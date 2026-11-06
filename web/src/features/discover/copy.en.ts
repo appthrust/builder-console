@@ -1,0 +1,78 @@
+import type { textJa } from './copy'
+
+export const textEn: typeof textJa = {
+  home: {
+    searching: 'Searching…',
+    resultsCount: (n: number) => n === 1 ? '1 result' : `${n} results`,
+    groupLead: (name: string) => `Apps in ${name} and its subgroups.`,
+    sharedLead: 'Apps shared from parent groups that you can use.',
+    companyLead: 'New apps everyone in your company can use.',
+  },
+  list: {
+    ownerSeparator: ', ',
+    urlLabel: (name: string) => `URL for ${name}`,
+    open: 'Open ↗',
+    copyUrl: 'Copy URL',
+    statusFailed: 'Could not check app status.',
+    created: (time: string) => `Added ${time}`,
+    resume: 'Continue building',
+    check: 'Check status',
+    discard: 'Delete',
+    discardLabel: (name: string) => `Delete “${name}”`,
+    discardTitle: (name: string) => `Delete “${name}”?`,
+    discardBody: 'Remove this unfinished app from the list. This cannot be undone.',
+    discardConfirm: 'Delete',
+    discarding: 'Deleting…',
+  },
+  drafts: {
+    title: 'Drafts',
+    create: 'Build with AI',
+    lead: 'Unfinished apps you can continue building.',
+    building: (stage: string) => `Building with AI (${stage})`,
+    updated: (time: string) => ` · Updated ${time}`,
+    empty: 'No unfinished apps',
+    emptyBody: 'Describe what you want and choose “Build with AI” to continue here later.',
+  },
+  mine: {
+    problemLead: 'Apps with issues and what you can do next.',
+    seeAll: 'See all',
+    statusFailed: 'Could not check status',
+    noProblems: 'No apps with issues',
+    emptyBody: 'Apps you create will appear here.',
+    cannotCreate: 'Ask an administrator to add you as an app creator.',
+  },
+  group: {
+    emptyBody: 'Apps you create will appear in this group.',
+    createHere: 'Create an app here',
+  },
+  entry: {
+    ofGroup: (name: string) => `Apps in ${name}`,
+    wantToUse: 'Request access',
+    restricted: (name: string) => `This app is shared with people in ${name}. Choose “Request access” if you would like to use it.`,
+    owner: 'Owner',
+    requestUnavailable: 'We could not find where to send your request. Ask the owner for help.',
+  },
+  store: {
+    makers: 'App creators in this department',
+    makerApps: (n: number) => n === 1 ? '1 app' : `${n} apps`,
+    trial: (n: number) => n === 1 ? 'Trial or in progress (1 app)' : `Trial or in progress (${n} apps)`,
+    trialLead: 'These apps do not yet have screenshots or a list of what they can do.',
+    open: (name: string) => `Open ${name}`,
+    want: (name: string) => `Request access to ${name}`,
+  },
+  person: {
+    apps: (n: number) => `Apps created (${n})`,
+    appsLoading: 'Apps created',
+    noApps: 'No apps yet.',
+    memberships: 'Groups',
+  },
+  members: {
+    inheritedColumn: 'Inherited from',
+    direct: 'Direct',
+    you: 'You',
+    emailMissing: 'No email address',
+  },
+  help: {
+    lead: 'What to know when getting started.',
+  },
+}

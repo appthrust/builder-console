@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.env.*
+*.tgz
+/server
+/builder-console-server
+web/e2e/results/
+web/playwright-report/
+web/test-results/

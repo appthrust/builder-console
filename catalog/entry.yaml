@@ -1,0 +1,73 @@
+apiVersion: appthrust.io/v1alpha1
+kind: ApplicationStackDefinition
+metadata:
+  name: builder-console
+spec:
+  access:
+    audiences:
+    - appthrust-platform-api
+    bearerPassThrough: true
+    scopes:
+    - openid
+    - profile
+    - email
+    tokenClaims:
+    - groups
+  components:
+  - defaultValues:
+      internalService: true
+      livenessProbePath: /healthz
+      minScale: 2
+      port: 8080
+      publicURLEnv: BUILDER_CONSOLE_PUBLIC_URL
+      readinessProbePath: /readyz
+    definitionRef:
+      name: web-service
+      version: v1
+    id: web
+  - defaultValues:
+      instances: 2
+      provider: CNPG
+      storageSize: 5Gi
+    definitionRef:
+      name: postgresql
+      version: v1
+    id: database
+  connections:
+  - from: web
+    name: database
+    to: database
+  dependencies:
+  - definition: directory
+    installPolicy: Automatic
+    publicURLEnv: BUILDER_CONSOLE_DIRECTORY_PUBLIC_URL
+    urlEnv: BUILDER_CONSOLE_DIRECTORY_URL
+  display:
+    category: build
+    description: Project-scoped console for building and releasing applications without
+      touching cluster details.
+    iconRef:
+      name: sparkles
+    title: Builder Console
+  provides:
+  - launcher.entries/v1
+  publish:
+    hostnameLabel: console
+  releaseIdentityEnvPrefix: BUILDER_CONSOLE
+  updatePolicy:
+    allowed:
+    - pinned
+    - follow
+    default: pinned
+  versions:
+  - images:
+      web: ghcr.io/appthrust/platform/builder-console@sha256:0215baed2f516727e608498ed1846575ba6e3ecb992a482e70e6524efe6a9ee5
+    name: 0.1.0
+    served: true
+    stream: "0.1"
+  - default: true
+    images:
+      web: ghcr.io/appthrust/platform/builder-console@sha256:50dafae530876d883cbeb09c2d184f4eedfbc8ea9adc4e1ffd007e9ceb7c00f3
+    name: 0.2.0
+    served: true
+    stream: "0.2"

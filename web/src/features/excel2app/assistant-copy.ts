@@ -1,0 +1,65 @@
+import { localized } from '../../shell/language'
+import type { Accent, Density, ListLayout } from './ui-design'
+import { textEn } from './assistant-copy.en'
+
+export const textJa = {
+  accent: { teal: '緑', blue: '青', violet: '紫', amber: '琥珀', rose: '赤', stone: 'グレー' } satisfies Record<Accent, string>,
+  scope: { list: '一覧', form: '登録フォーム', both: '一覧と登録フォーム' },
+  position: { first: '先頭', last: '最後', numbered: (number: number) => `${number} 番目`, before: (name: string) => `「${name}」の前`, after: (name: string) => `「${name}」の後` },
+  card: { overdue: '期限切れの件数', count: (entity: string) => `${entity}の件数`, countBy: (field: string) => `${field}別の件数`, sum: (field: string) => `${field}の合計` },
+  reply: {
+    empty: '変えたいところを入力してください。',
+    note: '実装時に渡すメモに残しました。プレビューは変えていません。',
+    noteClause: (instruction: string) => `『${instruction}』はメモに残しました。`,
+    unchanged: (confirmation: string) => `すでにそうなっています: ${confirmation}`,
+    layout: (entity: string, layout: ListLayout) => `「${entity}」の一覧は${layout === 'cards' ? 'カード表示' : '表形式'}です。`,
+    fields: (entity: string, scope: string, names: string[], visible: boolean) => `「${entity}」の${scope}で「${names.join('、')}」を${visible ? '表示します' : '非表示にします'}。`,
+    fieldOrder: (entity: string, scope: string, name: string, position: string) => `「${entity}」の${scope}で「${name}」を${position}に置きます。`,
+    color: (entity: string, field: string | undefined) => field ? `「${entity}」の一覧は「${field}」で色分けします。` : `「${entity}」の一覧は色分けしません。`,
+    group: (entity: string, field: string | undefined) => field ? `「${entity}」の一覧は「${field}」でグループ化します。` : `「${entity}」の一覧のグループ化を解除しました。`,
+    sort: (entity: string, field: string) => `「${entity}」の一覧は「${field}」順です。日付は新しい順に並びます。`,
+    search: (entity: string, enabled: boolean) => `「${entity}」の一覧の検索を${enabled ? '有効' : '無効'}にしました。`,
+    filter: (entity: string, field: string, enabled: boolean) => `「${entity}」の一覧の「${field}」による絞り込みを${enabled ? '追加' : '削除'}しました。`,
+    formColumns: (entity: string, twoColumns: boolean) => `「${entity}」の登録フォームは ${twoColumns ? 2 : 1} 列です。`,
+    required: (entity: string, field: string, required: boolean) => `「${entity}」の登録フォームの「${field}」を${required ? '表示し、必須にしました' : '任意にしました'}。`,
+    appName: (name: string) => `アプリ名は「${name}」です。`,
+    screenName: (before: string, after: string) => `画面「${before}」の名前を「${after}」に変更しました。`,
+    screenVisible: (title: string, visible: boolean) => `画面「${title}」を${visible ? '表示' : '非表示'}にしました。`,
+    screenOrder: (title: string, position: string) => `画面「${title}」を${position}に置きます。`,
+    accent: (color: string) => `アプリの基調色は${color}です。`,
+    density: (density: Density) => `画面の密度は${density === 'compact' ? 'コンパクト' : 'ゆったり'}です。`,
+    card: (title: string) => `ダッシュボードに「${title}」を表示します。`,
+  },
+  suggest: {
+    layout: (layout: ListLayout): string => layout === 'cards' ? '一覧をカード表示に' : '一覧を表に',
+    color: (field: string) => `${field}を色分け`,
+    formColumns: (twoColumns: boolean) => `登録フォームは ${twoColumns ? 2 : 1} 列で`,
+    group: (field: string) => `${field}でグループ化`,
+    dashboardFirst: 'ダッシュボードを最初に',
+    countBy: (field: string) => `${field}別の件数`,
+    overdue: '期限切れの件数を出して',
+    accent: (accent: Accent): string => `色を${textJa.accent[accent]}に`,
+    density: (density: Density): string => density === 'compact' ? 'コンパクトにして' : 'ゆったり表示に',
+    showScreen: (title: string) => `画面「${title}」を表示して`,
+  },
+  /** The UI preview step's chat with the AI that changes the design. */
+  chat: {
+    lead: '仕様書から作る画面の見本です。チャットで話しかけると、AI が画面を直します。',
+    title: 'AI と相談',
+    messages: 'やりとり',
+    you: 'あなた',
+    assistant: 'AI',
+    thinking: 'AI が考えています…',
+    pending: '送信中',
+    failed: 'AI が応答できませんでした',
+    retry: 'もう一度',
+    suggestions: '話しかける例',
+    input: '画面への指示',
+    placeholder: '例: 一覧をカード表示に',
+    send: '送る',
+    sendHint: 'Enter で送る',
+    undo: '元に戻す',
+  },
+}
+
+export const text = localized({ ja: textJa, en: textEn })

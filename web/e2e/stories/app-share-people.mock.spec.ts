@@ -1,0 +1,67 @@
+import { captureWrite, expect, seed, test } from '../support/fixtures'
+
+test('share by email, change role, remove, and copy the invitation @mock @story', async ({ page, context, mock }, testInfo) => {
+  void mock
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const app = seed.apps.mitsumori
+  const path = `/api/console/apps/${app.id}`
+  const platformWrites: string[] = []
+  page.on('request', (request) => { if (request.method() === 'PUT' && request.url().endsWith('/access')) platformWrites.push(request.url()) })
+  await page.goto(`/${app.groupPath}/${app.slug}`)
+  const trigger = page.getByRole('button', { name: '共有', exact: true })
+  await trigger.click()
+  const dialog = page.getByRole('dialog', { name: '共有', exact: true })
+  await expect(dialog.getByText('営業1課 のメンバー', { exact: true })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: `${seed.me.name} を外す`, exact: true })).toBeDisabled()
+  await dialog.getByLabel(`${seed.me.name} の役割`, { exact: true }).click()
+  await expect(page.getByRole('option', { name: '閲覧', exact: true })).toHaveAttribute('data-disabled', '')
+  await page.keyboard.press('Escape')
+
+  const email = 'invited@example.test'
+  const search = dialog.getByLabel('名前やメールアドレスで追加', { exact: true })
+  await search.fill('bad@')
+  await expect(dialog.getByRole('button', { name: 'このメールアドレスで招待' })).toBeDisabled()
+  await search.fill(email)
+  const created = await captureWrite(page, 'POST', '/api/console/directory/people', () => dialog.getByRole('button', { name: 'このメールアドレスで招待' }).click())
+  expect(created.body).toEqual({ email, displayName: email })
+  const row = dialog.locator('li[data-testid^="share-person-"]').filter({ has: page.getByRole('combobox', { name: `${email} の役割`, exact: true }) })
+  await expect(row).toContainText('招待中（まだログインしていません）')
+  await expect(row.getByRole('combobox')).toHaveText('閲覧')
+  const current = await (await page.request.get(path)).json()
+  const invitedId = current.share.extraPersonIds[0]
+  expect(invitedId).toBeTruthy()
+  await row.getByRole('combobox').click()
+  const promote = await captureWrite(page, 'PATCH', path, () => page.getByRole('option', { name: '編集', exact: true }).click())
+  expect(promote.body).toEqual({ ownerIds: [seed.me.id, invitedId], share: { scope: 'group', groupIds: [seed.groups.teamA.id], extraPersonIds: [] } })
+  await expect(row.getByRole('combobox')).toHaveText('編集')
+  await row.getByRole('combobox').click()
+  const demote = await captureWrite(page, 'PATCH', path, () => page.getByRole('option', { name: '閲覧', exact: true }).click())
+  expect(demote.body).toEqual({ ownerIds: [seed.me.id], share: { scope: 'group', groupIds: [seed.groups.teamA.id], extraPersonIds: [invitedId] } })
+  await expect(row.getByRole('combobox')).toHaveText('閲覧')
+
+  await dialog.getByRole('button', { name: '招待文をコピー', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(`「${app.name}」を共有しました。\nhttps://mitsumori.commerce.appthrust.test/\n${email} でサインインしてください。`)
+  await dialog.getByRole('button', { name: 'リンクをコピー', exact: true }).click()
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('https://mitsumori.commerce.appthrust.test/')
+  await page.screenshot({ path: testInfo.outputPath('share-invitation.png'), fullPage: true })
+  await dialog.getByRole('heading', { name: '共有', exact: true }).scrollIntoViewIfNeeded()
+  await page.screenshot({ path: testInfo.outputPath('share-people.png'), fullPage: true })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(row.getByRole('combobox')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('share-people-mobile.png'), fullPage: true })
+  await page.setViewportSize({ width: 1280, height: 900 })
+
+  await captureWrite(page, 'PATCH', path, () => row.getByRole('button', { name: `${email} を外す` }).click())
+  await expect(row).toHaveCount(0)
+  await search.fill('sato')
+  await dialog.getByRole('button', { name: '佐藤 花子 を追加', exact: true }).click()
+  await expect(dialog.getByTestId('share-person-p-sato')).toBeVisible()
+  expect(platformWrites).toEqual([])
+  await page.keyboard.press('Escape')
+  await expect(dialog).not.toBeVisible()
+  await expect(trigger).toBeFocused()
+  await page.reload()
+  await trigger.click()
+  await expect(dialog.getByTestId('share-person-p-sato')).toBeVisible()
+  await expect(dialog.getByRole('combobox', { name: `${email} の役割` })).toHaveCount(0)
+})

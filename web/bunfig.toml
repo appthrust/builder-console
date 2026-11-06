@@ -1,0 +1,3 @@
+[test]
+# Browser globals for the console's DOM unit tests.
+preload = ["./test/dom.ts"]

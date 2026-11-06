@@ -1,0 +1,31 @@
+import type { textJa } from './copy'
+
+export const textEn: typeof textJa = {
+  title: 'Your app in progress',
+  preview: 'App preview',
+  preparing: 'Preparing your screens',
+  previewError: 'The preview is currently returning an error. The AI may be making changes; you can check it in a new tab.',
+  previewTimedOut: 'The preview isn’t ready yet; wait a little longer or open it in a new tab.',
+  previewDatabase: (excel: boolean) => `This work-in-progress preview runs without a database. ${excel ? 'Your Excel data will be imported when you publish.' : 'Data will be saved and displayed when you publish.'}`,
+  database: {
+    starting: 'Preparing the working database.',
+    sleeping: 'The workspace is asleep; your data is kept. It wakes when the AI starts its next step.',
+    unavailable: 'The working database has stopped. “Recreate database” fixes it (data entered while building is erased).',
+    readyUnverified: (excel: boolean) => excel ? 'The working database is running. Your Excel rows haven’t been checked yet.' : 'The working database is running. Data you enter here doesn’t carry over to the published app.',
+    readyVerified: (excel: boolean) => excel ? 'The working database contains your Excel rows. Publishing loads them into the production database again.' : 'The working database is running. Data you enter here doesn’t carry over to the published app.',
+  },
+  databaseReset: 'Recreate database',
+  databaseResetRunning: 'You can recreate it once the AI finishes working.',
+  databaseResetConfirm: 'Recreate',
+  databaseResetBody: 'The working database will be recreated. Data entered while building and check results are erased. Your source code and Excel file are kept.',
+  databaseResetBusy: 'You can’t recreate it while the AI is working. Try again once it finishes.',
+  databaseResetNotEnabled: 'This workspace has no working database to recreate.',
+  databaseResetFailed: 'Couldn’t start recreating the database. Wait a moment and try again.',
+  open: 'Take a look',
+  newTab: 'Open in new tab',
+  retry: 'Try again',
+  retryPending: 'Preparing to resume',
+  unmetCriteria: (count: number) => `${count} unmet acceptance criteria`,
+  skip: 'Skip this task',
+  nothingImplemented: 'No screens have been built yet; try again to build them.',
+}

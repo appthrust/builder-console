@@ -1,0 +1,56 @@
+import type { textJa } from './copy'
+
+export const textEn: typeof textJa = {
+  missingAdmin: (labels: string) => `Set up ${labels} in Platform settings before continuing.`,
+  domainPending: 'The publishing domain is getting ready. You can start creating here as soon as it is ready.',
+  openPlatform: 'Open platform settings',
+  sharePreview: 'Who can see this',
+  creatingHint: 'Please wait; your app will open when it is ready.',
+  abandon: 'Cancel',
+  chooseTemplate: 'Choose another template',
+  fix: 'Fix',
+  fieldError: {
+    template: 'Check the template.',
+    existing: 'Choose the GitHub repository again.',
+    destination: 'Check the URL name.',
+  },
+  alreadyCreated: (name: string) => `This app was already created as "${name}"; finish it with that URL name.`,
+  sourceUnavailable: 'The GitHub connection is unavailable.',
+  loadingDraft: 'Loading your unfinished app…',
+  pageTitle: (step: number) => `New app (${step}/4)`,
+  unsavedChanges: 'Your changes have not been saved. Leave this page?',
+  buildFailed: 'Could not start building',
+  retryBuild: 'Try again',
+  inputKept: 'Your input has been kept.',
+  customizeWithAi: 'Customize with AI',
+  noBusinessTemplates: 'No business templates yet; build with AI or use your own code.',
+  fromImage: 'From a container image',
+  prerequisiteSeparator: ', ',
+  tagSeparator: ', ',
+  templates: {
+    'biz-inventory-postgres': {
+      name: 'Inventory',
+      lead: 'Track stock and incoming and outgoing items in one place.',
+      includes: ['Item list', 'Stock movement history', 'CSV import and export'],
+      seed: 'I want to build an app to manage inventory and incoming and outgoing stock. I need an item list, stock movement history, and CSV import and export.',
+    },
+    'biz-master-postgres': {
+      name: 'Business records',
+      lead: 'Keep contacts, products, and other business records together.',
+      includes: ['Add and edit records', 'Search and filters', 'CSV import and export'],
+      seed: 'I want to build an app to manage business records such as contacts and products. I need to add and edit records, search and filter them, and import and export CSV files.',
+    },
+    'biz-approval-postgres': {
+      name: 'Requests and approvals',
+      lead: 'Track requests and see whose approval is needed next.',
+      includes: ['Create requests', 'Approve or return requests', 'Approval status overview'],
+      seed: 'I want to build an internal request and approval app. I need to create requests, approve them or return them for changes, and see an overview of their approval status.',
+    },
+    'biz-reservation-postgres': {
+      name: 'Bookings and loans',
+      lead: 'Find available meeting rooms and equipment to book or borrow.',
+      includes: ['Check availability', 'Create bookings', 'Loan and return history'],
+      seed: 'I want to build an app for booking meeting rooms and borrowing equipment. I need to check availability, create bookings, and record loans and returns.',
+    },
+  },
+}

@@ -1,0 +1,61 @@
+import { captureWrite, expect, seed, test } from '../support/fixtures'
+
+const badge = 'access-request-pending-badge'
+
+test('an owner approves a request as a viewer and pending badges disappear @mock @story', async ({ page, mock }, testInfo) => {
+  const app = seed.apps.keihi
+  await mock.console('caller', { personId: seed.me.id })
+  await page.goto('/')
+  await expect(page.getByTestId(badge)).toHaveText('1')
+  await page.goto('/mine')
+  const row = page.getByRole('row').filter({ hasText: app.name })
+  await expect(row.getByTestId(badge)).toHaveText('1')
+  await page.goto(`/${app.groupPath}/${app.slug}`)
+  const share = page.getByRole('button', { name: '共有', exact: true })
+  await expect(share.getByTestId(badge)).toHaveText('1')
+  await share.click()
+  const dialog = page.getByRole('dialog', { name: '共有', exact: true })
+  const requests = dialog.getByRole('region', { name: 'アクセスのリクエスト', exact: true })
+  await expect(requests.getByText('鈴木 一郎', { exact: true })).toBeVisible()
+  await expect(requests.getByText('suzuki@example.com', { exact: true })).toBeVisible()
+  await expect(requests.getByText('経費の確認で使います', { exact: true })).toBeVisible()
+  await expect(requests.locator('time')).toHaveAttribute('datetime', '2026-10-10T09:00:00.000Z')
+  const [approved] = await Promise.all([
+    page.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/console/apps/${app.id}/access-requests/aar-keihi-suzuki/approve`),
+    requests.getByRole('button', { name: '閲覧で承認', exact: true }).click(),
+  ])
+  expect(approved.status()).toBe(200)
+  expect(await approved.json()).toMatchObject({ request: { status: 'approved' }, app: { share: { extraPersonIds: ['p-suzuki'] } } })
+  const people = dialog.getByRole('region', { name: 'アクセスできる人', exact: true })
+  const viewer = people.getByTestId('share-person-p-suzuki')
+  await expect(viewer.getByText('鈴木 一郎', { exact: true })).toBeVisible()
+  await expect(viewer.getByRole('combobox', { name: '鈴木 一郎 の役割', exact: true })).toHaveText('閲覧')
+  await expect(requests).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: '以前のリクエスト', exact: true })).toHaveAttribute('aria-expanded', 'false')
+  await page.screenshot({ path: testInfo.outputPath('access-request-approved.png'), fullPage: true })
+  await page.keyboard.press('Escape')
+  await expect(share.getByTestId(badge)).toHaveCount(0)
+  await page.goto('/mine')
+  await expect(page.getByRole('row').filter({ hasText: app.name })).toBeVisible()
+  await expect(page.getByTestId(badge)).toHaveCount(0)
+  await page.goto('/')
+  await expect(page.getByRole('link').filter({ hasText: app.name })).toBeVisible()
+  await expect(page.getByTestId(badge)).toHaveCount(0)
+})
+
+test('a non-owner submits an access request and sees the pending view @mock @story', async ({ page, mock }, testInfo) => {
+  await mock.console('caller', { personId: 'p-tanaka' })
+  await page.goto('/-/request-access/keihi?reason=not_visible')
+  await expect(page.getByRole('heading', { name: 'アクセス権が必要です', exact: true })).toBeVisible()
+  await expect(page.getByText('keihi はあなたに共有されていません。担当者にアクセスをリクエストできます。', { exact: true })).toBeVisible()
+  await page.getByRole('textbox', { name: 'メッセージ（任意、500 字まで）', exact: true }).fill('経費の確認をお願いします')
+  const submitted = await captureWrite(page, 'POST', '/api/console/access-requests', () => page.getByRole('button', { name: 'アクセスをリクエスト', exact: true }).click())
+  expect(submitted.body).toEqual({ appName: 'keihi', message: '経費の確認をお願いします' })
+  await expect(page.getByRole('heading', { name: 'リクエストを送りました', exact: true })).toBeVisible()
+  await expect(page.getByText(/担当者の承認待ちです/)).toBeVisible()
+  await expect(page.getByRole('button', { name: '依頼文をコピー', exact: true })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'メッセージ（任意、500 字まで）', exact: true })).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath('access-request-pending.png'), fullPage: true })
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'リクエストを送りました', exact: true })).toBeVisible()
+})

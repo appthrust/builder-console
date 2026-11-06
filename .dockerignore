@@ -1,0 +1,12 @@
+.git
+.github
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+**/*.tgz
+web/e2e/results
+web/playwright-report
+web/test-results
+server
+builder-console-server

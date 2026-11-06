@@ -1,0 +1,663 @@
+// One draft owns the workbook set, staged analysis, specification and screen design.
+// Files are parsed and stored sequentially; only an explicit start submits analysis.
+import type { ApplicationDraft, ApplicationDraftConversationTurn, ApplicationDraftConversationTurnKind, ApplicationDraftPublishPreferences, ApplicationDraftWorkbookAddResponse, ApplicationDraftWorkbookSummary, ExcelAnalysis, UiDesign, UpdateApplicationDraftRequest } from '@appthrust/api-schema/platform-api'
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import * as api from '../../api/build'
+import { buildDraftOptions, draftWorkbookGridOptions, draftWorkbooksOptions } from '../../api/build-queries'
+import { platformErrorEnvelope } from '../../api/platform-error'
+import { useCreationTools } from '../../api/queries'
+import { classifyBuildFailure } from '../../model/build/failure'
+import type { BuildFailure } from '../../model/build/types'
+import { parseAssistantMessage } from '../../model/build/messages'
+import { isBuildPending } from '../../model/build/progress'
+import { parseSpec, serializeSpec } from '../../model/build/spec'
+import { filesFromList, isWorkbookFile, workbookBudget, type CollectedWorkbook, type WorkbookFileState } from './collect'
+import { designFromReadings, readingOf } from './design'
+import { text, textJa } from './copy'
+import { textEn } from './copy.en'
+import { fromDraftWorkbook, planApp, toDraftWorkbook, type AppPlan, type WorkbookGrid } from './model'
+import { excelSpecMarkdown, withUiDecisions } from './spec'
+import { applyInstruction, suggestedInstructions } from './ui-assistant'
+import { defaultUiDesign } from './ui-design'
+import { readXlsx, UnsupportedWorkbook } from './xlsx'
+
+/** The ui-design turn that derives the default design from the specification. */
+export const UI_DESIGN_INIT = '__init__'
+
+/** A turn message is at most 4,000 characters; an undo whose design JSON does not fit is not offered. */
+const TURN_MESSAGE_MAX = 4000
+
+/** The 「AI なしで続ける」 choice of a draft survives a reload of this tab. */
+const OFFLINE_PREFIX = 'builder-console:excel2app:offline:'
+
+const EMPTY_MEMBERS: ApplicationDraftWorkbookSummary[] = []
+export type Excel2AppStep = 0 | 1 | 2 | 3 | 4
+
+export interface CollectionResult {
+  id: string
+  /** An analysis was requested, including requests rejected before a turn exists. */
+  analysisRequested: boolean
+}
+
+/** One bubble of the chat. Failed turns retain their cause for classification by the notice. */
+export interface UiPreviewChatMessage {
+  role: 'user' | 'assistant'
+  text: string
+  pending?: boolean
+  failed?: boolean
+  failure?: BuildFailure
+}
+
+/** Why the excel-analysis turn could not start. */
+export type AnalysisProblem = 'unavailable' | 'failed' | 'quota' | 'policy'
+
+/** Why the workbook could not be stored. */
+export type StoreProblem = Exclude<WorkbookFileState, 'reading' | 'storing' | 'stored' | 'unsupported' | 'unreadable'> | 'busy' | 'created'
+
+export class WorkbookStoreError extends Error {
+  constructor(readonly problem: StoreProblem, readonly location?: { sheet?: string; row?: number }) {
+    super(problem)
+  }
+}
+
+export function errorStatus(error: unknown): number | undefined {
+  if (typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number') return error.status
+  return platformErrorEnvelope(error)?.status
+}
+
+/** Creation closes Excel preparation, even if a subsequent draft read is stale or fails. */
+export function isApplicationCreated(error: unknown): boolean {
+  return errorStatus(error) === 409 && platformErrorEnvelope(error)?.details?.reason === 'ApplicationCreated'
+}
+
+/** API reasons, not message wording, determine a file's terminal state. */
+export function classifyStoreError(error: unknown): WorkbookStoreError {
+  const status = errorStatus(error)
+  const details = platformErrorEnvelope(error)?.details
+  if (status === 400) {
+    const sheet = typeof details?.sheet === 'string' ? details.sheet : undefined
+    const row = typeof details?.row === 'number' && Number.isSafeInteger(details.row) && details.row >= 1 ? details.row : undefined
+    return new WorkbookStoreError('invalid', sheet !== undefined || row !== undefined ? { sheet, row } : undefined)
+  }
+  if (status === 413) return new WorkbookStoreError(details?.reason === 'WorkbookSetTooLarge' ? 'setTooLarge' : 'tooLarge')
+  if (status === 409) {
+    const reason = details?.reason
+    return new WorkbookStoreError(reason === 'ApplicationCreated' ? 'created' : reason === 'DraftBusy' ? 'busy' : reason === 'WorkbookDuplicate' ? 'duplicate' : reason === 'WorkbookSetFull' ? 'setFull' : 'failed')
+  }
+  return new WorkbookStoreError('failed')
+}
+
+/** The file name without its extension: the draft's title. */
+export function fileStem(fileName: string): string {
+  return fileName.replace(/\.(xlsx|xlsm)$/i, '') || fileName
+}
+
+/** Turns belonging to the current membership revision, including its boundary. */
+export function currentTurns(draft: ApplicationDraft): ApplicationDraftConversationTurn[] {
+  const revision = draft.source?.revision
+  const turns = draft.conversationTurns ?? []
+  return revision ? turns.filter((turn) => Date.parse(turn.startedAt) >= Date.parse(revision)) : turns
+}
+
+const turnsOf = (turns: ApplicationDraftConversationTurn[], kind: ApplicationDraftConversationTurnKind) => turns.filter((turn) => turn.kind === kind)
+
+export const isUndoMessage = (message: string) => message.startsWith(textJa.preview.undoRequest) || message.startsWith(textEn.preview.undoRequest)
+
+export function undoMessage(previous: UiDesign): string {
+  return `${text.preview.undoRequest}\n\`\`\`json\n${JSON.stringify(previous)}\n\`\`\``
+}
+
+/** Designs the ui-design turns produced, as an undo stack: each change pushes, each undo pops. */
+export function designStack(turns: ApplicationDraftConversationTurn[]): UiDesign[] {
+  const stack: UiDesign[] = []
+  for (const turn of turns) {
+    if (turn.status !== 'succeeded' || !turn.uiDesign) continue
+    if (isUndoMessage(turn.userMessage) && stack.length > 1) stack.pop()
+    else stack.push(turn.uiDesign)
+  }
+  return stack
+}
+
+/** The chat the ui-design turns make: the instruction, then the reply's summary (or its error). */
+export function designMessages(turns: ApplicationDraftConversationTurn[]): UiPreviewChatMessage[] {
+  const messages: UiPreviewChatMessage[] = []
+  for (const turn of turns) {
+    const pending = isBuildPending(turn)
+    if (turn.userMessage !== UI_DESIGN_INIT) messages.push({ role: 'user', text: isUndoMessage(turn.userMessage) ? text.preview.undoMessage : turn.userMessage, ...(pending ? { pending: true } : {}) })
+    if (turn.status === 'failed') messages.push({ role: 'assistant', text: turn.error || text.preview.turnFailed, failed: true })
+    else if (turn.status === 'succeeded' && turn.assistantMessage) {
+      const parts = parseAssistantMessage(turn.assistantMessage)
+      messages.push({ role: 'assistant', text: parts.summary || parts.question || turn.assistantMessage })
+    }
+  }
+  return messages
+}
+
+/** A collected set stays on step 0 until analysis has explicitly started. */
+export function resumeStep(draft: ApplicationDraft, analysed: boolean): Excel2AppStep {
+  if (!draft.source) return 0
+  if (!analysed) return turnsOf(currentTurns(draft), 'excel-analysis').length > 0 ? 1 : 0
+  if (!draft.uiDesign && turnsOf(currentTurns(draft), 'ui-design').length === 0) return 2
+  return 3
+}
+
+/** The specification's front-matter text, kept verbatim when only the body is edited. */
+export function specParts(specMarkdown: string): { frontMatter: string; body: string } {
+  const { body } = parseSpec(specMarkdown)
+  return { frontMatter: specMarkdown.slice(0, specMarkdown.length - body.length), body }
+}
+
+/**
+ * Saves the latest value, one save at a time. A request while a save runs waits for it and
+ * then saves whatever is latest by then, so text typed during a slow save is never dropped;
+ * every caller (blur, 次へ) resolves once the value current at its call is settled.
+ */
+export function latestSaver(save: (value: string) => Promise<boolean>, latest: () => string | undefined, saved: (value: string) => void): () => Promise<boolean> {
+  let inFlight: Promise<boolean> | undefined
+  const run = (): Promise<boolean> => {
+    if (inFlight) return inFlight.then(run)
+    const value = latest()
+    if (value === undefined) return Promise.resolve(true)
+    inFlight = save(value)
+      .then((ok) => {
+        if (ok) saved(value)
+        return ok
+      })
+      .finally(() => { inFlight = undefined })
+    return inFlight
+  }
+  return run
+}
+
+/**
+ * The name the excel-analysis turn wrote into the specification's front-matter, when the
+ * draft's title (the file name until now) should follow it: the turn succeeded and no app
+ * exists or is being made. Original file names stay in the source membership.
+ */
+export function analysisTitle(draft: ApplicationDraft, turn: ApplicationDraftConversationTurn | undefined): string | undefined {
+  if (turn?.status !== 'succeeded' || draft.createdApplicationStackId || draft.createdApplicationId || isBuildPending(draft.creationExecutions?.at(-1))) return undefined
+  const name = parseSpec(draft.specMarkdown).spec.name?.trim()
+  return name && name !== draft.title ? name : undefined
+}
+
+/** 用意する's two questions, persisted on the draft for every tab. */
+export type PublishChoice = Required<ApplicationDraftPublishPreferences>
+
+/** Align the title/spec name and replace the draft's publish preferences in the same PATCH. */
+export function handOffPatch(draft: Pick<ApplicationDraft, 'title' | 'specMarkdown'>, specMarkdown: string, publish: PublishChoice): UpdateApplicationDraftRequest {
+  const { name } = publish
+  const { spec, body } = parseSpec(specMarkdown)
+  // A document without readable front-matter keeps its text as is; the title still carries the name.
+  const named = spec.name === name || body === specMarkdown ? specMarkdown : serializeSpec({ ...spec, name }, body)
+  return { ...(draft.title === name ? {} : { title: name }), ...(named === draft.specMarkdown ? {} : { specMarkdown: named }), publishPreferences: publish }
+}
+
+type SpecSave = { state: 'idle' | 'saving' | 'saved' } | { state: 'failed'; body: string }
+
+/** The 「AI なしで続ける」 preview: the design lives in this tab until the hand-off writes it into the specification. */
+interface OfflineDesign {
+  design: UiDesign
+  history: UiDesign[]
+  messages: UiPreviewChatMessage[]
+}
+
+function readOffline(draftId: string): boolean {
+  try { return sessionStorage.getItem(OFFLINE_PREFIX + draftId) === '1' } catch { return false }
+}
+
+function saveOffline(draftId: string) {
+  try { sessionStorage.setItem(OFFLINE_PREFIX + draftId, '1') } catch { /* The in-memory choice still applies to this visit. */ }
+}
+
+export function useExcel2AppDraft(projectId: string, draftId: string | undefined) {
+  const queryClient = useQueryClient()
+  const tools = useCreationTools(projectId)
+  /** `false` only when the project answered that AI is unavailable; unknown counts as available. */
+  const codexAvailable = tools.data?.codexAvailable !== false
+  const draftQuery = useQuery({ ...buildDraftOptions(projectId, draftId ?? ''), enabled: Boolean(draftId) })
+  const [storedDraft, setStoredDraft] = useState<ApplicationDraft>()
+  const draft = draftQuery.data ?? (storedDraft?.projectId === projectId && (!draftId || storedDraft.id === draftId) ? storedDraft : undefined)
+  const members = draft?.source?.workbooks ?? EMPTY_MEMBERS
+  const [previewRequested, setPreviewRequested] = useState(false)
+  const [offline, setOffline] = useState(() => (draftId ? readOffline(draftId) : false))
+  const [analysisProblem, setAnalysisProblem] = useState<{ kind: AnalysisProblem; failure?: BuildFailure }>()
+  const [specSave, setSpecSave] = useState<SpecSave>({ state: 'idle' })
+  const [sending, setSending] = useState<string>()
+  const [sendProblem, setSendProblem] = useState<{ instruction: string; message: string; failure?: BuildFailure }>()
+  const [offlineDesign, setOfflineDesign] = useState<OfflineDesign>()
+  const [createdDraftId, setCreatedDraftId] = useState<string>()
+  const createdDraftRef = useRef<string>(undefined)
+  const readOnly = Boolean(draft?.createdApplicationId || draft?.createdApplicationStackId || (draft && createdDraftId === draft.id))
+  const lock = useRef(false)
+  const draftRef = useRef(draft)
+  draftRef.current = draft
+  /** A new draft whose failed workbook upload could not be cleaned up; reuse it across renders. */
+  const pendingWorkbookDraft = useRef<ApplicationDraft>(undefined)
+  const [files, setFiles] = useState<CollectedWorkbook[]>([])
+  const [collecting, setCollecting] = useState(false)
+  const [starting, setStarting] = useState(false)
+  const [hint, setHint] = useState('')
+  const uploads = useRef(new Map<string, File | WorkbookGrid>())
+  const collectLock = useRef(false)
+
+  const turns = useMemo(() => (draft ? currentTurns(draft) : []), [draft])
+  const analysisTurn = turnsOf(turns, 'excel-analysis').at(-1)
+  const designTurns = useMemo(() => turnsOf(turns, 'ui-design'), [turns])
+  const latestDesignTurn = designTurns.at(-1)
+  const turnRunning = turns.some(isBuildPending)
+
+  const version = `${draft?.source?.revision ?? ''}:${analysisTurn?.id ?? ''}:${analysisTurn?.status ?? ''}`
+  const workbooksQuery = useQuery({ ...draftWorkbooksOptions(projectId, draft?.id ?? '', version), enabled: Boolean(draft?.source) })
+  const gridQueries = useQueries({
+    queries: members.map((member) => ({
+      ...draftWorkbookGridOptions(projectId, draft!.id, member.id),
+      enabled: previewRequested || offline || !codexAvailable,
+    })),
+    combine: (results) => ({ data: results.map((query) => query.data), failed: results.some((query) => query.isError) }),
+  })
+  const grids = useMemo(() => {
+    const result = new Map<string, WorkbookGrid>()
+    for (const [index, data] of gridQueries.data.entries()) {
+      if (data) result.set(members[index]!.id, fromDraftWorkbook(data))
+    }
+    return result
+  }, [gridQueries.data, members])
+  const gridsReady = members.length > 0 && grids.size === members.length
+  const inputs = useMemo(() => gridsReady ? members.map((summary) => ({ summary, grid: grids.get(summary.id)! })) : [], [gridsReady, members, grids])
+  const reading = useMemo<ExcelAnalysis | undefined>(() => draft?.excelAnalysis ?? (offline && gridsReady ? designFromReadings(inputs) : undefined), [draft?.excelAnalysis, offline, gridsReady, inputs])
+  const plan = useMemo<AppPlan | undefined>(() => reading ? planApp(reading, draft?.title ?? '') : undefined, [reading, draft?.title])
+  const entries = useMemo(() => offline && gridsReady ? inputs.map((input) => ({ workbook: input.summary, reading: readingOf(input) })) : workbooksQuery.data?.data ?? [], [offline, gridsReady, inputs, workbooksQuery.data])
+  const usingOffline = offline && !draft?.excelAnalysis
+
+  function receive(next: ApplicationDraft) {
+    draftRef.current = next
+    setStoredDraft(next)
+    queryClient.setQueryData(buildDraftOptions(projectId, next.id).queryKey, next)
+  }
+
+  function appendTurn(turn: ApplicationDraftConversationTurn) {
+    const latest = draftRef.current
+    if (latest) receive({ ...latest, conversationTurns: [...(latest.conversationTurns ?? []), turn] })
+  }
+
+  async function refetchDraft() {
+    const id = draftRef.current?.id
+    if (id) receive(await api.getDraft(projectId, id))
+  }
+
+  function isReadOnly() {
+    const current = draftRef.current
+    return Boolean(current?.createdApplicationId || current?.createdApplicationStackId || (current && createdDraftRef.current === current.id))
+  }
+
+  function markCreated(id: string) {
+    createdDraftRef.current = id
+    setCreatedDraftId(id)
+    setAnalysisProblem(undefined)
+    setSendProblem(undefined)
+    void refetchDraft().catch(() => undefined)
+  }
+
+  async function exclusive<T>(action: () => Promise<T>): Promise<T | undefined> {
+    if (lock.current) return undefined
+    lock.current = true
+    try { return await action() } finally { lock.current = false }
+  }
+
+  function resetAnalysis(id: string) {
+    try { sessionStorage.removeItem(OFFLINE_PREFIX + id) } catch { /* The in-memory choice is cleared too. */ }
+    setOffline(false)
+    setOfflineDesign(undefined)
+    setAnalysisProblem(undefined)
+    setSendProblem(undefined)
+    setSpecSave({ state: 'idle' })
+  }
+
+  function confirmSetChange(): boolean {
+    return !draftRef.current?.excelAnalysis && !offline || window.confirm(text.pick.confirmChange)
+  }
+
+  /** R19: a failed first POST deletes its new draft, or retains that draft for reuse. */
+  async function store(grid: WorkbookGrid, key: string): Promise<string> {
+    if (isReadOnly()) throw new WorkbookStoreError('created')
+    const payload = toDraftWorkbook(grid)
+    const current = pendingWorkbookDraft.current?.projectId === projectId ? pendingWorkbookDraft.current : draftRef.current
+    let target = current
+    try {
+      target ??= await api.createDraft(projectId, { title: fileStem(grid.fileName), intent: text.pick.draftIntent(grid.fileName) })
+      let result: ApplicationDraftWorkbookAddResponse
+      try {
+        result = await api.addWorkbook(projectId, target.id, payload, key)
+      } catch (error) {
+        if (!current) {
+          try { await api.deleteDraft(projectId, target.id) }
+          catch { pendingWorkbookDraft.current = target }
+        }
+        throw error
+      }
+      pendingWorkbookDraft.current = undefined
+      queryClient.setQueryData(draftWorkbookGridOptions(projectId, result.draft.id, result.workbook.id).queryKey, payload)
+      receive(result.draft)
+      resetAnalysis(result.draft.id)
+      setFiles((rows) => rows.map((row) => row.key === key ? { ...row, state: 'stored', workbookId: result.workbook.id } : row))
+      uploads.current.delete(key)
+      return result.draft.id
+    } catch (error) {
+      if (isApplicationCreated(error) && target) markCreated(target.id)
+      throw classifyStoreError(error)
+    }
+  }
+
+  function changeFile(key: string, patch: Partial<CollectedWorkbook>) {
+    setFiles((rows) => rows.map((row) => row.key === key ? { ...row, ...patch } : row))
+  }
+
+  async function processFile(key: string, input: File | WorkbookGrid) {
+    if (input instanceof File && !isWorkbookFile(input.name)) {
+      changeFile(key, { state: 'unsupported' })
+      return false
+    }
+    let grid: WorkbookGrid
+    try {
+      changeFile(key, { state: 'reading', problem: undefined, location: undefined })
+      grid = input instanceof File ? await readXlsx(input) : input
+    } catch (error) {
+      changeFile(key, { state: error instanceof UnsupportedWorkbook ? 'unsupported' : 'unreadable' })
+      return false
+    }
+    changeFile(key, { state: 'storing' })
+    try { await store(grid, key); return true }
+    catch (error) {
+      const failure = error instanceof WorkbookStoreError ? error : new WorkbookStoreError('failed')
+      changeFile(key, { state: failure.problem === 'busy' || failure.problem === 'created' ? 'failed' : failure.problem, problem: failure.problem === 'busy' || failure.problem === 'created' ? failure.problem : undefined, location: failure.location })
+      return false
+    }
+  }
+
+  async function collect(inputs: readonly (File | WorkbookGrid)[], start = false): Promise<CollectionResult | undefined> {
+    if (inputs.length === 0 || collectLock.current || lock.current || isReadOnly() || turnRunning || !confirmSetChange()) return
+    collectLock.current = true
+    setCollecting(true)
+    try {
+      const queued = inputs.map((input) => ({ input, key: crypto.randomUUID() }))
+      for (const { input, key } of queued) uploads.current.set(key, input)
+      setFiles((rows) => [...rows, ...queued.map(({ input, key }): CollectedWorkbook => ({ key, fileName: input instanceof File ? input.name : input.fileName, state: 'reading' }))])
+      let allStored = true
+      for (const { input, key } of queued) {
+        if (!await processFile(key, input)) allStored = false
+      }
+      const analysisRequested = start && allStored && Boolean(draftRef.current?.source)
+      if (analysisRequested) await analyse()
+      return draftRef.current ? { id: draftRef.current.id, analysisRequested } : undefined
+    } finally {
+      collectLock.current = false
+      setCollecting(false)
+    }
+  }
+
+  async function retryFile(key: string) {
+    const input = uploads.current.get(key)
+    if (!input || collectLock.current || lock.current || turnRunning || isReadOnly() || !confirmSetChange()) return
+    collectLock.current = true
+    setCollecting(true)
+    try { await processFile(key, input) }
+    finally { collectLock.current = false; setCollecting(false) }
+  }
+
+  async function removeWorkbook(key: string, workbookId?: string) {
+    if (collectLock.current || lock.current || turnRunning || isReadOnly()) return
+    if (workbookId && !confirmSetChange()) return
+    collectLock.current = true
+    setCollecting(true)
+    try {
+      const current = draftRef.current
+      if (workbookId && current) {
+        receive(await api.removeWorkbook(projectId, current.id, workbookId))
+        resetAnalysis(current.id)
+      }
+      uploads.current.delete(key)
+      setFiles((rows) => rows.filter((row) => row.key !== key && (!workbookId || row.workbookId !== workbookId)))
+    } catch (error) {
+      if (isApplicationCreated(error) && draftRef.current) markCreated(draftRef.current.id)
+      throw classifyStoreError(error)
+    } finally { collectLock.current = false; setCollecting(false) }
+  }
+
+  async function analyse(message = hint) {
+    const current = draftRef.current
+    if (!current?.source || isReadOnly() || currentTurns(current).some(isBuildPending)) return
+    setAnalysisProblem(undefined)
+    setStarting(true)
+    try {
+      await exclusive(async () => {
+        try {
+          const first = current.source!.workbooks[0]!
+          receive(await api.updateDraft(projectId, current.id, { title: fileStem(first.fileName), intent: text.pick.setIntent(first.fileName, current.source!.workbooks.length) }))
+          appendTurn(await api.createTurn(projectId, current.id, { kind: 'excel-analysis', message: message.trim() }))
+        } catch (error) {
+          if (isApplicationCreated(error)) return markCreated(current.id)
+          const status = errorStatus(error)
+          if (status === 409) return void (await refetchDraft().catch(() => undefined))
+          const envelope = platformErrorEnvelope(error)
+          const message = envelope?.message ?? (error instanceof Error ? error.message : '')
+          const failure = classifyBuildFailure(message, status, 'turn', undefined, envelope?.code, undefined, undefined, envelope?.details)
+          setAnalysisProblem({ kind: failure.kind === 'policy' || failure.kind === 'quota' ? failure.kind : status === 412 ? 'unavailable' : 'failed', failure })
+        }
+      })
+    } finally { setStarting(false) }
+  }
+
+  // The AI names the app in the specification; the draft's title follows once per analysis.
+  const titled = useRef(new Set<string>())
+  const nextTitle = draft && !readOnly ? analysisTitle(draft, analysisTurn) : undefined
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the analysis turn and the name; the PATCH reads the latest draft through a ref.
+  useEffect(() => {
+    const current = draftRef.current
+    if (!nextTitle || !current || !analysisTurn) return
+    const key = `${current.id}:${analysisTurn.id}`
+    if (titled.current.has(key)) return
+    titled.current.add(key)
+    // A failed rename leaves the file name as the title; the hand-off writes the publish name anyway.
+    void api.updateDraft(projectId, current.id, { title: nextTitle }).then(receive, () => undefined)
+  }, [nextTitle, analysisTurn?.id])
+
+  async function continueOffline() {
+    const current = draftRef.current
+    if (!current || !gridsReady || codexAvailable || isReadOnly() || turnRunning) return
+    const local = designFromReadings(inputs)
+    const localPlan = planApp(local, current.title)
+    await exclusive(async () => {
+      try {
+        receive(await api.updateDraft(projectId, current.id, { specMarkdown: excelSpecMarkdown(local, localPlan, members) }))
+        saveOffline(current.id)
+        setOffline(true)
+        setAnalysisProblem(undefined)
+      } catch (error) {
+        if (isApplicationCreated(error)) markCreated(current.id)
+        else setAnalysisProblem({ kind: 'failed' })
+      }
+    })
+  }
+
+  /** Saves an edited specification body under the unchanged front-matter; resolves whether it is saved. */
+  async function saveSpec(body: string): Promise<boolean> {
+    const current = draftRef.current
+    if (!current || isReadOnly()) return false
+    const { frontMatter, body: saved } = specParts(current.specMarkdown)
+    if (body === saved) {
+      if (specSave.state === 'failed') setSpecSave({ state: 'idle' })
+      return true
+    }
+    setSpecSave({ state: 'saving' })
+    try {
+      receive(await api.updateDraft(projectId, current.id, { specMarkdown: `${frontMatter}${body}` }))
+      setSpecSave({ state: 'saved' })
+      return true
+    } catch {
+      setSpecSave({ state: 'failed', body })
+      return false
+    }
+  }
+
+  async function sendDesignTurn(message: string) {
+    const current = draftRef.current
+    if (!current || isReadOnly()) return
+    await exclusive(async () => {
+      setSendProblem(undefined)
+      setSending(message)
+      try {
+        appendTurn(await api.createTurn(projectId, current.id, { kind: 'ui-design', message }))
+      } catch (error) {
+        if (isApplicationCreated(error)) return markCreated(current.id)
+        const status = errorStatus(error)
+        if (status === 409) await refetchDraft().catch(() => undefined)
+        const envelope = platformErrorEnvelope(error)
+        const cause = envelope?.message ?? (error instanceof Error ? error.message : '')
+        const failure = classifyBuildFailure(cause, status, 'turn', undefined, envelope?.code, undefined, undefined, envelope?.details)
+        setSendProblem({ instruction: message, message: failure.kind === 'policy' ? failure.reason : failure.kind === 'quota' ? cause : status === 412 ? text.preview.unavailable : status === 409 ? text.preview.busy : text.preview.turnFailed, failure })
+      } finally {
+        setSending(undefined)
+      }
+    })
+  }
+
+  // ── UI design ────────────────────────────────────────────────────────────
+  const stack = useMemo(() => designStack(designTurns), [designTurns])
+  const previous = stack.at(-2)
+  const serverDesign = draft?.uiDesign ?? stack.at(-1) ?? null
+
+  /** Entering the preview asks for the default design once, unless one exists or is on its way. */
+  function initDesign() {
+    if (isReadOnly()) return
+    if (usingOffline) {
+      if (!offlineDesign && plan) {
+        const design = defaultUiDesign(plan)
+        const screens = design.screens.filter((screen) => !screen.hidden).map((screen) => screen.title)
+        setOfflineDesign({ design, history: [], messages: [{ role: 'assistant', text: text.preview.greeting(screens, text.accent[design.accent]) }] })
+      }
+      return
+    }
+    if (draftRef.current?.uiDesign || designTurns.length > 0 || sending) return
+    void sendDesignTurn(UI_DESIGN_INIT)
+  }
+
+  function send(instruction: string) {
+    if (isReadOnly()) return
+    if (usingOffline) {
+      if (!offlineDesign || !plan) return
+      const result = applyInstruction(offlineDesign.design, plan, instruction)
+      setOfflineDesign({
+        design: result.changed ? result.design : offlineDesign.design,
+        history: result.changed ? [...offlineDesign.history, offlineDesign.design] : offlineDesign.history,
+        messages: [...offlineDesign.messages, { role: 'user', text: instruction }, { role: 'assistant', text: result.reply }],
+      })
+      return
+    }
+    void sendDesignTurn(instruction)
+  }
+
+  const serverUndo = previous ? undoMessage(previous) : undefined
+  const canUndo = usingOffline ? Boolean(offlineDesign?.history.length) : Boolean(serverUndo && serverUndo.length <= TURN_MESSAGE_MAX)
+
+  function undo() {
+    if (isReadOnly()) return
+    if (usingOffline) {
+      const last = offlineDesign?.history.at(-1)
+      if (!offlineDesign || !last) return
+      setOfflineDesign({ design: last, history: offlineDesign.history.slice(0, -1), messages: [...offlineDesign.messages, { role: 'user', text: text.preview.undoMessage }, { role: 'assistant', text: text.preview.undone }] })
+      return
+    }
+    if (canUndo && serverUndo) void sendDesignTurn(serverUndo)
+  }
+
+  /** Re-sends what failed: the local send error first, else the last ui-design turn when it failed. */
+  function retryDesign() {
+    if (sendProblem) return void sendDesignTurn(sendProblem.instruction)
+    if (latestDesignTurn?.status === 'failed') void sendDesignTurn(latestDesignTurn.userMessage)
+  }
+
+  const messages = useMemo<UiPreviewChatMessage[]>(() => {
+    if (usingOffline) return offlineDesign?.messages ?? []
+    const list = designMessages(designTurns)
+    if (sending && sending !== UI_DESIGN_INIT) list.push({ role: 'user', text: isUndoMessage(sending) ? text.preview.undoMessage : sending, pending: true })
+    if (sendProblem) {
+      if (sendProblem.instruction !== UI_DESIGN_INIT) list.push({ role: 'user', text: isUndoMessage(sendProblem.instruction) ? text.preview.undoMessage : sendProblem.instruction })
+      list.push({ role: 'assistant', text: sendProblem.message, failed: true, failure: sendProblem.failure })
+    }
+    return list
+  }, [usingOffline, offlineDesign, designTurns, sending, sendProblem])
+
+  const designBusy = usingOffline ? false : Boolean(sending) || isBuildPending(latestDesignTurn)
+  const suggestions = usingOffline
+    ? (offlineDesign && plan ? suggestedInstructions(offlineDesign.design, plan) : [])
+    : latestDesignTurn?.status === 'succeeded' ? (latestDesignTurn.suggestedReplies ?? []) : []
+
+  /** Persist the fallback's screen decisions, aligned name and publish preferences before opening the build. */
+  async function handOff(publish: PublishChoice): Promise<boolean> {
+    const current = draftRef.current
+    if (!current || isReadOnly()) return false
+    const specMarkdown = usingOffline && offlineDesign ? withUiDecisions(current.specMarkdown, offlineDesign.design) : current.specMarkdown
+    const patch = handOffPatch(current, specMarkdown, publish)
+    try {
+      receive(await api.updateDraft(projectId, current.id, patch))
+    } catch {
+      return false
+    }
+    return true
+  }
+
+  return {
+    draftQuery,
+    draft,
+    readOnly,
+    workbooksQuery,
+    entries,
+    grids,
+    gridsReady,
+    gridsFailed: gridQueries.failed,
+    loadGrids: () => setPreviewRequested(true),
+    retryGrids: () => { for (const member of members) void queryClient.refetchQueries({ queryKey: draftWorkbookGridOptions(projectId, draft!.id, member.id).queryKey }) },
+    files: [...members.map((member): CollectedWorkbook => ({ key: files.find((row) => row.workbookId === member.id)?.key ?? member.id, fileName: member.fileName, state: 'stored', workbookId: member.id })), ...files.filter((row) => !row.workbookId)],
+    budget: workbookBudget(members),
+    collecting,
+    starting,
+    hint,
+    setHint,
+    addFiles: (selected: readonly File[]) => collect(filesFromList(selected)),
+    addSample: (selected: readonly WorkbookGrid[]) => collect(selected, true),
+    retryFile,
+    removeWorkbook,
+    startAnalysis: () => collectLock.current ? Promise.resolve() : analyse(),
+    codexAvailable,
+    codexUnavailableReason: tools.data?.codexUnavailableReason,
+    codexPolicy: tools.data?.codexPolicy,
+    reading,
+    plan,
+    offline: usingOffline,
+    analysis: {
+      turn: analysisTurn,
+      running: starting || isBuildPending(analysisTurn),
+      problem: analysisProblem?.kind ?? (analysisTurn?.status === 'failed' && !draft?.excelAnalysis ? ('failed' as const) : undefined),
+      failure: analysisProblem?.failure,
+      error: analysisTurn?.status === 'failed' ? analysisTurn.error : undefined,
+      retry: () => void analyse(analysisTurn?.userMessage ?? hint),
+      continueOffline,
+    },
+    spec: { save: saveSpec, status: specSave },
+    design: {
+      current: usingOffline ? (offlineDesign?.design ?? null) : serverDesign,
+      messages,
+      busy: designBusy,
+      activityTail: isBuildPending(latestDesignTurn) ? latestDesignTurn?.activityTail : undefined,
+      suggestions,
+      canUndo: canUndo && !designBusy && !readOnly,
+      init: initDesign,
+      send,
+      undo,
+      retry: retryDesign,
+    },
+    turnRunning,
+    handOff,
+  }
+}

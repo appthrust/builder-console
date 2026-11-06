@@ -1,0 +1,62 @@
+import type { ApplicationDraft, ApplicationDraftImplementationHandoff, ApplicationDraftImplementationRun, ApplicationDraftImplementationTask } from '@appthrust/api-schema/platform-api'
+import type { BuildFailure } from '../../../model/build'
+import { classifyBuildFailure } from '../../../model/build/failure'
+import type { PreviewDatabaseStatus } from './runtime'
+import type { PreviewReadiness } from './use-preview-readiness'
+import { text } from '../copy'
+
+export type ImplementationTask = ApplicationDraftImplementationTask
+
+export interface ImplementationState {
+  phase: 'idle' | 'starting-workspace' | 'running' | 'pushing' | 'done' | 'failed'
+  tasks: ImplementationTask[]
+  currentTaskId?: string
+  previewUrl?: string
+  previewStatus?: PreviewReadiness
+  /** Unset until the workspace has been read. */
+  previewDatabaseStatus?: PreviewDatabaseStatus
+  activityTail?: string
+  failure?: BuildFailure
+  /** Start/retry is being submitted, or its draft inputs are not ready yet. */
+  retryPending?: boolean
+  workspaceId?: string
+  /** The current task's clock, not the run's clock. */
+  startedAt?: string
+  step?: ApplicationDraftImplementationRun['step']
+}
+
+/** At least one task was pushed: the app contains something the AI made, not only the template. */
+export function implemented(state: Pick<ImplementationState, 'tasks'>): boolean {
+  return state.tasks.some((task) => task.status === 'done')
+}
+
+/** Keep IDs identical to Dashboard applicationImplementationTodoId, including non-ASCII titles. */
+export function implementationTodoId(title: string, index: number): string {
+  const ascii = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+  let hash = 0
+  if (!ascii) {
+    for (const character of title) hash = (hash * 31 + character.charCodeAt(0)) >>> 0
+  }
+  return `todo-${index + 1}-${ascii ? ascii.slice(0, 40) : `task-${hash.toString(16)}`}`
+}
+
+/** The server owns execution and recovery; a reload never rewrites task status. */
+export function projectImplementation(draft: Pick<ApplicationDraft, 'id' | 'updatedAt'>, run?: ApplicationDraftImplementationRun, handoff?: ApplicationDraftImplementationHandoff): ImplementationState {
+  if (!run) return {
+    phase: 'idle',
+    tasks: (handoff?.tasks ?? []).map((task, index) => ({ id: implementationTodoId(task.title, index), title: task.title, status: 'pending' })),
+  }
+  const task = run.tasks.find((item) => item.id === run.currentTaskId)
+  const stopped = run.status === 'failed' || run.status === 'cancelled'
+  return {
+    phase: stopped ? 'failed' : run.status === 'succeeded' ? run.tasks.every((item) => item.status === 'done' || item.status === 'skipped') ? 'done' : 'idle'
+      : run.step === 'pushing' ? 'pushing' : run.currentTaskId ? 'running' : 'starting-workspace',
+    tasks: stopped ? run.tasks.map((item) => item.status === 'running' ? { ...item, status: 'failed' } : item) : run.tasks,
+    currentTaskId: run.currentTaskId,
+    workspaceId: run.devWorkspaceId || undefined,
+    startedAt: task?.startedAt,
+    step: run.step,
+    activityTail: run.activityTail,
+    ...(stopped ? { failure: classifyBuildFailure(run.error || task?.error || (run.status === 'cancelled' ? text.implement.cancelled : text.implement.failed), undefined, 'implement', { draftId: draft.id, executionId: run.id, at: run.finishedAt ?? task?.finishedAt ?? draft.updatedAt }, undefined, undefined, run.failureReason ?? task?.failureReason) } : {}),
+  }
+}
