@@ -57,6 +57,12 @@ test('all build API adapters use contract routes, payloads and idempotency keys 
   expect(new Set(keys).size).toBe(requests.length)
 })
 
+test('plan handoff reuses its attempt key across interrupted responses', async () => {
+  await api.createGeneration('project-1', 'draft-1', {}, 'build-plan-draft-1-kickoff-initial')
+  await api.createGeneration('project-1', 'draft-1', {}, 'build-plan-draft-1-kickoff-initial')
+  expect(requests.map((request) => request.headers.get('Idempotency-Key'))).toEqual(['build-plan-draft-1-kickoff-initial', 'build-plan-draft-1-kickoff-initial'])
+})
+
 test('workbook set and structured turns use the draft contract routes, payloads and the caller key', async () => {
   const workbook = { fileName: '台帳.xlsx', sheets: [{ name: '台帳', rows: [['名前'], ['案件']] }] }
   await api.addWorkbook('project-1', 'draft-1', workbook, 'file-key-1')
@@ -144,6 +150,15 @@ test('operation polling is 3 seconds only while pending/running, including lapse
   const listOptions = draftsOptions('p1')
   if (typeof listOptions.refetchInterval !== 'function') throw new Error('Draft list polling callback missing')
   expect(listOptions.refetchInterval({ state: { data: { data: [draft] } } } as never)).toBe(3000)
+})
+
+test('draft handoff keeps polling in background, and succeeded turns without a lease are idle', () => {
+  const options = buildDraftOptions('p1', 'd1')
+  expect(options.refetchIntervalInBackground).toBe(true)
+  if (typeof options.refetchInterval !== 'function') throw new Error('Draft polling callback missing')
+  const completed = { ...draft, creationExecutions: [], conversationTurns: [{ status: 'succeeded' }] }
+  expect(options.refetchInterval({ state: { data: completed } } as never)).toBe(false)
+  expect(options.refetchInterval({ state: { data: { ...completed, conversationTurns: [{ status: 'running' }] } } } as never)).toBe(BUILD_POLL_MS)
 })
 
 test('implementation mutations use the run envelope and leave task execution to the server', async () => {

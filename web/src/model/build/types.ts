@@ -55,7 +55,7 @@ export interface ProgressCard {
   delayHint?: string
 }
 export interface BuildPrimary {
-  action: 'prepare' | 'prepare-after-plan' | 'publish' | 'continue' | 'none'
+  action: 'plan' | 'prepare' | 'prepare-after-plan' | 'publish' | 'continue' | 'none'
   label: string
   enabled: boolean
 }

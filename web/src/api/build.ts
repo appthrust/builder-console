@@ -5,8 +5,8 @@ import type {
 } from '@appthrust/api-schema/platform-api'
 import { client } from './client'
 
-// Keep the stable mutation envelope intact. Draft mutations get a fresh
-// Idempotency-Key per attempt; publish repair explicitly reuses its key.
+// Keep the stable mutation envelope intact. Ordinary mutations get a fresh key;
+// resumable plan handoffs and publish repair explicitly reuse their attempt key.
 export function createDraft(projectId: string, payload: CreateApplicationDraftRequest) {
   return client.platformApiCreateApplicationDraft({ projectId, ...payload })
 }
@@ -52,8 +52,8 @@ export function getTurn(projectId: string, draftId: string, turnId: string) {
   return client.platformApiGetApplicationDraftConversationTurn({ projectId, id: draftId, turnId })
 }
 
-export function createGeneration(projectId: string, draftId: string, payload: CreateApplicationDraftCreationPlanGenerationRequest = {}) {
-  return client.platformApiCreateApplicationDraftCreationPlanGeneration({ projectId, id: draftId, ...payload })
+export function createGeneration(projectId: string, draftId: string, payload: CreateApplicationDraftCreationPlanGenerationRequest = {}, idempotencyKey?: string) {
+  return client.platformApiCreateApplicationDraftCreationPlanGeneration({ projectId, id: draftId, ...payload }, { context: { idempotencyKey } })
 }
 
 export function getGeneration(projectId: string, draftId: string, generationId: string) {

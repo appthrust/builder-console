@@ -2,7 +2,7 @@ import type { ApplicationDraft } from '@appthrust/api-schema/platform-api'
 import { z } from 'zod'
 import { isBuildPending } from '../../model/build/progress'
 import { buildCopy } from '../../model/build/copy'
-import { decomposeBuildIntent, isPrepareTurn } from '../../model/build/questions'
+import { decomposeBuildIntent, isKickoffReply, isPrepareTurn } from '../../model/build/questions'
 import type { BuildMessage, BuildStage } from '../../model/build/types'
 import { localized } from '../../shell/language'
 import { text, textJa } from './copy'
@@ -75,7 +75,7 @@ export function queueReply(session: BuildSession, text: string, at: string): Bui
   const reply = { text: text.trim(), at }
   if (!reply.text) return session
   const message: BuildMessage = { role: 'user', ...reply }
-  return { ...session, pending: [...session.pending, reply], messages: [...session.messages, message] }
+  return { ...session, planRequested: session.planRequested || isKickoffReply(reply.text), pending: [...session.pending, reply], messages: [...session.messages, message] }
 }
 
 export function acknowledgeReply(session: BuildSession, at: string): BuildSession {

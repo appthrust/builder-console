@@ -7,11 +7,13 @@ import { buildDraftOptions } from '../../api/build-queries'
 import { consoleApi, consoleKeys, isConsoleError, type BusinessApp, type Me } from '../../api/console'
 import { platformErrorEnvelope } from '../../api/platform-error'
 import { isPublishPreparationPending, publishPreparationRetryDelay } from '../../api/publish-retry'
+import { isSessionExpiredError, sessionExpiryStore } from '../../api/session-expiry'
 import { classifyBuildFailure } from '../../model/build/failure'
+import { buildCopy } from '../../model/build/copy'
 import { messagesFromDraft, planProposal } from '../../model/build/messages'
-import { composeBuildIntent, conversationTurns, decomposeBuildIntent, isKickoffReply, isPrepareTurn, prepareAnswers } from '../../model/build/questions'
+import { composeBuildIntent, conversationTurns, decomposeBuildIntent, isPrepareTurn, prepareAnswers } from '../../model/build/questions'
 import { parseSpec, serializeSpec } from '../../model/build/spec'
-import { deriveStage, draftPublished, needsPlanRefresh } from '../../model/build/stage'
+import { deriveStage, draftPublished, hasUnplannedKickoff, needsPlanRefresh } from '../../model/build/stage'
 import type { BuildFailure, BuildMessage } from '../../model/build/types'
 import { pickCreateEnvironment, summarizeCreationPlan } from '../../model/create'
 import { withDefaultPublish } from '../../model/build/plan'
@@ -141,10 +143,10 @@ export function useBuildSession(draft: ApplicationDraft, me: Me, groupId: string
     })
   }
   async function perform(context: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish', action: () => Promise<void>) {
-    if (lock.current) return
+    if (lock.current || sessionExpiryStore.state) return
     lock.current = true
     setBusy(true)
-    try { await action() } catch (error) { fail(error, context) } finally { lock.current = false; setBusy(false) }
+    try { await action() } catch (error) { if (!isSessionExpiredError(error)) fail(error, context) } finally { lock.current = false; setBusy(false) }
   }
   useEffect(() => { saveBuildSession(draft.id, store.state) }, [draft.id, store])
   useEffect(() => {
@@ -180,7 +182,6 @@ export function useBuildSession(draft: ApplicationDraft, me: Me, groupId: string
       patch((current) => queueReply({ ...current, continuedAfterPublishAt: draft.publishedAt }, reply, new Date().toISOString()))
       return
     }
-    if (isKickoffReply(reply)) patch({ planRequested: true })
     patch((current) => queueReply({ ...current, reusePlan: false }, reply, new Date().toISOString()))
     setFailure(undefined)
   }
@@ -247,11 +248,23 @@ export function useBuildSession(draft: ApplicationDraft, me: Me, groupId: string
   }, [session.pending, session.messages, conversing, preparing, answers.open, busy, failure, now, implementation.pending, implementation.state.failure])
 
   async function generate() {
-    const current = draftRef.current
+    const previousGenerationId = draftRef.current.creationPlanGenerations?.at(-1)?.id
+    // A reload/another tab may have already accepted this handoff. Read before writing.
+    const current = await api.getDraft(projectId, draft.id)
+    receive(current)
+    const latestGeneration = current.creationPlanGenerations?.at(-1)
+    if (current.createdApplicationStackId || current.creationExecutions.length
+      || latestGeneration?.id !== previousGenerationId
+      || !needsPlanRefresh(current, store.state.lastPlannedIntent)) {
+      patch({ planRequested: false })
+      return
+    }
+    if ([latestGeneration, current.conversationTurns?.at(-1)].some(isBuildPending)) return
     const intent = composeBuildIntent(decomposeBuildIntent(session.baseIntent), conversationTurns(current.conversationTurns).map((item) => item.userMessage), true)
     const updated = current.intent === intent ? current : await api.updateDraft(projectId, draft.id, { intent })
     receive(updated)
-    const created = await api.createGeneration(projectId, draft.id)
+    const attemptKey = `build-plan-${draft.id}-${current.conversationTurns?.at(-1)?.id ?? 'initial'}-${previousGenerationId ?? 'initial'}`
+    const created = await api.createGeneration(projectId, draft.id, {}, attemptKey)
     patch({ lastPlannedIntent: intent, planRequested: false, reusePlan: false })
     receive({ ...draftRef.current, creationPlanGenerations: [...(draftRef.current.creationPlanGenerations ?? []), created] })
   }
@@ -270,7 +283,7 @@ export function useBuildSession(draft: ApplicationDraft, me: Me, groupId: string
   useEffect(() => {
     if (running || busy || lock.current || session.pending.length || failure || draft.createdApplicationStackId) return
     if ([generation, turn, execution].some((operation) => operation?.status === 'failed' && !observedFailures.current.has(operation.id))) return
-    if ((session.planRequested && turn?.status === 'succeeded') || (session.prepareRequested && !session.reusePlan && needsPlanRefresh(draft, session.lastPlannedIntent))) {
+    if ((turn?.status === 'succeeded' && (session.planRequested || hasUnplannedKickoff(draft))) || (session.prepareRequested && !session.reusePlan && needsPlanRefresh(draft, session.lastPlannedIntent))) {
       void perform('plan', generate)
       return
     }
@@ -426,6 +439,11 @@ export function useBuildSession(draft: ApplicationDraft, me: Me, groupId: string
     waitingForAi: session.pending.length > 0 && unavailableRetries.current > 0 && now < blockedUntil.current + 1000,
     waitingForPublish: publishRetries.current >= 4,
     send, retry, patch, receive, perform,
+    requestPlan: () => {
+      if (lock.current || running || store.state.pending.length || result.primary.action !== 'plan') return
+      if (hasUnplannedKickoff(draft)) retry('plan')
+      else send(buildCopy.questions.kickoffReply)
+    },
     prepare: () => { bindingFailed.current = false; setFailure(undefined); patch({ prepareRequested: true }) },
     published: (updated: BusinessApp) => { queryClient.setQueryData(consoleKeys.app(updated.id), updated); return markPublished() },
   }

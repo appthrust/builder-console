@@ -8,6 +8,7 @@ import * as api from '../../api/build'
 import { buildKeys } from '../../api/build-queries'
 import { consoleKeys, type BusinessApp, type Me } from '../../api/console'
 import { keys } from '../../api/queries'
+import { sessionExpiryStore } from '../../api/session-expiry'
 import { buildCopy } from '../../model/build/copy'
 import { shareScopeLabel } from '../../model/access'
 import { composeBuildIntent } from '../../model/build/questions'
@@ -46,6 +47,7 @@ let build: {
   session: BuildSession; failure?: BuildFailure; prepareOpen: boolean; app?: BusinessApp; messages: BuildMessage[]
   result: { stage: BuildStage; primary: BuildPrimary }
   send(text: string): void
+  requestPlan(): void
   retry(context?: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish'): void
   patch(next: Partial<BuildSession>): void
   published(app: BusinessApp): Promise<void>
@@ -123,6 +125,7 @@ beforeEach(() => {
     mutationResponse({ ...client.getQueryData<ApplicationDraft>(queryKey)!, ...payload }, 'ApplicationDraft', 'application-draft.update'))
   createTurn = spyOn(api, 'createTurn').mockImplementation(async (_projectId, _draftId, payload) =>
     mutationResponse(turn('share', payload.message, 2), 'ApplicationDraftConversationTurn', 'application-draft-conversation-turn.create'))
+  const getDraft = spyOn(api, 'getDraft').mockImplementation(async () => client.getQueryData<ApplicationDraft>(queryKey)!)
   timers = new Map()
   let nextTimer = 0
   const timeoutSpy = spyOn(window, 'setTimeout').mockImplementation(((handler: TimerHandler, delay?: number) => {
@@ -132,16 +135,130 @@ beforeEach(() => {
     return id
   }) as typeof window.setTimeout)
   const clearSpy = spyOn(window, 'clearTimeout').mockImplementation((id) => { timers.delete(Number(id)) })
-  restore = [implementationSpy, viewsSpy, update, createTurn, timeoutSpy, clearSpy, clockSpy].map((spy) => () => spy.mockRestore())
+  restore = [implementationSpy, viewsSpy, update, createTurn, getDraft, timeoutSpy, clearSpy, clockSpy].map((spy) => () => spy.mockRestore())
 })
 afterEach(async () => {
   await act(async () => { root.unmount() })
   client.clear()
   container.remove()
   forgetBuildSession(draft.id)
+  sessionExpiryStore.setState(() => false)
   for (const reset of restore.reverse()) reset()
   if (storageDescriptor) Object.defineProperty(globalThis, 'sessionStorage', storageDescriptor)
   else Reflect.deleteProperty(globalThis, 'sessionStorage')
+})
+
+describe('kickoff to plan handoff', () => {
+  const kickoff = turn('kickoff', buildCopy.questions.kickoffReply, 4)
+  const unplanned = { ...draft, conversationTurns: [kickoff] }
+
+  function mockGeneration() {
+    const generation = spyOn(api, 'createGeneration').mockImplementation(async () =>
+      mutationResponse({ id: 'plan-1', status: 'pending' as const, startedAt: '2026-10-26T00:05:00Z', devWorkspaceId: 'workspace-1' }, 'ApplicationDraftCreationPlanGeneration', 'application-draft-creation-plan-generation.create'))
+    restore.push(() => generation.mockRestore())
+    return generation
+  }
+
+  test('accepted kickoff waits for succeeded, then requests exactly one generation without a lease', async () => {
+    const generation = mockGeneration()
+    createTurn.mockImplementation(async (_projectId, _draftId, payload) =>
+      mutationResponse({ ...kickoff, userMessage: payload.message, status: 'pending' as const }, 'ApplicationDraftConversationTurn', 'application-draft-conversation-turn.create'))
+    await mount({ ...unplanned, conversationTurns: [turn('opening', buildCopy.questions.firstTurn, 0)] })
+    await act(async () => { build.send(buildCopy.questions.kickoffReply) })
+    expect(createTurn).toHaveBeenCalledTimes(1)
+    expect(build.session).toMatchObject({ pending: [], planRequested: true })
+    expect(generation).not.toHaveBeenCalled()
+    await act(async () => { client.setQueryData(queryKey, { ...client.getQueryData<ApplicationDraft>(queryKey)!, conversationTurns: [kickoff] }) })
+    expect(generation).toHaveBeenCalledTimes(1)
+    expect(build.session.planRequested).toBe(false)
+    await render()
+    expect(generation).toHaveBeenCalledTimes(1)
+  })
+
+  test.each(['saved', 'missing', 'invalid'] as const)('reload with %s session recovers succeeded kickoff from the draft', async (storage) => {
+    const generation = mockGeneration()
+    if (storage === 'saved') saveBuildSession(draft.id, initial)
+    else if (storage === 'invalid') sessionStorage.setItem(`builder-console:build:${draft.id}`, '{')
+    else forgetBuildSession(draft.id)
+    client.setQueryData(queryKey, unplanned)
+    await render()
+    expect(generation).toHaveBeenCalledTimes(1)
+    expect(createTurn).not.toHaveBeenCalled()
+    await act(async () => { root.render(null) })
+    await render()
+    expect(generation).toHaveBeenCalledTimes(1)
+  })
+
+  test.each(['pending', 'succeeded'] as const)('reload observes an existing %s generation instead of sending another', async (status) => {
+    const generation = mockGeneration()
+    const current: ApplicationDraft = {
+      ...unplanned, phase: status === 'succeeded' ? 'planned' : 'specifying',
+      creationPlan: status === 'succeeded' ? { summary: '', markdown: '', representation: [] } : undefined,
+      creationPlanGenerations: [{ id: 'existing', status, startedAt: '2026-10-26T00:05:00Z', devWorkspaceId: 'workspace-1' }],
+    }
+    await mount(current, { ...initial, planRequested: true })
+    expect(generation).not.toHaveBeenCalled()
+  })
+
+  test('a generation accepted before reload is read back instead of duplicated', async () => {
+    const generation = mockGeneration()
+    const getDraft = spyOn(api, 'getDraft').mockResolvedValue({
+      ...unplanned, creationPlanGenerations: [{ id: 'already-accepted', status: 'pending', startedAt: '2026-10-26T00:05:00Z', devWorkspaceId: 'workspace-1' }],
+    })
+    restore.push(() => getDraft.mockRestore())
+    await mount(unplanned, { ...initial, planRequested: true })
+    expect(generation).not.toHaveBeenCalled()
+    expect(client.getQueryData<ApplicationDraft>(queryKey)?.creationPlanGenerations?.[0]?.id).toBe('already-accepted')
+  })
+
+  test('the primary action sends one kickoff and one plan, even on a double click', async () => {
+    const generation = mockGeneration()
+    await mount({ ...unplanned, conversationTurns: [turn('opening', buildCopy.questions.firstTurn, 0)] })
+    expect(build.result.primary).toMatchObject({ action: 'plan', enabled: true })
+    await act(async () => { build.requestPlan(); build.requestPlan() })
+    expect(createTurn).toHaveBeenCalledTimes(1)
+    expect(generation).toHaveBeenCalledTimes(1)
+  })
+
+  test('turn admission conflict retains the kickoff reservation and retries after its block', async () => {
+    const generation = mockGeneration()
+    let tick: (() => void) | undefined
+    const interval = spyOn(window, 'setInterval').mockImplementation(((handler: TimerHandler) => {
+      tick = handler as () => void
+      return 987
+    }) as typeof window.setInterval)
+    restore.push(() => interval.mockRestore())
+    createTurn.mockRejectedValueOnce(conflict)
+    await mount({ ...unplanned, conversationTurns: [turn('opening', buildCopy.questions.firstTurn, 0)] })
+    await act(async () => { build.send(buildCopy.questions.kickoffReply) })
+    expect(build.session.planRequested).toBe(true)
+    expect(build.session.pending).toHaveLength(1)
+    expect(generation).not.toHaveBeenCalled()
+    spyOn(Date, 'now').mockReturnValue(Date.parse('2026-10-26T00:05:04Z'))
+    if (!tick) throw new Error('Pending reply clock missing')
+    await act(async () => { tick!() })
+    expect(createTurn).toHaveBeenCalledTimes(2)
+    expect(build.session.pending).toEqual([])
+    expect(generation).toHaveBeenCalledTimes(1)
+  })
+
+  test('session expiry during handoff settles without losing intent and sign-in resumes once', async () => {
+    const generation = mockGeneration()
+    generation.mockImplementationOnce(async () => {
+      sessionExpiryStore.setState(() => true)
+      throw new ORPCError('SESSION_EXPIRED', { status: 401 })
+    })
+    await mount(unplanned, { ...initial, planRequested: true })
+    expect(build.failure).toBeUndefined()
+    expect(readBuildSession(draft.id)?.planRequested).toBe(true)
+    expect(generation).toHaveBeenCalledTimes(1)
+    await act(async () => { root.render(null) })
+    sessionExpiryStore.setState(() => false)
+    await render()
+    expect(generation).toHaveBeenCalledTimes(2)
+    expect(generation.mock.calls[0]?.[3]).toBe(generation.mock.calls[1]?.[3])
+    expect(build.session.planRequested).toBe(false)
+  })
 })
 
 describe('preparation name synchronization', () => {

@@ -101,6 +101,7 @@ function Session({ draft, groupId }: { draft: ApplicationDraft; groupId: string 
   }
   const onPrimary = () => {
     if (primary.action === 'publish') { setSharing(true); setTab('artifact') }
+    else if (primary.action === 'plan') build.requestPlan()
     else if (primary.action === 'continue') { build.patch({ continuedAfterPublishAt: draft.publishedAt }); setTab('conversation') }
   }
   const useName = (next: string) => {

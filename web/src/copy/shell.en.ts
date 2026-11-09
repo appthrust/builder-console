@@ -211,6 +211,8 @@ export const shellEn: typeof shell = {
     retry: 'Reload',
     loadFailed: 'We could not load this information. Wait a moment, then reload.',
     accessDenied: 'Your sign-in was not accepted. Please contact your admin.',
+    sessionExpired: 'Your session has expired. Please sign in again.',
+    signInAgain: 'Sign in again',
     actionFailed: 'Something went wrong.',
     cancel: 'Cancel',
     close: 'Close',

@@ -308,6 +308,22 @@ non-engineers, with engineering words only under 「詳しい人向け」
   successful data for the same key during failed polls; build/draft pages show
   a load-error card only when no data has loaded, never in place of cached work.
   Data from another draft, app or project is not used as placeholder data.
+- API requests use manual redirects: an edge 401, OIDC redirect (including an
+  opaque cross-origin redirect), or successful HTML login page ends the local
+  session instead of masquerading as an API result. Platform and Console/Directory
+  requests share this check. The page shows 「セッションが切れました。再サインインしてください」
+  and a 「再サインイン」 action; query observers are removed and further API calls
+  are blocked until sign-in. The action navigates to the same URL through the edge,
+  preserving the draft and its session storage. There is no automatic redirect
+  loop or never-settling authentication promise.
+- A successful build kickoff resumes plan generation from the draft even when
+  session storage is absent. A queued kickoff also persists its plan reservation
+  atomically. An idle conversation without a plan has a visible 「この内容で提案して」
+  primary action rather than a fake progress state. The handoff reads the draft
+  under the existing mutation lock and uses an idempotency key bound to the latest
+  turn and prior generation; an already accepted/current plan is not recreated.
+  Active draft polling continues while the tab is hidden (subject to browser
+  suspension); normal focus refetch catches up after resume.
 - A source repository kept from a failed create attempt is reused only when
   its origin (URL name, entry, picked repository, template) matches the retry.
 - AI build sessions default an absent/disabled plan publish to the wizard's

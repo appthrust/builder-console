@@ -48,7 +48,6 @@ function recorder(responses: Response[]) {
       calls.push({ input, init })
       return responses.shift() ?? new Response(null, { status: 500 })
     },
-    () => false,
   )
   return { api, calls }
 }
@@ -105,7 +104,7 @@ describe('createConsoleApi', () => {
     const { api } = recorder([Response.json({ error: 'upstream_unavailable', message: 'platform down' }, { status: 502 })])
     await expect(api.me()).rejects.toMatchObject({ status: 502, code: 'upstream_unavailable', transient: false, message: 'platform down' })
 
-    const offline = createConsoleApi(async () => Promise.reject(new TypeError('Failed to fetch')), () => false)
+    const offline = createConsoleApi(async () => Promise.reject(new TypeError('Failed to fetch')))
     await expect(offline.me()).rejects.toMatchObject({ status: 0, transient: true, message: copy.errors.transient })
   })
 

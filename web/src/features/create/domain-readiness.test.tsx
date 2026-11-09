@@ -39,7 +39,7 @@ afterEach(() => {
 })
 
 test.each([true, false])('new app distinguishes pending domain and recovers on its scheduled poll: admin=%s', async (admin) => {
-  const api = createConsoleApi(fixture, () => false)
+  const api = createConsoleApi(fixture)
   const [me, groups] = await Promise.all([api.me(), api.directory.groups()])
   const project = `/api/v1/projects/${me.projectId}`
   const [templates, definitions, sources, registries, domains, tools] = await Promise.all([
