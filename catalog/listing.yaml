@@ -1,0 +1,103 @@
+locales:
+  en:
+    title: Builder Console
+    tagline: Build business apps inside your Project, publish them, and share each one with exactly the people and groups who need it.
+    overview: |
+      Builder Console is where a team builds, publishes, and shares its own business apps inside a Project, without dealing with servers or deployment. Start from a description of what you need, an existing Excel ledger, a ready-made template, or code you have already written. It suits departments that want to put small internal tools in place themselves.
+
+      Every app belongs to a group in your organisation and has named owners. The home page lists the apps of your group, apps shared from parent groups, and what is new company-wide, with search by name, purpose, or group. Each app page brings together the running version, its URL, a usage guide, its data, and its logs; an app that is not running properly is flagged as needing attention.
+
+      When you build with AI, the console asks what you need, agrees on a plan, builds the app, and lets you try it in a preview before publishing. Access can be limited to named people, to selected groups (including their subgroups), or opened to the whole company; publishing to the internet is reserved for administrators. Changes pushed to an app's repository roll out as a new version, and the release history lets you go back to an earlier one. Ask AI to fix something in a live app and the change arrives as a proposal that the owners review before it is applied.
+
+      People and groups come from Directory, and everyone signs in with their organisation account. App details, sharing settings, and comments are stored inside the Project. Building and fixing with AI is available when AI is enabled for the Project.
+  ja:
+    title: Builder Console
+    tagline: Project の中で業務アプリを作って公開し、必要な人やグループにだけ届けられます。
+    overview: |
+      Builder Console は、Project の中で業務アプリを作り、公開し、社内で共有するためのコンソールです。サーバーや配備の知識は要りません。やりたいことを文章で書く、いま使っている Excel 台帳を読み込ませる、テンプレートを選ぶ、手元で作ったコードを持ち込む、のいずれかから始められます。部署で使う小さな業務アプリを、自分たちで用意したいチームに向いています。
+
+      アプリは組織のグループに置かれ、担当者が決まります。ホームには所属グループのアプリ、上位グループから共有されたアプリ、全社の新着が並び、名前・用途・組織で探せます。アプリのページでは、いま動いている版、URL、つかいかた、データ、ログをまとめて確かめられます。正常に動いていないアプリには「問題あり」と表示されます。
+
+      AI と作る場合は、聞く・決める・作る・公開の順に進み、公開の前にプレビューで動かして確かめられます。公開範囲は、指定した人だけ、選んだグループ（下のグループを含む）、全社から選びます。社外への公開は管理者だけが選べます。アプリのリポジトリに入った変更は新しい版として公開され、更新履歴から前の版に戻せます。公開中のアプリで直したいことを AI に伝えると、変更は担当者が確認してから反映する提案として届きます。
+
+      人とグループは Directory で管理し、サインインには組織のアカウントを使います。アプリの情報、公開範囲、コメントは Project の中に保存されます。AI を使った作成と修正は、Project で AI が有効な場合に使えます。
+highlights:
+  - screenshot: home
+    locales:
+      en:
+        title: Find the apps your team uses
+        body: The home page shows your group's apps, apps shared from parent groups, and new apps across the company, each with its current status. Search by name, purpose, or group.
+      ja:
+        title: チームのアプリがすぐ見つかる
+        body: ホームに所属グループのアプリ、上位グループから共有されたアプリ、全社の新着が、いまの状態と一緒に並びます。名前・用途・組織で探せます。
+  - screenshot: new-app
+    locales:
+      en:
+        title: Start the way that suits you
+        body: Describe what you need and build it with AI, let AI read your Excel ledgers and write a specification, pick a business template, or bring code you already have.
+      ja:
+        title: 始め方を選べる
+        body: やりたいことを書いて AI と作る、Excel 台帳を AI に読ませて仕様書から作る、業務テンプレートを選ぶ、作ったコードを持ち込む、から選べます。
+  - screenshot: app-overview
+    locales:
+      en:
+        title: Everything about an app on one page
+        body: See the running version, the URL, screenshots, and what the app can do, then move to its guide, data, release history, settings, and logs. Editors can ask AI for a fix, which arrives as a proposal for the owners to review.
+      ja:
+        title: アプリのことが 1 ページで分かる
+        body: いま動いている版、URL、画面の写真、できることを確かめ、つかいかた・データ・更新履歴・設定・ログへ移れます。AI に直してもらった変更は、担当者が確認する提案として届きます。
+  - screenshot: share
+    locales:
+      en:
+        title: Share with the right people
+        body: Add people by name or email address and choose groups from the organisation tree; subgroups are included. Widening access asks for confirmation. No email is sent; you pass the invitation text on yourself.
+      ja:
+        title: 必要な人にだけ届ける
+        body: 名前やメールアドレスで人を加え、組織の一覧からグループを選びます。下のグループも含まれます。公開範囲を広げるときは確認が入ります。メールは送られないので、招待文は自分で相手に渡します。
+  - screenshot: releases
+    locales:
+      en:
+        title: Versions you can roll back
+        body: Changes pushed to the app's repository roll out as a new version. The release history shows which version is running and the state of each one, and you can go back to an earlier version.
+      ja:
+        title: 前の版に戻せる
+        body: リポジトリに入った変更は新しい版として公開されます。更新履歴で、いま動いている版と各版の状態を確かめ、前の版に戻せます。
+  - screenshot: data
+    locales:
+      en:
+        title: Look after the app's data
+        body: Browse the app's tables, search them, and add, edit, or delete rows.
+      ja:
+        title: アプリのデータを直接扱える
+        body: アプリの表を一覧して検索し、行の追加・編集・削除ができます。
+screenshots:
+  - name: home
+    file: home.webp
+    alt:
+      en: "Builder Console home in Japanese: a search box, cards for the sales team's apps (quotes, expenses, daily reports) with status badges such as running and needs attention, apps shared from a parent group, and new company-wide apps."
+      ja: "Builder Console のホーム画面。検索欄の下に営業1課のアプリ（見積作成・経費精算・日報）が「公開中」「問題あり」などの状態つきで並び、上位グループから共有されたアプリと全社の新着が続きます。"
+  - name: new-app
+    file: new-app.webp
+    alt:
+      en: "Step 1 of 4 of creating a new app: a text box describing an equipment-lending app with the Build with AI button, a Create from Excel option, and business templates such as inventory and master data management."
+      ja: "新しいアプリ作成のステップ 1 / 4。備品の貸し出しを記録したいという説明と「AI と作る」ボタン、「Excel から作る」、在庫管理やマスター管理などのテンプレートが表示されています。"
+  - name: app-overview
+    file: app-overview.webp
+    alt:
+      en: "The page of the quote app: running status and version v3, access limited to two people and two groups, owner, the app URL with copy and open buttons, tabs for overview, guide, data, release history, settings and logs, and app screenshots."
+      ja: "見積作成アプリのページ。「公開中」と動いている版 v3、公開範囲「限定（2 人・営業1課、営業企画部）」、担当者、アプリの URL とコピー・開くボタン、概要・つかいかた・データ・更新履歴・設定・ログのタブ、画面の写真が並びます。"
+  - name: share
+    file: share.webp
+    alt:
+      en: "The share dialog: two people with edit and view access, members of two groups with view access, and general access set to Group with the sales team and the sales planning department checked in the organisation tree."
+      ja: "共有ダイアログ。編集できる人と閲覧できる人の 2 人、閲覧できる 2 つのグループが並び、一般的なアクセスは「グループ」で、組織の一覧から営業1課と営業企画部が選ばれています。"
+  - name: releases
+    file: releases.webp
+    alt:
+      en: "The release history of the quote app, newest first: v4 waiting, v3 marked as currently running, and v2 and v1 completed, each with a button to go back to that version."
+      ja: "見積作成アプリの更新履歴（新しい順）。v4 は待機中、v3 に「いま動いている」、v2 と v1 は完了で、どちらにも「この版に戻す」ボタンがあります。"
+  - name: data
+    file: data.webp
+    alt:
+      en: "The data tab showing a product table with about 12 rows (laptops, monitors, stationery, furniture) with category, unit price, stock, and notes, plus a table search box and an Add row button."
+      ja: "データタブ。商品の表（約 12 行）にノートPC・モニター・文具・家具などが分類・単価・在庫・メモと一緒に並び、表の検索欄と「行を追加」ボタンがあります。"

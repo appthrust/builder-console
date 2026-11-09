@@ -28,7 +28,7 @@ func TestMeCompositionAndUnknownHydration(t *testing.T) {
 	require.True(t, me.CanCreateApps)
 	require.Equal(t, []string{group.ID}, me.EffectiveGroupIDs)
 	require.Equal(t, []string{group.ID}, me.ManagedGroupIDs)
-	require.Equal(t, "test-team", me.TeamSlug)
+	require.Empty(t, me.TeamSlug)
 	require.Equal(t, "pj-test", me.ProjectID)
 	require.Equal(t, "https://directory.example.test", me.DirectoryPublicURL)
 	require.False(t, me.Migration.Pending)
