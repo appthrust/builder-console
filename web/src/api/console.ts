@@ -4,6 +4,7 @@
 // same-origin under `/api/console/directory/*` (→ `/api/directory/v1/*`). Same-origin
 // JSON; the OIDC edge attaches Authorization, the SPA never sees a token.
 import { copy } from '../copy'
+import { assertSessionActive, checkSessionResponse } from './session-expiry'
 
 /** A Directory person. `avatarVersion`: null without a profile picture, else when it last changed (the image URL's cache-buster). */
 export type Person = { id: string; subject: string | null; pending: boolean; email: string; displayName: string; avatarVersion: string | null }
@@ -200,11 +201,6 @@ export function isConsoleError(error: unknown, code?: string): error is ConsoleA
 }
 
 const READ_TIMEOUT_MS = 8_000
-// Shared with the Platform API client (api/client.ts): a 401 sends the browser
-// to `/` once so the edge re-runs sign-in; a second 401 inside the window
-// surfaces to the screens instead of looping.
-const REAUTH_WINDOW_MS = 60_000
-const REAUTH_AT_KEY = 'builder-console:reauth-at'
 
 type Fetcher = (input: string, init: RequestInit) => Promise<Response>
 export type AppListParams = { scope?: AppScope; groupId?: string; q?: string }
@@ -274,8 +270,9 @@ export interface ConsoleApi {
   }
 }
 
-export function createConsoleApi(fetcher: Fetcher = (input, init) => fetch(input, init), reauth = browserReauth): ConsoleApi {
+export function createConsoleApi(fetcher: Fetcher = (input, init) => fetch(input, init)): ConsoleApi {
   async function send<T>(method: string, path: string, body: BodyInit | undefined, contentType: string | undefined): Promise<T> {
+    assertSessionActive()
     const read = method === 'GET'
     let response: Response
     try {
@@ -284,13 +281,14 @@ export function createConsoleApi(fetcher: Fetcher = (input, init) => fetch(input
         headers: contentType === undefined ? { Accept: 'application/json' } : { Accept: 'application/json', 'Content-Type': contentType },
         body,
         credentials: 'same-origin',
+        redirect: 'manual',
         signal: read ? AbortSignal.timeout(READ_TIMEOUT_MS) : undefined,
       })
     } catch {
       // Network failure or read timeout: nothing answered (status 0).
       throw new ConsoleApiError(0, undefined)
     }
-    if (response.status === 401 && reauth()) return new Promise<T>(() => {})
+    checkSessionResponse(response)
     if (!response.ok) {
       let parsed: Partial<ApiError> | undefined
       try {
@@ -382,14 +380,6 @@ export function createConsoleApi(fetcher: Fetcher = (input, init) => fetch(input
       directoryMigrate: () => call<DirectoryMigrationResult>('POST', '/admin/directory-migrate'),
     },
   }
-}
-
-function browserReauth(): boolean {
-  const lastReauthAt = Number(sessionStorage.getItem(REAUTH_AT_KEY))
-  if (Date.now() - lastReauthAt < REAUTH_WINDOW_MS) return false
-  sessionStorage.setItem(REAUTH_AT_KEY, String(Date.now()))
-  window.location.assign('/')
-  return true
 }
 
 export const consoleApi = createConsoleApi()

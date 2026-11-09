@@ -18,7 +18,7 @@ import { projectImplementation, type ImplementationState } from './implement/sta
 import { NameChoice } from './name-choice'
 import { ProposalBody } from './proposal'
 import { stageLabels, titleFromIntent } from './session'
-import { StageRail, stateWord } from './session-header'
+import { StageAction, StageRail, stateWord } from './session-header'
 
 let restoreLanguage: () => void
 beforeEach(() => {
@@ -55,6 +55,15 @@ test('imported stage and state labels switch both ways without reloading modules
   expect(stageLabels.ask).toBe('聞く')
   expect(stateWord.build).toBe('作っています')
   expect(implementationCopy.preview).toBe('アプリのプレビュー')
+})
+
+test.each(['ja', 'en'] as const)('idle plan handoff shows a primary action, not a spinner, in %s', (language) => {
+  setLanguage(language)
+  const markup = renderToStaticMarkup(<StageAction stage="ask" primary={{ action: 'plan', label: buildCopy.questions.kickoffReply, enabled: true }} onPrimary={() => {}} />)
+  expect(markup).toContain('<button')
+  expect(markup).toContain(buildCopy.questions.kickoffReply)
+  expect(markup).not.toContain('disabled=""')
+  expect(markup).not.toContain('animate-spin')
 })
 
 test('spec and proposal preserve Japanese wording and use English labels and punctuation', () => {

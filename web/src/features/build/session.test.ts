@@ -103,6 +103,13 @@ describe('build session persistence', () => {
     expect(queued.pending).toHaveLength(2)
     expect(queueReply(initial, '  ', 'empty')).toBe(initial)
   })
+  test('queuing a kickoff persists its plan reservation through acknowledgment and reload', () => {
+    const target = storage()
+    const queued = queueReply(initial, ` ${buildCopy.questions.kickoffReply} `, 'now')
+    expect(queued.planRequested).toBe(true)
+    saveBuildSession('kickoff', acknowledgeReply(queued, 'now'), target)
+    expect(readBuildSession('kickoff', target)).toMatchObject({ planRequested: true, pending: [] })
+  })
   test('reload retains preparation reservation, queued messages, binding, template release and continuation', () => {
     const target = storage()
     const session = { ...queueReply(initial, '変更したい', 'now'), kickoffSent: true, lastPlannedIntent: '見積を作りたい', prepareRequested: true, createdAppId: 'app1', continuedAfterPublishAt: '2026-10-29T00:00:00Z', initialReleaseId: 'template-release' }

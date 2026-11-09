@@ -25,6 +25,14 @@ describe('design section 4 stage table', () => {
     expect(deriveStage({ ...base, draft: { ...unplanned, creationPlan: draft.creationPlan } }).stage).toBe('decide')
     expect(deriveStage({ ...base, draft: undefined }).stage).toBe('ask')
   })
+  test('an idle unplanned conversation offers a plan action without pretend progress', () => {
+    const current = { ...unplanned, conversationTurns: [{ ...turn, status: 'succeeded' as const, userMessage: buildCopy.questions.kickoffReply }] }
+    expect(deriveStage({ ...base, draft: current })).toEqual({
+      stage: 'ask', primary: { action: 'plan', label: buildCopy.questions.kickoffReply, enabled: true },
+    })
+    expect(deriveStage({ ...base, draft: current, turn }).primary.action).toBe('none')
+    expect(deriveStage({ ...base, draft: current, generation: { ...generation, status: 'pending' } }).primary.action).toBe('none')
+  })
   test('decides with a ready plan and enables preparation', () => {
     expect(deriveStage(base)).toEqual({ stage: 'decide', primary: { action: 'prepare', label: buildCopy.primary.prepare, enabled: true } })
   })

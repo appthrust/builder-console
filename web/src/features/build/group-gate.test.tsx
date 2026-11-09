@@ -25,7 +25,7 @@ async function fixture(path: string, init?: RequestInit) {
   return response
 }
 
-const consoleApi = createConsoleApi(fixture, () => false)
+const consoleApi = createConsoleApi(fixture)
 const localStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
 let restoreLanguage: () => void
 beforeEach(() => {

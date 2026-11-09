@@ -5,6 +5,7 @@ import { createRoot } from 'react-dom/client'
 import { queryClient } from './api/queries'
 import { router } from './router'
 import { useLanguage } from './shell/language'
+import { SessionExpiryBoundary } from './ui/session-expired'
 import './styles.css'
 
 // A stale deployment chunk gets one full navigation per tab session, never a reload loop.
@@ -55,7 +56,7 @@ if (!root) throw new Error('#root is missing from index.html')
 createRoot(root).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <LocalizedRouter />
+      <SessionExpiryBoundary><LocalizedRouter /></SessionExpiryBoundary>
       {Devtools ? (
         <Suspense fallback={null}>
           <Devtools />

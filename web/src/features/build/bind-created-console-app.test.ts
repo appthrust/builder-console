@@ -31,7 +31,7 @@ beforeEach(async () => {
 afterEach(async () => { await fetchConsole('/api/console/__mock/reset', { method: 'POST' }) })
 
 function harness(createdAppId?: string) {
-  const api = createConsoleApi(fetchConsole, () => false)
+  const api = createConsoleApi(fetchConsole)
   const apps = {
     ...api.apps,
     list: mock(api.apps.list), get: mock(api.apps.get), create: mock(api.apps.create),

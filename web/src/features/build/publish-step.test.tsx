@@ -13,7 +13,7 @@ async function fixture(path: string, init?: RequestInit) {
 }
 
 test.each(['private', 'group', 'company'] as const)('a fresh publish dialog uses draft name and audience %s, not stale console metadata', async (shareScope) => {
-  const api = createConsoleApi(fixture, () => false)
+  const api = createConsoleApi(fixture)
   const [me, groups, apps] = await Promise.all([api.me(), api.directory.groups(), api.apps.list({ scope: 'mine' })])
   const app = apps[0]!
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })

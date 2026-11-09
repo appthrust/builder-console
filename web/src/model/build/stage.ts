@@ -3,7 +3,7 @@ import type {
 } from '@appthrust/api-schema/platform-api'
 import { buildCopy } from './copy'
 import { isBuildPending, progressCard } from './progress'
-import { prepareAnswers } from './questions'
+import { conversationTurns, isKickoffReply, prepareAnswers } from './questions'
 import type { BuildPhase, BuildPrimary, BuildStage, ProgressCard } from './types'
 
 /** Publication belongs to the draft; a later implementation invalidates that published version. */
@@ -31,6 +31,13 @@ export function needsPlanRefresh(draft: ApplicationDraft | undefined, lastPlanne
   const { turnIds } = prepareAnswers(draft.conversationTurns)
   return (draft.conversationTurns ?? []).some((turn) => turn.status === 'succeeded' && turn.specMarkdown !== undefined && Date.parse(turn.finishedAt ?? turn.startedAt) > plannedAt
     && Date.parse(turn.startedAt) < executedAt && !turnIds.includes(turn.id))
+}
+
+/** The server's accepted kickoff survives missing session storage and OIDC round trips. */
+export function hasUnplannedKickoff(draft: ApplicationDraft): boolean {
+  return !draft.creationPlan && !draft.creationPlanGenerations?.length && !draft.creationExecutions?.length
+    && !draft.createdApplicationStackId && draft.phase !== 'created'
+    && conversationTurns(draft.conversationTurns).some((turn) => turn.status === 'succeeded' && isKickoffReply(turn.userMessage))
 }
 
 export function deriveStage(input: {
@@ -77,7 +84,14 @@ export function deriveStage(input: {
       : execution?.status === 'failed' ? progressCard({ kind: 'prepare', operation: execution, execution, now })
         : generation?.status === 'failed' ? progressCard({ kind: 'plan', operation: generation, now }) : undefined
   const hasPlan = draft?.creationPlan || generation?.status === 'succeeded' || draft?.creationPlanGenerations?.some((item) => item.status === 'succeeded')
-  if (!hasPlan && execution?.status !== 'failed') return { stage: 'ask', primary: none, ...(progress ? { progress } : {}) }
+  if (!hasPlan && execution?.status !== 'failed') {
+    const canPlan = !generation && turn?.status === 'succeeded'
+    return {
+      stage: 'ask',
+      primary: canPlan ? { action: 'plan', label: buildCopy.questions.kickoffReply, enabled: true } : none,
+      ...(progress ? { progress } : {}),
+    }
+  }
   // The separately polled generation may reach success before the draft query catches up.
   const planningDraft = draft && generation && !draft.creationPlanGenerations?.some((item) => item.id === generation.id && item.status === generation.status)
     ? { ...draft, creationPlanGenerations: [...(draft.creationPlanGenerations ?? []).filter((item) => item.id !== generation.id), generation] } : draft

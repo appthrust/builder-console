@@ -214,6 +214,8 @@ export const shell = {
     loadFailed: '情報を読み込めませんでした。しばらくしてから再読み込みしてください。',
     /** 401 that survives a fresh sign-in: the token is valid but Platform API rejects it (e.g. AudienceNotAllowed). */
     accessDenied: 'サインイン情報が基盤に受け付けられませんでした。管理者に連絡してください。',
+    sessionExpired: 'セッションが切れました。再サインインしてください',
+    signInAgain: '再サインイン',
     actionFailed: '操作に失敗しました。',
     cancel: 'キャンセル',
     close: '閉じる',

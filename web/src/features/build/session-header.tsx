@@ -15,12 +15,12 @@ export function StageRail({ stage }: { stage: BuildStage }) {
 export const stateWord: Record<BuildStage, string> = localized({ ja: textJa.header.stateWord, en: textEn.header.stateWord })
 
 /**
- * The stage's page-level action: 公開する / 続けて直す. 「この内容で作る」 belongs to the
+ * The stage's page-level action: 提案して / 公開する / 続けて直す. 「この内容で作る」 belongs to the
  * AI's proposal in the conversation (it is read there first), so it is not repeated here.
  * During preparation there is nothing to press; the header says what is happening.
  */
 export function StageAction({ stage, primary, progress, onPrimary }: { stage: BuildStage; primary: BuildPrimary; progress?: ProgressCard; onPrimary(): void }) {
-  if (primary.action === 'publish' || primary.action === 'continue') return <Button tone="primary" className="max-sm:px-2.5 max-sm:text-xs" disabled={!primary.enabled} onClick={onPrimary}>{primary.label}</Button>
+  if (primary.action === 'plan' || primary.action === 'publish' || primary.action === 'continue') return <Button tone="primary" className="max-sm:px-2.5 max-sm:text-xs" disabled={!primary.enabled} onClick={onPrimary}>{primary.label}</Button>
   if (stage === 'build' && progress) return <p role="status" className="flex h-9 items-center gap-2 text-sm whitespace-nowrap text-stone-600 max-sm:text-xs"><Loader2 aria-hidden className="size-4 animate-spin text-accent" />{progress.title}{progress.elapsedLabel ? <span className="tabular-nums text-stone-400">{progress.elapsedLabel}</span> : null}</p>
   return null
 }

@@ -32,6 +32,8 @@ export function buildDraftOptions(projectId: string, draftId: string) {
     queryFn: projectId && draftId ? () => getDraft(projectId, draftId) : skipToken,
     retry: retryReadQuery,
     retryDelay: readRetryDelay,
+    // This page drives the turn → plan handoff; hiding its tab must not suspend that writer.
+    refetchIntervalInBackground: true,
     refetchInterval: (query) => draftPending(query.state.data) ? BUILD_POLL_MS : false,
   })
 }
