@@ -8,7 +8,7 @@
 // enough to exercise the UI; the real rules live in cmd/server.
 // `POST /api/console/__mock/bare-500 {times?}` makes the next writes answer a
 // bare gateway 500 (no JSON envelope), as during a console rollout.
-// `POST /api/console/__mock/not-member {notMember?, teamSlug?}` denies Project
+// `POST /api/console/__mock/not-member {notMember?}` denies Project
 // access (default true); /me still answers with the non-member notice metadata.
 // `POST /api/console/__mock/caller {personId, role?}` switches signed-in people
 // (default role Viewer) for requester/approver stories; reset restores Yamada.
@@ -208,7 +208,6 @@ function seedConsole() {
     role: (process.env.MOCK_ROLE as Role | undefined) ?? 'Admin',
     platformUnavailable: process.env.MOCK_PLATFORM_UNAVAILABLE === '1',
     notMember: false,
-    teamSlug: 'commerce-team',
     projectId: process.env.MOCK_PROJECT_ID ?? 'commerce',
     people,
     directoryOnly,
@@ -368,7 +367,6 @@ function me(): Me {
     isConsoleAdmin: isAdmin(),
     canCreateApps: !state.notMember && !state.platformUnavailable && (state.role === 'Admin' || state.role === 'Editor'),
     projectId: state.projectId,
-    teamSlug: state.teamSlug,
     directoryPublicURL: requestOrigin,
     migration: state.migration,
     ...(state.notMember ? { notMember: true } : {}),
@@ -560,10 +558,9 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
     return json({ appId: input.appId, state: input.state })
   }
   if (head === '__mock' && id === 'not-member' && method === 'POST') {
-    const input = await body<{ notMember?: boolean; teamSlug?: string }>(request)
+    const input = await body<{ notMember?: boolean }>(request)
     state.notMember = input.notMember ?? true
-    state.teamSlug = input.teamSlug ?? state.teamSlug
-    return json({ notMember: state.notMember, teamSlug: state.teamSlug })
+    return json({ notMember: state.notMember })
   }
   // Old console drafts (stackId null): the abandoned 作りかけ row.
   if (head === '__mock' && id === 'app-draft' && method === 'POST') {
@@ -606,9 +603,7 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
   if (head === 'directory') return directoryRoutes(request, url, segments.slice(1))
   const needsRoles = head === 'resolve' || head === 'apps' || head === 'admin' || (head === 'access-requests' && !id && method === 'GET')
   if (state.notMember && needsRoles) {
-    return fail(403, 'not_project_member', state.teamSlug
-      ? `This Project belongs to Team ${state.teamSlug}`
-      : 'This Project belongs to a Team; ask its administrator to add you')
+    return fail(403, 'not_project_member', 'You are not a member of this Project; ask its administrator to add you')
   }
   if (head === 'resolve' && method === 'GET') {
     const resolved = resolve(url.searchParams.get('path') ?? '')
@@ -920,7 +915,6 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
   if (head === 'admin' && id === 'platform' && method === 'GET') {
     return json({
       projectId: state.projectId,
-      teamSlug: 'commerce-team',
       github: { connected: true, connectionId: 'github-source-207cb7ce' },
       registry: { connected: true, connectionId: 'registry-ghcr' },
       defaultTemplateId: 'nextjs-postgres',

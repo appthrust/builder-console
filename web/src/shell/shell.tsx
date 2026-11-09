@@ -58,7 +58,7 @@ export function Shell({ children }: { children: ReactNode }) {
           {headerOnly || account ? children : (
             <div className="max-w-xl text-center">
               <h1 className="text-xl font-semibold text-stone-900">{copy.topbar.notMemberTitle}</h1>
-              <p className="mt-3 break-words text-sm leading-relaxed text-stone-600">{copy.topbar.notMemberBody(me.teamSlug)}</p>
+              <p className="mt-3 break-words text-sm leading-relaxed text-stone-600">{copy.topbar.notMemberBody}</p>
             </div>
           )}
         </main>

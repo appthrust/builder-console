@@ -55,9 +55,7 @@ export const shellEn: typeof shell = {
     platformUnavailable: 'App creation is unavailable',
     platformUnavailableBody: 'Wait a moment, then reload the page.',
     notMemberTitle: 'You are not a project member',
-    notMemberBody: (teamSlug?: string) => teamSlug
-      ? `This project is managed by the team “${teamSlug}”. Ask an admin to add you.`
-      : 'Ask an admin to add you.',
+    notMemberBody: 'Ask a project admin to add you.',
   },
   home: {
     title: 'Home',
@@ -142,8 +140,6 @@ export const shellEn: typeof shell = {
     registryOff: 'Not connected yet. Ask your workspace admin to set this up.',
     team: 'App creators',
     teamBody: 'People with app creation access can create apps here. Ask your workspace admin to add someone.',
-    teamName: 'Team',
-    teamUnknown: 'Unavailable',
     project: 'Project',
     advanced: 'Advanced',
     connected: 'Connected',

@@ -7,7 +7,7 @@ Builder Console keeps app metadata, access requests, comments, and sharing polic
 
 ## Repository
 
-- `cmd/server/`: Go server and tests, using `github.com/appthrust/appserver-go v0.2.0`.
+- `cmd/server/`: Go server and tests, using `github.com/appthrust/appserver-go v0.3.0`.
 - `web/`: Vite/React SPA, unit tests, in-memory development APIs, and Playwright stories.
 - `catalog/entry.yaml`: ApplicationStackDefinition, including the Directory dependency,
   PostgreSQL connection, identity access settings, probes, and existing version floors.
@@ -103,6 +103,9 @@ readiness. `/config`, `/launcher`, `/launcher/entries`, `/api/console/*`, `/auth
 and the `/api/*` Platform proxy retain their existing contracts.
 
 ## Publication
+
+Next release: **v0.4.0**. Membership and app-creation permissions come from
+Project IAM access; non-member notices and settings no longer name an owning Team.
 
 Only a `v<semver>` tag starts publication. The initial standalone release is
 **v0.3.0**, stream **0.3**, at `ghcr.io/appthrust/builder-console`. Do not reuse

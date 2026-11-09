@@ -56,9 +56,7 @@ export const shell = {
     platformUnavailable: 'いまアプリの作成状態を確認できません',
     platformUnavailableBody: 'しばらくしてからページを再読み込みしてください。',
     notMemberTitle: 'この基盤（Project）のメンバーではありません',
-    notMemberBody: (teamSlug?: string) => teamSlug
-      ? `この基盤は Team「${teamSlug}」が管理しています。管理者に追加を依頼してください。`
-      : '管理者に追加を依頼してください。',
+    notMemberBody: 'この基盤の管理者に追加を依頼してください。',
   },
   home: {
     title: 'ホーム',
@@ -143,8 +141,6 @@ export const shell = {
     registryOff: 'まだ連携していません。基盤の担当者に設定を依頼してください。',
     team: '作れる人',
     teamBody: 'アプリを作れるのは、基盤で「作れる人」に登録された人です。追加は基盤の担当者が行います。',
-    teamName: 'チーム',
-    teamUnknown: '確認できません',
     project: 'プロジェクト',
     advanced: '詳しい人向け',
     connected: '連携済み',
