@@ -45,7 +45,7 @@ type request struct {
 	groups              []domain.Group
 	effectiveGroupIDs   []string
 	directory           *directoryview.Session
-	access              platform.TeamAccess
+	access              platform.ProjectAccess
 	bearer              string
 	platformUnavailable bool
 }
@@ -201,9 +201,6 @@ func (a *API) withRequest(ctx context.Context, claims identity.Identity, bearer 
 		}
 		if state.access.NotMember && !me {
 			message := "This Project belongs to a Team; ask its administrator to add you"
-			if state.access.TeamSlug != "" {
-				message = "This Project belongs to Team " + state.access.TeamSlug
-			}
 			return httpx.Fail(403, "not_project_member", message)
 		}
 	}

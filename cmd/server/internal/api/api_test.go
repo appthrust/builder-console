@@ -59,18 +59,12 @@ func newHarness(t *testing.T) *harness {
 			role = "Editor"
 		}
 		switch r.URL.Path {
-		case "/api/v1/projects/pj-test":
+		case "/api/v1/projects/pj-test/access":
 			if status := int(h.projectStatus.Load()); status != 0 {
 				w.WriteHeader(status)
 				return
 			}
-			httpx.WriteJSON(w, 200, map[string]string{"teamSlug": "test-team"})
-		case "/api/v1/teams":
-			httpx.WriteJSON(w, 200, map[string]any{"items": []any{map[string]string{"id": "team-id", "slug": "test-team", "role": role}}})
-		case "/api/v1/teams/team-id/members":
-			httpx.WriteJSON(w, 200, map[string]any{"items": []any{map[string]string{"id": "one", "email": "admin@example.test", "name": "Admin"}}})
-		case "/api/v1/teams/team-id/directory-users":
-			httpx.WriteJSON(w, 200, map[string]any{"items": []any{map[string]string{"id": "duplicate", "email": "admin@example.test", "name": "Admin"}, map[string]string{"id": "two", "email": "person@example.test", "name": "Person"}}})
+			httpx.WriteJSON(w, 200, map[string]any{"member": true, "role": role})
 		case "/api/v1/projects/pj-test/source-connections":
 			httpx.WriteJSON(w, 200, map[string]any{"data": []any{map[string]string{"id": "pending", "status": "incomplete"}, map[string]string{"id": "github", "status": "ready"}}})
 		case "/api/v1/registry-connections":
@@ -198,7 +192,7 @@ func TestProjectNonMemberRoutesIntegration(t *testing.T) {
 			call[meResponse](h, "admin", "GET", "/me", nil, 200)
 			h.projectStatus.Store(int32(status))
 			me := call[meResponse](h, "outsider", "GET", "/me", nil, 200)
-			if !me.NotMember || me.TeamSlug != "test-team" || me.PlatformUnavailable ||
+			if !me.NotMember || me.TeamSlug != "" || me.PlatformUnavailable ||
 				me.CanCreateApps || me.IsConsoleAdmin || me.Person.ID != person.ID || len(me.EffectiveGroupIDs) != 0 {
 				t.Fatalf("non-member me leaked roles or memberships: %+v", me)
 			}
@@ -220,7 +214,7 @@ func TestProjectNonMemberRoutesIntegration(t *testing.T) {
 				{"GET", "/admin/platform"},
 			} {
 				failure := call[httpx.Error](h, "outsider", route.method, route.path, nil, 403)
-				if failure.Code != "not_project_member" || failure.Message != "This Project belongs to Team test-team" {
+				if failure.Code != "not_project_member" || failure.Message != "This Project belongs to a Team; ask its administrator to add you" {
 					t.Fatalf("%s %s: %+v", route.method, route.path, failure)
 				}
 			}

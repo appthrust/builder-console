@@ -119,8 +119,8 @@ export type Me = {
   platformUnavailable?: boolean
   /** The Project rejected this account; this is not a Platform outage. */
   notMember?: boolean
-  /** Owning Team from the latest successful Project read; empty until one succeeds. */
-  teamSlug: string
+  /** Owning Team of the Project; absent since access is resolved from Project IAM. */
+  teamSlug?: string
   /** Public origin of the Directory built-in app (profiles, group management, avatars); empty when not linked. */
   directoryPublicURL: string
   migration: DirectoryMigration
@@ -132,7 +132,7 @@ export type Resolved = { kind: 'group' | 'app' | 'entry'; id: string; currentPat
 export type DirectoryUser = { id: string; email: string; displayName: string }
 export type PlatformSettings = {
   projectId: string
-  teamSlug: string | null
+  teamSlug?: string | null
   github: { connected: boolean; connectionId: string | null }
   registry: { connected: boolean; connectionId: string | null }
   defaultTemplateId: string

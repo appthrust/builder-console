@@ -520,14 +520,12 @@ func TestServedOpenAPIEqualsCommittedContract(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
-				case "/api/v1/projects/pj-test":
+				case "/api/v1/projects/pj-test/access":
 					if !tc.member {
 						w.WriteHeader(http.StatusForbidden)
 						return
 					}
-					writeJSON(w, 200, map[string]string{"teamSlug": "test-team"})
-				case "/api/v1/teams":
-					writeJSON(w, 200, map[string]any{"items": []any{map[string]string{"id": "team-id", "slug": "test-team", "role": "Viewer"}}})
+					writeJSON(w, 200, map[string]any{"member": true, "role": "Viewer"})
 				default:
 					t.Errorf("unexpected platform route %s", r.URL.Path)
 					w.WriteHeader(http.StatusNotFound)
