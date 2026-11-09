@@ -1,13 +1,14 @@
 import type { SourceChangeProposal } from '@appthrust/api-schema/platform-api'
 import { useQuery } from '@tanstack/react-query'
-import { ExternalLink } from 'lucide-react'
+import { ExternalLink, GitPullRequest } from 'lucide-react'
 import { useId, useState } from 'react'
+import { useDashboardSettingsUrl } from '../../api/queries'
 import { copy } from '../../copy'
 import { paths } from '../../routes/paths'
 import { useShell } from '../../shell/use-shell'
 import { ActionError, Button, Dialog, Field, HrefLink, LinkButton, Notice, StatusPill, TextArea } from '../../ui'
 import { text } from './copy'
-import { canReview, requestedChanges } from './model'
+import { canReview, previewRevision, previewStatus, proposalChangePreview, requestedChanges } from './model'
 import { proposalPreviewOptions, useProposalDecision, useProposalPeople } from './queries'
 
 export function ProposalStatus({ proposal }: { proposal: SourceChangeProposal }) {
@@ -15,9 +16,52 @@ export function ProposalStatus({ proposal }: { proposal: SourceChangeProposal })
   return <StatusPill status={status} label={text.phase[proposal.phase]} />
 }
 
+/** The DevWorkspace dev-server preview while drafting; a preview Branch supersedes it. */
 export function ProposalPreview({ proposal }: { proposal: SourceChangeProposal }) {
-  const preview = useQuery(proposalPreviewOptions(proposal.projectId, proposal.previewWorkspaceId))
+  const branchPreview = proposalChangePreview(proposal).preview
+  const preview = useQuery(proposalPreviewOptions(proposal.projectId, branchPreview ? undefined : proposal.previewWorkspaceId))
+  if (branchPreview) return null
   return preview.data ? <LinkButton external href={preview.data} size="sm" icon={<ExternalLink />}>{text.preview}</LinkButton> : preview.error ? <ActionError error={preview.error} /> : null
+}
+
+/** The Dashboard's Branch detail for a preview Branch, when the server names the Dashboard. */
+function useBranchHref(proposal: SourceChangeProposal, branchId: string): string | undefined {
+  const dashboardUrl = useDashboardSettingsUrl()
+  if (!dashboardUrl) return undefined
+  const path = `/dashboard/projects/${encodeURIComponent(proposal.projectId)}/applications/${encodeURIComponent(proposal.applicationId)}/branches/${encodeURIComponent(branchId)}`
+  return new URL(path, new URL(dashboardUrl).origin).href
+}
+
+/**
+ * The preview Branch built from the proposal's head, and the change request
+ * that opened it. `compact` renders the same facts inline for proposal lists.
+ */
+export function ProposalBranchPreview({ proposal, compact = false }: { proposal: SourceChangeProposal; compact?: boolean }) {
+  const { preview, externalChangeRequest } = proposalChangePreview(proposal)
+  const branchHref = useBranchHref(proposal, preview?.branchId ?? '')
+  if (!preview && !externalChangeRequest) return null
+  const revision = preview ? previewRevision(proposal, preview) : {}
+  // Every reason is shown: product copy when known, the controller code otherwise.
+  const reason = preview?.reason ? (text.previewReason[preview.reason] ?? text.previewReasonOther(preview.reason)) : undefined
+  return <section className={compact ? 'space-y-1.5' : 'space-y-3 rounded-lg border border-line bg-white p-4'} data-testid={compact ? 'proposal-branch-preview-summary' : 'proposal-branch-preview'} data-state={preview?.state}>
+    {compact ? null : <h2 className="font-semibold">{text.branchPreview}</h2>}
+    {preview ? <>
+      <div className="flex flex-wrap items-center gap-3">
+        <StatusPill status={previewStatus(preview.state)} label={text.previewState[preview.state]} second={reason} />
+        {preview.state === 'Ready' && preview.url ? <LinkButton external href={preview.url} size="sm" icon={<ExternalLink />}>{text.preview}</LinkButton> : null}
+        {branchHref ? <a href={branchHref} target="_blank" rel="noreferrer" className="text-sm text-accent-strong underline">{text.openPreviewDetails}</a> : null}
+      </div>
+      {revision.pinned ? <p className="text-xs text-stone-500 tabular-nums" data-testid="proposal-preview-revision">
+        <span className="font-mono">{text.pinned(revision.pinned)}</span>
+        {revision.newerHead ? <span className="ml-2 text-busy-ink">· {text.newerHead(revision.newerHead)}</span> : null}
+      </p> : null}
+    </> : null}
+    {externalChangeRequest ? <p className="flex flex-wrap items-center gap-2 text-sm">
+      <GitPullRequest className="size-4 text-stone-500" aria-hidden />
+      <a href={externalChangeRequest.url} target="_blank" rel="noreferrer" className="text-accent-strong underline" title={externalChangeRequest.repository}>{text.changeRequest(externalChangeRequest.externalId)}</a>
+      {externalChangeRequest.state ? <span className="text-xs text-stone-500">{text.changeRequestState[externalChangeRequest.state]}</span> : null}
+    </p> : null}
+  </section>
 }
 
 export function ProposalActions({ proposal, inline = false }: { proposal: SourceChangeProposal; inline?: boolean }) {

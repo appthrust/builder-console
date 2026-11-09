@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import type { SourceChangeProposal } from '@appthrust/api-schema/platform-api'
 import { isProductLanguage } from '../../model/build/wording'
-import { canReview, proposalTerminal, proposalWaiting, requestedChanges } from './model'
+import { canReview, previewRevision, previewStatus, proposalChangePreview, proposalTerminal, proposalWaiting, requestedChanges } from './model'
 import { textJa } from './copy'
 import { textEn } from './copy.en'
 
@@ -32,4 +32,22 @@ test('waiting and terminal phases are distinct; only current change requests sho
   const proposal = { phase: 'ChangesRequested', decisions: [{ decision: 'RequestChanges', comment: 'First' }, { decision: 'RequestChanges', comment: 'Second' }] } as SourceChangeProposal
   expect(requestedChanges(proposal)).toBe('Second')
   expect(requestedChanges({ ...proposal, phase: 'Proposed' })).toBeUndefined()
+})
+
+test('preview Branch states map to console status pills', () => {
+  expect(previewStatus('Ready')).toBe('live')
+  expect(previewStatus('Building')).toBe('deploying')
+  expect(previewStatus('Pending')).toBe('deploying')
+  expect(previewStatus('Failed')).toBe('failed')
+  expect(previewStatus('Deleting')).toBe('unknown')
+})
+
+test('the pinned preview commit is compared with the proposal head', () => {
+  const sha = (char: string) => ({ kind: 'GitCommit' as const, gitCommit: { sha: char.repeat(40) } })
+  const preview = { branchId: 'b', branchName: 'b', state: 'Building' as const, revision: sha('d') }
+  const proposal = { headRevision: sha('e'), preview } as unknown as SourceChangeProposal
+  expect(proposalChangePreview(proposal).preview).toBe(preview)
+  expect(previewRevision(proposal, preview)).toEqual({ pinned: 'ddddddd', newerHead: 'eeeeeee' })
+  expect(previewRevision({ ...proposal, headRevision: sha('d') }, preview)).toEqual({ pinned: 'ddddddd' })
+  expect(previewRevision(proposal, { ...preview, revision: undefined })).toEqual({})
 })

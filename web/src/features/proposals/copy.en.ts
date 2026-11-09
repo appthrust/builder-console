@@ -15,4 +15,21 @@ export const textEn: typeof textJa = {
     Applying: 'Applying', Applied: 'Applied', ApplyFailed: 'Could not apply', Rejected: 'Declined',
     Withdrawn: 'Withdrawn', Expired: 'Expired',
   },
+  branchPreview: 'Preview',
+  previewState: {
+    Pending: 'Preparing the preview', Building: 'Building the preview', Ready: 'Preview ready',
+    Failed: 'Could not build the preview', Deleting: 'Removing the preview',
+  },
+  previewReason: {
+    PreviewBuildUnsupported: 'This app’s build setup does not support previews.',
+    PreviewBranchRetired: 'The preview was removed.',
+    BuildPending: 'Building the latest change.',
+    HeadRevisionPending: 'Waiting for the change to arrive.',
+  },
+  previewReasonOther: (reason: string) => `Details: ${reason}`,
+  openPreviewDetails: 'Open preview details',
+  pinned: (sha: string) => `Showing ${sha}`,
+  newerHead: (sha: string) => `Building newer change ${sha}`,
+  changeRequest: (id: string) => `Pull request #${id}`,
+  changeRequestState: { Open: 'Open', Merged: 'Merged', Closed: 'Closed' },
 }

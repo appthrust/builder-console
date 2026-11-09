@@ -7,7 +7,7 @@ import { paths } from '../../routes/paths'
 import { useShell } from '../../shell/use-shell'
 import { HrefLink, LinkButton, LoadFailed, Loading, PageHeader, useDocumentTitle } from '../../ui'
 import { text } from './copy'
-import { ProposalActions, ProposalFeedback, ProposalPreview, ProposalStatus } from './proposal-ui'
+import { ProposalActions, ProposalBranchPreview, ProposalFeedback, ProposalPreview, ProposalStatus } from './proposal-ui'
 import { proposalDiffOptions, proposalOptions, proposalsOptions, useProposalPeople } from './queries'
 
 export function ProposalPage({ id }: { id: string }) {
@@ -39,6 +39,7 @@ function ProposalDetail({ proposal }: { proposal: SourceChangeProposal }) {
       {app ? <LinkButton href={paths.app(app.group.path, app.slug)} size="sm">{text.back}</LinkButton> : null}
     </div>
     {proposal.phase === 'Applied' && version ? <p className="font-semibold text-accent-strong">{version}</p> : null}
+    <ProposalBranchPreview proposal={proposal} />
     <p className="whitespace-pre-wrap text-sm leading-relaxed text-stone-800">{proposal.summary}</p>
     <section className="space-y-3"><h2 className="font-semibold">{text.tasks}</h2><ol className="list-inside list-decimal space-y-4 text-sm">
       {proposal.tasks.map((task, index) => <li key={index} className="leading-relaxed"><span className="font-medium">{task.title}</span><p className="mt-1 whitespace-pre-wrap text-stone-600">{task.description}</p><ul className="mt-1 list-inside list-disc text-stone-500">{task.acceptanceCriteria.map((criterion, i) => <li key={i}>{criterion}</li>)}</ul></li>)}
@@ -63,7 +64,10 @@ export function ProposalsPage({ applicationId }: { applicationId?: string }) {
   return <div className="mx-auto w-full max-w-4xl space-y-6">
     <PageHeader title={text.title} />
     {query.isPending ? <Loading /> : query.isError ? <LoadFailed error={query.error} onRetry={() => void query.refetch()} /> : query.data.data.length ? <ul className="divide-y divide-line rounded-lg border border-line bg-white">
-      {query.data.data.map((proposal) => <li key={proposal.id} className="flex items-center justify-between gap-4 p-4"><HrefLink href={paths.proposal(proposal.id)} className="font-medium text-accent-strong hover:underline">{proposal.title}</HrefLink><ProposalStatus proposal={proposal} /></li>)}
+      {query.data.data.map((proposal) => <li key={proposal.id} className="flex items-start justify-between gap-4 p-4">
+        <div className="min-w-0 space-y-2"><HrefLink href={paths.proposal(proposal.id)} className="font-medium text-accent-strong hover:underline">{proposal.title}</HrefLink><ProposalBranchPreview proposal={proposal} compact /></div>
+        <ProposalStatus proposal={proposal} />
+      </li>)}
     </ul> : <p className="text-sm text-stone-500">{text.empty}</p>}
   </div>
 }

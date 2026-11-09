@@ -129,7 +129,7 @@ import { isFirstTurn, isKickoffReply, isPrepareTurn } from '../model/build/quest
 import { dataModeFailure, findTable, resetDatabaseData, selectRows, state as dataState, type DataMode } from './mock-database-data'
 import { dataWriteRoutes } from './mock-database-rows'
 import { mockOwnerSubjects, mockSubject } from './mock-console'
-import { proposalTerminal, proposalWaiting } from '../features/proposals/model'
+import { proposalTerminal, proposalWaiting, type ProposalChangePreview } from '../features/proposals/model'
 
 export const MOCK_PROJECT_ID = 'commerce'
 const TEAM_SLUG = 'commerce-team'
@@ -1156,7 +1156,38 @@ function seedPlatform() {
       state.githubRepositoryNames.add(appName)
     }
   }
+  for (const proposal of seededPreviewProposals()) state.proposals.set(proposal.id, proposal)
   return state
+}
+
+/**
+ * Two proposals with change preview Branches (Platform API `preview` /
+ * `origin` / `externalChangeRequest`): a pull request whose preview is ready,
+ * and an AI fix whose preview is building a newer head than it shows.
+ */
+function seededPreviewProposals(): Array<SourceChangeProposal & ProposalChangePreview> {
+  const sha = (char: string) => ({ kind: 'GitCommit' as const, gitCommit: { sha: char.repeat(40) } })
+  const base = {
+    projectId: MOCK_PROJECT_ID, applicationId: 'mitsumori', sourceRepositoryId: 'mitsumori-src',
+    proposer: 'github:octocat', reviewers: ['github:octocat'], tasks: [], base: sha('a'),
+    phase: 'Proposed' as const, decisions: [], change: { files: 2, additions: 14, deletions: 3 },
+    createdAt: minutesAgo(90), updatedAt: minutesAgo(5),
+  }
+  return [
+    {
+      ...base, id: 'pr-128-rounding', title: '見積の端数処理を切り上げに変更', summary: '合計金額の端数を切り上げます。',
+      head: { kind: 'GitBranch', name: 'fix/rounding' }, headRevision: sha('c'),
+      origin: { kind: 'ExternalChangeRequest', name: 'acme-mitsumori-128' },
+      externalChangeRequest: { repository: 'acme/mitsumori', externalId: '128', url: 'https://github.com/acme/mitsumori/pull/128', state: 'Open' },
+      preview: { branchId: 'pr-128-rounding', branchName: 'mitsumori-pr-128-rounding', state: 'Ready', revision: sha('c'), url: `https://mitsumori-pr-128.${BASE_DOMAIN}` },
+    },
+    {
+      ...base, id: 'ai-fix-header', title: 'ヘッダーに会社ロゴを表示', summary: 'ヘッダー左にロゴを表示します。',
+      head: { kind: 'GitBranch', name: 'appthrust/proposal/ai-fix-header' }, headRevision: sha('e'),
+      origin: { kind: 'ApplicationDraft', name: 'draft-ai-fix-header' },
+      preview: { branchId: 'ai-fix-header', branchName: 'mitsumori-ai-fix-header', state: 'Building', reason: 'BuildPending', revision: sha('d') },
+    },
+  ]
 }
 
 /** Moves every unfinished, healthy stack, adopted repository, plan generation and creation execution one step forward. */

@@ -1,4 +1,5 @@
 import type { SourceChangeProposalPhase } from '@appthrust/api-schema/platform-api'
+import type { ProposalBranchPreviewState } from './model'
 import { localized } from '../../shell/language'
 import { textEn } from './copy.en'
 
@@ -17,5 +18,22 @@ export const textJa = {
     Applying: '反映しています', Applied: '反映しました', ApplyFailed: '反映できませんでした', Rejected: '見送りました',
     Withdrawn: '取り下げました', Expired: '期限が切れました',
   } satisfies Record<SourceChangeProposalPhase, string>,
+  branchPreview: 'プレビュー',
+  previewState: {
+    Pending: 'プレビューを準備しています', Building: 'プレビューを作っています', Ready: 'プレビューを見られます',
+    Failed: 'プレビューを作れませんでした', Deleting: 'プレビューを片付けています',
+  } satisfies Record<ProposalBranchPreviewState, string>,
+  previewReason: {
+    PreviewBuildUnsupported: 'このアプリのビルド設定がプレビューに対応していません。',
+    PreviewBranchRetired: 'プレビューは片付けられました。',
+    BuildPending: '最新の変更をビルドしています。',
+    HeadRevisionPending: '変更の取り込みを待っています。',
+  } as Record<string, string>,
+  previewReasonOther: (reason: string) => `詳細: ${reason}`,
+  openPreviewDetails: 'プレビューの詳細を開く',
+  pinned: (sha: string) => `表示中の変更 ${sha}`,
+  newerHead: (sha: string) => `新しい変更 ${sha} を反映中`,
+  changeRequest: (id: string) => `プルリクエスト #${id}`,
+  changeRequestState: { Open: 'オープン', Merged: 'マージ済み', Closed: 'クローズ' } satisfies Record<'Open' | 'Merged' | 'Closed', string>,
 }
 export const text = localized({ ja: textJa, en: textEn })
