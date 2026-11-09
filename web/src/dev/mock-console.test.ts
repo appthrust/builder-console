@@ -68,7 +68,7 @@ test('platform reset restores seeded stacks, lifecycle state, toggles and the ID
     `${project}/applications/nippo/branches/production/components/nippo-web/env-vars`,
     `${project}/application-templates`,
     `${project}/source-connections/github-source-207cb7ce/repositories`,
-    '/api/v1/teams',
+    `${project}/access`,
     '/api/v1/registry-connections',
     `${project}/application-drafts/creation-tools`,
   ]
@@ -125,7 +125,7 @@ test('platform reset restores seeded stacks, lifecycle state, toggles and the ID
     process.env.MOCK_REGISTRY = 'off'
     process.env.MOCK_CODEX = 'off'
     expect((await call('POST', `${mock}/reset`)).status).toBe(200)
-    expect((await call('GET', '/api/v1/teams')).body.items[0].role).toBe('Viewer')
+    expect((await call('GET', `${project}/access`)).body).toEqual({ projectId: 'commerce', member: true, role: 'Viewer', platformRoles: [] })
     expect((await call('GET', '/api/v1/registry-connections')).body.data).toEqual([])
     expect((await call('GET', `${project}/application-drafts/creation-tools`)).body.codexAvailable).toBe(false)
   } finally {

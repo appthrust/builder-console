@@ -23,7 +23,7 @@ import { useBuildSession } from './use-build-session'
 const me: Me = {
   projectId: 'project-session-test', person: { id: 'person-1', subject: 'owner-1', pending: false, email: 'owner@example.test', displayName: 'Owner', avatarVersion: null },
   effectiveGroupIds: ['sales'], managedGroupIds: [], isConsoleAdmin: false, canCreateApps: true,
-  teamSlug: 'team', directoryPublicURL: '', migration: { pending: false, people: 0, groups: 0, memberships: 0 },
+  directoryPublicURL: '', migration: { pending: false, people: 0, groups: 0, memberships: 0 },
 }
 const at = '2026-10-26T00:00:00Z'
 const turn = (id: string, userMessage: string, minute: number): ApplicationDraftConversationTurn => ({

@@ -16,7 +16,6 @@ type meResponse struct {
 	ProjectID           string                `json:"projectId"`
 	PlatformUnavailable bool                  `json:"platformUnavailable,omitempty"`
 	NotMember           bool                  `json:"notMember,omitempty"`
-	TeamSlug            string                `json:"teamSlug"`
 	DirectoryPublicURL  string                `json:"directoryPublicURL"`
 	Migration           store.MigrationStatus `json:"migration"`
 }
@@ -38,7 +37,7 @@ func (a *API) me(s *request) (any, int, error) {
 	if resolveErr != nil {
 		return nil, 0, resolveErr
 	}
-	return meResponse{Person: s.person, Roles: domain.Roles(s.access.Roles), EffectiveGroupIDs: effective, ManagedGroupIDs: managed, ProjectID: a.platform.ProjectID, PlatformUnavailable: s.platformUnavailable, NotMember: s.access.NotMember, TeamSlug: s.access.TeamSlug, DirectoryPublicURL: binding.PublicURL, Migration: migration}, 200, err
+	return meResponse{Person: s.person, Roles: domain.Roles(s.access.Roles), EffectiveGroupIDs: effective, ManagedGroupIDs: managed, ProjectID: a.platform.ProjectID, PlatformUnavailable: s.platformUnavailable, NotMember: s.access.NotMember, DirectoryPublicURL: binding.PublicURL, Migration: migration}, 200, err
 }
 func (a *API) migrateDirectory(s *request) (any, int, error) {
 	if !s.actor.IsConsoleAdmin {
@@ -61,7 +60,7 @@ func (a *API) migrateDirectory(s *request) (any, int, error) {
 	return result, 200, s.tx.SaveDirectoryMigration(result)
 }
 func (a *API) settings(s *request) (any, int, error) {
-	settings, err := a.platform.Settings(s.r.Context(), s.bearer, s.access)
+	settings, err := a.platform.Settings(s.r.Context(), s.bearer)
 	if err != nil {
 		return nil, 0, upstreamError()
 	}

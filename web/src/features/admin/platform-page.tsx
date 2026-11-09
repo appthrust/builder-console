@@ -92,7 +92,7 @@ export function AdminPlatformPage() {
               <StatusRow
                 icon={<UsersRound aria-hidden className="size-4" />}
                 title={copy.admin.team}
-                state={settings.data.teamSlug ? 'ready' : 'unknown'}
+                state={me.canCreateApps ? 'ready' : 'missing'}
               >
                 <span className="block">{copy.admin.teamBody}</span>
                 <span className="mt-1 block font-medium text-stone-700">{me.canCreateApps ? text.platform.teamYou : text.platform.teamNotYou}</span>
@@ -103,7 +103,6 @@ export function AdminPlatformPage() {
             <p className="mb-3 text-sm text-stone-500">{text.platform.advancedLead}</p>
             <dl className="grid grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-[10rem_1fr] sm:gap-y-2">
               <Detail label={copy.admin.project} value={settings.data.projectId} />
-              <Detail label={copy.admin.teamName} value={settings.data.teamSlug ?? copy.admin.teamUnknown} />
               {settings.data.github.connectionId ? <Detail label={copy.admin.github} value={settings.data.github.connectionId} /> : null}
               {settings.data.registry.connectionId ? <Detail label={copy.admin.registry} value={settings.data.registry.connectionId} /> : null}
               {domain ? <Detail label={text.platform.domain} value={domain} /> : null}

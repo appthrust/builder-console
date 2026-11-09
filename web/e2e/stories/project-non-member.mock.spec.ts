@@ -1,19 +1,18 @@
 import { test, expect, seed } from '../support/fixtures'
 
-test('explains Project non-membership with its Team, hides app actions, and lets the user log out @mock @story', async ({ page, request, mock }) => {
-  const teamSlug = 'owning-project-team'
+test('explains Project non-membership, hides app actions, and lets the user log out @mock @story', async ({ page, request, mock }) => {
   const title = 'この基盤（Project）のメンバーではありません'
-  const body = `この基盤は Team「${teamSlug}」が管理しています。管理者に追加を依頼してください。`
-  await mock.console('not-member', { teamSlug })
+  const body = 'この基盤の管理者に追加を依頼してください。'
+  await mock.console('not-member', {})
 
   const me = await request.get('/api/console/me')
   expect(me.status()).toBe(200)
   expect(await me.json()).toMatchObject({
-    notMember: true, teamSlug, isConsoleAdmin: false, canCreateApps: false,
+    notMember: true, isConsoleAdmin: false, canCreateApps: false,
   })
   const apps = await request.get('/api/console/apps')
   expect(apps.status()).toBe(403)
-  expect(await apps.json()).toEqual({ error: 'not_project_member', message: `This Project belongs to Team ${teamSlug}` })
+  expect(await apps.json()).toEqual({ error: 'not_project_member', message: 'You are not a member of this Project; ask its administrator to add you' })
 
   await page.goto('/')
   const main = page.getByRole('main')
@@ -35,12 +34,6 @@ test('explains Project non-membership with its Team, hides app actions, and lets
   await expect(main.getByRole('heading', { name: title, exact: true })).toBeVisible()
   await expect(main.getByText(body, { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'メニューを開く', exact: true })).toHaveCount(0)
-
-  // Before the server has read the Project successfully, it must not invent a Team name.
-  await mock.console('not-member', { teamSlug: '' })
-  await page.reload()
-  await expect(main.getByText('管理者に追加を依頼してください。', { exact: true })).toBeVisible()
-  await expect(main.getByText(body, { exact: true })).toHaveCount(0)
 
   // The edge owns logout; prove this stays a full document navigation, not an API call.
   await page.route('**/logout', (route) => route.fulfill({ contentType: 'text/html', body: '<p>Signed out</p>' }))

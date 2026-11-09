@@ -132,7 +132,6 @@ import { mockOwnerSubjects, mockSubject } from './mock-console'
 import { proposalTerminal, proposalWaiting } from '../features/proposals/model'
 
 export const MOCK_PROJECT_ID = 'commerce'
-const TEAM_SLUG = 'commerce-team'
 /** Host of the project's seeded, publish-ready domain (`GET /domains` answers `<projectId>.appthrust.test`). */
 const BASE_DOMAIN = `${MOCK_PROJECT_ID}.appthrust.test`
 const AI_QUOTA_ERROR = 'Codex task failed: Codex error: stream disconnected before completion: You have no credits remaining. Add credits to continue using the API at <REDACTED>'
@@ -1744,13 +1743,8 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
     if (typeof body.interruptSecondTask === 'boolean') state.implementationRun.interruptSecondTask = body.interruptSecondTask
     return json(state.implementationRun)
   }],
-  ['GET', new RegExp(`^/api/v1/projects/([^/]+)$`), (m) => json({ id: m[1], name: m[1], teamSlug: TEAM_SLUG })],
-  ['GET', /^\/api\/v1\/teams$/, () => json({ items: [{ id: 'team-commerce', slug: TEAM_SLUG, name: 'Commerce', plan: 'team', role: state.role }] })],
-  [
-    'GET',
-    /^\/api\/v1\/teams\/([^/]+)\/directory-users$/,
-    () => json({ items: [{ id: 'u-new-1', email: 'kobayashi@acme.example', name: '小林 真' }, { id: 'u-new-2', email: 'kato@acme.example', name: '加藤 葵' }] }),
-  ],
+  ['GET', new RegExp(`^/api/v1/projects/([^/]+)$`), (m) => json({ id: m[1], name: m[1] })],
+  ['GET', new RegExp(`^/api/v1/projects/([^/]+)/access$`), (m) => json({ projectId: m[1], member: true, role: state.role, platformRoles: [] })],
   ['GET', new RegExp(`^${P}/source-connections$`), () => json(list(sourceConnections))],
   [
     'GET',
