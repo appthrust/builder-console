@@ -168,6 +168,12 @@ describe('catalog', () => {
     expect(resolveCreateCatalog([imageOnly], [definition], 'sample-image')?.template).toBe(imageOnly)
   })
 
+  test('marketplace definitions are never paired with a template, even when listed first with the same shape', () => {
+    const marketplace: ApplicationStackDefinition = { ...definition, id: 'builder-console', catalogSource: 'appthrust' }
+    expect(resolveCreateCatalog([template], [marketplace, definition], 'github-template')?.definitionRef?.name).toBe(definition.id)
+    expect(resolveCreateCatalog([template], [marketplace], 'github-template')).toBeUndefined()
+  })
+
   test('template allowlists trim and ignore case like the Platform validator; empty allowlists admit all templates', () => {
     const blocked = { ...sourceConnection, allowedRepositories: ['appthrust/template-other'] }
     expect(templateSourceProblem(template, [blocked])).toBe('not-admitted')

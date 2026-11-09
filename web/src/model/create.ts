@@ -156,8 +156,11 @@ export function templatesFor(
 
 /**
  * Picks the requested (or default, or first) template for the source kind, and
- * the stack definition whose component count matches it. Templates do not
- * reference a definition, so the pairing is structural.
+ * the platform-shipped stack definition whose component count matches it.
+ * Templates do not reference a definition, so the pairing is structural;
+ * marketplace apps (`catalogSource` set, owned by an AppCatalogSource) are
+ * ApplicationStackDefinitions too and must never be candidates, or the template
+ * deploys that app's image under the user's name.
  */
 export function resolveCreateCatalog(
   templates: readonly ApplicationTemplateSummary[],
@@ -168,7 +171,7 @@ export function resolveCreateCatalog(
   const candidates = templatesFor(templates, sourceKind)
   const template = templateId ? candidates.find((item) => item.id === templateId) : candidates[0]
   if (!template) return undefined
-  const definition = definitions.find((item) => item.components.length === template.components.length)
+  const definition = definitions.find((item) => !item.catalogSource && item.components.length === template.components.length)
   if (!definition) return undefined
   const version =
     definition.versions?.find((item) => item.default && item.served !== false) ??
