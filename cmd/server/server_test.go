@@ -525,7 +525,7 @@ func TestServedOpenAPIEqualsCommittedContract(t *testing.T) {
 						w.WriteHeader(http.StatusForbidden)
 						return
 					}
-					writeJSON(w, 200, map[string]any{"member": true, "role": "Viewer"})
+					writeJSON(w, 200, map[string]any{"member": true, "roles": []string{"Viewer"}, "actions": []string{}})
 				default:
 					t.Errorf("unexpected platform route %s", r.URL.Path)
 					w.WriteHeader(http.StatusNotFound)

@@ -3,7 +3,7 @@ module github.com/appthrust/builder-console
 go 1.26.0
 
 require (
-	github.com/appthrust/appserver-go v0.3.0
+	github.com/appthrust/appserver-go v0.5.0
 	github.com/google/uuid v1.6.0
 	github.com/lib/pq v1.12.3
 	github.com/stretchr/testify v1.11.1
