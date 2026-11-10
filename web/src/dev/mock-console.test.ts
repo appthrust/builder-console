@@ -374,6 +374,8 @@ describe('directory and comment routes', () => {
     expect(groups.find((group) => group.id === 'g-sales-east')).toMatchObject({ path: 'sales/east', subgroupCount: 2, memberCount: 1 })
     const members = (await call('GET', `${root}/directory/groups/g-team-a/members`)).body.items as Array<{ person: { id: string }; inheritedFrom: string | null }>
     expect(members.map((member) => [member.person.id, member.inheritedFrom]).sort()).toEqual([['p-sato', 'g-sales'], ['p-suzuki', null], ['p-yamada', null]])
+    // A direct membership stays a direct row even when an ancestor grants a stronger role; the role is the strongest.
+    expect((await call('GET', `${root}/directory/groups/g-planning/members`)).body.items).toMatchObject([{ person: { id: 'p-sato' }, role: 'manager', inheritedFrom: null }])
     expect((await call('GET', `${root}/directory/groups/missing/members`)).status).toBe(404)
     expect((await call('GET', `${root}/directory/people?ids=p-sato,p-missing`)).body.items).toMatchObject([{ id: 'p-sato' }])
     expect((await call('GET', `${root}/directory/people?q=yamada`)).body.items).toMatchObject([{ id: 'p-yamada' }])

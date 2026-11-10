@@ -112,6 +112,7 @@ export const shellEn: typeof shell = {
     subgroups: 'Subgroups',
     appsEmpty: 'This group has no apps yet.',
     memberCount: (members: number) => `${members} ${members === 1 ? 'member' : 'members'}`,
+    inheritedCount: (members: number) => ` · ${members} more inherited`,
     manageInDirectory: 'Manage in Directory',
     aboutEmpty: 'No introduction for this department yet.',
     about: 'About this department',
@@ -124,7 +125,8 @@ export const shellEn: typeof shell = {
   },
   members: {
     title: 'Members',
-    lead: 'Members of a parent group automatically belong to its subgroups.',
+    lead: 'People who belong to this group directly. Members of parent groups can also use this group’s apps.',
+    inheritedTitle: (members: number) => `Members inherited from parent groups (${members})`,
     empty: 'No members yet.',
     columns: { name: 'Name', email: 'Email', role: 'Role' },
     role: { member: 'Member', manager: 'Admin' },

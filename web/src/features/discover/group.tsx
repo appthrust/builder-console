@@ -1,17 +1,17 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, type UseQueryResult } from '@tanstack/react-query'
 import { ExternalLink, FolderTree, LayoutGrid } from 'lucide-react'
-import { directoryLinks, pathPrefixes, type Group } from '../../api/console'
-import { appsQuery } from '../../api/queries'
+import { directoryLinks, pathPrefixes, type Group, type Membership } from '../../api/console'
+import { appsQuery, membersQuery } from '../../api/queries'
 import { copy } from '../../copy'
 import { paths, type GroupTab } from '../../routes/paths'
 import { locale } from '../../shell/language'
 import { useShell } from '../../shell/use-shell'
-import { EmptyState, HrefLink, LinkButton, LinkTabs, LoadFailed, PageHeader, useDocumentTitle } from '../../ui'
+import { EmptyState, HrefLink, LinkButton, LinkTabs, LoadFailed, PageHeader, Skeleton, useDocumentTitle } from '../../ui'
 import { useAppViews } from '../app/use-app-views'
 import { AppListSkeleton, AppTable, StatusLoadNotice } from './app-list'
 import { text } from './copy'
 import { GroupFront } from './group-front'
-import { GroupMembers } from './members'
+import { GroupMembers, splitMembers } from './members'
 
 const TABS: GroupTab[] = ['front', 'apps', 'members']
 
@@ -29,12 +29,14 @@ export function GroupPage({ group, tab = 'front' }: { group: Group; tab?: GroupT
   const children = groups
     .filter((candidate) => candidate.parentId === group.id)
     .sort((a, b) => a.name.localeCompare(b.name, locale()))
+  // Same query as the front and member tabs, so the page loads the member list once.
+  const members = useQuery({ ...membersQuery(group.id), enabled: !group.description })
 
   return (
     <div className="space-y-6">
       <PageHeader
         title={group.name}
-        lead={group.description || copy.group.memberCount(group.memberCount)}
+        lead={group.description || memberCountLead(members)}
         breadcrumbs={crumbs}
         actions={me.directoryPublicURL ? (
           <LinkButton href={directoryLinks.group(me.directoryPublicURL, group.id)} external size="sm" icon={<ExternalLink />}>
@@ -55,6 +57,29 @@ export function GroupPage({ group, tab = 'front' }: { group: Group; tab?: GroupT
         <GroupMembers key={group.id} group={group} />
       )}
     </div>
+  )
+}
+
+/**
+ * Headline count = the group's own members; people who only reach it through an upper
+ * group follow as quieter text. The effective `memberCount` is never shown here, so
+ * nothing is drawn until the member list says which members are direct.
+ */
+function memberCountLead(members: UseQueryResult<Membership[]>) {
+  if (members.isPending) {
+    return (
+      <span role="status" aria-label={copy.common.loading} className="block">
+        <Skeleton className="h-5 w-40" />
+      </span>
+    )
+  }
+  if (members.isError) return undefined
+  const { direct, inherited } = splitMembers(members.data)
+  return (
+    <>
+      {copy.group.memberCount(direct.length)}
+      {inherited.length > 0 ? <span className="text-xs">{copy.group.inheritedCount(inherited.length)}</span> : null}
+    </>
   )
 }
 

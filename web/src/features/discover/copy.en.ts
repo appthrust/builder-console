@@ -68,7 +68,6 @@ export const textEn: typeof textJa = {
   },
   members: {
     inheritedColumn: 'Inherited from',
-    direct: 'Direct',
     you: 'You',
     emailMissing: 'No email address',
   },

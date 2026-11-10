@@ -72,7 +72,6 @@ export const textJa = {
   },
   members: {
     inheritedColumn: '継承元',
-    direct: '直接',
     you: 'あなた',
     emailMissing: 'メールアドレス未登録',
   },
