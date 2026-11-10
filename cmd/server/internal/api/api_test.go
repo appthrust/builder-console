@@ -64,7 +64,7 @@ func newHarness(t *testing.T) *harness {
 				w.WriteHeader(status)
 				return
 			}
-			httpx.WriteJSON(w, 200, map[string]any{"member": true, "role": role})
+			httpx.WriteJSON(w, 200, map[string]any{"member": true, "roles": []string{role}, "actions": []string{}})
 		case "/api/v1/projects/pj-test/source-connections":
 			httpx.WriteJSON(w, 200, map[string]any{"data": []any{map[string]string{"id": "pending", "status": "incomplete"}, map[string]string{"id": "github", "status": "ready"}}})
 		case "/api/v1/registry-connections":
