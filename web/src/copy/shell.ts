@@ -113,6 +113,7 @@ export const shell = {
     subgroups: 'サブグループ',
     appsEmpty: 'このグループのアプリはまだありません。',
     memberCount: (members: number) => `メンバー ${members} 人`,
+    inheritedCount: (members: number) => `・ほか継承 ${members} 人`,
     manageInDirectory: 'ディレクトリで管理',
     aboutEmpty: 'この部署の紹介はまだ書かれていません。',
     about: '部署の紹介',
@@ -125,7 +126,8 @@ export const shell = {
   },
   members: {
     title: 'メンバー',
-    lead: '上位グループのメンバーは、下のグループにも自動で入ります。',
+    lead: 'このグループに直接所属しているメンバーです。上位グループのメンバーも、このグループのアプリを使えます。',
+    inheritedTitle: (members: number) => `上位グループから引き継いだメンバー（${members} 人）`,
     empty: 'メンバーはまだいません。',
     columns: { name: '名前', email: 'メールアドレス', role: '役割' },
     role: { member: 'メンバー', manager: '管理者' },

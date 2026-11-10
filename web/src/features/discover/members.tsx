@@ -13,21 +13,63 @@ import { membersQuery } from '../../api/queries'
 import { copy } from '../../copy'
 import { locale } from '../../shell/language'
 import { useShell } from '../../shell/use-shell'
-import { Avatar, DataTable, EmptyState, LoadFailed, Skeleton } from '../../ui'
+import { Avatar, DataTable, Disclosure, EmptyState, LoadFailed, Skeleton } from '../../ui'
 import { text } from './copy'
 
 const column = createColumnHelper<Membership>()
-const NO_MEMBERS: Membership[] = []
 
-/** Direct + inherited members of a group, read-only: membership is managed in the Directory. */
+/**
+ * Who belongs to the group (no `inheritedFrom`) versus who only has access
+ * through an ancestor. Belonging is what a group page counts and lists first.
+ */
+export function splitMembers(members: Membership[]): { direct: Membership[]; inherited: Membership[] } {
+  const direct: Membership[] = []
+  const inherited: Membership[] = []
+  for (const member of members) (member.inheritedFrom == null ? direct : inherited).push(member)
+  return { direct, inherited }
+}
+
+/**
+ * The group's own members, then the members of upper groups in a collapsed section.
+ * Read-only: membership is managed in the Directory.
+ */
 export function GroupMembers({ group }: { group: Group }) {
-  const { me, groups } = useShell()
   const members = useQuery(membersQuery(group.id))
+  const { direct, inherited } = useMemo(() => splitMembers(members.data ?? []), [members.data])
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-stone-500">{copy.members.lead}</p>
+      {members.isPending ? (
+        <div role="status" aria-label={copy.common.loading} className="space-y-2 rounded-lg border border-stone-200 bg-white p-4">
+          {[0, 1, 2].map((index) => (
+            <Skeleton key={index} className="h-8 w-full" />
+          ))}
+        </div>
+      ) : members.isError ? (
+        <LoadFailed error={members.error} onRetry={() => void members.refetch()} />
+      ) : (
+        <>
+          <MemberTable members={direct} caption={copy.members.title} />
+          {inherited.length > 0 ? (
+            <Disclosure title={copy.members.inheritedTitle(inherited.length)}>
+              <MemberTable members={inherited} caption={copy.members.inheritedTitle(inherited.length)} showSource />
+            </Disclosure>
+          ) : null}
+        </>
+      )}
+      <p className="text-xs text-stone-500">{copy.members.readOnly}</p>
+    </div>
+  )
+}
+
+/** One sortable member table; `showSource` adds the group each inherited member comes from. */
+function MemberTable({ members, caption, showSource = false }: { members: Membership[]; caption: string; showSource?: boolean }) {
+  const { me, groups } = useShell()
   const [sorting, setSorting] = useState<SortingState>([])
 
   const columns = useMemo(() => {
-    const groupName = (groupId: string) => groups.find((candidate) => candidate.id === groupId)?.name ?? groupId
-    return [
+    const base = [
       column.accessor((membership) => membership.person.displayName, {
         id: 'name',
         header: copy.members.columns.name,
@@ -59,26 +101,23 @@ export function GroupMembers({ group }: { group: Group }) {
         id: 'role',
         header: copy.members.columns.role,
         meta: { className: 'w-36' },
-        cell: ({ getValue }) => <span className="text-stone-700">{copy.members.role[getValue()]}</span>,
-      }),
-      column.accessor('inheritedFrom', {
-        id: 'inherited',
-        header: text.members.inheritedColumn,
-        enableSorting: false,
-        cell: ({ getValue }) => {
-          const from = getValue()
-          return from ? (
-            <span className="whitespace-nowrap text-stone-600">{copy.members.inherited(groupName(from))}</span>
-          ) : (
-            <span className="whitespace-nowrap text-stone-400">{text.members.direct}</span>
-          )
-        },
+        cell: ({ getValue }) => <span className="whitespace-nowrap text-stone-700">{copy.members.role[getValue()]}</span>,
       }),
     ]
-  }, [groups, me.person.id])
+    if (!showSource) return base
+    return [
+      ...base,
+      column.accessor((membership) => groups.find((candidate) => candidate.id === membership.inheritedFrom)?.name ?? membership.inheritedFrom ?? '', {
+        id: 'inherited',
+        header: text.members.inheritedColumn,
+        sortingFn: (a, b) => a.getValue<string>('inherited').localeCompare(b.getValue<string>('inherited'), locale()),
+        cell: ({ getValue }) => <span className="whitespace-nowrap text-stone-600">{copy.members.inherited(getValue())}</span>,
+      }),
+    ]
+  }, [groups, me.person.id, showSource])
 
   const table = useReactTable({
-    data: members.data ?? NO_MEMBERS,
+    data: members,
     columns,
     state: { sorting },
     onSortingChange: setSorting,
@@ -88,24 +127,10 @@ export function GroupMembers({ group }: { group: Group }) {
   })
 
   return (
-    <div className="space-y-4">
-      <p className="text-sm text-stone-500">{copy.members.lead}</p>
-      {members.isPending ? (
-        <div role="status" aria-label={copy.common.loading} className="space-y-2 rounded-lg border border-stone-200 bg-white p-4">
-          {[0, 1, 2].map((index) => (
-            <Skeleton key={index} className="h-8 w-full" />
-          ))}
-        </div>
-      ) : members.isError ? (
-        <LoadFailed error={members.error} onRetry={() => void members.refetch()} />
-      ) : (
-        <DataTable
-          table={table}
-          caption={copy.members.title}
-          emptyState={<EmptyState icon={<Users aria-hidden />} title={copy.members.empty} />}
-        />
-      )}
-      <p className="text-xs text-stone-500">{copy.members.readOnly}</p>
-    </div>
+    <DataTable
+      table={table}
+      caption={caption}
+      emptyState={<EmptyState icon={<Users aria-hidden />} title={copy.members.empty} />}
+    />
   )
 }

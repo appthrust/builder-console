@@ -135,7 +135,8 @@ function seedConsole() {
     group('g-sales', null, '営業本部', 'sales', '営業部門全体です。'),
     group('g-sales-east', 'g-sales', '営業1部', 'east'),
     {
-      ...group('g-team-a', 'g-sales-east', '営業1課', 'team-a', '法人営業を担当しています。'),
+      // No description, so the page header shows its count: 2 own members and 1 inherited from 営業本部.
+      ...group('g-team-a', 'g-sales-east', '営業1課', 'team-a'),
       about: '# 営業1課について\n\n法人のお客さまへの提案を担当しています。\n\n- 見積書の作成\n- 商談の相談\n\n[窓口に連絡する](mailto:yamada@example.com)',
       aboutUpdatedBy: people[0],
       aboutUpdatedAt: at(35),
@@ -283,7 +284,10 @@ export const mockOwnerSubjects = (stackId: string): string[] =>
   (state.apps.find((app) => app.stackId === stackId)?.ownerIds ?? [])
     .flatMap((id) => person(id)?.subject ? [person(id).subject!] : [])
 
-/** Direct rows plus rows inherited from ancestors: the strongest role wins, then the nearest source (Directory rule). */
+/**
+ * Direct rows plus rows inherited from ancestors (Directory rule): a direct membership always stays a direct
+ * row carrying the strongest effective role; otherwise the strongest role wins, then the nearest source.
+ */
 function membersOf(groupId: string): Membership[] {
   const rows = new Map<string, Membership>()
   for (const [personId, memberRole] of state.memberships.get(groupId) ?? []) {
@@ -293,7 +297,7 @@ function membersOf(groupId: string): Membership[] {
     for (const [personId, memberRole] of state.memberships.get(ancestorId) ?? []) {
       const existing = rows.get(personId)
       if (!existing || (existing.role === 'member' && memberRole === 'manager')) {
-        rows.set(personId, { groupId, person: person(personId), role: memberRole, inheritedFrom: ancestorId })
+        rows.set(personId, { groupId, person: person(personId), role: memberRole, inheritedFrom: existing?.inheritedFrom === null ? null : ancestorId })
       }
     }
   }
