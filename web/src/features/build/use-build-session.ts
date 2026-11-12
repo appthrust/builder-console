@@ -253,7 +253,7 @@ export function useBuildSession(draft: ApplicationDraft, me: Me, groupId: string
     const current = await api.getDraft(projectId, draft.id)
     receive(current)
     const latestGeneration = current.creationPlanGenerations?.at(-1)
-    if (current.createdApplicationStackId || current.creationExecutions.length
+    if (current.createdApplicationStackId || current.creationExecutions?.length
       || latestGeneration?.id !== previousGenerationId
       || !needsPlanRefresh(current, store.state.lastPlannedIntent)) {
       patch({ planRequested: false })

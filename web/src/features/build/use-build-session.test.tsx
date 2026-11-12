@@ -189,6 +189,16 @@ describe('kickoff to plan handoff', () => {
     expect(generation).toHaveBeenCalledTimes(1)
   })
 
+  test('a draft the API returns without creationExecutions still requests its plan', async () => {
+    const generation = mockGeneration()
+    // The Platform API omits an empty creationExecutions array from the draft JSON.
+    const { creationExecutions: _omitted, ...neverExecuted } = unplanned
+    client.setQueryData(queryKey, neverExecuted)
+    await render()
+    expect(generation).toHaveBeenCalledTimes(1)
+    expect(build.failure).toBeUndefined()
+  })
+
   test.each(['pending', 'succeeded'] as const)('reload observes an existing %s generation instead of sending another', async (status) => {
     const generation = mockGeneration()
     const current: ApplicationDraft = {
