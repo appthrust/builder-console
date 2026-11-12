@@ -144,13 +144,9 @@ export function buildProgress(preparation: ProgressCard | undefined, input: Impl
   }
 }
 
-/** Lines of the live activity a progress card shows. */
-export const ACTIVITY_LINES = 6
-
-/** The last `ACTIVITY_LINES` non-empty lines of an activity tail. */
+/** The non-empty lines of an activity tail, oldest first. */
 export function activityLines(text: string | undefined): string[] {
-  const lines = (text ?? '').split('\n').map((line) => line.trimEnd()).filter(Boolean)
-  return lines.slice(-ACTIVITY_LINES)
+  return (text ?? '').split('\n').map((line) => line.trimEnd()).filter(Boolean)
 }
 
 /** Lease expiry signals interruption, not failure: server-side recovery still owns the run. */

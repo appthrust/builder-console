@@ -4,7 +4,7 @@ import { buildCopy } from '../../model/build/copy'
 import { activityLines, formatElapsed } from '../../model/build/progress'
 import { isProductLanguage } from '../../model/build/wording'
 import type { ImproveState, ImproveVersion } from '../../model/improve'
-import { Card, CardBody, LinkButton } from '../../ui'
+import { ActivityLog, Card, CardBody, LinkButton } from '../../ui'
 import { text as buildText } from '../build/copy'
 import type { ImplementationState } from '../build/implement'
 import { text } from './copy'
@@ -66,7 +66,7 @@ function RunProgress({ state, implementation, appUrl, proposalPending }: { state
   const copy = buildCopy.progress.task
   const tasks = implementation.tasks.filter((task) => run.taskIds.includes(task.id))
   // The tail belongs to the task in progress; between tasks it would describe the finished one.
-  const activity = running && tasks.some((task) => task.status === 'running') ? activityLines(implementation.activityTail).filter(isProductLanguage).slice(-3) : []
+  const activity = running && tasks.some((task) => task.status === 'running') ? activityLines(implementation.activityTail).filter(isProductLanguage) : []
   const step = implementation.step === 'working' ? copy.working(Boolean(implementation.activityTail?.trim())) : implementation.step ? copy[implementation.step] : undefined
   const previewReady = Boolean(implementation.previewUrl) && implementation.previewStatus === 'ready'
   const title = state.phase === 'done' ? proposalPending ? proposalText.sent : text.updated(state.version) : running ? text.run.running : implementation.failure?.title ?? text.run.running
@@ -87,7 +87,7 @@ function RunProgress({ state, implementation, appUrl, proposalPending }: { state
         </li>
       })}
     </ol>
-    {activity.length ? <pre aria-label={buildCopy.progress.observe.activity} className="mt-3 max-h-24 overflow-hidden whitespace-pre-wrap break-words rounded bg-stone-50 p-2.5 font-mono text-xs leading-relaxed text-stone-600">{activity.join('\n')}</pre> : null}
+    <ActivityLog lines={activity} label={buildCopy.progress.observe.activity} className="mt-3 max-h-40 p-2.5" />
     {(running || proposalPending) && implementation.previewUrl ? previewReady
       ? <LinkButton external href={implementation.previewUrl} size="sm" icon={<ExternalLink />} className="mt-3">{text.run.preview}</LinkButton>
       : <p role="status" className="mt-3 text-xs text-stone-500">{text.run.previewPreparing}</p> : null}

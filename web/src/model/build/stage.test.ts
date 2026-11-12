@@ -176,9 +176,9 @@ describe('long-operation progress', () => {
     expect(progressCard({ kind: 'implement', phase: 'starting-workspace', now }).kind).toBe('workspace')
     expect(progressCard({ kind: 'implement', phase: 'pushing', now }).title).toBe('新しい版を保存しています')
   })
-  test('a running operation shows its last activity lines; a finished one shows none', () => {
+  test('a running operation shows every received activity line; a finished one shows none', () => {
     const activityTail = ['', 'a', 'b ', '', 'c', 'd', 'e', 'f', 'g', ''].join('\n')
-    expect(progressCard({ kind: 'plan', operation: { ...generation, status: 'running', activityTail }, now }).activity).toEqual(['b', 'c', 'd', 'e', 'f', 'g'])
+    expect(progressCard({ kind: 'plan', operation: { ...generation, status: 'running', activityTail }, now }).activity).toEqual(['a', 'b', 'c', 'd', 'e', 'f', 'g'])
     expect(progressCard({ kind: 'plan', operation: { ...generation, status: 'succeeded', activityTail }, now }).activity).toBeUndefined()
     expect(progressCard({ kind: 'implement', phase: 'running', activityTail: 'x\ny', now }).activity).toEqual(['x', 'y'])
   })

@@ -5,7 +5,7 @@ import { buildCopy } from '../../model/build/copy'
 import { buildFailureReference } from '../../model/build/failure'
 import { importedRowCount } from '../../model/build/questions'
 import type { BuildFailure, BuildProposal, BuildSpec, BuildStage, ProgressCard as Progress } from '../../model/build/types'
-import { Card, CardBody, CopyButton, Disclosure, LinkButton, Notice } from '../../ui'
+import { ActivityLog, Card, CardBody, CopyButton, Disclosure, LinkButton, Notice } from '../../ui'
 import { ImplementPanel, type ImplementationState } from './implement'
 import type { PreviewDatabaseReset } from './implement/use-implementation'
 import { implementationCopy } from './implement/copy'
@@ -64,7 +64,7 @@ export function ProgressCard({ progress, failure }: { progress: Progress; failur
     <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold text-stone-900">{progress.title}</h3>{progress.elapsedLabel ? <span className="text-sm tabular-nums text-stone-500">{progress.elapsedLabel}</span> : null}</div>
     {progress.hint ? <p className="mt-2 text-sm text-stone-600">{progress.hint}</p> : null}
     {reference ? <p className="mt-3 break-all text-xs text-stone-600">{reference}</p> : null}
-    {progress.activity ? <pre aria-label={buildCopy.progress.observe.activity} className="mt-3 max-h-32 overflow-hidden whitespace-pre-wrap break-words rounded bg-stone-50 p-3 font-mono text-xs leading-relaxed text-stone-600">{progress.activity.join('\n')}</pre> : null}
+    {progress.activity ? <ActivityLog lines={progress.activity} label={buildCopy.progress.observe.activity} className="mt-3 max-h-48 p-3" /> : null}
     {progress.steps ? <ol aria-label={progress.staged ? text.artifact.preparation : undefined} className="mt-4 space-y-3">{progress.steps.map((step, index) => <li key={`${step.label}-${index}`} aria-current={step.state === 'doing' ? 'step' : undefined} className="flex gap-3 text-sm">
       <span aria-label={text.artifact.states[step.state]} className={step.state === 'failed' ? 'text-bad-ink' : step.state === 'todo' ? 'text-stone-400' : 'text-accent-strong'}>{progress.staged ? ({ todo: '○', doing: '●', done: '✔', failed: '!' })[step.state] : text.artifact.states[step.state]}</span>
       <div className="min-w-0 flex-1"><div className="flex flex-wrap justify-between gap-2"><span className={step.state === 'doing' ? 'font-semibold' : undefined}>{step.label}</span>{step.elapsedLabel ? <span className="tabular-nums text-stone-500">{step.elapsedLabel}</span> : null}</div>{step.expectation ? <span className="block text-xs text-stone-500">{step.expectation}</span> : null}{step.detail && step.detail !== progress.hint ? <span className="block text-xs text-stone-500">{step.detail}</span> : null}</div>

@@ -1,4 +1,5 @@
 // Builder Console design-system kit. Pages import everything from here.
+export { ActivityLog } from './activity-log'
 export { Button, buttonClasses, IconButton, LinkButton, OpenLink, type ButtonProps, type ButtonSize, type ButtonTone, type LinkButtonProps } from './button'
 export { cn } from './cn'
 export { DataTable } from './data-table'
