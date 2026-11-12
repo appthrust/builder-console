@@ -8,7 +8,7 @@ import { activityLines, formatElapsed } from '../../model/build/progress'
 import type { BuildFailure } from '../../model/build/types'
 import { isProductLanguage } from '../../model/build/wording'
 import { improveTimeline, runVersion, sortedTurns, type ImproveState, type ImproveTask } from '../../model/improve'
-import { Button, CopyButton, LinkButton, Notice } from '../../ui'
+import { ActivityLog, Button, CopyButton, LinkButton, Notice } from '../../ui'
 import { Composer } from '../build/composer'
 import { AiTurn, AssistantMessage, UserMessage } from '../build/conversation-pane'
 import { text as buildText } from '../build/copy'
@@ -37,7 +37,7 @@ export interface ImproveConversationProps {
 
 /** Product-language lines of the AI's live output; file paths and platform words stay hidden. */
 function readableActivity(tail: string | undefined): string[] {
-  return activityLines(tail).filter(isProductLanguage).slice(-3)
+  return activityLines(tail).filter(isProductLanguage)
 }
 
 export const ImproveConversation = forwardRef<HTMLTextAreaElement, ImproveConversationProps>(function ImproveConversation({ draft, state, appUrl, locked, waitingForReview, outcome, starting, sendFailure, startFailure, onSend, onRetrySend, onStart }, input) {
@@ -132,8 +132,7 @@ export const ImproveConversation = forwardRef<HTMLTextAreaElement, ImproveConver
 })
 
 function Activity({ lines }: { lines: string[] }) {
-  if (!lines.length) return null
-  return <pre aria-label={buildCopy.progress.observe.activity} className="mt-2 max-h-24 overflow-hidden whitespace-pre-wrap break-words rounded bg-stone-50 p-2.5 font-mono text-xs leading-relaxed text-stone-600">{lines.join('\n')}</pre>
+  return <ActivityLog lines={lines} label={buildCopy.progress.observe.activity} className="mt-2 max-h-40 p-2.5" />
 }
 
 function FailureNotice({ failure, onRetry }: { failure: BuildFailure; onRetry?(): void }) {
