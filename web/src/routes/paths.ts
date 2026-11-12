@@ -29,6 +29,8 @@ export const paths = {
   account: () => '/-/account',
   help: '/help',
   adminPlatform: '/-/admin/platform',
+  /** 基盤の設定's 新しい置き場の作成先 section (the Project default). */
+  repositoryDestinationSettings: '/-/admin/platform#repository-destination',
   new: ({ group, resume, template, intent }: NewAppSearch = {}) => withSearch('/new', { group, resume, template, intent }),
   excel2app: (draft?: string) => withSearch('/-/excel2app', { draft }),
   build: (draftId: string) => `/-/build/${encodeURIComponent(draftId)}`,

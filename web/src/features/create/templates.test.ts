@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test'
-import { ApplicationTemplateSummary, GitHubSourceConnection } from '@appthrust/api-schema/platform-api'
+import { ApplicationTemplateSummary } from '@appthrust/api-schema/platform-api'
+import { ProjectGitHubSourceConnectionListResponse } from '../../api/repository-destination'
 import { MOCK_PROJECT_ID, platformRoutes } from '../../dev/mock-platform'
-import { buildSourceRepositoryRequest, resolveCreateCatalog, templateSourceProblem, templateUsableFor } from '../../model/create'
+import { buildSourceRepositoryRequest, resolveCreateCatalog, templateUsableFor } from '../../model/create'
 import { businessTemplates, joinBusinessTemplates } from './templates'
 
 const rows: ApplicationTemplateSummary[] = businessTemplates.map((metadata, index) => ({
@@ -35,27 +36,29 @@ describe('business template × platform catalog', () => {
     const definitions = [{ id: 'web', title: 'Web', category: 'application', components: [{ id: 'web', definitionRef: { name: 'web' } }] }]
     const catalog = resolveCreateCatalog(rows, definitions, 'github-template', 'biz-master-postgres')!
     const request = buildSourceRepositoryRequest('customer-book', catalog, {
-      source: { id: 'github', displayName: 'GitHub', account: { login: 'acme', type: 'Organization' }, capabilities: ['createRepositories'], status: 'ready', source: 'github-source-connection-cr' },
-      registry: { id: 'registry', displayName: 'Registry', registryHost: 'ghcr.io', registryType: 'ghcr', status: 'ready', source: 'registry-connection-cr' },
+      state: 'Resolved',
+      source: 'Project',
+      revision: 'rev-1',
+      destination: { connectionId: 'github', provider: 'github', displayName: 'GitHub', repositoryNamespace: 'acme', registryNamespace: 'ghcr.io/acme' },
     })
     expect(request.template).toEqual({ repository: 'appthrust/template-biz-master', ref: 'main' })
     expect(resolveCreateCatalog(rows, definitions, 'github-template', 'biz-reservation-postgres')).toBeUndefined()
     expect(resolveCreateCatalog(rows, definitions, 'github-template', 'not-a-template')).toBeUndefined()
   })
 
-  test('the mock catalog exposes source availability and blocks approval but admits framework templates', async () => {
+  test('the mock catalog exposes source availability and the resolved destination of its two connections', async () => {
     const templatesUrl = new URL(`/api/v1/projects/${MOCK_PROJECT_ID}/application-templates`, 'http://mock.test')
     const sourcesUrl = new URL(`/api/v1/projects/${MOCK_PROJECT_ID}/source-connections`, 'http://mock.test')
     const templatesResponse = await platformRoutes(new Request(templatesUrl), templatesUrl)
     const sourcesResponse = await platformRoutes(new Request(sourcesUrl), sourcesUrl)
     const catalog = ApplicationTemplateSummary.array().parse((await templatesResponse!.json()).data)
-    const sources = GitHubSourceConnection.array().parse((await sourcesResponse!.json()).data)
+    const sources = ProjectGitHubSourceConnectionListResponse.pick({ data: true, repositoryDestination: true }).parse(await sourcesResponse!.json())
     const approval = catalog.find((item) => item.id === 'biz-approval-postgres')!
     const framework = catalog.find((item) => item.id === 'nextjs-postgres')!
     expect(templateUsableFor(approval, 'github-template')).toBe(false)
-    expect(templateSourceProblem(approval, sources)).toBe('not-admitted')
     expect(templateUsableFor(framework, 'github-template')).toBe(true)
-    expect(templateSourceProblem(framework, sources)).toBeUndefined()
+    expect(sources.data).toHaveLength(2)
+    expect(sources.repositoryDestination).toMatchObject({ state: 'Resolved', source: 'Project', destination: { repositoryNamespace: 'acme' } })
     for (const template of catalog) {
       expect(template.availability.sources.map((source) => source.kind)).toEqual(template.sourceKinds)
       expect(template.availability.available).toBe(template.availability.sources.some((source) => source.available))

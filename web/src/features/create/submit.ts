@@ -4,23 +4,24 @@
 // instead of duplicating.
 // - ひな形 / 作ったコードから / イメージ: `submitCreate` (source repository →
 //   stack, or the stack alone for an image).
-import type {
-  ApplicationStackValidation,
-  CreateApplicationSourceRepositoryRequest,
-} from '@appthrust/api-schema/platform-api'
+import type { ApplicationStackValidation } from '@appthrust/api-schema/platform-api'
 import { ORPCError } from '@orpc/client'
 import { isConsoleError, type BusinessApp, type ConsoleApi, type SharePolicy } from '../../api/console'
 import type { PlatformApiClient } from '../../api/client'
 import { platformErrorEnvelope } from '../../api/platform-error'
+import type { ApplicationSourceRepositoryValidation, CreateApplicationSourceRepositoryRequest } from '../../api/repository-destination'
 import { queueCreatedAppAccess } from './access'
 import { text } from './copy'
 import {
   buildCreateStackRequest,
   buildExistingSourceRepositoryRequest,
   buildSourceRepositoryRequest,
+  isRepositoryDestinationReason,
+  type AdoptionConnections,
   type CreateCatalog,
+  type DestinationProblem,
   type PickedRepository,
-  type SourceConnections,
+  type ResolvedDestination,
   type StackSource,
 } from '../../model/create'
 
@@ -81,8 +82,10 @@ export interface CreateDeps {
   catalog: CreateCatalog
   /** Publish-ready domain base for the app URL. */
   domain: string
-  /** Required for the ひな形 and 作ったコードから paths. */
-  connections?: SourceConnections
+  /** 作ったコードから: the connection and registry the picked repository is adopted with. */
+  adoption?: AdoptionConnections
+  /** ひな形: where the platform resolved new repositories to go, as the user saw it. */
+  destination?: ResolvedDestination
   onPhase: (phase: SubmitPhase) => void
   onProgress?: (progress: CreateProgress) => void
 }
@@ -102,7 +105,10 @@ export interface ValidationIssue {
  * already used (console slug, platform application name or repository name);
  * the wizard sends the user back to the name. `retryable` = the same request
  * succeeds shortly: the platform's delivery was converging, or the console
- * did not answer (`transient`). Otherwise `progress` is what to resume from.
+ * did not answer (`transient`). `destination` = the platform would not create
+ * the repository where the user was told it goes (moved, mismatched or
+ * blocked); the wizard re-reads the destination. Otherwise `progress` is what
+ * to resume from.
  */
 export class CreateFailed extends Error {
   readonly forbidden: boolean
@@ -112,6 +118,8 @@ export class CreateFailed extends Error {
   readonly field?: { path: string; step: 0 | 1 }
   /** No answer from the console (gateway 5xx, network); its message is `copy.errors.transient`. */
   readonly transient: boolean
+  /** The repository destination the platform refused, with its typed reason. */
+  readonly destination?: DestinationProblem
   readonly progress: CreateProgress
   /** Server-provided detail (not localized); ActionError reads `data.message`. */
   readonly data: { message: string } | undefined
@@ -122,23 +130,27 @@ export class CreateFailed extends Error {
     super(cause instanceof Error ? cause.message : String(cause), { cause })
     this.name = 'CreateFailed'
     this.forbidden = forbidden
+    const envelope = cause instanceof ORPCError ? platformErrorEnvelope(cause) : undefined
     // Every Platform API 409 carries code `conflict`; the delivery-root
     // rejections (apierror.DeliveryBlocked) say `details.reason`
     // `delivery_pending` (converging, retry the same request) or
-    // `delivery_blocked` (an operator must restore delivery). Neither is about
-    // the caller's name.
+    // `delivery_blocked` (an operator must restore delivery), and destination
+    // rejections name their RepositoryDestinationBlockedReason (409
+    // DestinationChanged / DestinationMismatch, 412 or 403 for a blocked one).
+    // None of them is about the caller's name.
     const conflict = cause instanceof ORPCError && cause.status === 409
-    const reason = conflict ? platformErrorEnvelope(cause)?.details?.reason : undefined
+    const reason = envelope?.details?.reason
+    if (cause instanceof DestinationRejected) this.destination = cause.problem
+    else if (isRepositoryDestinationReason(reason)) this.destination = { reason, message: envelope?.message ?? '' }
     this.transient = isConsoleError(cause) && cause.transient
-    this.retryable = reason === 'delivery_pending' || this.transient
+    this.retryable = (conflict && reason === 'delivery_pending') || this.transient
     this.nameTaken =
-      isConsoleError(cause, 'slug_taken') || (conflict && reason !== 'delivery_pending' && reason !== 'delivery_blocked')
+      isConsoleError(cause, 'slug_taken') || (conflict && reason !== 'delivery_pending' && reason !== 'delivery_blocked' && !this.destination)
     this.progress = progress
     const detail = detailOf(cause)
     this.data = detail ? { message: detail } : undefined
     this.issues = cause instanceof ValidationRejected ? cause.issues : []
-    const envelope = cause instanceof ORPCError && cause.status === 400 ? platformErrorEnvelope(cause) : undefined
-    const field = envelope?.code === 'invalid_argument'
+    const field = cause instanceof ORPCError && cause.status === 400 && envelope?.code === 'invalid_argument'
       ? /^'((template|existing|destination)\.[^']+)'(?:\s|$)/.exec(envelope.message ?? '')
       : undefined
     if (field) this.field = { path: field[1]!, step: field[2] === 'template' ? 0 : 1 }
@@ -160,6 +172,15 @@ class ValidationRejected extends Error {
   constructor(message: string, issues: readonly ValidationIssue[]) {
     super(message)
     this.issues = issues
+  }
+}
+
+/** A source repository validation answer whose destination is blocked: nothing can be created yet. */
+class DestinationRejected extends Error {
+  readonly problem: DestinationProblem
+  constructor(problem: DestinationProblem) {
+    super(problem.message || problem.reason)
+    this.problem = problem
   }
 }
 
@@ -197,7 +218,8 @@ export async function ensureDraft(request: AppDetails, progress: CreateProgress,
  * would only be an orphan); every other failure keeps what was made.
  */
 async function failed(error: unknown, progress: CreateProgress, consoleApi: ConsoleCalls, platformTouched: boolean): Promise<never> {
-  const forbidden = error instanceof ORPCError && error.status === 403
+  // A 403 NotVisible is about the destination connection, not the caller's right to create apps.
+  const forbidden = error instanceof ORPCError && error.status === 403 && !isRepositoryDestinationReason(platformErrorEnvelope(error)?.details?.reason)
   if (forbidden && progress.draft && !platformTouched) {
     await consoleApi.remove(progress.draft.id).catch(() => undefined)
     throw new CreateFailed(error, {}, true)
@@ -227,7 +249,6 @@ export async function submitCreate(
       if (request.path.kind === 'image') {
         source = { kind: 'sample-image', imageRef: request.path.imageRef }
       } else {
-        if (!deps.connections) throw new Error(text.sourceUnavailable)
         const origin: NonNullable<CreateProgress['sourceRepositoryOrigin']> = {
           appName,
           kind: request.path.kind,
@@ -252,13 +273,22 @@ export async function submitCreate(
         }
         if (!progress.sourceRepositoryId) {
           deps.onPhase('source')
-          const body: CreateApplicationSourceRepositoryRequest & { projectId: string } = {
-            projectId: request.projectId,
-            ...(request.path.kind === 'existing'
-              ? buildExistingSourceRepositoryRequest(request.path.repository, deps.connections)
-              : buildSourceRepositoryRequest(appName, deps.catalog, deps.connections)),
+          let sourceRequest: CreateApplicationSourceRepositoryRequest
+          if (request.path.kind === 'existing') {
+            if (!deps.adoption) throw new Error(text.sourceUnavailable)
+            sourceRequest = buildExistingSourceRepositoryRequest(request.path.repository, deps.adoption)
+          } else {
+            if (!deps.destination) throw new Error(text.sourceUnavailable)
+            sourceRequest = buildSourceRepositoryRequest(appName, deps.catalog, deps.destination)
           }
-          const validation = await deps.platform.platformApiValidateApplicationSourceRepository(body)
+          const body = { projectId: request.projectId, ...sourceRequest }
+          // The published 0.1.x client types the answer without the destination fields the server now returns.
+          const validation = (await deps.platform.platformApiValidateApplicationSourceRepository(body)) as ApplicationSourceRepositoryValidation
+          // Adoption names its own connection; only a new repository depends on the resolved destination.
+          const resolution = validation.repositoryDestination
+          if (request.path.kind === 'template' && resolution?.state === 'Blocked') {
+            throw new DestinationRejected({ reason: resolution.reason, message: resolution.message })
+          }
           if (!validation.valid) {
             const message = validation.message ?? ''
             throw new ValidationRejected(message, message ? [{ section: 'source', message }] : [])

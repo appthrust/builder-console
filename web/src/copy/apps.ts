@@ -13,6 +13,24 @@ export type ConsoleStatus = 'live' | 'deploying' | 'failed' | 'unfinished' | 'un
  */
 const PREREQUISITE = { github: 'GitHub 連携', registry: 'アプリの保管場所', domain: '公開用のドメイン' }
 
+/** Plain-language reasons the platform cannot create a new repository (RepositoryDestinationBlockedReason). */
+const DESTINATION_REASON: Record<string, string> = {
+  NotConfigured: '新しい置き場を作れる GitHub 連携がありません。',
+  Ambiguous: '新しい置き場を作れる GitHub 連携が複数あり、どれを使うか決まっていません。',
+  NotFound: '作成先に指定した GitHub 連携が見つかりません。',
+  Deleting: '作成先に指定した GitHub 連携は削除中です。',
+  NotReady: '作成先の GitHub 連携が、まだ使える状態になっていません。',
+  MissingCapability: '作成先の GitHub 連携に、置き場を作る権限がありません。',
+  NotVisible: 'このプロジェクトからは、作成先の GitHub 連携を使えません。',
+  UnsupportedProvider: '作成先の連携は、置き場の自動作成に対応していません。',
+  ImageAccessNotConfigured: '作成先に合うアプリの保管場所がありません。',
+  ImageAccessAmbiguous: '作成先に合うアプリの保管場所が複数あり、どれを使うか決まっていません。',
+  ImageAccessNotReady: '作成先のアプリの保管場所が、まだ使える状態になっていません。',
+  DestinationMismatch: '作ろうとした場所が、基盤で決まっている作成先と食い違っています。',
+  DestinationChanged: '新しい置き場の作成先が変わりました。',
+  Unavailable: '新しい置き場の作成先を確認できませんでした。',
+}
+
 export const apps = {
   status: {
     live: '公開中',
@@ -126,7 +144,6 @@ export const apps = {
       template: { title: '空のアプリ', body: '中身はあとから AI で作れます。' },
       templateUnavailable: 'いまはこのテンプレートから作れません。基盤の担当者に相談してください。',
       templateNotAdmitted: (repository: string) => `${repository} を利用できません。管理者に GitHub 連携でこのリポジトリを許可するよう依頼してください。`,
-      templateNoConnection: 'ひな形から作れる GitHub 連携がありません。管理者に連携の準備を依頼してください。',
       existingUnavailable: 'いまは作ったコードから作れません。管理者に依頼してください。',
       aiUnavailable: 'いまは AI と一緒に作れません。管理者に依頼してください。',
     },
@@ -151,6 +168,27 @@ export const apps = {
     prerequisite: PREREQUISITE,
     missing: (items: readonly (keyof typeof PREREQUISITE)[]) =>
       `${items.map((item) => PREREQUISITE[item]).join('・')}がまだ用意されていません。管理者に依頼してください。`,
+    destination: {
+      title: '新しい置き場',
+      repository: (path: string) => `GitHub の ${path} に作ります。`,
+      image: (path: string) => `アプリの保管場所: ${path}`,
+      source: {
+        Project: 'このプロジェクトの設定で決まっている作成先です。',
+        Environment: '基盤全体の既定で決まっている作成先です。',
+        SingleConnection: '使える GitHub 連携が 1 つだけなので、その連携で作ります。',
+      },
+      /** A known reason in product words; an unknown one shows the server's message. */
+      problem: (reason: string, message: string) => DESTINATION_REASON[reason] ?? (message || DESTINATION_REASON.Unavailable!),
+      askAdmin: '管理者に「新しい置き場の作成先」の設定を依頼してください。',
+      fixHere: '「基盤の設定」の「新しい置き場の作成先」で直せます。',
+      openSetting: '作成先の設定を開く',
+      blockedTitle: '新しい置き場を作れません',
+      changedTitle: '新しい置き場の作成先が変わりました',
+      moved: (before: string, after: string) => `作成先が ${before} から ${after} に変わりました。下の内容を確かめて、もう一度作ってください。`,
+      refreshed: '作成先の情報が新しくなりました。下の内容を確かめて、もう一度作ってください。',
+      nowBlocked: '作成先がいま決まっていないため、作れません。',
+      retryAfterFix: '作成先の設定を直してから、もう一度試してください。',
+    },
     advanced: {
       toggle: '詳しい人向け',
       lead: 'すでにあるコンテナイメージをそのまま動かします。',
@@ -210,7 +248,7 @@ export const apps = {
       submit: '作る',
       retry: 'もう一度試す',
       resume: '続きから作る',
-      labels: { description: '説明', tags: 'タグ', repository: '作ったものの置き場', template: 'テンプレート' },
+      labels: { description: '説明', tags: 'タグ', repository: '作ったものの置き場', template: 'テンプレート', destination: '新しい置き場' },
     },
     phase: {
       draft: 'アプリを登録しています…',

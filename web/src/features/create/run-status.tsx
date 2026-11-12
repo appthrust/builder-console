@@ -2,6 +2,7 @@
 import { LoaderCircle } from 'lucide-react'
 import { copy } from '../../copy'
 import type { CreateEntry } from '../../model/create'
+import { paths } from '../../routes/paths'
 import { Button, LinkButton, Notice } from '../../ui'
 import { text } from './copy'
 import type { CreateFailed, SubmitPhase } from './submit'
@@ -53,11 +54,13 @@ export function FieldFailureNotice({ failure, onFix }: { failure: CreateFailed; 
 
 /**
  * A failed attempt: why (forbidden / console unreachable / platform updating /
- * other, with the server's validation detail verbatim) and what to do next.
- * The retry itself is the wizard's primary button; taken names and invalid
- * input fields return to their owning step instead.
+ * destination moved or blocked / other, with the server's validation detail
+ * verbatim) and what to do next. The retry itself is the wizard's primary
+ * button; taken names and invalid input fields return to their owning step
+ * instead. A destination failure says what the re-read destination changed
+ * (`destinationNote`) and links to its setting.
  */
-export function FailureNotice({ failure }: { failure: CreateFailed }) {
+export function FailureNotice({ failure, destinationNote }: { failure: CreateFailed; destinationNote?: string }) {
   const abandon = (
     <LinkButton to="/" tone="ghost" size="sm">
       {text.abandon}
@@ -67,6 +70,23 @@ export function FailureNotice({ failure }: { failure: CreateFailed }) {
     return (
       <Notice tone="error" actions={abandon}>
         {copy.create.forbidden}
+      </Notice>
+    )
+  }
+  if (failure.destination) {
+    const { reason, message } = failure.destination
+    const changed = reason === 'DestinationChanged' || reason === 'DestinationMismatch'
+    return (
+      <Notice
+        tone="error"
+        title={changed ? copy.create.destination.changedTitle : copy.create.destination.blockedTitle}
+        actions={<>
+          <LinkButton href={paths.repositoryDestinationSettings} size="sm">{copy.create.destination.openSetting}</LinkButton>
+          {abandon}
+        </>}
+      >
+        <p className="break-words" data-testid="create-destination-failure">{destinationNote ?? copy.create.destination.problem(reason, message)}</p>
+        {failure.progress.draft ? <p className="mt-1 opacity-80">{copy.create.draftKept}</p> : null}
       </Notice>
     )
   }

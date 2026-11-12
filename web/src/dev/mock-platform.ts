@@ -34,6 +34,13 @@
 // Toggles:
 // - `POST /api/v1/__mock/role {role}` switches the caller's Team role (Viewer → create calls answer 403).
 // - `POST /api/v1/__mock/registry {connected}` (or `MOCK_REGISTRY=off`) removes the ready registry connection.
+// - Repository destination: two GitHub connections (acme, acme-labs); the Project default is acme. The source-connections
+//   list carries `repositoryDestination`; `GET/PUT …/repository-destination-settings` keep the Project default (ETag
+//   `"settings-<n>"`, If-Match + Idempotency-Key, Admin only, stale If-Match → 412 repository_destination_settings_changed).
+//   New template repositories go to the resolved owner; a stale `destinationRevision` answers 409 DestinationChanged,
+//   another asserted connection/imagePath 409 DestinationMismatch, a blocked destination 412 with its reason.
+//   `POST /api/v1/__mock/repository-destination {projectDefault?, environmentDefault?}` (connection id or null) changes
+//   the defaults as someone else would: `{projectDefault: null}` makes it Ambiguous.
 // - `POST /api/v1/__mock/reject-next-validation` makes the next stack validation fail its `source` section once.
 // - `POST /api/v1/__mock/codex {available, reason?, policy?}` (or `MOCK_CODEX=off`) switches
 //   plan/turn/implementation availability. Reasons and policy names reach creation-tools and 412 details.
@@ -115,6 +122,12 @@ import {
   UpdateApplicationDraftRequest,
 } from '@appthrust/api-schema/platform-api'
 import { implementationTodoId } from '../features/build/implement/state'
+import {
+  PutRepositoryDestinationSettingsRequest,
+  type CreateApplicationSourceRepositoryRequest as DestinationBoundSourceRepositoryRequest,
+  type RepositoryDestinationResolution,
+  type RepositoryDestinationSelection,
+} from '../api/repository-destination'
 import { designFromReadings, readingOf, type DesignInput } from '../features/excel2app/design'
 import { designTextJa } from '../features/excel2app/design-copy'
 import { textJa as excelTextJa } from '../features/excel2app/copy'
@@ -256,19 +269,19 @@ const stamp = () => {
   return new Date(lastStamp).toISOString()
 }
 
-function repositoryFor(appName: string, status: ApplicationSourceRepository['status']): ApplicationSourceRepository {
+function repositoryFor(appName: string, status: ApplicationSourceRepository['status'], owner = 'acme', sourceConnectionId = 'github-source-207cb7ce'): ApplicationSourceRepository {
   return {
     id: `${appName}-src`,
     projectId: MOCK_PROJECT_ID,
-    sourceConnectionId: 'github-source-207cb7ce',
+    sourceConnectionId,
     template: { repository: 'appthrust/template-nextjs', ref: 'main' },
     destination: { repositoryName: appName, visibility: 'private' },
-    image: { imagePath: `ghcr.io/acme/${appName}`, tagFilter: 'edge-', versioningScheme: 'Alphabetical' },
-    build: { state: status === 'ready' ? 'healthy' : status === 'failed' ? 'failed' : 'running', runUrl: `https://github.com/acme/${appName}/actions/runs/1`, headSha: 'mock-head', observedAt: stamp() },
+    image: { imagePath: `ghcr.io/${owner}/${appName}`, tagFilter: 'edge-', versioningScheme: 'Alphabetical' },
+    build: { state: status === 'ready' ? 'healthy' : status === 'failed' ? 'failed' : 'running', runUrl: `https://github.com/${owner}/${appName}/actions/runs/1`, headSha: 'mock-head', observedAt: stamp() },
     status,
     conditions: [],
     createdAt: stamp(),
-    ...(status === 'ready' ? { repositoryUrl: `https://github.com/acme/${appName}`, defaultBranch: 'main' } : {}),
+    ...(status === 'ready' ? { repositoryUrl: `https://github.com/${owner}/${appName}`, defaultBranch: 'main' } : {}),
   }
 }
 
@@ -328,18 +341,24 @@ const PLAN_ACTIVITY = [
   '> 計画を確かめています',
 ]
 
+/** Where the resolved destination puts images; the acme default while the destination is blocked. */
+function planRegistryNamespace(): string {
+  const resolution = resolveDestination()
+  return resolution.state === 'Resolved' ? resolution.destination.registryNamespace : 'ghcr.io/acme'
+}
+
 /** The plan the mock "AI" writes: a new repository from the default ひな形, published on the project domain. */
 function mockPlan(appName: string, publish = true): ApplicationDraftCreationPlan {
   return {
     summary: '見積書を作って PDF で出せるアプリです。顧客と品目を登録し、見積の一覧から探せます。',
     representation: ['SourceRepository', 'ApplicationStack', 'Application', 'Component', 'Database', 'Publish'],
     markdown: `# ${appName}\n\n- web: Next.js\n- database: PostgreSQL${publish ? `\n- publish: https://${appName}.${BASE_DOMAIN}` : ''}`,
+    // No connection: the platform resolves the destination. The image path is the server-derived one of that
+    // destination (the published 0.1.x schema still requires it for templates).
     applicationSourceRepositoryRequest: {
-      sourceConnectionId: 'github-source-207cb7ce',
-      registryConnectionRef: 'ghcr-acme',
       template: { repository: 'appthrust/template-nextjs', ref: 'main' },
       destination: { repositoryName: appName, visibility: 'private' },
-      image: { imagePath: `ghcr.io/acme/${appName}`, tagFilter: 'edge-', versioningScheme: 'Alphabetical' },
+      image: { imagePath: `${planRegistryNamespace()}/${appName}`, tagFilter: 'edge-', versioningScheme: 'Alphabetical' },
       build: { mode: 'observed-image', ref: 'main' },
     },
     applicationStackRequest: {
@@ -441,7 +460,8 @@ function draftSourceRecord(draft: ApplicationDraft) {
   const request = draft.creationPlan?.applicationSourceRepositoryRequest
   return request?.destination && draft.createdSourceRepositories?.find((record) =>
     record.repositoryName.toLowerCase() === request.destination!.repositoryName.toLowerCase() &&
-    record.sourceConnectionId === request.sourceConnectionId &&
+    // New-repository requests no longer name a connection; the record keeps the one the platform resolved.
+    (!request.sourceConnectionId || record.sourceConnectionId === request.sourceConnectionId) &&
     record.gitProviderConnectionRef?.name === request.gitProviderConnectionRef?.name &&
     record.gitProviderConnectionRef?.namespace === request.gitProviderConnectionRef?.namespace)
 }
@@ -789,20 +809,32 @@ function advanceDraft(draft: ApplicationDraft): boolean {
     }
     if (sourceRequest && !repository) {
       const name = sourceRequest.destination?.repositoryName ?? appName
-      if (state.githubRepositoryNames.has(name) && !record?.repository && !sourceRequest.existing) {
-        Object.assign(execution, { status: 'failed', finishedAt: now, error: `name already exists: ${name}: GitHub repository acme/${name} already exists. Choose a different repository name.` })
+      const existing = sourceRequest.existing ?? (record?.repository ? { repository: record.repository, ref: record.defaultBranch } : undefined)
+      // A new repository goes where the platform resolves it now; a blocked destination fails the source step.
+      const resolution = resolveDestination()
+      if (!existing && resolution.state === 'Blocked') {
+        Object.assign(execution, { status: 'failed', finishedAt: now, error: resolution.message })
+        execution.steps = execution.steps.map((step) => step.tool === 'appthrust.applicationSourceRepository.create'
+          ? { ...step, status: 'failed', message: resolution.message, finishedAt: now, detail: { since: now, attempt: execution.attempt, reason: resolution.reason } }
+          : step)
         draft.phase = 'planning'
         continue
       }
-      const existing = sourceRequest.existing ?? (record?.repository ? { repository: record.repository, ref: record.defaultBranch } : undefined)
+      const owner = resolution.state === 'Resolved' ? resolution.destination.repositoryNamespace : 'acme'
+      const connectionId = resolution.state === 'Resolved' ? resolution.destination.connectionId : undefined
+      if (state.githubRepositoryNames.has(name) && !record?.repository && !sourceRequest.existing) {
+        Object.assign(execution, { status: 'failed', finishedAt: now, error: `name already exists: ${name}: GitHub repository ${owner}/${name} already exists. Choose a different repository name.` })
+        draft.phase = 'planning'
+        continue
+      }
       repository = existing
         ? adoptedRepository({ ...sourceRequest, template: undefined, destination: undefined, existing })
-        : repositoryFor(name, 'pending')
+        : repositoryFor(name, 'pending', owner, connectionId)
       state.repositories.set(repository.id, repository)
       state.githubRepositoryNames.add(name)
       if (!existing || record) {
         draft.createdSourceRepositoryId = repository.id
-        const created = { sourceRepositoryId: repository.id, repositoryName: name, repository: `acme/${name}`, defaultBranch: 'main', sourceConnectionId: sourceRequest.sourceConnectionId, gitProviderConnectionRef: sourceRequest.gitProviderConnectionRef }
+        const created = { sourceRepositoryId: repository.id, repositoryName: name, repository: `${owner}/${name}`, defaultBranch: 'main', sourceConnectionId: connectionId ?? sourceRequest.sourceConnectionId, gitProviderConnectionRef: sourceRequest.gitProviderConnectionRef }
         draft.createdSourceRepositories = [...(draft.createdSourceRepositories ?? []).filter((item) => item !== record), created]
       }
     }
@@ -1120,6 +1152,13 @@ function seedPlatform() {
     databaseChanges: new Map<string, DatabaseChange[]>(),
     /** Repository names that exist on GitHub (`acme/<name>`); a deleted source repository leaves its name here. */
     githubRepositoryNames: new Set<string>(['uriage']),
+    /** Project / environment default destinations (`connectionId`), and the settings version behind the ETag. */
+    destination: {
+      projectDefault: { connectionId: 'github-source-207cb7ce' } as RepositoryDestinationSelection | null,
+      environmentDefault: null as RepositoryDestinationSelection | null,
+      version: 1,
+      replays: new Map<string, unknown>(),
+    },
     sequence: 0,
     githubRepositories,
     templates,
@@ -1415,7 +1454,68 @@ const sourceConnections: GitHubSourceConnection[] = [
     status: 'ready',
     source: 'github-source-connection-cr',
   },
+  // A second organization: without a declared default the destination is Ambiguous.
+  {
+    id: 'github-source-729d7936',
+    displayName: 'Acme Labs GitHub',
+    account: { login: 'acme-labs', type: 'Organization' },
+    capabilities: ['createRepositories', 'readTemplateRepositories', 'readPackages'],
+    status: 'ready',
+    source: 'github-source-connection-cr',
+  },
 ]
+
+/** The platform's Resolver: Project default, else environment default, else the sole creatable connection. */
+function resolveDestination(): RepositoryDestinationResolution {
+  const blocked = (reason: string, message: string, candidateIds?: string[]): RepositoryDestinationResolution =>
+    ({ state: 'Blocked', reason, message, ...(candidateIds ? { candidateIds } : {}), settingsUrl: `/dashboard/projects/${MOCK_PROJECT_ID}/settings#repository-destination` })
+  const { projectDefault, environmentDefault, version } = state.destination
+  const declared = projectDefault ?? environmentDefault
+  const creatable = sourceConnections.filter((connection) => connection.capabilities.includes('createRepositories'))
+  let connection: GitHubSourceConnection | undefined
+  let source: 'Project' | 'Environment' | 'SingleConnection'
+  if (declared) {
+    connection = sourceConnections.find((item) => item.id === declared.connectionId)
+    if (!connection) return blocked('NotFound', `source connection ${declared.connectionId} not found`)
+    source = projectDefault ? 'Project' : 'Environment'
+  } else {
+    if (creatable.length === 0) return blocked('NotConfigured', 'no source connection can create repositories')
+    if (creatable.length > 1) return blocked('Ambiguous', 'several source connections can create repositories and no default is declared', creatable.map((item) => item.id))
+    connection = creatable[0]!
+    source = 'SingleConnection'
+  }
+  if (connection.status !== 'ready') return blocked('NotReady', `source connection ${connection.id} is not ready`)
+  if (!connection.capabilities.includes('createRepositories')) return blocked('MissingCapability', `source connection ${connection.id} cannot create repositories`)
+  if (!state.registryConnected) return blocked('ImageAccessNotConfigured', `no image access for ghcr.io/${connection.account.login}`)
+  const imageAccessId = declared?.imageAccessId ?? 'ghcr-acme'
+  return {
+    state: 'Resolved',
+    source,
+    revision: `rev-${connection.id}-${version}`,
+    destination: {
+      connectionId: connection.id,
+      provider: 'github',
+      displayName: connection.displayName,
+      repositoryNamespace: connection.account.login,
+      registryNamespace: `ghcr.io/${connection.account.login}`,
+      imageAccessId,
+    },
+  }
+}
+
+/** Blocked → 412 (403 NotVisible); a stale revision → 409 DestinationChanged; another asserted place → 409 DestinationMismatch. */
+function destinationRejection(body: DestinationBoundSourceRepositoryRequest, resolution: RepositoryDestinationResolution): Response | undefined {
+  if (resolution.state === 'Blocked') return error(resolution.reason === 'NotVisible' ? 403 : 412, resolution.reason === 'NotVisible' ? 'permission_denied' : 'failed_precondition', resolution.message, { reason: resolution.reason })
+  const { destination, revision } = resolution
+  const name = body.destination?.repositoryName ?? ''
+  if ((body.sourceConnectionId && body.sourceConnectionId !== destination.connectionId) || (body.image?.imagePath && body.image.imagePath !== `${destination.registryNamespace}/${name}`)) {
+    return error(409, 'conflict', `request does not match the resolved repository destination ${destination.repositoryNamespace}`, { reason: 'DestinationMismatch' })
+  }
+  if (body.destinationRevision && body.destinationRevision !== revision) {
+    return error(409, 'conflict', 'repository destination changed since it was read', { reason: 'DestinationChanged' })
+  }
+  return undefined
+}
 
 const registryConnections: RegistryConnection[] = [
   { id: 'ghcr-acme', displayName: 'GHCR (acme)', registryHost: 'ghcr.io', registryType: 'ghcr', status: 'ready', source: 'registry-connection-cr' },
@@ -1481,8 +1581,8 @@ function codexUnavailable(message: string): Response {
 }
 
 /** The platform's answer for a destination repository that already exists on GitHub. */
-const githubRepositoryExists = (name: string) =>
-  error(409, 'conflict', `GitHub repository acme/${name} already exists. Choose a different repository name.`)
+const githubRepositoryExists = (name: string, owner: string) =>
+  error(409, 'conflict', `GitHub repository ${owner}/${name} already exists. Choose a different repository name.`)
 const list = <T>(data: T[]) => ({ data, meta: { total: data.length } })
 
 function operation(kind: string, id: string): PublicOperation {
@@ -1645,6 +1745,14 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
   }],
   ['GET', /^\/api\/v1\/__mock\/logs$/, (_, __, url) => json(state.logs.get(url.searchParams.get('componentId') ?? '') ?? { status: 200, requests: 0 })],
   ['POST', /^\/api\/v1\/__mock\/advance$/, () => json({ moved: advance() })],
+  // Someone else changes the defaults: the settings version (ETag) and the resolution revision move.
+  ['POST', /^\/api\/v1\/__mock\/repository-destination$/, async (_, request) => {
+    const body = (await request.json()) as { projectDefault?: string | null; environmentDefault?: string | null }
+    if (body.projectDefault !== undefined) state.destination.projectDefault = body.projectDefault ? { connectionId: body.projectDefault } : null
+    if (body.environmentDefault !== undefined) state.destination.environmentDefault = body.environmentDefault ? { connectionId: body.environmentDefault } : null
+    state.destination.version++
+    return json(resolveDestination())
+  }],
   [
     'POST',
     /^\/api\/v1\/__mock\/role$/,
@@ -1751,7 +1859,33 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
     /^\/api\/v1\/teams\/([^/]+)\/directory-users$/,
     () => json({ items: [{ id: 'u-new-1', email: 'kobayashi@acme.example', name: '小林 真' }, { id: 'u-new-2', email: 'kato@acme.example', name: '加藤 葵' }] }),
   ],
-  ['GET', new RegExp(`^${P}/source-connections$`), () => json(list(sourceConnections))],
+  ['GET', new RegExp(`^${P}/source-connections$`), () => json({ ...list(sourceConnections), repositoryDestination: resolveDestination() })],
+  ['GET', new RegExp(`^${P}/repository-destination$`), () => json(resolveDestination())],
+  ['GET', new RegExp(`^${P}/repository-destination-settings$`), () =>
+    Response.json({ defaultDestination: state.destination.projectDefault }, { headers: { 'Cache-Control': 'no-store', ETag: `"settings-${state.destination.version}"` } })],
+  ['PUT', new RegExp(`^${P}/repository-destination-settings$`), async (_, request) => {
+    const key = request.headers.get('Idempotency-Key')
+    const ifMatch = request.headers.get('If-Match')
+    if (!key || !ifMatch) return error(400, 'invalid_argument', 'Idempotency-Key and If-Match are required')
+    const replay = state.destination.replays.get(key)
+    if (replay) return json(replay, 202)
+    // project.manage: only the Admin role may change the Project default.
+    if (state.role !== 'Admin') return error(403, 'permission_denied', 'project.manage is required to change the repository destination')
+    if (ifMatch !== `"settings-${state.destination.version}"`) {
+      return error(412, 'failed_precondition', 'repository destination settings changed; reload before saving', { reason: 'repository_destination_settings_changed' })
+    }
+    const parsed = PutRepositoryDestinationSettingsRequest.safeParse(await request.json())
+    if (!parsed.success) return error(400, 'invalid_argument', 'invalid repository destination settings')
+    const next = parsed.data.defaultDestination
+    if (next && !sourceConnections.some((connection) => connection.id === next.connectionId)) {
+      return error(412, 'failed_precondition', `source connection ${next.connectionId} not found`, { reason: 'NotFound' })
+    }
+    state.destination.projectDefault = next
+    state.destination.version++
+    const envelope = { resource: { defaultDestination: next }, operation: operation('RepositoryDestinationSettings', MOCK_PROJECT_ID) }
+    state.destination.replays.set(key, envelope)
+    return json(envelope, 202)
+  }],
   [
     'GET',
     new RegExp(`^${P}/source-connections/([^/]+)/repositories$`),
@@ -1786,7 +1920,8 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
     'POST',
     new RegExp(`^${P}/application-source-repositories/validate$`),
     async (_, request) => {
-      const body = (await request.json()) as CreateApplicationSourceRepositoryRequest
+      const body = (await request.json()) as DestinationBoundSourceRepositoryRequest
+      const resolution = resolveDestination()
       if (body.existing) {
         const adopted = adoptedRepository({ ...body, existing: body.existing })
         const problem = !state.githubRepositories.some((repository) => repository.fullName === body.existing?.repository)
@@ -1794,13 +1929,19 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
           : state.repositories.has(adopted.id)
             ? 'repository is already adopted'
             : undefined
-        return json(problem ? { valid: false, message: problem } : { valid: true })
+        return json(problem ? { valid: false, message: problem, repositoryDestination: resolution } : { valid: true, repositoryDestination: resolution })
       }
+      const rejected = destinationRejection(body, resolution)
+      if (rejected) return rejected
+      const owner = resolution.state === 'Resolved' ? resolution.destination.repositoryNamespace : 'acme'
       const name = body.destination?.repositoryName
       // Like the platform: an existing GitHub repository is a 409 conflict, not `valid: false`.
-      if (name && state.githubRepositoryNames.has(name)) return githubRepositoryExists(name)
+      if (name && state.githubRepositoryNames.has(name)) return githubRepositoryExists(name, owner)
       const problem = name && DNS_LABEL.test(name) ? undefined : `'${name ?? ''}' is not a valid DNS label`
-      return json(problem ? { valid: false, message: problem } : { valid: true })
+      const computed = resolution.state === 'Resolved' && name
+        ? { repositoryUrl: `https://github.com/${owner}/${name}`, imagePath: `${resolution.destination.registryNamespace}/${name}`, tagFilter: 'edge-', versioningScheme: 'Alphabetical' }
+        : {}
+      return json(problem ? { valid: false, message: problem, repositoryDestination: resolution } : { valid: true, repositoryDestination: resolution, ...computed })
     },
   ],
   [
@@ -1808,24 +1949,24 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
     new RegExp(`^${P}/application-source-repositories$`),
     async (_, request) => {
       if (state.role === 'Viewer') return error(403, 'forbidden', 'team role Viewer cannot create source repositories')
-      const body = (await request.json()) as CreateApplicationSourceRepositoryRequest
-      const connection = sourceConnections.find((source) => source.id === body.sourceConnectionId)
-      const templateRepository = body.template?.repository.trim().toLowerCase()
-      if (templateRepository && connection?.allowedRepositories?.length && !connection.allowedRepositories.some((allowed) => allowed.trim().toLowerCase() === templateRepository)) {
-        return error(400, 'invalid_argument', "'template.repository' is not allowed by the selected source connection")
-      }
+      const body = (await request.json()) as DestinationBoundSourceRepositoryRequest
       if (body.existing) {
         const repository = adoptedRepository({ ...body, existing: body.existing })
         if (state.repositories.has(repository.id)) return error(409, 'conflict', 'repository is already adopted')
         state.repositories.set(repository.id, repository)
         return json(mutation('ApplicationSourceRepository', repository.id, repository), 201)
       }
+      const resolution = resolveDestination()
+      const rejected = destinationRejection(body, resolution)
+      if (rejected) return rejected
+      if (resolution.state !== 'Resolved') return error(412, 'failed_precondition', resolution.message, { reason: resolution.reason })
+      const { repositoryNamespace: owner, connectionId } = resolution.destination
       const name = body.destination?.repositoryName
       const problem = nameProblem(name)
       if (problem || !name) return error(409, 'conflict', problem ?? 'invalid')
-      if (state.githubRepositoryNames.has(name)) return githubRepositoryExists(name)
+      if (state.githubRepositoryNames.has(name)) return githubRepositoryExists(name, owner)
       state.githubRepositoryNames.add(name)
-      const repository = repositoryFor(name, 'pending')
+      const repository = repositoryFor(name, 'pending', owner, connectionId)
       state.repositories.set(repository.id, repository)
       return json(mutation('ApplicationSourceRepository', repository.id, repository), 201)
     },
@@ -2262,8 +2403,14 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
       const record = draftSourceRecord(draft)
       const source = record ? state.repositories.get(record.sourceRepositoryId) : undefined
       const reuseProblem = source && source.status !== 'ready' ? `SourceRepository ${source.id} is not ready for reuse.` : undefined
+      // A plan that creates a new repository needs a resolved destination, like the platform's plan validation.
+      const resolution = resolveDestination()
+      if (request?.template && !source && !record?.repository && resolution.state === 'Blocked') {
+        return error(412, 'failed_precondition', resolution.message, { reason: resolution.reason })
+      }
+      const owner = resolution.state === 'Resolved' ? resolution.destination.repositoryNamespace : 'acme'
       const collision = name && state.githubRepositoryNames.has(name) && !source && !record?.repository
-        ? `name already exists: ${name}: GitHub repository acme/${name} already exists. Choose a different repository name.`
+        ? `name already exists: ${name}: GitHub repository ${owner}/${name} already exists. Choose a different repository name.`
         : undefined
       const problem = !draft.creationPlan ? 'creationPlan is required' : nameProblem(appName) ?? reuseProblem ?? collision ?? publishProblem(draft.creationPlan.applicationStackRequest?.publish)
       const validation = problem

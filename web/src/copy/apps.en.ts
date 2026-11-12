@@ -2,6 +2,23 @@ import type { apps, reasonCopy, reasonHelp } from './apps'
 
 const PREREQUISITE = { github: 'GitHub connection', registry: 'app storage', domain: 'domain for publishing' }
 
+const DESTINATION_REASON: Record<string, string> = {
+  NotConfigured: 'No GitHub connection can create new code locations.',
+  Ambiguous: 'Several GitHub connections can create code locations, and none is chosen as the destination.',
+  NotFound: 'The GitHub connection chosen as the destination no longer exists.',
+  Deleting: 'The GitHub connection chosen as the destination is being deleted.',
+  NotReady: 'The destination GitHub connection is not ready yet.',
+  MissingCapability: 'The destination GitHub connection is not allowed to create code locations.',
+  NotVisible: 'This project cannot use the destination GitHub connection.',
+  UnsupportedProvider: 'The destination connection cannot create code locations automatically.',
+  ImageAccessNotConfigured: 'No app storage matches the destination.',
+  ImageAccessAmbiguous: 'Several app storages match the destination, and none is chosen.',
+  ImageAccessNotReady: 'The destination app storage is not ready yet.',
+  DestinationMismatch: 'The requested location does not match the destination set on the platform.',
+  DestinationChanged: 'The destination for new code locations has changed.',
+  Unavailable: 'Could not check where new code locations are created.',
+}
+
 export const appsEn: typeof apps = {
   status: {
     live: 'Live',
@@ -114,7 +131,6 @@ export const appsEn: typeof apps = {
       template: { title: 'Blank app', body: 'Build the contents with AI later.' },
       templateUnavailable: 'This template is unavailable right now; ask your administrator for help.',
       templateNotAdmitted: (repository: string) => `${repository} is unavailable; ask your administrator to allow it in the GitHub connection.`,
-      templateNoConnection: 'Ask your administrator to set up a GitHub connection that supports templates.',
       existingUnavailable: 'Creating an app from your code is unavailable right now; ask your administrator for help.',
       aiUnavailable: 'Building with AI is unavailable right now; ask your administrator for help.',
     },
@@ -139,6 +155,26 @@ export const appsEn: typeof apps = {
     prerequisite: PREREQUISITE,
     missing: (items: readonly (keyof typeof PREREQUISITE)[]) =>
       `Ask your administrator to set up: ${items.map((item) => PREREQUISITE[item]).join(', ')}.`,
+    destination: {
+      title: 'New code location',
+      repository: (path: string) => `Created on GitHub at ${path}.`,
+      image: (path: string) => `App storage: ${path}`,
+      source: {
+        Project: 'This destination is set for this project.',
+        Environment: 'This destination is the platform-wide default.',
+        SingleConnection: 'Only one GitHub connection is available, so it is used.',
+      },
+      problem: (reason: string, message: string) => DESTINATION_REASON[reason] ?? (message || DESTINATION_REASON.Unavailable!),
+      askAdmin: ' Ask your administrator to set the destination for new code locations.',
+      fixHere: ' You can fix this under Platform settings → Destination for new code locations.',
+      openSetting: 'Open destination settings',
+      blockedTitle: 'New code locations cannot be created',
+      changedTitle: 'The destination for new code locations has changed',
+      moved: (before: string, after: string) => `The destination changed from ${before} to ${after}. Check the details below and create again.`,
+      refreshed: 'The destination details were refreshed. Check the details below and create again.',
+      nowBlocked: 'No destination is available right now, so the app cannot be created. ',
+      retryAfterFix: ' Fix the destination setting, then try again.',
+    },
     advanced: {
       toggle: 'Advanced',
       lead: 'Run an existing container image as it is.',
@@ -198,7 +234,7 @@ export const appsEn: typeof apps = {
       submit: 'Create',
       retry: 'Try again',
       resume: 'Continue building',
-      labels: { description: 'Description', tags: 'Tags', repository: 'Code location', template: 'Template' },
+      labels: { description: 'Description', tags: 'Tags', repository: 'Code location', template: 'Template', destination: 'New code location' },
     },
     phase: {
       draft: 'Registering the app…',

@@ -4,13 +4,19 @@
 // The console is served same-origin with a reverse proxy: `/api/*` goes to the
 // Platform API, and the Authorization header is attached by the OIDC edge
 // (Envoy) in front of the console. The SPA never sees or requests a token.
-import { platformApiRouter } from '@appthrust/api-schema/platform-api-router'
+import { platformApiRouter as publishedPlatformApiRouter } from '@appthrust/api-schema/platform-api-router'
 import { createORPCClient, ORPCError } from '@orpc/client'
 import type { ContractRouterClient } from '@orpc/contract'
 import { OpenAPILink } from '@orpc/openapi-client/fetch'
+import { platformApiRepositoryDestinationsRouter } from './repository-destination'
 import { assertSessionActive, checkSessionResponse } from './session-expiry'
 
-type PlatformClientContext = { idempotencyKey?: string }
+// The repository-destination routes are not in the published contract yet
+// (see ./repository-destination); drop this spread when the package is bumped.
+const platformApiRouter = { ...publishedPlatformApiRouter, ...platformApiRepositoryDestinationsRouter }
+
+/** `onResponse` sees the raw answer (for headers such as `ETag`) before the body is decoded. */
+type PlatformClientContext = { idempotencyKey?: string; onResponse?: (response: Response) => void }
 export type PlatformApiClient = ContractRouterClient<typeof platformApiRouter, PlatformClientContext>
 
 const READ_TIMEOUT_MS = 8_000
@@ -33,7 +39,11 @@ export async function platformFetch(request: Request): Promise<Response> {
 const link = new OpenAPILink<PlatformClientContext>(platformApiRouter, {
   url: () => window.location.origin,
   headers: ({ context }) => context.idempotencyKey ? { 'Idempotency-Key': context.idempotencyKey } : {},
-  fetch: (request) => platformFetch(request),
+  fetch: async (request, _init, options) => {
+    const response = await platformFetch(request)
+    options.context?.onResponse?.(response)
+    return response
+  },
 })
 
 export const client: PlatformApiClient = createORPCClient(link)

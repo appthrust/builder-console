@@ -6,7 +6,8 @@ import { assistantParts } from '../../model/build/messages'
 import { isFirstTurn, isPrepareTurn, prepareShareLabel, replyOptions } from '../../model/build/questions'
 import type { BuildFailure, BuildMessage, BuildStage, ProgressCard } from '../../model/build/types'
 import { paths } from '../../routes/paths'
-import { Button, cn, CopyButton, HrefLink, Notice } from '../../ui'
+import { copy } from '../../copy'
+import { Button, cn, CopyButton, HrefLink, LinkButton, Notice } from '../../ui'
 import { Composer } from './composer'
 import { ProposalBody } from './proposal'
 import { NameChoice } from './name-choice'
@@ -90,7 +91,12 @@ export function ConversationPane({ messages, stage, answering, thinking: turnPen
           if (message.role === 'notice') {
             // Retrying a prepare with the same name can only fail again: the only way forward is a different name.
             const nameTaken = message.retry === 'prepare' && failure?.kind === 'name-taken' && message.title === failure.title
-            const actions = nameTaken ? <NameChoice suggestion={failure.suggestedName} onUse={onUseName} /> : message.retry ? <Button size="sm" onClick={() => onRetry(message.retry!)}>{uiText.conversation.retry}</Button> : undefined
+            const retry = message.retry ? <Button size="sm" onClick={() => onRetry(message.retry!)}>{uiText.conversation.retry}</Button> : undefined
+            // A blocked destination is fixed in its setting; the retry then creates where it now points.
+            const destination = failure?.kind === 'destination' && message.title === failure.title
+              ? <><LinkButton href={paths.repositoryDestinationSettings} size="sm">{copy.create.destination.openSetting}</LinkButton>{retry}</>
+              : undefined
+            const actions = nameTaken ? <NameChoice suggestion={failure.suggestedName} onUse={onUseName} /> : destination ?? retry
             const reference = message.reference ? buildFailureReference(message.reference) : undefined
             return <Notice key={key} tone={message.tone} title={message.title} actions={actions}>
               {message.detail}

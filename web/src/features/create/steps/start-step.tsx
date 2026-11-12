@@ -14,14 +14,15 @@ import { joinBusinessTemplates, type BusinessTemplate } from '../templates'
 
 export type EntryBlocks = Record<CreateEntry, string | undefined>
 
-export function StartStep({ form, disabled, loading, catalogFailed, onRetryCatalog, blocked, setupLink, catalog, codexAvailable, codexUnavailableReason, codexPolicy, onBuild, onCustomize, startingBuild, onTemplate, onExisting, onUseImage }: {
+export function StartStep({ form, disabled, loading, catalogFailed, onRetryCatalog, blocked, setup, catalog, codexAvailable, codexUnavailableReason, codexPolicy, onBuild, onCustomize, startingBuild, onTemplate, onExisting, onUseImage }: {
   form: CreateFormApi
   disabled: boolean
   loading: boolean
   catalogFailed: boolean
   onRetryCatalog: () => void
   blocked: EntryBlocks
-  setupLink: boolean
+  /** Where the blocking setup is fixed (基盤の設定, or its destination section); undefined when there is no link to offer. */
+  setup: { href: string; label: string } | undefined
   catalog: ApplicationTemplateSummary[]
   codexAvailable: boolean
   codexUnavailableReason?: ApplicationDraftCreationToolRegistryResponse['codexUnavailableReason']
@@ -38,7 +39,7 @@ export function StartStep({ form, disabled, loading, catalogFailed, onRetryCatal
   const ready = (entry: CreateEntry) => !disabled && !loading && !catalogFailed && !blocked[entry]
   const templates = joinBusinessTemplates(catalog)
   const frameworks = catalog.filter((item) => item.category !== 'business' && item.sourceKinds.includes('github-template'))
-  const setupAction = setupLink ? <LinkButton to="/-/admin/platform" size="sm" icon={<Settings className="size-4" />}>{text.openPlatform}</LinkButton> : undefined
+  const setupAction = setup ? <LinkButton href={setup.href} size="sm" icon={<Settings className="size-4" />}>{setup.label}</LinkButton> : undefined
   const reasons = [...new Set([blocked.existing, blocked.template].filter((reason) => reason !== undefined))]
   const policyExplanation = aiPolicyExplanation(codexUnavailableReason, codexPolicy)
   const showAi = codexAvailable || Boolean(policyExplanation)

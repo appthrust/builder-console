@@ -1,11 +1,12 @@
 // Step 1: app name, description, tags, owner group and URL name.
-// Existing work asks for its source first.
+// Existing work asks for its source first; a template shows where the
+// platform will create its repository (read-only: the platform decides).
 import { useStore } from '@tanstack/react-form'
 import { Plus, X } from 'lucide-react'
 import { useState, type KeyboardEvent } from 'react'
 import type { GroupNode } from '../../../api/console'
 import { copy } from '../../../copy'
-import { appUrl, isValidAppName } from '../../../model/create'
+import { appUrl, destinationImage, destinationRepository, isValidAppName, type ResolvedDestination } from '../../../model/create'
 import { Button, Field, GroupSelect, TextInput } from '../../../ui'
 import { detailsSchema, firstError, syncUrlName, type CreateFormApi } from '../form'
 import { RepositoryPicker } from './repository-picker'
@@ -22,6 +23,7 @@ export function DetailsStep({
   form,
   projectId,
   sourceConnectionId,
+  destination,
   groups,
   domain,
   nameTaken,
@@ -31,6 +33,8 @@ export function DetailsStep({
   form: CreateFormApi
   projectId: string
   sourceConnectionId: string | undefined
+  /** ひな形: where the platform resolved the new repository to go. */
+  destination: ResolvedDestination | undefined
   /** Depth-first group tree. */
   groups: GroupNode[]
   /** Publish domain; undefined while unknown. */
@@ -149,7 +153,26 @@ export function DetailsStep({
           />
         )}
       </form.Field>
+      {destination ? <NewRepository form={form} destination={destination} /> : null}
     </div>
+  )
+}
+
+/** Where the new repository and its images will live; the URL name completes both paths. */
+function NewRepository({ form, destination }: { form: CreateFormApi; destination: ResolvedDestination }) {
+  const urlName = useStore(form.store, (state) => state.values.urlName)
+  const named = isValidAppName(urlName)
+  return (
+    <section aria-labelledby="create-destination-title" className="rounded-lg border border-stone-200 bg-stone-50 px-4 py-3" data-testid="create-destination">
+      <h3 id="create-destination-title" className="text-sm font-medium text-stone-800">{copy.create.destination.title}</h3>
+      <p className="mt-1 text-sm break-all text-stone-700">
+        {copy.create.destination.repository(named ? destinationRepository(destination, urlName) : destination.destination.repositoryNamespace)}
+      </p>
+      <p className="mt-1 font-mono text-xs break-all text-stone-500">
+        {copy.create.destination.image(named ? destinationImage(destination, urlName) : destination.destination.registryNamespace)}
+      </p>
+      <p className="mt-2 text-xs text-stone-500">{copy.create.destination.source[destination.source]}</p>
+    </section>
   )
 }
 

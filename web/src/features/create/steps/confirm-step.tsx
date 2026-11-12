@@ -14,6 +14,7 @@ export function ConfirmStep({
   groupName,
   shareText,
   templateName,
+  newRepository,
   sourceProblem,
   onChooseTemplate,
 }: {
@@ -23,6 +24,8 @@ export function ConfirmStep({
   groupName: string
   shareText: string
   templateName: string | undefined
+  /** ひな形: the repository and image path the platform will create (its resolved destination). */
+  newRepository: { repository: string; image: string } | undefined
   sourceProblem: string | undefined
   onChooseTemplate: () => void
 }) {
@@ -34,6 +37,12 @@ export function ConfirmStep({
   }, [sourceProblem])
   const rows: Array<[string, ReactNode]> = [
     ...(values.entry === 'template' && templateName ? [[copy.create.confirm.labels.template, templateName] as [string, ReactNode]] : []),
+    ...(values.entry === 'template' && newRepository
+      ? [[copy.create.confirm.labels.destination, <span data-testid="confirm-destination">
+          <span className="block font-mono break-all">{newRepository.repository}</span>
+          <span className="block font-mono text-xs break-all text-stone-500">{copy.create.destination.image(newRepository.image)}</span>
+        </span>] as [string, ReactNode]]
+      : []),
     ...(values.entry === 'existing' && values.repository
       ? [[copy.create.confirm.labels.repository, <span className="font-mono">{values.repository.fullName}</span>] as [string, ReactNode]]
       : []),

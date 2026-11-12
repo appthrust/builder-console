@@ -8,11 +8,12 @@ import type { ConsoleApi } from '../../api/console'
 import { platformErrorEnvelope } from '../../api/platform-error'
 import {
   buildSourceRepositoryRequest,
+  isRepositoryDestinationReason,
   isValidAppName,
   numberedUrlName,
   type CreateCatalog,
   type CreateEntry,
-  type SourceConnections,
+  type ResolvedDestination,
 } from '../../model/create'
 import type { CreateProgress } from './submit'
 
@@ -32,7 +33,8 @@ export interface AvailabilityRequest {
   entry: Exclude<CreateEntry, 'ai'> | undefined
   /** ひな形 only: what the repository request is built from. */
   catalog?: CreateCatalog
-  connections?: SourceConnections
+  /** ひな形 only: where the platform resolved the new repository to go. */
+  destination?: ResolvedDestination
   /** What an earlier attempt of this wizard made: the user's own, never "taken". */
   own?: Pick<CreateProgress, 'draft' | 'stackId' | 'sourceRepositoryOrigin'>
 }
@@ -75,21 +77,20 @@ async function consolePathTaken(name: string, request: AvailabilityRequest, deps
  * owner/name already exists`); a `valid: false` saying so counts too.
  */
 async function repositoryTaken(name: string, request: AvailabilityRequest, deps: AvailabilityDeps): Promise<boolean> {
-  const { catalog, connections } = request
+  const { catalog, destination } = request
   const origin = request.own?.sourceRepositoryOrigin
   // Only a kept ひな形 repository made for this very name is the user's own; any other origin does not waive the check.
   const own = origin?.kind === 'template' && origin.appName === name
-  if (request.entry !== 'template' || !catalog || !connections || own) return false
+  if (request.entry !== 'template' || !catalog || !destination || own) return false
   try {
-    const validation = await deps.platform.platformApiValidateApplicationSourceRepository({
-      projectId: request.projectId,
-      ...buildSourceRepositoryRequest(name, catalog, connections),
-    })
+    const body = { projectId: request.projectId, ...buildSourceRepositoryRequest(name, catalog, destination) }
+    const validation = await deps.platform.platformApiValidateApplicationSourceRepository(body)
     return !validation.valid && /already exists/i.test(validation.message ?? '')
   } catch (error) {
     if (!(error instanceof ORPCError) || error.status !== 409) return false
+    // A moved or mismatched destination is the submit's to report, not a taken name.
     const reason = platformErrorEnvelope(error)?.details?.reason
-    return reason !== 'delivery_pending' && reason !== 'delivery_blocked'
+    return reason !== 'delivery_pending' && reason !== 'delivery_blocked' && !isRepositoryDestinationReason(reason)
   }
 }
 

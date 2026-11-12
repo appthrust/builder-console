@@ -1,5 +1,7 @@
 import type { ApplicationDraftImplementationFailureReason } from '@appthrust/api-schema/platform-api'
+import { copy as consoleCopy } from '../../copy'
 import { aiPolicyCopy, aiPolicyExplanation } from '../../copy/ai-policy'
+import { isRepositoryDestinationReason } from '../create'
 import { buildCopy } from './copy'
 import type { BuildFailure } from './types'
 
@@ -15,6 +17,13 @@ export function classifyBuildFailure(text: string, status: number | undefined, c
   const policy = aiPolicyExplanation(details?.reason, details?.policy)
     ?? aiPolicyExplanation(text.match(/ai_(?:policy_|model_|approval_policy_)[a-z_]*/i)?.[0]?.toLowerCase(), details?.policy)
   if (policy) return { kind: 'policy', title: aiPolicyCopy.title, reason: policy, raw: text }
+  // The platform refused to create the repository where the plan said (moved, mismatched or blocked destination).
+  const destination = [details?.reason, code].find(isRepositoryDestinationReason)
+  if (destination) {
+    const words = consoleCopy.create.destination
+    const changed = destination === 'DestinationChanged' || destination === 'DestinationMismatch'
+    return { kind: 'destination', title: changed ? words.changedTitle : words.blockedTitle, reason: `${words.problem(destination, text)}${words.retryAfterFix}`, raw: text, ...(reference ? { reference } : {}) }
+  }
   // A provider cause is more specific than the runtime's generic TaskFailed/stream reason.
   if (context !== 'prepare' && context !== 'publish' && isAIQuotaExhausted(text)) return { kind: 'quota', ...copy.quota, raw: text }
   if (context === 'implement' && failureReason) {

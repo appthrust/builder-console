@@ -1,10 +1,12 @@
 import type { ApplicationDraft, ApplicationDraftSourceSummary, UiDesign } from '@appthrust/api-schema/platform-api'
 import { Circle, PanelRightClose } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { copy } from '../../copy'
 import { buildCopy } from '../../model/build/copy'
 import { buildFailureReference } from '../../model/build/failure'
 import { importedRowCount } from '../../model/build/questions'
 import type { BuildFailure, BuildProposal, BuildSpec, BuildStage, ProgressCard as Progress } from '../../model/build/types'
+import { paths } from '../../routes/paths'
 import { ActivityLog, Card, CardBody, CopyButton, Disclosure, LinkButton, Notice } from '../../ui'
 import { ImplementPanel, type ImplementationState } from './implement'
 import type { PreviewDatabaseReset } from './implement/use-implementation'
@@ -130,7 +132,7 @@ export function ArtifactPane({ draft, spec, proposal, stage, progress, implement
     {built ? null : specCard}
     {!built && progress ? <ProgressCard progress={progress} failure={progressFailure} /> : null}
     {!built && proposal?.tasks.length ? <TasksPreview proposal={proposal} /> : null}
-    {showFailureNotice ? <Notice tone="error" title={failure.title}>
+    {showFailureNotice ? <Notice tone="error" title={failure.title} actions={failure.kind === 'destination' ? <LinkButton href={paths.repositoryDestinationSettings} size="sm">{copy.create.destination.openSetting}</LinkButton> : undefined}>
       <p>{failure.reason}</p>
       {reference ? <p className="mt-3 break-all text-xs">{reference}</p> : null}
     </Notice> : null}

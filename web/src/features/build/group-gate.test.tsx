@@ -68,7 +68,7 @@ async function renderPage(path: '/new' | '/-/build/draft-1', hasGroup: boolean, 
     ].map(async (url) => (await fixture(url)).json()))
     client.setQueryData(['application-templates', me.projectId], templates)
     client.setQueryData(['application-stack-definitions'], definitions)
-    client.setQueryData(createConnectionsQuery(me.projectId).queryKey, { sources: sources.data, registries: registries.data, domains: domains.data })
+    client.setQueryData(createConnectionsQuery(me.projectId).queryKey, { sources: sources.data, registries: registries.data, domains: domains.data, destination: sources.repositoryDestination })
     client.setQueryData(creationToolsQuery(me.projectId).queryKey, { ...tools, ...availability })
   }
   const root = createRootRoute()

@@ -10,22 +10,27 @@ import { useCreateCatalog, useCreateConnections, useCreationTools } from '../../
 import { copy } from '../../copy'
 import { aiPolicyExplanation } from '../../copy/ai-policy'
 import {
+  adoptionConnectionsOf,
   appUrl,
+  destinationImage,
+  destinationMoved,
+  destinationProblem,
+  destinationRepository,
   isValidAppName,
   missingPrerequisites,
   pickCreateEnvironment,
   resolveCreateCatalog,
-  pickSourceConnection,
+  resolvedDestination,
   publishDomainPending,
-  sourceConnectionsOf,
-  templateSourceProblem,
   templateUsableFor,
   type CreateEntry,
+  type ResolvedDestination,
 } from '../../model/create'
 import { shareSentence } from '../../model/share'
 import { paths } from '../../routes/paths'
 import { useShell } from '../../shell/use-shell'
-import { Button, Card, CardBody, focusHeading, LoadFailed, Notice, PageHeader, Stepper, useDocumentTitle, useUnsavedChangesGuard } from '../../ui'
+import { Button, Card, CardBody, focusHeading, LinkButton, LoadFailed, Notice, PageHeader, Stepper, useDocumentTitle, useUnsavedChangesGuard } from '../../ui'
+import type { RepositoryDestinationResolution } from '../../api/repository-destination'
 import { checkNameAvailability, suggestFreeUrlName, type AvailabilityRequest, type NameAvailability } from './availability'
 import { text } from './copy'
 import { effectiveShareGroupIds, stepFields, syncUrlName, useCreateForm, type CreateValues } from './form'
@@ -59,6 +64,8 @@ interface RunState {
   advancing?: boolean
   /** The URL name found taken, with a free variant once known. */
   nameTaken?: TakenUrlName
+  /** A destination failure: what the re-read destination says changed (or why it is blocked now). */
+  destinationNote?: string
 }
 
 type CreateSearch = { group?: string; resume?: string; template?: string; intent?: string; step?: (typeof createSteps)[number] }
@@ -74,6 +81,24 @@ export function NewAppPage({ defaultGroupPath }: { defaultGroupPath?: string }) 
   if (search.resume && draft.isPending) return <Notice>{text.loadingDraft}</Notice>
   if (search.resume && draft.isError) return <LoadFailed onRetry={() => void draft.refetch()} error={draft.error} />
   return <CreateWizard key={JSON.stringify([search.resume, search.template, search.intent])} defaultGroupPath={defaultGroupPath} search={search} draft={search.resume ? draft.data : undefined} />
+}
+
+/**
+ * What a destination failure's re-read says, in the user's words: where new
+ * repositories go now (`before` → now), that only the details were refreshed,
+ * or why nothing can be created at the moment.
+ */
+function destinationChange(before: ResolvedDestination | undefined, after: RepositoryDestinationResolution | undefined): string {
+  const now = resolvedDestination(after)
+  if (!now) {
+    const problem = destinationProblem(after)!
+    return `${copy.create.destination.nowBlocked}${copy.create.destination.problem(problem.reason, problem.message)}`
+  }
+  if (!before || !destinationMoved(before, now)) return copy.create.destination.refreshed
+  const owners = before.destination.repositoryNamespace !== now.destination.repositoryNamespace
+  return owners
+    ? copy.create.destination.moved(before.destination.repositoryNamespace, now.destination.repositoryNamespace)
+    : copy.create.destination.moved(before.destination.registryNamespace, now.destination.registryNamespace)
 }
 
 function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: string; search: CreateSearch; draft?: BusinessApp }) {
@@ -106,7 +131,7 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
 
   const initialStep = createSteps.indexOf(search.step ?? saved?.step ?? 'start') as Step
   const run = useCreateStore<RunState>({ step: initialStep, resume: saved?.progress ?? {} })
-  const { step, phase, failure, checkingName, advancing, nameTaken } = useSelector(run)
+  const { step, phase, failure, checkingName, advancing, nameTaken, destinationNote } = useSelector(run)
   const [startingBuild, setStartingBuild] = useState(false)
   const [buildError, setBuildError] = useState(false)
   const [completed, setCompleted] = useState(false)
@@ -161,11 +186,10 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
   const definitionRows = definitions.data?.data ?? []
   const selectedTemplate = templateRows.find((template) => template.id === values.templateId)
   const environment = connections.data
-    ? pickCreateEnvironment(connections.data.sources, connections.data.registries, connections.data.domains)
+    ? pickCreateEnvironment(connections.data.sources, connections.data.registries, connections.data.domains, connections.data.destination)
     : {}
-  const sourceConnections = sourceConnectionsOf(values.entry === 'template'
-    ? { ...environment, source: pickSourceConnection(connections.data?.sources ?? [], selectedTemplate) }
-    : environment)
+  const adoption = adoptionConnectionsOf(environment)
+  const destination = resolvedDestination(environment.destination)
   const domain = environment.domain
   const templateCatalog = resolveCreateCatalog(templateRows, definitionRows, 'github-template', values.entry === 'template' ? values.templateId : undefined)
   const defaultCatalog = resolveCreateCatalog(templateRows, definitionRows, 'github-template')
@@ -182,33 +206,33 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
       : copy.create.missing(missing)
   }
   const imageMissing = missingFor('image')
+  // ひな形 and AI create a repository where the platform resolved it; a blocked destination stops both.
+  const destinationBlock = connections.data ? destinationProblem(environment.destination) : undefined
+  const destinationText = destinationBlock
+    ? `${copy.create.destination.problem(destinationBlock.reason, destinationBlock.message)}${me.isConsoleAdmin ? copy.create.destination.fixHere : copy.create.destination.askAdmin}`
+    : undefined
   const blocked: EntryBlocks = {
     existing: missingFor('existing') ?? (defaultCatalog ? undefined : copy.create.start.existingUnavailable),
-    template: missingFor('template') ?? (defaultCatalog ? undefined : copy.create.start.templateUnavailable),
-    ai: aiPolicyExplanation(tools.data?.codexUnavailableReason, tools.data?.codexPolicy) ?? (!aiGroupId ? buildText.page.noGroup.body : missingFor('ai') ?? (tools.data?.codexAvailable ? undefined : copy.create.start.aiUnavailable)),
+    template: missingFor('template') ?? destinationText ?? (defaultCatalog ? undefined : copy.create.start.templateUnavailable),
+    ai: aiPolicyExplanation(tools.data?.codexUnavailableReason, tools.data?.codexPolicy) ?? (!aiGroupId ? buildText.page.noGroup.body : missingFor('ai') ?? destinationText ?? (tools.data?.codexAvailable ? undefined : copy.create.start.aiUnavailable)),
     image: imageMissing
       ? `${copy.create.advanced.unavailable}${imageMissing}`
       : imageCatalog
         ? undefined
         : copy.create.advanced.unavailable,
   }
-  const setupLink =
+  const setup =
     me.isConsoleAdmin && (['existing', 'template', 'ai', 'image'] as const).some((entry) => missingSetupFor(entry).length > 0)
+      ? { href: paths.adminPlatform, label: text.openPlatform }
+      : destinationText ? { href: paths.repositoryDestinationSettings, label: copy.create.destination.openSetting } : undefined
   const catalogLoading = connections.isPending || templates.isPending || definitions.isPending || tools.isPending
   const catalogFailed = templates.isError || definitions.isError || connections.isError
   const canCreate = me.canCreateApps
-  const sourceProblem = values.entry === 'template' && selectedTemplate
-    ? templateSourceProblem(selectedTemplate, connections.data?.sources ?? [])
-    : undefined
   const templateProblem = values.entry !== 'template' || catalogLoading || catalogFailed
     ? undefined
-    : sourceProblem === 'not-admitted' && selectedTemplate?.githubTemplate
-      ? copy.create.start.templateNotAdmitted(selectedTemplate.githubTemplate.repository)
-      : sourceProblem === 'no-connection'
-        ? copy.create.start.templateNoConnection
-        : !selectedTemplate || !templateUsableFor(selectedTemplate, 'github-template')
-          ? copy.create.start.templateUnavailable
-          : undefined
+    : !selectedTemplate || !templateUsableFor(selectedTemplate, 'github-template')
+      ? copy.create.start.templateUnavailable
+      : undefined
   const entryReady = (entry: CreateEntry | undefined) =>
     entry !== undefined && canCreate && !catalogLoading && !catalogFailed && !blocked[entry] && (entry !== 'template' || (Boolean(templateCatalog) && !templateProblem))
 
@@ -300,7 +324,7 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
       urlName,
       entry: current.entry,
       catalog: current.entry === 'template' ? templateCatalog : undefined,
-      connections: sourceConnections,
+      destination: current.entry === 'template' ? destination : undefined,
       own: run.state.resume,
     }
   }
@@ -387,9 +411,12 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
     share,
   }
 
+  /** The destination the running attempt was built for; a destination failure compares the re-read one with it. */
+  const submittedDestination = useRef<ResolvedDestination | undefined>(undefined)
+
   /** Runs one create attempt; a failure keeps what was made for the retry. */
   const attempt = async (perform: () => Promise<void>) => {
-    patch({ failure: undefined })
+    patch({ failure: undefined, destinationNote: undefined })
     try {
       await perform()
     } catch (error) {
@@ -408,6 +435,10 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
       } else if (failed.field && !failed.forbidden) {
         if (failed.field.path.startsWith('destination.')) form.setFieldValue('urlNameEdited', true)
         patch({ resume: failed.progress, failure: failed, step: failed.field.step })
+      } else if (failed.destination) {
+        // Re-read where new repositories go; the retry then binds the fresh revision.
+        const refreshed = await connections.refetch()
+        patch({ resume: failed.progress, failure: failed, destinationNote: destinationChange(submittedDestination.current, refreshed.data?.destination) })
       } else {
         patch({ resume: failed.progress, failure: failed })
       }
@@ -458,13 +489,15 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
             ? { kind: 'image', imageRef: values.imageRef.trim() }
             : undefined
     if (!path || !catalog || !values.groupId || !domain || templateProblem || run.state.phase) return
+    submittedDestination.current = path.kind === 'template' ? destination : undefined
     void attempt(async () => {
       const app = await submitCreate({ ...details, path }, run.state.resume, {
         console: consoleApi.apps,
         platform: client,
         catalog,
         domain,
-        connections: sourceConnections,
+        adoption,
+        destination: submittedDestination.current,
         onPhase: (next) => patch({ phase: next }),
         onProgress: (resume) => patch({ resume }),
       })
@@ -539,7 +572,7 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
                   void connections.refetch()
                 }}
                 blocked={blocked}
-                setupLink={setupLink}
+                setup={setup}
                 catalog={templateRows}
                 codexAvailable={tools.data?.codexAvailable === true}
                 codexUnavailableReason={tools.data?.codexUnavailableReason}
@@ -555,7 +588,8 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
               <DetailsStep
                 form={form}
                 projectId={projectId}
-                sourceConnectionId={environment.source?.id}
+                sourceConnectionId={adoption?.source.id}
+                destination={values.entry === 'template' ? destination : undefined}
                 groups={flatGroups}
                 domain={domain}
                 nameTaken={nameTaken}
@@ -569,12 +603,20 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
               <ShareStep form={form} groups={flatGroups} isConsoleAdmin={me.isConsoleAdmin} shareText={shareText} />
             ) : step === 3 ? (
               <div className="space-y-6">
+                {values.entry === 'template' && destinationText && !failure?.destination ? (
+                  <Notice tone="warning" title={copy.create.destination.blockedTitle} actions={<LinkButton href={paths.repositoryDestinationSettings} size="sm">{copy.create.destination.openSetting}</LinkButton>}>
+                    {destinationText}
+                  </Notice>
+                ) : null}
                 <ConfirmStep
                   form={form}
                   url={url}
                   groupName={ownerGroup?.name ?? ''}
                   shareText={shareText}
                   templateName={templateCatalog ? businessTemplateById(templateCatalog.template.id)?.name ?? templateCatalog.template.displayName : undefined}
+                  newRepository={values.entry === 'template' && destination && isValidAppName(values.urlName)
+                    ? { repository: destinationRepository(destination, values.urlName), image: destinationImage(destination, values.urlName) }
+                    : undefined}
                   sourceProblem={templateProblem}
                   onChooseTemplate={() => patch({ step: 0 })}
                 />
@@ -588,7 +630,7 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
 
             {failure && !failure.field ? (
               <div id="create-failure" tabIndex={-1} className="mt-6 focus:outline-none">
-                <FailureNotice failure={failure} />
+                <FailureNotice failure={failure} destinationNote={destinationNote} />
               </div>
             ) : null}
 

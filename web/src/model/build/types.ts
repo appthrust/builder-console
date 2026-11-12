@@ -60,7 +60,8 @@ export interface BuildPrimary {
   enabled: boolean
 }
 export interface BuildFailure {
-  kind: 'workspace' | 'unavailable' | 'policy' | 'quota' | 'limit' | 'forbidden' | 'timeout' | 'failed' | 'name-taken' | 'interrupted' | 'platform' | 'group'
+  /** `destination`: the platform would not create the repository where the plan said; the fix is its destination setting. */
+  kind: 'workspace' | 'unavailable' | 'policy' | 'quota' | 'limit' | 'forbidden' | 'timeout' | 'failed' | 'name-taken' | 'interrupted' | 'platform' | 'group' | 'destination'
   title: string
   reason: string
   suggestedName?: string

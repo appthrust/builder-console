@@ -130,10 +130,14 @@ test('create connections: source connections are validated at the boundary, regi
     usedBy: [] as Domain['usedBy'],
   } as const
   const calls: string[] = []
+  const repositoryDestination = {
+    state: 'Resolved', source: 'Project', revision: 'rev-1',
+    destination: { connectionId: 'github-source-1', provider: 'github', displayName: 'Acme', repositoryNamespace: 'acme', registryNamespace: 'ghcr.io/acme' },
+  } as const
   const api = {
     platformApiListProjectGitHubSourceConnections: mock(async (input: { projectId: string }) => {
       calls.push(`sources:${input.projectId}`)
-      return { data: [ready] }
+      return { data: [ready], repositoryDestination } as unknown
     }),
     platformApiListRegistryConnections: mock(async () => {
       calls.push('registries')
@@ -146,8 +150,12 @@ test('create connections: source connections are validated at the boundary, regi
   }
   const query = createConnectionsQuery('pj-1', api as never)
   expect(query.queryKey).toEqual(['create-connections', 'pj-1'])
-  expect(await query.queryFn()).toEqual({ sources: [ready], registries: [registry], domains: [domain] })
+  expect(await query.queryFn()).toEqual({ sources: [ready], registries: [registry], domains: [domain], destination: repositoryDestination })
   expect(calls.sort()).toEqual(['domains:pj-1', 'registries', 'sources:pj-1'])
+
+  // An answer without a valid resolution leaves the destination unknown, not the whole query failed.
+  const withoutDestination = { ...api, platformApiListProjectGitHubSourceConnections: mock(async () => ({ data: [ready], repositoryDestination: { state: 'Resolved' } })) }
+  expect((await createConnectionsQuery('pj-1', withoutDestination as never).queryFn()).destination).toBeUndefined()
 
   const pending = { ...domain, usableForPublish: false, delegationReady: false, publishUnavailableReason: 'ProjectGatewayPending' }
   const interval = query.refetchInterval as unknown as (query: unknown) => number | false

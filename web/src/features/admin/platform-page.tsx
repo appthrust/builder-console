@@ -7,13 +7,15 @@ import { pickPublishDomain } from '../../model/create'
 import { Card, Disclosure, LoadFailed, Notice, PageHeader, Skeleton, StatusPill, useDocumentTitle } from '../../ui'
 import { text } from './copy'
 import { DirectoryMigrationBanner } from './directory-migration'
+import { RepositoryDestinationSetting } from './repository-destination'
 
 type RowState = 'ready' | 'missing' | 'checking' | 'unknown'
 
 /**
  * 基盤の設定 (ux-design §7.1, C3): whether the platform pieces app creation
- * needs are in place, and who to ask otherwise. Read-only for everyone; the
- * settings themselves are changed on the platform side.
+ * needs are in place, and who to ask otherwise. Read-only for everyone except
+ * the Project's repository destination, which console admins set here; the
+ * other settings are changed on the platform side.
  */
 export function AdminPlatformPage() {
   useDocumentTitle(copy.admin.platformTitle)
@@ -111,6 +113,10 @@ export function AdminPlatformPage() {
           </Disclosure>
         </div>
       )}
+      {/* Outside the settings branch so the #repository-destination anchor exists on first render. */}
+      <div className="mt-6">
+        <RepositoryDestinationSetting me={me} connections={connections} />
+      </div>
     </div>
   )
 }

@@ -12,7 +12,7 @@ import type { PlatformApiClient } from '../../api/client'
 import { ConsoleApiError, type BusinessApp } from '../../api/console'
 import { copy } from '../../copy'
 import { MOCK_PROJECT_ID, platformRoutes } from '../../dev/mock-platform'
-import { resolveCreateCatalog, type SourceConnections } from '../../model/create'
+import { resolveCreateCatalog, type AdoptionConnections, type ResolvedDestination } from '../../model/create'
 import {
   CreateFailed,
   submitCreate,
@@ -41,7 +41,7 @@ const definition: ApplicationStackDefinition = {
     { id: 'database', definitionRef: { name: 'postgresql' } },
   ],
 }
-const connections: SourceConnections = {
+const adoption: AdoptionConnections = {
   source: {
     id: 'gh',
     displayName: 'gh',
@@ -51,6 +51,12 @@ const connections: SourceConnections = {
     source: 'github-source-connection-cr',
   },
   registry: { id: 'ghcr', displayName: 'ghcr', registryHost: 'ghcr.io', registryType: 'ghcr', status: 'ready', source: 'registry-connection-cr' },
+}
+const destination: ResolvedDestination = {
+  state: 'Resolved',
+  source: 'Project',
+  revision: 'rev-1',
+  destination: { connectionId: 'gh', provider: 'github', displayName: 'gh', repositoryNamespace: 'acme', registryNamespace: 'ghcr.io/acme' },
 }
 
 const person = { id: 'p1', subject: 's', pending: false, email: 'a@example.test', displayName: '山田', avatarVersion: null }
@@ -126,7 +132,8 @@ function deps(overrides: Partial<CreateDeps['platform']> = {}) {
     },
     catalog: resolveCreateCatalog([template], [definition], 'github-template')!,
     domain: 'pj.appthrust.test',
-    connections,
+    adoption,
+    destination,
     onPhase: () => {},
   }
   return { value, calls }
@@ -178,34 +185,84 @@ describe('submitCreate', () => {
     expect(failure.progress.draft).toEqual(draft)
   })
 
-  test('a stale catalog reaches the mock allowlist rejection and returns to the template step', async () => {
-    const link = new OpenAPILink(platformApiRouter, {
-      url: 'http://platform.test',
-      fetch: async (input, init) => {
-        const request = new Request(input, init)
-        const response = await platformRoutes(request, new URL(request.url))
-        if (!response) throw new Error(`unhandled ${request.url}`)
-        return response
-      },
-    })
+  /** A real OpenAPILink against the in-memory Platform mock, reset first. */
+  async function mockPlatform() {
+    const call = async (request: Request) => {
+      const response = await platformRoutes(request, new URL(request.url))
+      if (!response) throw new Error(`unhandled ${request.url}`)
+      return response
+    }
+    await call(new Request('http://platform.test/api/v1/__mock/reset', { method: 'POST' }))
+    const toggle = (body: unknown) => call(new Request('http://platform.test/api/v1/__mock/repository-destination', { method: 'POST', body: JSON.stringify(body) }))
+    const read = async () => (await (await call(new Request(`http://platform.test/api/v1/projects/${MOCK_PROJECT_ID}/repository-destination`))).json()) as ResolvedDestination
+    const link = new OpenAPILink(platformApiRouter, { url: 'http://platform.test', fetch: async (input, init) => call(new Request(input, init)) })
     const client: PlatformApiClient = createORPCClient(link)
     const { value } = deps({
       platformApiValidateApplicationSourceRepository: client.platformApiValidateApplicationSourceRepository,
       platformApiCreateApplicationSourceRepository: client.platformApiCreateApplicationSourceRepository,
     })
-    value.connections = { ...connections, source: { ...connections.source, id: 'github-source-207cb7ce' } }
-    value.catalog = {
-      ...value.catalog,
-      template: {
-        ...template,
-        id: 'biz-approval-postgres',
-        githubTemplate: { repository: 'appthrust/template-biz-approval', repositoryUrl: 'https://github.com/appthrust/template-biz-approval' },
-      },
-    }
-    const failure = await submitCreate({ ...request, projectId: MOCK_PROJECT_ID, urlName: 'blocked-template-test' }, {}, value).catch((error: unknown) => error) as CreateFailed
-    expect(failure.field).toEqual({ path: 'template.repository', step: 0 })
-    expect(failure.data?.message).toBe("'template.repository' is not allowed by the selected source connection")
+    return { value, toggle, read }
+  }
+
+  test('ひな形 creates the repository under the resolved owner, never the first listed connection', async () => {
+    const { value, toggle, read } = await mockPlatform()
+    await toggle({ projectDefault: 'github-source-729d7936' })
+    value.destination = await read()
+    const create = value.platform.platformApiCreateApplicationSourceRepository
+    let created: { sourceConnectionId?: string; image?: { imagePath?: string } } | undefined
+    value.platform.platformApiCreateApplicationSourceRepository = (async (input: Parameters<typeof create>[0]) => {
+      const repository = await create(input)
+      created = repository as typeof created
+      return repository
+    }) as typeof create
+    await submitCreate({ ...request, projectId: MOCK_PROJECT_ID, urlName: 'labs-owned-test' }, {}, value)
+    expect(created).toMatchObject({ sourceConnectionId: 'github-source-729d7936', image: { imagePath: 'ghcr.io/acme-labs/labs-owned-test' } })
+  })
+
+  test('a destination that moved after it was read is a 409 DestinationChanged: not a taken name, draft kept', async () => {
+    const { value, toggle, read } = await mockPlatform()
+    value.destination = await read()
+    await toggle({ projectDefault: 'github-source-729d7936' })
+    const failure = await submitCreate({ ...request, projectId: MOCK_PROJECT_ID, urlName: 'moved-destination-test' }, {}, value).catch((error: unknown) => error) as CreateFailed
+    expect(failure.destination).toEqual({ reason: 'DestinationChanged', message: 'repository destination changed since it was read' })
+    expect(failure.nameTaken).toBe(false)
+    expect(failure.retryable).toBe(false)
+    expect(failure.forbidden).toBe(false)
     expect(failure.progress).toEqual({ draft })
+  })
+
+  test('a destination blocked by the time of submit stops before creating anything, with its reason', async () => {
+    const { value, toggle, read } = await mockPlatform()
+    value.destination = await read()
+    await toggle({ projectDefault: null })
+    const failure = await submitCreate({ ...request, projectId: MOCK_PROJECT_ID, urlName: 'ambiguous-destination-test' }, {}, value).catch((error: unknown) => error) as CreateFailed
+    expect(failure.destination?.reason).toBe('Ambiguous')
+    expect(failure.nameTaken).toBe(false)
+    expect(failure.progress).toEqual({ draft })
+  })
+
+  test('a validation answer with a blocked destination is a destination failure; adoption ignores it', async () => {
+    const blocked = { valid: false, message: 'blocked', repositoryDestination: { state: 'Blocked', reason: 'NotReady', message: 'connection not ready' } }
+    const template = deps({ platformApiValidateApplicationSourceRepository: mock(async () => blocked) as never })
+    const failure = await submitCreate(request, {}, template.value).catch((error: unknown) => error) as CreateFailed
+    expect(failure.destination).toEqual({ reason: 'NotReady', message: 'connection not ready' })
+    expect(template.calls).not.toContain('platform.createSource')
+
+    const adopted = deps({ platformApiValidateApplicationSourceRepository: mock(async () => ({ ...blocked, valid: true })) as never })
+    await submitCreate({ ...request, path: { kind: 'existing', repository: { fullName: 'acme/claude-mitsumori', defaultBranch: 'main' } } }, {}, adopted.value)
+    expect(adopted.calls).toContain('platform.createSource')
+  })
+
+  test('a 403 NotVisible is about the destination, not the caller: the draft is kept', async () => {
+    const { value, calls } = deps({
+      platformApiValidateApplicationSourceRepository: mock(async () => {
+        throw new ORPCError('FORBIDDEN', { status: 403, data: { body: { error: { code: 'permission_denied', message: 'not visible', details: { reason: 'NotVisible' } } }, status: 403 } })
+      }) as never,
+    })
+    const failure = await submitCreate(request, {}, value).catch((error: unknown) => error) as CreateFailed
+    expect(failure.forbidden).toBe(false)
+    expect(failure.destination?.reason).toBe('NotVisible')
+    expect(calls).not.toContain('console.remove')
   })
 
   test.each([
@@ -427,8 +484,10 @@ describe('submitCreate', () => {
     const create = retry.value.platform.platformApiCreateApplicationSourceRepository as unknown as Mock<(body: CreateApplicationSourceRepositoryRequest) => unknown>
     expect(create.mock.calls[0]![0]).toMatchObject({
       destination: { repositoryName: 'test2' },
-      image: { imagePath: 'ghcr.io/acme/test2' },
+      destinationRevision: 'rev-1',
     })
+    expect(create.mock.calls[0]![0]).not.toHaveProperty('sourceConnectionId')
+    expect(create.mock.calls[0]![0].image).not.toHaveProperty('imagePath')
     const stack = retry.value.platform.platformApiCreateApplicationStack as unknown as Mock<(body: CreateApplicationStackRequest) => unknown>
     expect(stack.mock.calls[0]![0].source).toEqual({ kind: 'application-source-repository', sourceRepositoryId: 'test2-src' })
   })

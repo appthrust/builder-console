@@ -43,15 +43,15 @@ test.describe('App create from a business template @create', () => {
     })
 
     const repository = writes.repository?.body
-    if (!repository || typeof repository !== 'object' || !('template' in repository) || !('sourceConnectionId' in repository) || !('destination' in repository)) {
-      throw new Error('Template create did not send its source connection, template, and destination')
+    if (!repository || typeof repository !== 'object' || !('template' in repository) || !('destinationRevision' in repository) || !('destination' in repository)) {
+      throw new Error('Template create did not send its template, destination and destination revision')
     }
+    // The platform resolves owner, connection and image path; the console only binds the revision it showed.
     expect(repository).toEqual({
-      sourceConnectionId: 'github-source-207cb7ce',
-      registryConnectionRef: 'ghcr-acme',
       template: { repository: 'appthrust/template-biz-inventory', ref: 'main' },
       destination: { repositoryName: slug, visibility: 'private' },
-      image: { imagePath: `ghcr.io/acme/${slug}`, tagFilter: 'edge-', versioningScheme: 'Alphabetical' },
+      destinationRevision: expect.stringMatching(/^rev-github-source-207cb7ce-/),
+      image: { tagFilter: 'edge-', versioningScheme: 'Alphabetical' },
       build: { mode: 'observed-image', ref: 'main' },
     })
 

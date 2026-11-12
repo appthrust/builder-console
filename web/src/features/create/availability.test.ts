@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from 'bun:test'
 import type { ApplicationStackDefinition, ApplicationTemplateSummary } from '@appthrust/api-schema/platform-api'
 import { ORPCError } from '@orpc/client'
 import { ConsoleApiError, type BusinessApp, type Resolved } from '../../api/console'
-import { resolveCreateCatalog, type SourceConnections } from '../../model/create'
+import { resolveCreateCatalog, type ResolvedDestination } from '../../model/create'
 import { checkNameAvailability, suggestFreeUrlName, type AvailabilityDeps, type AvailabilityRequest } from './availability'
 
 const template: ApplicationTemplateSummary = {
@@ -26,16 +26,11 @@ const definition: ApplicationStackDefinition = {
     { id: 'database', definitionRef: { name: 'postgresql' } },
   ],
 }
-const connections: SourceConnections = {
-  source: {
-    id: 'gh',
-    displayName: 'gh',
-    account: { login: 'acme', type: 'Organization' },
-    capabilities: ['createRepositories'],
-    status: 'ready',
-    source: 'github-source-connection-cr',
-  },
-  registry: { id: 'ghcr', displayName: 'ghcr', registryHost: 'ghcr.io', registryType: 'ghcr', status: 'ready', source: 'registry-connection-cr' },
+const destination: ResolvedDestination = {
+  state: 'Resolved',
+  source: 'Project',
+  revision: 'rev-1',
+  destination: { connectionId: 'gh', provider: 'github', displayName: 'gh', repositoryNamespace: 'acme', registryNamespace: 'ghcr.io/acme' },
 }
 
 const base: AvailabilityRequest = {
@@ -44,7 +39,7 @@ const base: AvailabilityRequest = {
   urlName: 'mitsumori',
   entry: 'template',
   catalog: resolveCreateCatalog([template], [definition], 'github-template'),
-  connections,
+  destination,
 }
 
 /** A world where the console owns `consolePaths`, the platform `appNames` and GitHub `repositories`. */
@@ -125,18 +120,30 @@ describe('checkNameAvailability', () => {
     ).toBe('repository')
   })
 
-  test('repository: a delivery_pending 409 is not an answer about the name', async () => {
+  test('repository: delivery and destination 409s are not answers about the name', async () => {
     const { deps } = world()
-    const converging = {
-      ...deps,
-      platform: {
-        ...deps.platform,
-        platformApiValidateApplicationSourceRepository: async () => {
-          throw new ORPCError('CONFLICT', { status: 409, data: { body: { error: { code: 'conflict', details: { reason: 'delivery_pending' } } }, status: 409 } })
+    for (const reason of ['delivery_pending', 'DestinationChanged', 'DestinationMismatch']) {
+      const conflicting = {
+        ...deps,
+        platform: {
+          ...deps.platform,
+          platformApiValidateApplicationSourceRepository: async () => {
+            throw new ORPCError('CONFLICT', { status: 409, data: { body: { error: { code: 'conflict', details: { reason } } }, status: 409 } })
+          },
         },
-      },
-    } as unknown as AvailabilityDeps
-    expect((await checkNameAvailability(base, converging)).taken).toBeUndefined()
+      } as unknown as AvailabilityDeps
+      expect((await checkNameAvailability(base, conflicting)).taken).toBeUndefined()
+    }
+  })
+
+  test('repository: the check binds the seen destination revision and is skipped without a resolved destination', async () => {
+    const { deps, validate } = world()
+    await checkNameAvailability(base, deps)
+    expect(validate.mock.calls[0]![0]).toMatchObject({ destinationRevision: 'rev-1' })
+    expect(validate.mock.calls[0]![0]).not.toHaveProperty('sourceConnectionId')
+    validate.mockClear()
+    expect((await checkNameAvailability({ ...base, destination: undefined }, deps)).taken).toBeUndefined()
+    expect(validate).not.toHaveBeenCalled()
   })
 
   test('an aborted check stops looking for a suggestion', async () => {

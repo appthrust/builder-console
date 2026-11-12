@@ -7,12 +7,12 @@ import type {
   ApplicationStackDefinition,
   ApplicationTemplateSourceKind,
   ApplicationTemplateSummary,
-  CreateApplicationSourceRepositoryRequest,
   CreateApplicationStackRequest,
   Domain,
   GitHubSourceConnection,
   RegistryConnection,
 } from '@appthrust/api-schema/platform-api'
+import type { CreateApplicationSourceRepositoryRequest, RepositoryDestinationResolution } from '../api/repository-destination'
 
 /** Same rule as the contract's DnsLabelName. */
 const DNS_LABEL = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/
@@ -183,17 +183,26 @@ export function resolveCreateCatalog(
   }
 }
 
-export interface SourceConnections {
+/** The connection and registry an existing repository is adopted with (作ったコードから). */
+export interface AdoptionConnections {
   source: GitHubSourceConnection
   registry: RegistryConnection
 }
 
+export type ResolvedDestination = Extract<RepositoryDestinationResolution, { state: 'Resolved' }>
+
 /** What the create paths need from the platform besides the catalog. */
 export interface CreateEnvironment {
-  /** First ready GitHub connection able to create repositories and, if selected, read the template. */
-  source?: GitHubSourceConnection
-  /** First ready registry connection. */
+  /**
+   * 作ったコードから only: the first ready GitHub connection able to create
+   * repositories, used to list and adopt an existing repository. It never
+   * decides where a new repository goes.
+   */
+  adoption?: GitHubSourceConnection
+  /** First ready registry connection (作ったコードから and image). */
   registry?: RegistryConnection
+  /** Where the platform creates new repositories (ひな形, AI); undefined when the platform did not answer. */
+  destination?: RepositoryDestinationResolution
   /** Publish-ready domain base; the app URL is `https://<appName>.<domain>` (ux-design §7.1.1). */
   domain?: string
 }
@@ -222,38 +231,16 @@ function templateRepository(template: ApplicationTemplateSummary): string {
   return template.githubTemplate?.repository ?? `appthrust/template-${template.id.replace(/-postgres$/, '')}`
 }
 
-function canCreateFromSource(source: GitHubSourceConnection, template?: ApplicationTemplateSummary): boolean {
-  return source.status === 'ready' && source.capabilities.includes('createRepositories') &&
-    (!template || source.capabilities.includes('readTemplateRepositories'))
-}
-
-/** Trimmed, case-insensitive matching mirrors the Platform API's validateSourceRepositoryAllowlist. */
-export function pickSourceConnection(
-  sources: readonly GitHubSourceConnection[],
-  template?: ApplicationTemplateSummary
-): GitHubSourceConnection | undefined {
-  const repository = template ? templateRepository(template).trim().toLowerCase() : undefined
-  return sources.find((source) => canCreateFromSource(source, template) &&
-    (!repository || !source.allowedRepositories?.length || source.allowedRepositories.some((allowed) => allowed.trim().toLowerCase() === repository)))
-}
-
-export function templateSourceProblem(
-  template: ApplicationTemplateSummary,
-  sources: readonly GitHubSourceConnection[]
-): 'not-admitted' | 'no-connection' | undefined {
-  if (pickSourceConnection(sources, template)) return undefined
-  return sources.some((source) => canCreateFromSource(source, template)) ? 'not-admitted' : 'no-connection'
-}
-
 export function pickCreateEnvironment(
   sources: readonly GitHubSourceConnection[],
   registries: readonly RegistryConnection[],
   domains: readonly Domain[],
-  template?: ApplicationTemplateSummary
+  destination?: RepositoryDestinationResolution
 ): CreateEnvironment {
   return {
-    source: pickSourceConnection(sources, template),
+    adoption: sources.find((source) => source.status === 'ready' && source.capabilities.includes('createRepositories')),
     registry: registries.find((item) => item.status === 'ready'),
+    destination,
     domain: pickPublishDomain(domains),
   }
 }
@@ -262,21 +249,82 @@ export function pickCreateEnvironment(
 export type CreateEntry = 'existing' | 'template' | 'ai' | 'image'
 
 /**
- * What is missing for an entry, in display order. Every entry publishes and
- * needs a ready registry (the platform rejects a sample-image source without
- * one); all but the image entry work on a GitHub repository.
+ * What is missing for an entry, in display order. Every entry publishes. The
+ * existing-work and image entries name their registry connection (the
+ * platform rejects a sample-image source without one); a new repository's
+ * GitHub and image access come from the platform's destination instead
+ * (`destinationProblem`).
  */
 export function missingPrerequisites(environment: CreateEnvironment, entry: CreateEntry): CreatePrerequisite[] {
   const missing: CreatePrerequisite[] = []
-  if (entry !== 'image' && !environment.source) missing.push('github')
-  if (!environment.registry) missing.push('registry')
+  if (entry === 'existing' && !environment.adoption) missing.push('github')
+  if ((entry === 'existing' || entry === 'image') && !environment.registry) missing.push('registry')
   if (!environment.domain) missing.push('domain')
   return missing
 }
 
-export function sourceConnectionsOf(environment: CreateEnvironment): SourceConnections | undefined {
-  const { source, registry } = environment
-  return source && registry ? { source, registry } : undefined
+export function adoptionConnectionsOf(environment: CreateEnvironment): AdoptionConnections | undefined {
+  const { adoption, registry } = environment
+  return adoption && registry ? { source: adoption, registry } : undefined
+}
+
+/** The reasons the Platform API documents for a blocked destination; the list is open, so others still arrive. */
+export const REPOSITORY_DESTINATION_REASONS = [
+  'NotConfigured',
+  'Ambiguous',
+  'NotFound',
+  'Deleting',
+  'NotReady',
+  'MissingCapability',
+  'NotVisible',
+  'UnsupportedProvider',
+  'ImageAccessNotConfigured',
+  'ImageAccessAmbiguous',
+  'ImageAccessNotReady',
+  'DestinationMismatch',
+  'DestinationChanged',
+] as const
+export type RepositoryDestinationReason = (typeof REPOSITORY_DESTINATION_REASONS)[number]
+
+export function isRepositoryDestinationReason(value: unknown): value is RepositoryDestinationReason {
+  return typeof value === 'string' && (REPOSITORY_DESTINATION_REASONS as readonly string[]).includes(value)
+}
+
+/** Console-side reason when the platform did not report a destination at all. */
+export const DESTINATION_UNAVAILABLE = 'Unavailable'
+
+/** Why no new repository can be created; `message` is the server's (not localized) text. */
+export interface DestinationProblem {
+  reason: string
+  message: string
+}
+
+/** Undefined when new repositories have a destination; otherwise the platform's reason (or `Unavailable`). */
+export function destinationProblem(resolution: RepositoryDestinationResolution | undefined): DestinationProblem | undefined {
+  if (resolution?.state === 'Resolved') return undefined
+  return resolution ? { reason: resolution.reason, message: resolution.message } : { reason: DESTINATION_UNAVAILABLE, message: '' }
+}
+
+export function resolvedDestination(resolution: RepositoryDestinationResolution | undefined): ResolvedDestination | undefined {
+  return resolution?.state === 'Resolved' ? resolution : undefined
+}
+
+/** `owner/name` of the repository the platform will create for `appName`. */
+export function destinationRepository(destination: ResolvedDestination, appName: string): string {
+  return `${destination.destination.repositoryNamespace}/${appName}`
+}
+
+/** Where the new repository's images will be pushed. */
+export function destinationImage(destination: ResolvedDestination, appName: string): string {
+  return `${destination.destination.registryNamespace}/${appName}`
+}
+
+/** Did the place new repositories go to move (not merely a new revision of the same place)? */
+export function destinationMoved(before: ResolvedDestination | undefined, after: ResolvedDestination | undefined): boolean {
+  if (!before || !after) return before !== after
+  const a = before.destination
+  const b = after.destination
+  return a.connectionId !== b.connectionId || a.repositoryNamespace !== b.repositoryNamespace || a.registryNamespace !== b.registryNamespace
 }
 
 export function appUrl(appName: string, domain: string): string {
@@ -284,28 +332,27 @@ export function appUrl(appName: string, domain: string): string {
 }
 
 /**
- * The ひな形 path's first platform call, mirroring the Dashboard github-template
- * submission: a new private repository from the template, owned by the source
- * connection's account, whose pushed images (`edge-*`) are observed.
+ * The ひな形 path's first platform call: a new private repository from the
+ * template, whose pushed images (`edge-*`) are observed. Where it is created
+ * (connection, owner, image path) is the platform's resolved destination; the
+ * request only binds the revision the user saw, so a destination that moved
+ * meanwhile answers 409 DestinationChanged instead of creating elsewhere.
  */
 export function buildSourceRepositoryRequest(
   appName: string,
   catalog: CreateCatalog,
-  connections: SourceConnections
+  destination: ResolvedDestination
 ): CreateApplicationSourceRepositoryRequest {
-  const owner = connections.source.account.login.toLowerCase()
-  const host = connections.registry.registryHost.trim().toLowerCase() || 'ghcr.io'
   const github = catalog.template.githubTemplate
   const ref = github?.branch ?? DEFAULT_TEMPLATE_REF
   return {
-    sourceConnectionId: connections.source.id,
-    registryConnectionRef: connections.registry.id,
     template: {
       repository: templateRepository(catalog.template),
       ref,
     },
     destination: { repositoryName: appName, visibility: 'private' },
-    image: { imagePath: `${host}/${owner}/${appName}`, tagFilter: 'edge-', versioningScheme: 'Alphabetical' },
+    destinationRevision: destination.revision,
+    image: { tagFilter: 'edge-', versioningScheme: 'Alphabetical' },
     build: { mode: 'observed-image', ref },
   }
 }
@@ -331,7 +378,7 @@ export function urlNameFromRepository(fullName: string): string {
  */
 export function buildExistingSourceRepositoryRequest(
   repository: PickedRepository,
-  connections: SourceConnections
+  connections: AdoptionConnections
 ): CreateApplicationSourceRepositoryRequest {
   const host = connections.registry.registryHost.trim().toLowerCase() || 'ghcr.io'
   return {

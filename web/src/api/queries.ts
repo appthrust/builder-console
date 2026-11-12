@@ -22,6 +22,11 @@ import {
   useSuspenseQuery,
 } from '@tanstack/react-query'
 import { client, type PlatformApiClient } from './client'
+import {
+  ProjectGitHubSourceConnectionListResponse,
+  type RepositoryDestinationResolution,
+  type RepositoryDestinationSettings,
+} from './repository-destination'
 import { ORPCError } from '@orpc/client'
 import { ConsoleApiError, consoleApi, consoleKeys, isConsoleError, type AppListParams, type DirectoryAppsParams } from './console'
 import { isPlatformNotFound, isTransientError, platformErrorEnvelope } from './platform-error'
@@ -255,6 +260,7 @@ export const keys = {
     ['logs', projectId, componentId, branchId] as const,
   sourceRepositories: (projectId: string) => ['application-source-repositories', projectId] as const,
   createConnections: (projectId: string) => ['create-connections', projectId] as const,
+  repositoryDestinationSettings: (projectId: string) => ['repository-destination-settings', projectId] as const,
   creationTools: (projectId: string) => ['creation-tools', projectId] as const,
   githubRepositories: (projectId: string, connectionId: string, q: string) =>
     ['github-repositories', projectId, connectionId, q] as const,
@@ -405,15 +411,19 @@ export interface CreateConnections {
   sources: GitHubSourceConnection[]
   registries: RegistryConnection[]
   domains: Domain[]
+  /** Where new repositories go; undefined when the answer carries no valid resolution. */
+  destination: RepositoryDestinationResolution | undefined
 }
 
 export const CREATE_CONNECTIONS_POLL_MS = 10_000
 
 /**
- * The project's GitHub source connections (contract output is ZodTypeAny, so it
- * is validated at the boundary), the reusable registry connections (the
- * Platform API has no project-scoped registry-connections route) and the
- * project's domain inventory (the publish base for the app URL).
+ * The project's GitHub source connections and the platform's resolved
+ * repository destination (contract output is ZodTypeAny, so both are validated
+ * at the boundary; a missing resolution leaves adoption and image creation
+ * usable), the reusable registry connections (the Platform API has no
+ * project-scoped registry-connections route) and the project's domain
+ * inventory (the publish base for the app URL).
  */
 export function createConnectionsQuery(
   projectId: string,
@@ -432,7 +442,8 @@ export function createConnectionsQuery(
       ])
       // Only the items matter here; the pagination envelope is not validated.
       const parsed = GitHubSourceConnectionListResponse.pick({ data: true }).parse(sources)
-      return { sources: parsed.data, registries: registries.data, domains: domains.data }
+      const resolution = ProjectGitHubSourceConnectionListResponse.pick({ repositoryDestination: true }).safeParse(sources)
+      return { sources: parsed.data, registries: registries.data, domains: domains.data, destination: resolution.success ? resolution.data.repositoryDestination : undefined }
     },
     refetchInterval: (query: { state: { data: CreateConnections | undefined } }) =>
       publishDomainPending(query.state.data?.domains ?? []) ? CREATE_CONNECTIONS_POLL_MS : false,
@@ -441,6 +452,29 @@ export function createConnectionsQuery(
 
 export function useCreateConnections(projectId: string) {
   return useQuery(createConnectionsQuery(projectId))
+}
+
+/** The Project's declared default destination and the ETag its PUT must send back as `If-Match`. */
+export interface RepositoryDestinationSettingsRead {
+  settings: RepositoryDestinationSettings
+  etag: string | undefined
+}
+
+export function repositoryDestinationSettingsQuery(
+  projectId: string,
+  api: Pick<PlatformApiClient, 'platformApiGetProjectRepositoryDestinationSettings'> = client
+) {
+  return queryOptions({
+    queryKey: keys.repositoryDestinationSettings(projectId),
+    queryFn: async (): Promise<RepositoryDestinationSettingsRead> => {
+      let etag: string | undefined
+      const settings = await api.platformApiGetProjectRepositoryDestinationSettings({ projectId }, {
+        context: { onResponse: (response) => { etag = response.headers.get('ETag') ?? undefined } },
+      })
+      return { settings, etag }
+    },
+    refetchInterval: false,
+  })
 }
 
 export function useSourceRepositories(projectId: string) {
