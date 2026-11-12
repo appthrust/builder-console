@@ -162,16 +162,6 @@ export function messagesFromDraft(draft: ApplicationDraft, extra: BuildMessage[]
   }
   const proposal = proposalMessage(draft, options.lastPlannedIntent)
   if (proposal) messages.push(proposal)
-  // Only observed template startup earns the completion line; execution success
-  // alone merely proves that the application's resources were created.
-  const execution = draft.creationExecutions?.at(-1)
-  const exchange = prepareAnswers(turns)
-  if (execution?.status === 'succeeded' && options.preparationDone && !exchange.open) {
-    const text = buildCopy.prepareConversation.ready
-    const asked = turns.filter((turn) => exchange.turnIds.includes(turn.id)).map((turn) => turn.finishedAt ?? turn.startedAt)
-    const at = [execution.finishedAt ?? draft.updatedAt, ...asked].reduce((latest, item) => Date.parse(item) > Date.parse(latest) ? item : latest)
-    messages.push({ role: 'assistant', text, summary: text, at, turnId: `prepared:${execution.id}` })
-  }
   for (const message of extra) {
     const duplicate = messages.some((item) => {
       if (item.role !== message.role) return false
@@ -181,6 +171,17 @@ export function messagesFromDraft(draft: ApplicationDraft, extra: BuildMessage[]
       return 'text' in item && 'text' in message && item.text === message.text
     })
     if (!duplicate) messages.push(message)
+  }
+  // Only observed template startup earns the completion line; execution success
+  // alone merely proves that the application's resources were created.
+  const execution = draft.creationExecutions?.at(-1)
+  const exchange = prepareAnswers(turns)
+  if (execution?.status === 'succeeded' && options.preparationDone && !exchange.open) {
+    const text = buildCopy.prepareConversation.ready
+    // The exchange can end on an unrelated request. Never backdate readiness above
+    // that request (or a queued local message); inserting last also breaks timestamp ties.
+    const at = messages.reduce((latest, message) => Date.parse(message.at) > Date.parse(latest) ? message.at : latest, execution.finishedAt ?? draft.updatedAt)
+    messages.push({ role: 'assistant', text, summary: text, at, turnId: `prepared:${execution.id}` })
   }
   return messages.sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
 }

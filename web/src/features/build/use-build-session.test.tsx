@@ -272,6 +272,50 @@ describe('kickoff to plan handoff', () => {
 })
 
 describe('preparation name synchronization', () => {
+  test('APT-792 leaves the draft untouched and sends suggestion requests to the open conversation', async () => {
+    const current = {
+      ...draft,
+      conversationTurns: [
+        { ...turn('prepare', buildCopy.questions.prepareTurn, 0), suggestedReplies: ['入退室・開閉管理でよい', '入退室・金庫管理にしたい', 'セキュリティ記録管理にしたい', 'ほかの名前にしたい'] },
+        { ...turn('another', 'ほかの名前にしたい', 1), suggestedReplies: ['入退室・金庫管理にしたい', 'セキュリティ記録管理にしたい', 'ISMS記録管理にしたい', 'ほかの名前にしたい'] },
+      ],
+    }
+    await mount(current)
+    expect(update).not.toHaveBeenCalled()
+    expect(build.prepareOpen).toBe(true)
+    await act(async () => { build.send('提案して') })
+    expect(createTurn.mock.calls.map((call) => call[2])).toEqual([{ message: '提案して' }])
+    expect(implementation.requestChange).not.toHaveBeenCalled()
+    expect(build.prepareOpen).toBe(true)
+    expect(update).not.toHaveBeenCalled()
+    expect(client.getQueryData<ApplicationDraft>(queryKey)).toMatchObject({ title: draft.title, specMarkdown: draft.specMarkdown })
+    expect(client.getQueryData<ApplicationDraft>(queryKey)?.publishPreferences).toBeUndefined()
+  })
+  test('a concrete follow-up name writes only the extracted name to preferences, title and spec', async () => {
+    await mount({
+      ...draft,
+      conversationTurns: [
+        turn('prepare', buildCopy.questions.prepareTurn, 0), turn('another', 'ほかの名前にしたい', 1),
+        turn('suggest', '提案して', 2), turn('name', '「営業見積」でお願いします', 3),
+      ],
+    })
+    expect(update).toHaveBeenCalledTimes(1)
+    const payload = update.mock.calls[0]![2]
+    expect(payload).toMatchObject({ title: '営業見積', publishPreferences: { name: '営業見積' } })
+    expect(parseSpec(payload.specMarkdown!).spec.name).toBe('営業見積')
+    expect(build.prepareOpen).toBe(true)
+  })
+  test('an already-stored mistaken name is not silently repaired from newer name answers', async () => {
+    const name = 'ほかの名前にしたい'
+    const { spec, body } = parseSpec(draft.specMarkdown)
+    const current = {
+      ...draft, title: name, specMarkdown: serializeSpec({ ...spec, name }, body), publishPreferences: { name },
+      conversationTurns: [turn('prepare', buildCopy.questions.prepareTurn, 0), turn('another', name, 1), turn('name', '営業見積にしたい', 2)],
+    }
+    await mount(current)
+    expect(update).not.toHaveBeenCalled()
+    expect(client.getQueryData<ApplicationDraft>(queryKey)).toEqual(current)
+  })
   test.each([
     [true, 'idle'], [false, 'starting-workspace'], [false, 'running'], [false, 'pushing'],
   ] as const)('saves title/preferences while implementation pending=%s phase=%s and defers spec alignment', async (pending, phase) => {
