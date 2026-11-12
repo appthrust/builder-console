@@ -140,6 +140,16 @@ describe('plan freshness', () => {
     expect(needsPlanRefresh({ ...draft, conversationTurns: [{ ...finished, status: 'failed' }] })).toBe(false)
     expect(needsPlanRefresh({ ...draft, conversationTurns: [{ ...finished, finishedAt: '2026-10-07T23:00:00Z' }] })).toBe(false)
   })
+  test('name and audience clarification turns stay in the exchange after cleanup, but spec requests invalidate the plan', () => {
+    const exchange = [buildCopy.questions.prepareTurn, 'ほかの名前にしたい', '提案して', '営業見積にしたい', 'まだ決めていない', '全社'].map((userMessage, index) => ({
+      ...turn, id: `prepare-${index}`, status: 'succeeded' as const, userMessage,
+      startedAt: `2026-10-08T00:0${index + 2}:00Z`, specMarkdown: `spec ${index}`,
+    }))
+    expect(needsPlanRefresh({ ...draft, conversationTurns: exchange })).toBe(false)
+    expect(needsPlanRefresh({ ...draft, conversationTurns: exchange.slice(0, -1) })).toBe(false)
+    const request = { ...turn, id: 'spec-request', status: 'succeeded' as const, startedAt: '2026-10-08T00:08:00Z', userMessage: '一覧に検索をつけてください。', specMarkdown: 'new spec' }
+    expect(needsPlanRefresh({ ...draft, conversationTurns: [...exchange, request] })).toBe(true)
+  })
   test('turns while preparing (and the 用意する exchange after cleanup) keep the plan in use', () => {
     const at = (time: string) => `2026-10-08T00:${time}Z`
     const reply = (id: string, userMessage: string, time: string) => ({ ...turn, id, userMessage, status: 'succeeded' as const, startedAt: at(time), finishedAt: at(time.replace(/0$/, '5')), specMarkdown: `spec ${id}` })

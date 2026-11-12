@@ -29,6 +29,100 @@ describe('用意する answers', () => {
       .toEqual({ name: '営業見積', shareChoice: 'group', turnIds: ['t-prepare', 't-name', 't-share'], open: false })
     expect(prepareAnswers([opening, turn('t-name', '見積作成', 2), turn('t-share', '会社全体に見せたい', 3)]).shareChoice).toBe('company')
   })
+  test.each([
+    ['入退室・開閉管理でよい', '入退室・開閉管理'],
+    ['入退室・金庫管理にしたい', '入退室・金庫管理'],
+    ['セキュリティ記録管理にしたい', 'セキュリティ記録管理'],
+    ['ほかの名前にしたい', undefined],
+  ])('extracts the real opening chip %s without storing its choice wording', (reply, name) => {
+    const preparing = { ...opening, suggestedReplies: ['入退室・開閉管理でよい', '入退室・金庫管理にしたい', 'セキュリティ記録管理にしたい', 'ほかの名前にしたい'] }
+    expect(prepareAnswers([preparing, turn('t-reply', reply, 2)]))
+      .toEqual({ ...(name ? { name } : {}), turnIds: ['t-prepare', 't-reply'], open: true })
+  })
+  test.each([
+    ['入退室・金庫管理にしたい', '入退室・金庫管理'],
+    ['セキュリティ記録管理にしたい', 'セキュリティ記録管理'],
+    ['ISMS記録管理にしたい', 'ISMS記録管理'],
+    ['ほかの名前にしたい', undefined],
+  ])('extracts the real follow-up chip %s using the same rules', (reply, name) => {
+    const followup = turn('t-another', 'ほかの名前にしたい', 2, {
+      assistantMessage: '公開するときの名前は何にしますか？',
+      suggestedReplies: ['入退室・金庫管理にしたい', 'セキュリティ記録管理にしたい', 'ISMS記録管理にしたい', 'ほかの名前にしたい'],
+    })
+    expect(prepareAnswers([opening, followup, turn('t-reply', reply, 3)]))
+      .toEqual({ ...(name ? { name } : {}), turnIds: ['t-prepare', 't-another', 't-reply'], open: true })
+  })
+  test('strips the documented Japanese choice endings and quotes, with or without an offered chip', () => {
+    for (const ending of ['でよい', 'でいい', 'で良い', 'でOK', 'で大丈夫', 'でお願いします', 'にしたい', 'にする', 'にします', 'にして', 'にしてください', 'がよい', 'がいい']) {
+      for (const polite of ['', 'です', 'ですね']) {
+        for (const name of ['営業見積', '「営業見積」', '『営業見積』', '"営業見積"', '“営業見積”']) {
+          const reply = `${name}${ending}${polite}`
+          for (const suggestedReplies of [[], [reply]]) {
+            expect(prepareAnswers([{ ...opening, suggestedReplies }, turn('t-name', reply, 2)]).name).toBe('営業見積')
+          }
+        }
+      }
+    }
+    expect(prepareAnswers([opening, turn('t-name', '「営業見積でお願いします」', 2)]).name).toBe('営業見積')
+    expect(prepareAnswers([opening, turn('t-name', '「営業見積」でお願いします。', 2)]).name).toBe('営業見積')
+  })
+  test.each(['Sales is fine', 'Sales is fine.', 'Use Sales', 'Call it Sales', 'Use "Sales"', 'Call it “Sales”', 'Please use Sales', 'Sales is OK'])('extracts the English name from %s', (reply) => {
+    const preparing = { ...opening, userMessage: textEn.questions.prepareTurn, suggestedReplies: [reply] }
+    expect(prepareAnswers([preparing, turn('t-name', reply, 2)])).toEqual({ name: 'Sales', turnIds: ['t-prepare', 't-name'], open: true })
+  })
+  test.each([
+    'ほかの名前にしたい', '別の名前にしたい', '名前を変えたい', 'まだ決めていない', 'あとで決める',
+    '提案して', '提案してください。', 'おすすめは？', '候補を出して', '候補を出してください',
+    'Another name', 'Something else', 'Suggest one', 'Not sure', 'Suggest a name', 'I want to change the name', "I'll decide later",
+    "I haven't decided yet", 'What do you recommend?', 'Recommend a name', 'Give me some options', 'I’m not sure yet', 'I’ll decide later',
+    '別の名前がいいです', 'Use Another name', 'Something else is fine',
+  ])('keeps %s in the name exchange even when it is an offered chip', (reply) => {
+    for (const suggestedReplies of [[], [reply]]) {
+      const preparing = { ...opening, suggestedReplies }
+      const undecided = turn('t-undecided', reply, 2)
+      expect(prepareAnswers([preparing, undecided])).toEqual({ turnIds: ['t-prepare', 't-undecided'], open: true })
+      expect(prepareAnswers([preparing, undecided, turn('t-name', '営業見積', 3)]))
+        .toEqual({ name: '営業見積', turnIds: ['t-prepare', 't-undecided', 't-name'], open: true })
+    }
+  })
+  test('APT-792 keeps alternative-name and suggestion requests open until an actual name and audience arrive', () => {
+    const exchange = [opening, turn('t-another', 'ほかの名前にしたい', 2), turn('t-suggest', '提案して', 3)]
+    expect(prepareAnswers(exchange)).toEqual({ turnIds: ['t-prepare', 't-another', 't-suggest'], open: true })
+    const named = [...exchange, turn('t-name', 'チーム台帳にしたい', 4)]
+    expect(prepareAnswers(named)).toEqual({ name: 'チーム台帳', turnIds: ['t-prepare', 't-another', 't-suggest', 't-name'], open: true })
+    expect(prepareAnswers([...named, turn('t-share', '会社全体に見せたい', 5)]))
+      .toEqual({ name: 'チーム台帳', shareChoice: 'company', turnIds: ['t-prepare', 't-another', 't-suggest', 't-name', 't-share'], open: false })
+  })
+  test.each(['まだ決めていない', 'あとで決める', '提案して', 'おすすめは？', 'Not sure', "I'll decide later", 'Suggest one', 'What do you recommend?'])('keeps the audience question open on %s without replacing the captured name', (reply) => {
+    const exchange = [opening, turn('t-name', '営業見積', 2), turn('t-undecided', reply, 3)]
+    expect(prepareAnswers(exchange)).toEqual({ name: '営業見積', turnIds: ['t-prepare', 't-name', 't-undecided'], open: true })
+    expect(prepareAnswers([...exchange, turn('t-share', '全社', 4)]))
+      .toEqual({ name: '営業見積', shareChoice: 'company', turnIds: ['t-prepare', 't-name', 't-undecided', 't-share'], open: false })
+  })
+  test('the first unrelated request bounds the exchange; later names never reopen it', () => {
+    for (const reply of ['一覧に検索をつけてください。', 'Add search to the list.', '長'.repeat(41), '営業\n見積']) {
+      const exchange = [{ ...opening, suggestedReplies: [reply] }, turn('t-another', 'ほかの名前にしたい', 2), turn('t-request', reply, 3)]
+      expect(prepareAnswers([...exchange, turn('t-name', '営業見積', 4)]))
+        .toEqual({ turnIds: ['t-prepare', 't-another'], open: false })
+    }
+    const named = [opening, turn('t-name', '営業見積', 2)]
+    expect(prepareAnswers([...named, turn('t-other', '一覧に検索をつけてください。', 3), turn('t-share', '全社', 4)]))
+      .toEqual({ name: '営業見積', turnIds: ['t-prepare', 't-name'], open: false })
+    expect(prepareAnswers([...named, turn('t-share', '全社', 3), turn('t-later', '別名', 4)]))
+      .toEqual({ name: '営業見積', shareChoice: 'company', turnIds: ['t-prepare', 't-name', 't-share'], open: false })
+  })
+  test('failed suggestions are ignored, pending suggestions stay open, and only the latest preparation prompt counts', () => {
+    const exchange = [opening, turn('t-another', 'ほかの名前にしたい', 2), turn('t-failed', '一覧に検索をつけてください。', 3, { status: 'failed' }), turn('t-suggest', '提案して', 4, { status: 'running' })]
+    expect(prepareAnswers(exchange)).toEqual({ turnIds: ['t-prepare', 't-another', 't-suggest'], open: true })
+    expect(prepareAnswers([...exchange, turn('t-new', textEn.questions.prepareTurn, 5), turn('t-name', 'New name', 6)]))
+      .toEqual({ name: 'New name', turnIds: ['t-new', 't-name'], open: true })
+  })
+  test('persisted preferences remain authoritative, even if an old name was a non-name reply', () => {
+    const preferences = { name: 'ほかの名前にしたい' }
+    expect(prepareAnswers([opening, turn('t-another', preferences.name, 2), turn('t-name', '営業見積', 3)], preferences))
+      .toEqual({ name: preferences.name, turnIds: ['t-prepare', 't-another', 't-name'], open: true })
+    expect(preferences).toEqual({ name: 'ほかの名前にしたい' })
+  })
   test('a sentence asking for something else is not a name, and nothing before the preparation prompt counts', () => {
     expect(prepareAnswers([opening, turn('t-request', '一覧に検索をつけてください。', 2)])).toEqual({ turnIds: ['t-prepare'], open: false })
     expect(prepareAnswers([opening, turn('t-share', '全社', 2)])).toEqual({ shareChoice: 'company', turnIds: ['t-prepare', 't-share'], open: false })

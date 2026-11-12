@@ -86,8 +86,38 @@ export function prepareShareLabel(reply: string, ownerGroupName?: string): strin
   return scope ? shareScopeLabel(scope, ownerGroupName) : reply
 }
 
+/** Choice wording only, not arbitrary sentences. Group 1 is the proposed name in either locale. */
+const NAME_CHOICES = [
+  /^(.+?)(?:で(?:よい|いい|良い|OK|大丈夫|お願いします)|に(?:したい|する|します|して(?:ください)?)|が(?:よい|いい))(?:です(?:ね)?)?[。.!！]?$/i,
+  /^(.+?)\s+is\s+(?:fine|good|OK)(?:\s+with me)?[.!]?$/i,
+  /^(?:please\s+)?(?:use|call it)\s+(.+?)(?:,?\s+please)?[.!]?$/i,
+]
+/** These are answers about deciding, not names; they keep either preparation question open. */
+const PREPARE_CONTINUATIONS = [
+  /^(?:(?:ほか|他|別)の名前|名前を(?:変えたい|変更したい)|まだ決めていない|(?:あと|後)で決める|提案して(?:ください)?|おすすめは|候補を出して(?:ください)?)(?:です(?:ね)?)?$/,
+  /^(?:(?:another|(?:a )?different) name|something else|(?:i want to )?change (?:the|my) name)$/i,
+  /^(?:(?:i(?:['’]m| am) )?not sure(?: yet)?|(?:i )?(?:haven['’]t|have not) decided(?: yet)?|(?:i(?:['’]ll| will) )?decide later)$/i,
+  /^(?:(?:please )?(?:suggest|recommend) (?:one|a name|some names|names)|what (?:do|would) you recommend|(?:give me|show me) (?:some )?(?:suggestions|options|names))$/i,
+]
+const NAME_QUOTES = /^[「『"'“‘]+|[」』"'”’]+$/g
+
+function prepareNameReply(reply: string): { name?: string; continues: boolean } {
+  let name = reply.replace(NAME_QUOTES, '').trim()
+  for (const choice of NAME_CHOICES) {
+    const match = choice.exec(name)
+    if (match) {
+      name = match[1]!.trim().replace(NAME_QUOTES, '').trim()
+      break
+    }
+  }
+  const decision = name.replace(/[。.!！?？]+$/, '').trim()
+  if (PREPARE_CONTINUATIONS.some((pattern) => pattern.test(decision))) return { continues: true }
+  // Offered chips (opening or follow-up) are input, not proof that a name was supplied.
+  return /^[^\n\r。！？!?]{1,40}$/.test(name) && !name.endsWith('.') ? { name, continues: false } : { continues: false }
+}
+
 export interface PrepareAnswers {
-  /** The name to publish under: the reply to the AI's first 用意する question. */
+  /** The first extracted name in the 用意する exchange, unless saved preferences override it. */
   name?: string
   shareChoice?: DraftShareScope
   /** The preparation prompt and its replies; their spec changes never invalidate the plan. */
@@ -98,8 +128,10 @@ export interface PrepareAnswers {
 type PrepareTurn = Pick<ApplicationDraftConversationTurn, 'id' | 'status' | 'startedAt' | 'userMessage' | 'suggestedReplies'> & { kind?: ApplicationDraftConversationTurnKind }
 
 /**
- * The answers to the latest preparation prompt: the name first, then who sees the app. A name is an
- * offered option or one short line; a reply that is neither ends the exchange (it is a spec request).
+ * Read only the contiguous exchange after the latest preparation prompt, ignoring failed turns.
+ * Explicit indecision/suggestion replies continue either question without capturing a name.
+ * Otherwise accept one name, then an audience; the first unrelated reply or audience ends it.
+ * This semantic boundary replaces a reply-count limit: later spec requests never rejoin it.
  * Explicit Excel hand-off answers supersede the exchange without inventing conversation turns.
  */
 export function prepareAnswers(turns: readonly PrepareTurn[] = [], preferences?: ApplicationDraftPublishPreferences, ownerGroupName?: string): PrepareAnswers {
@@ -110,20 +142,19 @@ export function prepareAnswers(turns: readonly PrepareTurn[] = [], preferences?:
   const opening = ordered[start]
   if (!opening) return { ...answered, turnIds: [], open: false }
   const result: PrepareAnswers = { turnIds: [opening.id], open: false }
-  const replies = ordered.slice(start + 1).filter((turn) => turn.status !== 'failed').slice(0, 2)
-  for (const [index, turn] of replies.entries()) {
+  const replies = ordered.slice(start + 1).filter((turn) => turn.status !== 'failed')
+  for (const turn of replies) {
     const reply = turn.userMessage.trim()
     const share = prepareShareScope(reply, ownerGroupName)
-      ?? (index > 0 ? SHARE_WORDS.find(([, pattern]) => pattern.test(reply))?.[0] : undefined)
+      ?? (result.name ? SHARE_WORDS.find(([, pattern]) => pattern.test(reply))?.[0] : undefined)
     if (share) {
       result.shareChoice = share
       result.turnIds.push(turn.id)
       break
     }
-    const offered = opening.suggestedReplies?.includes(reply)
-    const name = offered ? reply : reply.replace(/^[「『"“]+|[」』"”]+$/g, '').trim()
-    if (index > 0 || !(offered || /^[^\n。！？!?]{1,40}$/.test(name))) break
-    result.name = name
+    const answer = prepareNameReply(reply)
+    if (!answer.continues && (result.name || !answer.name)) break
+    if (answer.name) result.name = answer.name
     result.turnIds.push(turn.id)
   }
   const last = ordered.filter((turn) => turn.status !== 'failed').at(-1)
