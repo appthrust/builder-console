@@ -123,7 +123,9 @@ export const fieldEditors: Record<FieldKind, ComponentType<EditorProps>> = {
 
 /**
  * One labelled form row. Read-only fields (auto-filled keys and timestamps)
- * are text: 「自動で入ります」 on create, the stored value on edit.
+ * are text: 「自動で入ります」 on create, the stored value on edit. A column of a
+ * type without a dedicated input is the plain text editor, with the type named
+ * beside the label and in the hint.
  */
 export function FieldEditor({
   id,
@@ -163,9 +165,17 @@ export function FieldEditor({
     ? writeText.field.referenceHint(referenceLabel ?? field.reference.table)
     : field.kind === 'json'
       ? writeText.field.jsonHint
-      : undefined
+      : field.unlistedType
+        ? writeText.field.unlistedType(field.unlistedType)
+        : undefined
+  const label = field.unlistedType ? (
+    <>
+      {field.label}
+      <span className="font-mono text-[11px] font-normal text-stone-500" data-testid="field-type">{field.unlistedType}</span>
+    </>
+  ) : field.label
   return (
-    <Field id={id} label={field.label} required={required} error={error} hint={hint}>
+    <Field id={id} label={label} required={required} error={error} hint={hint}>
       <Editor id={id} field={field} value={value} onChange={onChange} invalid={!!error} mode={mode} disabled={disabled} />
     </Field>
   )

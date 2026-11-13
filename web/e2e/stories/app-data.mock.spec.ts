@@ -1,10 +1,12 @@
-import type { Page } from '@playwright/test'
+import type { Page, Route } from '@playwright/test'
 import { test, expect, seed, withExpectedFailures, type ExpectedFailure } from '../support/fixtures'
 
 // データ tab, read side (design/platform/builder-console-app-data.md). The mock
 // serves one 備品在庫 catalog for every app database (src/dev/mock-database-data.ts).
 const app = seed.apps.mitsumori
 const dataUrl = `/${app.groupPath}/${app.slug}/-/data`
+const productsRowsPath = `/api/v1/projects/${seed.projectId}/databases/${app.slug}-db/tables/public/products/rows`
+const REFRESH_FAILED = /^更新できませんでした。/
 
 /** The data tab's first read: the Platform API answers why the database cannot be listed. */
 const tablesRefused = (status: number, reason: string): ExpectedFailure =>
@@ -18,6 +20,11 @@ async function switchTable(page: Page, label: RegExp) {
 }
 
 test.describe('App data @app-data', () => {
+  // A story that rewrites answers in the browser removes its routes before the next one starts.
+  test.afterEach(async ({ page }) => {
+    await page.unrouteAll({ behavior: 'ignoreErrors' })
+  })
+
   test('lists the visible 表, switches between them, searches, sorts, pages and opens a row @mock @story', async ({ page, mock }) => {
     void mock
     await page.goto(dataUrl)
@@ -114,6 +121,60 @@ test.describe('App data @app-data', () => {
     await switchTable(page, /^旧システムの取込データ/)
     await expect(page.getByText('この表は見るだけです')).toBeVisible()
     await expect(page.getByRole('button', { name: '行を追加' })).toHaveCount(0)
+  })
+
+  test('a refresh answered with unreadable rows keeps the grid under one notice, and the next good read clears it @mock @story', async ({ page, mock }, testInfo) => {
+    void mock
+    let corrupt = false
+    let corrupted = 0
+    let goodReads = 0
+    await page.route(`**${productsRowsPath}?*`, async (route: Route) => {
+      if (route.request().method() !== 'GET') return route.continue()
+      const response = await route.fetch()
+      if (!corrupt) {
+        goodReads++
+        return route.fulfill({ response })
+      }
+      corrupt = false
+      corrupted++
+      return route.fulfill({ response, json: { ...(await response.json()), rows: 'the rows of this table' } })
+    })
+    await page.goto(`${dataUrl}?table=public.products`)
+    const products = page.getByRole('table', { name: '商品の行' })
+    await expect(products.getByRole('row')).toHaveCount(13)
+    await expect(products.getByRole('row', { name: /ノートPC/ })).toContainText('120,000')
+    const rows = await products.getByRole('row').allTextContents()
+    const notice = page.getByText(REFRESH_FAILED)
+    await expect(notice).toHaveCount(0)
+
+    // 「↻」 reads the rows again and gets 200 with the rows as a string.
+    const before = goodReads
+    corrupt = true
+    await page.getByRole('button', { name: '読み込み直す', exact: true }).click()
+    await expect.poll(() => corrupted).toBe(1)
+    await expect(notice).toHaveCount(1)
+    expect(await products.getByRole('row').allTextContents()).toEqual(rows)
+    await expect(page.getByText('the rows of this table')).toHaveCount(0)
+    await expect(page.getByText('情報を読み込めませんでした')).toHaveCount(0)
+    await expect(page.getByText(/まだ行がありません/)).toHaveCount(0)
+    // The toolbar, the rows and the row Sheet stay usable.
+    await expect(page.getByRole('searchbox', { name: '検索' })).toBeEnabled()
+    await expect(page.getByRole('button', { name: '行を追加' })).toBeEnabled()
+    await products.getByRole('link', { name: 'ノートPC', exact: true }).click()
+    const sheet = page.getByRole('dialog', { name: /ノートPC/ })
+    await expect(sheet.locator('[data-field="stock"] dd')).toHaveText('8')
+    await page.keyboard.press('Escape')
+    await expect(sheet).toHaveCount(0)
+    await expect(notice).toHaveCount(1)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath('malformed-rows-notice.png'), fullPage: true })
+
+    // The notice's retry reads good rows again: it leaves, the rows stay.
+    await page.getByRole('status').filter({ hasText: REFRESH_FAILED }).getByRole('button').click()
+    await expect.poll(() => goodReads).toBeGreaterThan(before)
+    await expect(notice).toHaveCount(0)
+    expect(corrupted).toBe(1)
+    expect(await products.getByRole('row').allTextContents()).toEqual(rows)
   })
 
   test('forbidden, suspended, unsupported and empty databases are explained, never a grid @mock @story', async ({ page, mock }) => {

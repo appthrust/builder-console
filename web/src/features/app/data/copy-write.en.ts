@@ -30,6 +30,7 @@ export const writeTextEn: typeof writeTextJa = {
     none: '(None)',
     choose: 'Choose an option',
     jsonHint: 'Use { } or [ ] to write this value',
+    unlistedType: (type: string) => `No dedicated input for this type (${type}); the value is saved as you type it.`,
   },
   validation: {
     required: (label: string) => `${label} is required`,
