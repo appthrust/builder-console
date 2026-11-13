@@ -1,4 +1,3 @@
-import type { ApplicationSourceRepository } from '@appthrust/api-schema/platform-api'
 import { Trash2 } from 'lucide-react'
 import type { BusinessApp } from '../../model/contracts/console'
 import { copy } from '../../copy'
@@ -7,7 +6,7 @@ import type { AccessDisplay } from '../../model/access'
 import { Button, Notice } from '../../ui'
 import { text } from './copy'
 import { deleteHelpText } from './delete-dialog'
-import { webScope } from './platform'
+import { webScope, type SourceRepositoryRef } from './platform'
 import { EnvSection } from './settings/env-section'
 import { GeneralSection } from './settings/general-section'
 import { SettingsCard } from './settings/parts'
@@ -30,7 +29,7 @@ export function SettingsTab({
   view: AppView
   access: AccessDisplay
   onShare: () => void
-  sourceRepository: ApplicationSourceRepository | undefined
+  sourceRepository: SourceRepositoryRef | undefined
   canEdit: boolean
   onDelete: () => void
 }) {

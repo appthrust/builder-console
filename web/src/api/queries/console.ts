@@ -1,7 +1,7 @@
 // Console server reads (`/api/console/*`, `/config`) and the app screens'
 // Console writes. Every answer is decoded at the boundary
 // (api/contracts/console/*); nothing here reads an unchecked body.
-import { queryOptions, useQuery, useSuspenseQuery } from '@tanstack/react-query'
+import { queryOptions, useQuery, useSuspenseQuery, type QueryClient } from '@tanstack/react-query'
 import { isResponseContractError } from '../boundary'
 import { isConsoleError } from '../console'
 import { listCommentsContract, postCommentContract, removeCommentContract } from '../contracts/console/comments'
@@ -84,6 +84,18 @@ export const appsQuery = (params: AppListParams) =>
 
 export const appQuery = (appId: string) =>
   queryOptions({ queryKey: consoleKeys.app(appId), queryFn: () => apiGateway.console(appContract, appId), retry: retryReadQuery, retryDelay: readRetryDelay })
+
+/**
+ * The one way a write's answer enters the app cache: the decoded `BusinessApp`
+ * an update, bind, publish or approve answered, the same shape `appQuery`
+ * reads. A read of the app that started before the write could land later
+ * with the old record, so it is cancelled first.
+ */
+export async function writeAppCache(queryClient: QueryClient, app: BusinessApp): Promise<void> {
+  const { queryKey } = appQuery(app.id)
+  await queryClient.cancelQueries({ queryKey, exact: true })
+  queryClient.setQueryData(queryKey, app)
+}
 
 export const directoryAppsQuery = (params: DirectoryAppsParams = {}) =>
   queryOptions({ queryKey: consoleKeys.directoryApps(params), queryFn: () => apiGateway.console(directoryAppsContract, params) })

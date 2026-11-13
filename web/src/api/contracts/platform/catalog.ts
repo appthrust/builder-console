@@ -217,15 +217,6 @@ export const createSourceRepositoryContract = platformContract({
   reader: resourceOf(sourceRepositoryReader),
 })
 
-/** 202 with the mutation envelope (same writer as create). */
-export const deleteSourceRepositoryContract = platformContract({
-  operationId: 'platformApiDeleteApplicationSourceRepository',
-  method: 'DELETE',
-  routeTemplate: `${P}/application-source-repositories/{id}`,
-  successStatuses: [202],
-  reader: resourceOf(ApplicationSourceRepository.pick({ id: true })),
-})
-
 export const validateStackContract = platformContract({
   operationId: 'platformApiValidateApplicationStack',
   method: 'POST',

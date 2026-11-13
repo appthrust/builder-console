@@ -8,9 +8,6 @@
     "raw-platform-client": 1,
     "wire-schema-import": 1
   },
-  "features/app/settings-tab.tsx": {
-    "wire-schema-import": 1
-  },
   "features/discover/drafts.tsx": {
     "wire-schema-import": 1
   },
@@ -54,9 +51,6 @@
     "wire-schema-import": 1
   },
   "model/data-catalog.ts": {
-    "wire-schema-import": 1
-  },
-  "model/progress.ts": {
     "wire-schema-import": 1
   }
 }

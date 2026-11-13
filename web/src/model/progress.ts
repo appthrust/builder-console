@@ -3,7 +3,7 @@
 // belongs to the release step, which completes only when the app runs.
 // URL readiness and access-policy readiness are independent. An adopted
 // repository leads with a repository check; AI creation binds before this view.
-import type { ApplicationSourceRepository } from '@appthrust/api-schema/platform-api'
+import type { SourceRepository } from './contracts/catalog'
 import { copy } from '../copy'
 import type { AppView } from './app'
 import { isOneOf } from './contracts/build'
@@ -28,7 +28,7 @@ export interface ProgressStep {
 export interface ProgressInput {
   view: AppView
   /** Source repository bound to the stack, when the app was created from a ひな形 or an existing repository. */
-  sourceRepository?: ApplicationSourceRepository
+  sourceRepository?: SourceRepository
   /** shareSentence() of the app, e.g. "営業1課 に公開". */
   shareSentence: string
   access?: AccessDisplay
@@ -51,13 +51,10 @@ export function repositoryLabel(url: string): string {
   return url.replace(/^https?:\/\//, '').replace(/\.git$/, '').replace(/\/$/, '')
 }
 
-const REPOSITORY_FAILED: Partial<Record<ApplicationSourceRepository['status'], true>> = {
-  failed: true,
-  conflict: true,
-  'permission-denied': true,
-}
+/** Statuses that stop the repository; a status this console does not know is none of them (and never ready). */
+const isRepositoryFailed = (repository: SourceRepository) => isOneOf(repository.status, 'failed', 'conflict', 'permission-denied')
 
-function repositoryConditionStatus(repository: ApplicationSourceRepository | undefined, type: string): string | undefined {
+function repositoryConditionStatus(repository: SourceRepository | undefined, type: string): string | undefined {
   if (!repository) return undefined
   for (const condition of repository.conditions) {
     if (condition.type === type) return condition.status
@@ -70,21 +67,21 @@ function repositoryConditionStatus(repository: ApplicationSourceRepository | und
  * stops the line until the user adds one; a proposed build setup waits for
  * the user to merge the pull request the platform opened.
  */
-function checkStep(repository: ApplicationSourceRepository, fullName: string): ProgressStep {
+function checkStep(repository: SourceRepository, fullName: string): ProgressStep {
   const href = repository.repositoryUrl ?? `https://github.com/${fullName}`
   const where = { detail: fullName, href }
   const readiness = repository.readiness
-  if (readiness?.dockerfile === 'missing') {
+  if (isOneOf(readiness?.dockerfile, 'missing')) {
     return { key: 'check', state: 'failed', title: copy.progress.check.dockerfileMissing, detail: copy.progress.check.dockerfileHint, href, action: 'recheck' }
   }
-  if (readiness?.workflow === 'proposed') {
-    const pr = readiness.proposedPullRequestUrl
+  if (isOneOf(readiness?.workflow, 'proposed')) {
+    const pr = readiness?.proposedPullRequestUrl
     return { key: 'check', state: 'active', title: copy.progress.check.workflowProposed, ...(pr ? { detail: repositoryLabel(pr), href: pr } : where) }
   }
-  if (readiness?.dockerfile === 'present' && readiness.workflow === 'present') {
+  if (isOneOf(readiness?.dockerfile, 'present') && isOneOf(readiness?.workflow, 'present')) {
     return { key: 'check', state: 'done', title: copy.progress.check.done, ...where }
   }
-  if (REPOSITORY_FAILED[repository.status]) {
+  if (isRepositoryFailed(repository)) {
     return { key: 'check', state: 'failed', title: copy.progress.check.failed, ...where }
   }
   return { key: 'check', state: 'active', title: copy.progress.check.active, ...where }
@@ -107,11 +104,11 @@ export function deriveCreateProgress({ view, sourceRepository, shareSentence, ac
     // after it exists; a plain `failed` once it exists is the image build's.
     const state: StepState = !sourceRepository
       ? 'active'
-      : sourceRepository.status !== 'failed' && REPOSITORY_FAILED[sourceRepository.status]
+      : isOneOf(sourceRepository.status, 'conflict', 'permission-denied')
         ? 'failed'
-        : sourceRepository.status === 'ready' || repositoryConditionStatus(sourceRepository, 'RepositoryCreated') === 'True'
+        : isOneOf(sourceRepository.status, 'ready') || repositoryConditionStatus(sourceRepository, 'RepositoryCreated') === 'True'
           ? 'done'
-          : REPOSITORY_FAILED[sourceRepository.status]
+          : isRepositoryFailed(sourceRepository)
             ? 'failed'
             : 'active'
     const url = sourceRepository?.repositoryUrl
@@ -149,7 +146,7 @@ export function deriveCreateProgress({ view, sourceRepository, shareSentence, ac
       detail: view.text,
       ...(view.help ? { help: view.help } : {}),
     }
-  } else if (sourceRepository && sourceRepository.status !== 'ready' && imageStatus !== 'True') {
+  } else if (sourceRepository && !isOneOf(sourceRepository.status, 'ready') && imageStatus !== 'True') {
     release = {
       key: 'release',
       state: 'active',

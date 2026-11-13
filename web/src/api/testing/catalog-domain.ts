@@ -6,12 +6,13 @@ import type {
   PublishDomain,
   RegistryConnection,
   SourceConnection,
+  SourceRepository,
   StackDefinition,
   TemplateSummary,
 } from '../../model/contracts/catalog'
 import type { BusinessApp } from '../../model/contracts/console'
 import { decodeResponse } from '../boundary'
-import { publishDomainReader, registryConnectionReader, sourceConnectionReader, stackDefinitionReader, templateReader } from '../contracts/platform/catalog'
+import { publishDomainReader, registryConnectionReader, sourceConnectionReader, sourceRepositoryReader, stackDefinitionReader, templateReader } from '../contracts/platform/catalog'
 import { appContract } from '../contracts/console/operations'
 
 function read<D>(reader: z.ZodType<D>, wire: unknown, what: string): D {
@@ -25,6 +26,7 @@ export const definitionOf = (wire: unknown): StackDefinition => read(stackDefini
 export const sourceConnectionOf = (wire: unknown): SourceConnection => read(sourceConnectionReader, wire, 'source connection')
 export const registryOf = (wire: unknown): RegistryConnection => read(registryConnectionReader, wire, 'registry connection')
 export const domainOf = (wire: unknown): PublishDomain => read(publishDomainReader, wire, 'domain')
+export const sourceRepositoryOf = (wire: unknown): SourceRepository => read(sourceRepositoryReader, wire, 'source repository')
 
 /** A Console app as `GET /api/console/apps/{id}` answers it. */
 export function appOf(wire: unknown): BusinessApp {

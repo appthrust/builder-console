@@ -5,13 +5,13 @@
 import { keepPreviousData, queryOptions, skipToken, useQueries, useQuery } from '@tanstack/react-query'
 import type { CreateConnections } from '../../model/contracts/catalog'
 import { publishDomainPending } from '../../model/create'
-import { client } from '../client'
 import {
   creationToolsContract,
   listDomainsContract,
   listGitHubRepositoriesContract,
   listRegistryConnectionsContract,
   listSourceConnectionsContract,
+  listSourceRepositoriesContract,
   listStackDefinitionsContract,
   listTemplatesContract,
 } from '../contracts/platform/catalog'
@@ -46,15 +46,14 @@ export function useCreateConnections(projectId: string) {
 }
 
 /**
- * The project's source repositories for the app pages. Still the undecoded
- * list: its readers (features/app, features/build) switch to `SourceRepository`
- * (`createApi.sourceRepositories`, api/create.ts) with the app slice; create's
- * own readback already reads through the contract.
+ * The project's source repositories for the app pages and the build session,
+ * decoded at the boundary: a build or readiness state this console does not
+ * know is an unknown value, never "failed" or "ready".
  */
 export function useSourceRepositories(projectId: string) {
   return useQuery({
     queryKey: keys.sourceRepositories(projectId),
-    queryFn: () => client.platformApiListApplicationSourceRepositories({ projectId }),
+    queryFn: () => apiGateway.platform(listSourceRepositoriesContract, { projectId }),
   })
 }
 

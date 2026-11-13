@@ -8,7 +8,7 @@ import { isOneOf } from '../../../model/contracts/build'
 import { copy } from '../../../copy'
 import { ActionError, Button, Checkbox, cn, DataTable, Disclosure, EmptyState, Field, LoadFailed, Loading, Notice, TextInput, useUnsavedChangesGuard } from '../../../ui'
 import { text } from '../copy'
-import { hasUnsupportedEntry, isUserOwned, pendingRows, stageAdd, stageEdit, stageRemove, unstage, variablesToSave, type EnvChanges, type EnvRow, type EnvVariable } from './env-changes'
+import { hasUnsupportedEntry, isUserOwned, pendingRows, rebaseChanges, stageAdd, stageEdit, stageRemove, unstage, variablesToSave, type EnvChanges, type EnvRow, type EnvVariable } from './env-changes'
 import { StaleNotice, UnconfirmedNotice, useWriteConfirmation } from '../notices'
 import { fieldError, SaveRow, SettingsCard } from './parts'
 
@@ -152,7 +152,10 @@ export function EnvSection({ scope, canEdit }: { scope: ComponentScope | undefin
   const [columns] = useState(createColumns)
   const config = useEnvVars(scope)
   const entries = useMemo(() => config.data?.variables ?? [], [config.data])
-  const [changes, setChanges] = useState<EnvChanges>(NO_CHANGES)
+  const [staged, setStaged] = useState<EnvChanges>(NO_CHANGES)
+  // Staged changes are always read against the saved list as it is now (a save whose answer could not be read may have happened).
+  const changes = useMemo(() => rebaseChanges(entries, staged), [entries, staged])
+  const restage = (next: (current: EnvChanges) => EnvChanges) => setStaged((current) => next(rebaseChanges(entries, current)))
   const [editing, setEditing] = useState<{ key: string; value: string }>()
   const rows = useMemo(() => pendingRows(entries, changes), [entries, changes])
   const ownRows = useMemo(() => rows.filter((entry) => isUserOwned(entry) && !entry.key.startsWith('DATABASE_')), [rows])
@@ -171,7 +174,7 @@ export function EnvSection({ scope, canEdit }: { scope: ComponentScope | undefin
         await queryClient.cancelQueries({ queryKey: envVarsKey(scope), exact: true })
         queryClient.setQueryData(envVarsKey(scope), written)
       }
-      setChanges(NO_CHANGES)
+      setStaged(NO_CHANGES)
       setEditing(undefined)
     },
   })
@@ -185,14 +188,14 @@ export function EnvSection({ scope, canEdit }: { scope: ComponentScope | undefin
     editing,
     setEditing,
     apply: (key, value) => {
-      setChanges((current) => stageEdit(entries, current, key, value))
+      restage((current) => stageEdit(entries, current, key, value))
       setEditing(undefined)
     },
     remove: (key) => {
-      setChanges((current) => stageRemove(current, key))
+      restage((current) => stageRemove(current, key))
       setEditing(undefined)
     },
-    undo: (key) => setChanges((current) => unstage(current, key)),
+    undo: (key) => restage((current) => unstage(current, key)),
   }), [entries, canEdit, busy, editing])
 
   const table = useReactTable({
@@ -215,7 +218,7 @@ export function EnvSection({ scope, canEdit }: { scope: ComponentScope | undefin
   const form = useForm({
     defaultValues: { key: '', value: '', sensitive: false },
     onSubmit: ({ value, formApi }) => {
-      setChanges((current) => stageAdd(entries, current, value.key.trim(), value.value, value.sensitive))
+      restage((current) => stageAdd(entries, current, value.key.trim(), value.value, value.sensitive))
       formApi.reset()
     },
   })
@@ -226,7 +229,7 @@ export function EnvSection({ scope, canEdit }: { scope: ComponentScope | undefin
   useUnsavedChangesGuard(canEdit && (pendingCount > 0 || addingDirty || editingDirty), text.settings.unsaved(text.settings.sections.env))
 
   const discard = () => {
-    setChanges(NO_CHANGES)
+    setStaged(NO_CHANGES)
     setEditing(undefined)
     form.reset()
     mutation.reset()

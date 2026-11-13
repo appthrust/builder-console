@@ -27,7 +27,7 @@ import { text } from './copy'
 
 import { appPreparationProgress, isBuildPending, sourceBuildFailureProgress } from '../../model/build/progress'
 import { useAppViews } from '../app/use-app-views'
-import { appQuery, consoleKeys } from '../../api/queries/console'
+import { appQuery, writeAppCache } from '../../api/queries/console'
 import { createConnectionsQuery, useSourceRepositories } from '../../api/queries/catalog'
 import { sourceRepositoryFor } from '../app/platform'
 /** Backoff for an AI gate 412 (about two minutes in total, the length of a platform rollout). */
@@ -364,8 +364,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
         )
         patch({ createdAppId: kept.id, prepareRequested: false })
         // The decoded bind answer is the app; a read that started before the bind must not overwrite it.
-        await queryClient.cancelQueries({ queryKey: consoleKeys.app(kept.id) })
-        queryClient.setQueryData(consoleKeys.app(kept.id), kept)
+        await writeAppCache(queryClient, kept)
         await queryClient.invalidateQueries({ queryKey: ['console', 'apps'] })
       } catch (error) { bindingFailed.current = true; throw error }
     })

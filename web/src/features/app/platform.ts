@@ -2,6 +2,7 @@
 import type { ComponentScope } from '../../api/queries/app'
 import type { AppView } from '../../model/app'
 import { isOneOf } from '../../model/contracts/build'
+import type { SourceRepository } from '../../model/contracts/catalog'
 import type { BusinessApp } from '../../model/contracts/console'
 
 /** What the app screens read of a source repository (the catalog's list item). */
@@ -30,9 +31,9 @@ export function sourceRepositoryFor<R extends SourceRepositoryRef>(view: AppView
   return id ? repositories?.find((repository) => repository.id === id) : undefined
 }
 
-/** Whether the source's last image build is known to have failed; a state this console does not know is not a failure. */
-export function isSourceBuildFailed(repository: { build?: { state?: string } }): boolean {
-  return repository.build?.state === 'failed'
+/** Whether the source's last image build is known to have failed; a state this console does not know is neither failed nor succeeded. */
+export function isSourceBuildFailed(repository: Pick<SourceRepository, 'build'>): boolean {
+  return isOneOf(repository.build?.state, 'failed')
 }
 
 /** `owner/name` of the GitHub repository (置き場) behind a source, once the platform reports it. */

@@ -10,7 +10,6 @@ import { appOf } from '../../api/testing/catalog-domain'
 import type { BuildDraft } from '../../model/contracts/build'
 import { buildKeys } from '../../api/queries/build'
 import { consoleKeys } from '../../api/queries/console'
-import type { BusinessApp as UnverifiedBusinessApp } from '../../api/console-unverified'
 import type { BusinessApp } from '../../model/contracts/console'
 import { type Me } from '../../model/contracts/console'
 import { keys } from '../../api/queries/shared'
@@ -538,8 +537,8 @@ const publishedDraft: ApplicationDraft = {
   ...draft, phase: 'created', createdApplicationId: 'app-platform', createdApplicationStackId: 'stack-1',
   conversationTurns: [], publishedAt, publishPreferences: { name: draft.title, shareScope: 'group' },
 }
-// The bind answer as the build's bind step still types it (wire shape).
-const publishedApp: UnverifiedBusinessApp = {
+// The bind answer's wire; the bind step reads it through the app contract.
+const publishedApp = {
   id: 'app-console', slug: 'ledger', displayName: draft.title, description: '', icon: '', tags: [], guide: '', capabilities: [], screenshots: [],
   group: { id: 'sales', path: 'sales', name: 'Sales' }, owners: [me.person], stackId: 'stack-1', appName: 'app-platform',
   share: { scope: 'group', groupIds: ['sales'], extraPersonIds: [] }, createdBy: me.person, createdAt: at, updatedAt: at,

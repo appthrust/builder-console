@@ -7,11 +7,14 @@ import { currentLanguage, setLanguage } from '../../shell/language'
 import { buildCopy } from './copy'
 import { classifyBuildFailure } from './failure'
 import { executionOf, runOf, taskOf } from '../../api/testing/build-domain'
+import { sourceRepositoryOf } from '../../api/testing/catalog-domain'
 
 const since = '2026-10-10T00:00:00Z'
 const start = Date.parse(since)
 const execution: ApplicationDraftCreationExecution = { id: 'exec', attempt: 1, status: 'running', startedAt: since, steps: [{ id: 'observe', tool: 'appthrust.applicationStack.observe', status: 'running', title: '設計図を反映しています', phase: 'syncing', detail: { since, attempt: 1 } }] }
-const repository: ApplicationSourceRepository = { id: 'src', projectId: 'pj', destination: { repositoryName: 'app' }, image: { imagePath: 'ghcr.io/acme/app' }, status: 'pending', repositoryUrl: 'https://github.com/acme/app', conditions: [{ type: 'RepositoryCreated', status: 'True' }] }
+const repositoryWire: ApplicationSourceRepository = { id: 'src', projectId: 'pj', destination: { repositoryName: 'app' }, image: { imagePath: 'ghcr.io/acme/app' }, status: 'pending', repositoryUrl: 'https://github.com/acme/app', conditions: [{ type: 'RepositoryCreated', status: 'True' }] }
+const repository = sourceRepositoryOf(repositoryWire)
+const buildOf = (build: unknown) => sourceRepositoryOf({ ...repositoryWire, build }).build
 function view(facts: Partial<ConsoleAppFacts> = {}): AppView {
   return { status: 'deploying', label: '準備中', text: '', second: '', draft: false, platform: { id: 'app', name: 'app', status: 'deploying', statusText: '', branchId: 'production', facts: { webReady: false, everReleased: false, hasPublish: true, ...facts } } }
 }
@@ -40,7 +43,7 @@ test('the app projection drives the template startup, never a URL rung', () => {
   expect(building.steps?.map((step) => step.state)).toEqual(['done', 'done', 'doing'])
   expect(building.buildUrl).toBe('https://github.com/acme/app/actions')
   expect(building.delayHint).toContain('いつもより時間がかかっています')
-  const ready = { ...repository, status: 'ready' as const }
+  const ready = sourceRepositoryOf({ ...repositoryWire, status: 'ready' })
   const starting = appPreparationProgress({ ...input, sourceRepository: ready }, start + 67_000, since)!
   expect(starting.steps?.[2]).toMatchObject({ state: 'doing', elapsedLabel: '1:07' })
   expect(starting.steps?.map((step) => step.label)).not.toContain('URL')
@@ -50,9 +53,9 @@ test('the app projection drives the template startup, never a URL rung', () => {
 })
 
 test('build and startup failures show Japanese hints without leaking raw platform text', () => {
-  const failedBuild = appPreparationProgress({ view: view(), shareSentence: '', sourceRepository: { ...repository, status: 'failed', conditions: [...repository.conditions, { type: 'ImageReady', status: 'False' }] } }, start)!
+  const failedBuild = appPreparationProgress({ view: view(), shareSentence: '', sourceRepository: sourceRepositoryOf({ ...repositoryWire, status: 'failed', conditions: [...repositoryWire.conditions, { type: 'ImageReady', status: 'False' }] }) }, start)!
   expect(failedBuild.delayHint).toBe('下地の組み立てに失敗しました。基盤の担当者に確認してください。')
-  const failedStart = appPreparationProgress({ view: view({ webReleasePhase: 'Failed' }), shareSentence: '', sourceRepository: { ...repository, status: 'ready' } }, start)!
+  const failedStart = appPreparationProgress({ view: view({ webReleasePhase: 'Failed' }), shareSentence: '', sourceRepository: sourceRepositoryOf({ ...repositoryWire, status: 'ready' }) }, start)!
   expect(failedStart.delayHint).toBe('下地を起動できませんでした。基盤の担当者に確認してください。')
 })
 
@@ -81,26 +84,26 @@ test('screen projection hides technical titles and handles failed tasks and inva
 })
 
 test('source build failure survives an older released image and marks the startup rung', () => {
-  const failed = { ...repository, status: 'ready' as const, build: { state: 'failed' as const, runUrl: 'https://github.com/acme/app/actions/runs/12', headSha: 'new-head' } }
-  const input = { view: view({ everReleased: true, webReady: true }), sourceRepository: failed, shareSentence: '' }
+  const failedWire = { ...repositoryWire, status: 'ready' as const, build: { state: 'failed' as const, runUrl: 'https://github.com/acme/app/actions/runs/12', headSha: 'new-head' } }
+  const input = { view: view({ everReleased: true, webReady: true }), sourceRepository: sourceRepositoryOf(failedWire), shareSentence: '' }
   const preparation = appPreparationProgress(input, start)
   const card = buildProgress(preparation, { tasks: [taskOf({ id: 'screen', title: '一覧', status: 'done' })] }, start, true)
   expect(card.steps?.[2]).toMatchObject({ label: '下地を起動', state: 'failed', detail: 'アプリのビルドに失敗しています' })
   expect(card.steps?.at(-1)?.state).not.toBe('done')
-  expect(card.buildUrl).toBe(failed.build.runUrl)
+  expect(card.buildUrl).toBe(failedWire.build.runUrl)
   expect(card.currentActivity).toBeUndefined()
   expect(deriveStage({ execution: executionOf({ ...execution, status: 'succeeded' }), now: start, published: draftPublished({ publishedAt: since, implementationRuns: [] }), appProgress: preparation }).progress).toBe(preparation)
-  for (const state of ['healthy', 'running', 'unknown'] as const) {
-    expect(appPreparationProgress({ ...input, sourceRepository: { ...failed, build: { state } } }, start)?.buildFailed).not.toBe(true)
+  for (const state of ['healthy', 'running', 'unknown', 'a-state-added-later']) {
+    expect(appPreparationProgress({ ...input, sourceRepository: sourceRepositoryOf({ ...failedWire, build: { state } }) }, start)?.buildFailed).not.toBe(true)
   }
 })
 
 test('build failures are visible while creation is still waiting for the first stack', () => {
-  const progress = sourceBuildFailureProgress({ state: 'failed', runUrl: 'https://github.com/acme/app/actions/runs/12' })
+  const progress = sourceBuildFailureProgress(buildOf({ state: 'failed', runUrl: 'https://github.com/acme/app/actions/runs/12' }))
   expect(progress?.steps?.[2]?.state).toBe('failed')
   expect(deriveStage({ execution: executionOf(execution), now: start, published: draftPublished({ implementationRuns: [] }), appProgress: progress }).progress).toBe(progress)
-  expect(sourceBuildFailureProgress({ state: 'running' })).toBeUndefined()
-  expect(sourceBuildFailureProgress({ state: 'failed', runUrl: 'javascript:alert(1)' })?.buildUrl).toBeUndefined()
+  expect(sourceBuildFailureProgress(buildOf({ state: 'running' }))).toBeUndefined()
+  expect(sourceBuildFailureProgress(buildOf({ state: 'failed', runUrl: 'javascript:alert(1)' }))?.buildUrl).toBeUndefined()
 })
 
 test('build labels and failure messages switch languages without reloading the model', () => {
@@ -111,14 +114,14 @@ test('build labels and failure messages switch languages without reloading the m
     expect(progress.title).toBe('Building your app')
     expect(progress.steps?.map((step) => step.label)).toEqual(['Saved files', 'Apply design', 'Start app', 'Screen “Sales”', 'Ready to publish'])
     expect(progress.steps?.[3]?.status).toBe('Done')
-    expect(sourceBuildFailureProgress({ state: 'failed' })?.steps?.[2]?.detail).toBe('The app could not be built')
+    expect(sourceBuildFailureProgress(buildOf({ state: 'failed' }))?.steps?.[2]?.detail).toBe('The app could not be built')
     expect(classifyBuildFailure('PVCNotFound', undefined, 'prepare').reason).toBe('Storage for AI is not ready. Please wait or try again; contact your administrator if nothing changes for over 5 minutes.')
     expect(buildCopy.progress.task.working(false)).toBe('AI is working')
     expect(buildCopy.progress.task.working(true)).toBe('AI is working (updates available)')
     setLanguage('ja')
     expect(buildCopy.progress.task.working(false)).toBe('AI が作業しています')
     expect(buildCopy.progress.task.working(true)).toBe('AI が作業しています（出力あり）')
-    expect(sourceBuildFailureProgress({ state: 'failed' })?.steps?.[2]?.detail).toBe('アプリのビルドに失敗しています')
+    expect(sourceBuildFailureProgress(buildOf({ state: 'failed' }))?.steps?.[2]?.detail).toBe('アプリのビルドに失敗しています')
   } finally {
     setLanguage(originalLanguage)
   }

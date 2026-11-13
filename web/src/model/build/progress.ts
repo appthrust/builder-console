@@ -1,5 +1,6 @@
 import type { OpenValue } from '../../api/boundary'
-import { jobState, knownValue, type BuildExecution, type RunStep, type TaskStatus } from '../contracts/build'
+import { isOneOf, jobState, knownValue, type BuildExecution, type RunStep, type TaskStatus } from '../contracts/build'
+import type { SourceRepository } from '../contracts/catalog'
 import { buildCopy } from './copy'
 import { classifyBuildFailure } from './failure'
 import type { ProgressCard } from './types'
@@ -86,8 +87,8 @@ function observeProgress(execution: BuildExecution, now: number): Partial<Progre
 }
 
 /** A source build can fail before the stack or console app binding exists. */
-export function sourceBuildFailureProgress(build: { state: string; runUrl?: string } | undefined): ProgressCard | undefined {
-  if (build?.state !== 'failed') return undefined
+export function sourceBuildFailureProgress(build: SourceRepository['build']): ProgressCard | undefined {
+  if (!build || !isOneOf(build.state, 'failed')) return undefined
   return {
     kind: 'prepare', title: buildCopy.progress.prepare.title, interrupted: false, staged: true, buildFailed: true,
     steps: [
@@ -108,7 +109,7 @@ export function appPreparationProgress(input: ProgressInput, now: number, since?
   if (release?.state === 'done') return undefined
   const repository = input.sourceRepository
   const imageReady = repository?.conditions.some((condition) => condition.type === 'ImageReady' && condition.status === 'True')
-  const building = repository !== undefined && repository.status !== 'ready' && !imageReady
+  const building = repository !== undefined && !isOneOf(repository.status, 'ready') && !imageReady
   const phase = building ? 'building' : 'starting'
   const reason = release?.state === 'failed' ? building ? 'build_failed' : 'release_failed' : undefined
   return stagedProgress(phase, now, since, reason, undefined, release?.href)

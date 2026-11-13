@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import { buildGroupTree, flattenGroupTree, type BusinessApp } from '../../model/contracts/console'
 import { keys } from '../../api/queries/shared'
-import { consoleKeys, updateApp, useGroups, useMe } from '../../api/queries/console'
+import { consoleKeys, updateApp, useGroups, useMe, writeAppCache } from '../../api/queries/console'
 import { putAppAccess, retryAccess } from '../../api/access'
 import { knownScope, shareSentence } from '../../model/share'
 import { UnconfirmedNotice, useWriteConfirmation } from '../app/notices'
@@ -37,9 +37,7 @@ export function PublishStep({ app, publishId, publishPreferences, onPublished, o
     retry: retryAccess,
     retryDelay: 3_000,
     onSuccess: async (updated) => {
-      // A read of the app that started before the write must not land over its answer.
-      await queryClient.cancelQueries({ queryKey: consoleKeys.app(app.id), exact: true })
-      queryClient.setQueryData(consoleKeys.app(app.id), updated)
+      await writeAppCache(queryClient, updated)
       await queryClient.invalidateQueries({ queryKey: ['console', 'apps'] })
       await queryClient.invalidateQueries({ queryKey: keys.publishes(me.projectId) })
       onPublished(updated)

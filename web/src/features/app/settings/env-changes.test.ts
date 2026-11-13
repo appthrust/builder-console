@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { configOf } from '../../../api/testing/app-domain'
-import { hasUnsupportedEntry, pendingRows, stageAdd, stageEdit, stageRemove, unstage, variablesToSave, type EnvChanges } from './env-changes'
+import { hasUnsupportedEntry, pendingRows, rebaseChanges, stageAdd, stageEdit, stageRemove, unstage, variablesToSave, type EnvChanges } from './env-changes'
 
 const entries = configOf({ revision: 'r1', variables: [
   { key: 'APP_TITLE', state: 'configured', source: 'user', sensitive: false, value: 'mitsumori' },
@@ -69,5 +69,31 @@ describe('entries this console does not know', () => {
     expect(hasUnsupportedEntry(entries)).toBe(false)
     expect(hasUnsupportedEntry(future)).toBe(true)
     expect(hasUnsupportedEntry(configOf({ revision: 'r3', variables: [{ key: 'A', state: 'rotating', source: 'user', sensitive: true }] }).variables)).toBe(true)
+  })
+})
+
+describe('staged changes after a save whose answer could not be read', () => {
+  const saved = (variables: unknown[]) => configOf({ revision: 'r4', variables: [
+    { key: 'APP_TITLE', state: 'configured', source: 'user', sensitive: false, value: 'mitsumori' },
+    { key: 'DATABASE_URL', state: 'generated', source: 'generated', sensitive: true },
+    ...variables,
+  ] }).variables
+
+  test('an addition the read-back shows saved is not shown or sent twice', () => {
+    const changes = stageAdd(entries, {}, 'FEATURE_FLAG', 'on', false)
+    const after = saved([{ key: 'FEATURE_FLAG', state: 'configured', source: 'user', sensitive: false, value: 'on' }])
+    expect(rebaseChanges(after, changes)).toEqual({})
+    expect(pendingRows(after, rebaseChanges(after, changes)).filter((row) => row.key === 'FEATURE_FLAG')).toHaveLength(1)
+    expect(variablesToSave(after, rebaseChanges(after, changes)).filter((item) => item.key === 'FEATURE_FLAG')).toEqual([{ key: 'FEATURE_FLAG', value: 'on', sensitive: false }])
+  })
+
+  test('an addition saved with another value becomes an edit of it; one the user does not own is dropped', () => {
+    const changes = stageAdd(entries, stageAdd(entries, {}, 'FEATURE_FLAG', 'on', false), 'DATABASE_HOST', 'x', false)
+    const after = saved([
+      { key: 'FEATURE_FLAG', state: 'configured', source: 'user', sensitive: false, value: 'off' },
+      { key: 'DATABASE_HOST', state: 'generated', source: 'generated', sensitive: true },
+    ])
+    expect(rebaseChanges(after, changes)).toEqual({ FEATURE_FLAG: { kind: 'edited', value: 'on', sensitive: false } })
+    expect(rebaseChanges(entries, changes)).toBe(changes)
   })
 })

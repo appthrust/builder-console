@@ -12,6 +12,7 @@ import type {
 import { copy } from '../copy'
 import { appsInputOf, releaseOf, releaseStateOf, sourcesOf, type WireAppSources, type WireAppsInput } from '../api/testing/app-domain'
 import { runOf, taskOf } from '../api/testing/build-domain'
+import { sourceRepositoryOf } from '../api/testing/catalog-domain'
 import { isSourceBuildFailed } from '../features/app/platform'
 import * as model from './app'
 import { draftState, versionLabel, type AppBuildProgress, type ConsoleApp, type DraftPlatformState } from './app'
@@ -28,7 +29,10 @@ const implementedReleaseReady = (platform: ConsoleApp | undefined, releases: rea
 const appSecondLine = (platform: ConsoleApp, releases: readonly unknown[], now?: number, build?: AppBuildProgress) =>
   model.appSecondLine(platform, releases.map(releaseOf), now, build)
 const deriveRollbackView = (wire: unknown) => model.deriveRollbackView(releaseStateOf(wire))
-const repositoryFacts = (repository: { id: string; build?: { state?: string } }) => ({ id: repository.id, buildFailed: isSourceBuildFailed(repository) })
+const repositoryFacts = (wire: unknown) => {
+  const repository = sourceRepositoryOf(wire)
+  return { id: repository.id, buildFailed: isSourceBuildFailed(repository) }
+}
 
 const application: Application = {
   id: 'shop',
@@ -730,7 +734,7 @@ describe('source build status on app details and mine rows', () => {
   test('joins only the explicit source and recovers with the next observation', () => {
     expect(deriveAppView(app, { ...input, stacks: [stack] }).status).toBe('live')
     expect(deriveAppView(app, { ...input, sourceRepositories: [repositoryFacts({ ...repository, id: 'other-src' })] }).status).toBe('live')
-    for (const state of ['healthy', 'running', 'unknown'] as const) {
+    for (const state of ['healthy', 'running', 'unknown', 'a-state-added-later']) {
       expect(deriveAppView(app, { ...input, sourceRepositories: [repositoryFacts({ ...repository, build: { state } })] }).status).toBe('live')
     }
   })

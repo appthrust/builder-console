@@ -18,6 +18,7 @@ import {
   updateApp,
   uploadScreenshot,
   type UpdateAppInput,
+  writeAppCache,
 } from '../../api/queries/console'
 import type { BusinessApp, DirectoryUser, Person } from '../../model/contracts/console'
 import { platformErrorEnvelope } from '../../api/platform-error'
@@ -35,15 +36,6 @@ export async function ensurePerson(entry: DirectoryUser): Promise<Person> {
   return known ?? (await createPerson({ email: entry.email, displayName: entry.displayName }))
 }
 
-/**
- * Writes an answered app into its cache entry. A read of the app that started
- * before the write could land later with the old record, so it is cancelled first.
- */
-async function writeApp(queryClient: QueryClient, app: BusinessApp): Promise<void> {
-  await queryClient.cancelQueries({ queryKey: consoleKeys.app(app.id), exact: true })
-  queryClient.setQueryData(consoleKeys.app(app.id), app)
-}
-
 /** PATCH the console record; follow the app to its new path when the group or slug moved. */
 export function useUpdateApp(app: BusinessApp) {
   const queryClient = useQueryClient()
@@ -51,7 +43,7 @@ export function useUpdateApp(app: BusinessApp) {
   return useMutation({
     mutationFn: (input: UpdateAppInput) => updateApp(app.id, input),
     onSuccess: async (updated) => {
-      await writeApp(queryClient, updated)
+      await writeAppCache(queryClient, updated)
       await queryClient.invalidateQueries({ queryKey: CONSOLE_ROOT })
       if (updated.group.path !== app.group.path || updated.slug !== app.slug) {
         await navigate({ href: paths.app(updated.group.path, updated.slug, 'settings'), replace: true })
@@ -72,7 +64,7 @@ export function useSaveGuide(appId: string) {
   return useMutation({
     mutationFn: (input: Pick<BusinessApp, 'guide' | 'capabilities'>) => updateApp(appId, input),
     onSuccess: async (updated) => {
-      await writeApp(queryClient, updated)
+      await writeAppCache(queryClient, updated)
       await queryClient.invalidateQueries({ queryKey: CONSOLE_ROOT })
     },
   })
@@ -128,7 +120,7 @@ export function useApproveAccessRequest(appId: string) {
   return useMutation({
     mutationFn: (requestId: string) => approveAccessRequest(appId, requestId),
     onSuccess: async (response) => {
-      await writeApp(queryClient, response.app)
+      await writeAppCache(queryClient, response.app)
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: consoleKeys.accessRequestsOfApp(appId) }),
         queryClient.invalidateQueries({ queryKey: consoleKeys.accessRequestsPending }),

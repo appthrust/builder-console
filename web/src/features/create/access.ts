@@ -4,6 +4,7 @@ import { isResponseContractError } from '../../api/boundary'
 import { createdAppAccessRetryDelay, putAppAccess, retryCreatedAppAccess } from '../../api/access'
 import { keys } from '../../api/queries/shared'
 import { isPublishPreparationPending } from '../../api/publish-retry'
+import { knownValue } from '../../model/contracts/build'
 import type { ShareScope } from '../../model/contracts/catalog'
 import type { ConsoleValue } from '../../model/contracts/console'
 import { matchesAccess } from '../../model/access'
@@ -23,24 +24,18 @@ export function hasCreatedAppAccess(id: string): boolean {
 }
 
 /**
- * The created app whose access write is queued. Its share scope is the domain
- * open value (an unknown scope sends no access write); callers whose app cache
- * still holds the Console facade's plain string are accepted until that cache
- * reads through the gateway.
+ * The created app whose access write is queued, as the app cache holds it (the
+ * decoded Console app). An unknown share scope sends no access write.
  */
 export interface CreatedApp {
   id: string
-  share: { scope: ConsoleValue<ShareScope> | ShareScope }
+  share: { scope: ConsoleValue<ShareScope> }
 }
 
 /** The app page's selected publish: its id and the observed access `matchesAccess` reads. */
 export interface CreatedAppPublish {
   id: string
   access?: Parameters<typeof matchesAccess>[0]
-}
-
-function knownScope(scope: CreatedApp['share']['scope']): ShareScope | undefined {
-  return typeof scope === 'string' ? scope : scope.kind === 'known' ? scope.value : undefined
 }
 
 /**
@@ -53,7 +48,7 @@ function knownScope(scope: CreatedApp['share']['scope']): ShareScope | undefined
 export function useCreatedAppAccess(projectId: string, app: CreatedApp | undefined, publish: CreatedAppPublish | undefined) {
   const queryClient = useQueryClient()
   const queued = app ? hasCreatedAppAccess(app.id) : false
-  const scope = app ? knownScope(app.share.scope) : undefined
+  const scope = app ? knownValue(app.share.scope) : undefined
   const queryKey = ['create-access', projectId, app?.id, publish?.id, scope]
   const request = useQuery({
     queryKey,

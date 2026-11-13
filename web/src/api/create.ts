@@ -16,12 +16,12 @@ import type {
 import {
   createSourceRepositoryContract,
   createStackContract,
-  deleteSourceRepositoryContract,
   listSourceRepositoriesContract,
   listStacksContract,
   validateSourceRepositoryContract,
   validateStackContract,
 } from './contracts/platform/catalog'
+import { deleteApplicationSourceRepositoryContract } from './contracts/platform/app'
 import {
   appContract,
   appsContract,
@@ -70,7 +70,7 @@ export function createCreateApi(gateway: ApiGateway): CreateApi {
     sourceRepositories: (projectId) => gateway.platform(listSourceRepositoriesContract, { projectId }),
     validateSourceRepository: (projectId, request) => gateway.platform(validateSourceRepositoryContract, { projectId, ...request }),
     createSourceRepository: (projectId, request, idempotencyKey) => gateway.platform(createSourceRepositoryContract, { projectId, ...request }, { idempotencyKey }),
-    deleteSourceRepository: async (projectId, id) => { await gateway.platform(deleteSourceRepositoryContract, { params: { projectId, id } }) },
+    deleteSourceRepository: async (projectId, id) => { await gateway.platform(deleteApplicationSourceRepositoryContract, { params: { projectId, id } }) },
     validateStack: (projectId, request) => gateway.platform(validateStackContract, { projectId, ...request }),
     createStack: (projectId, request, idempotencyKey) => gateway.platform(createStackContract, { projectId, ...request }, { idempotencyKey }),
   }

@@ -86,3 +86,22 @@ export function stageRemove(changes: EnvChanges, key: string): EnvChanges {
 export function unstage(changes: EnvChanges, key: string): EnvChanges {
   return Object.fromEntries(Object.entries(changes).filter(([staged]) => staged !== key))
 }
+
+/**
+ * The staged changes read against the saved list as it is now. A save whose
+ * answer could not be read may have happened (or another tab saved): an
+ * addition whose key is now saved becomes an edit of that value, dropped when
+ * the value is already saved or the key is not the user's, so neither the rows
+ * nor the next PUT ever carry a key twice.
+ */
+export function rebaseChanges(entries: readonly Entry[], changes: EnvChanges): EnvChanges {
+  let rebased = changes
+  for (const [key, change] of Object.entries(changes)) {
+    if (change.kind !== 'added' || !entries.some((entry) => entry.key === key)) continue
+    rebased = unstage(rebased, key)
+    const saved = userOwned(entries).find((entry) => entry.key === key)
+    const same = saved && !saved.sensitive && !change.sensitive && saved.value === change.value
+    if (saved && !same) rebased = { ...rebased, [key]: { kind: 'edited', value: change.value, sensitive: change.sensitive } }
+  }
+  return rebased
+}
