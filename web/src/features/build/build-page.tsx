@@ -24,12 +24,8 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { cleanupCreation, updateDraft } from '../../api/build'
 import { buildKeys, useBuildDraft } from '../../api/queries/build'
 import { useGroups } from '../../api/queries/console'
-import { deriveAccess, shareScopeLabel } from '../../model/access'
-import { useCreatedAppAccess } from '../create/access'
-import { AccessForbiddenError } from '../../api/access'
 import { renameCreationPlan } from '../../model/build/plan'
 import { buildCopy } from '../../model/build/copy'
-import { implementedReleaseReady } from '../../model/app'
 import { isBuildPending } from '../../model/build/progress'
 import { paths } from '../../routes/paths'
 import { setArtifactCollapsed, shellStore } from '../../shell/store'
@@ -37,7 +33,6 @@ import { useShell } from '../../shell/use-shell'
 import { ActionError, Button, cn, EmptyState, focusHeading, LinkButton, Loading, Notice, ResourceBoundary, useDocumentTitle } from '../../ui'
 import { DatabaseChanges } from '../app/database-changes'
 import { canEditApp } from '../app/permissions'
-import { useAppViews } from '../app/use-app-views'
 import { ArtifactPane } from './artifact-pane'
 import { ConversationPane } from './conversation-pane'
 import { PublishStep } from './publish-step'
@@ -47,6 +42,7 @@ import { useNameSuggestion } from './use-name-suggestion'
 import { text } from './copy'
 import { resolveBuildGroup } from './entry'
 import { BuildFailureNotice } from './build-failure-notice'
+import { useCreatedAppView } from './use-created-app-view'
 
 export function BuildPage({ draftId }: { draftId: string }) {
   const { me, groups, currentGroup } = useShell()
@@ -70,7 +66,6 @@ function Session({ draft, groupId, stale }: { draft: BuildDraft; groupId: string
   const [tab, setTab] = useState<'conversation' | 'artifact'>('conversation')
   const artifactCollapsed = useSelector(shellStore, (state) => state.artifactCollapsed)
   const [sharing, setSharing] = useState(false)
-  const lookup = useAppViews(me.projectId)
   const { stage, progress } = build.result
   const name = draft.publishPreferences?.name ?? build.spec.name ?? draft.title
   useDocumentTitle(text.page.title(name))
@@ -78,15 +73,7 @@ function Session({ draft, groupId, stale }: { draft: BuildDraft; groupId: string
   // The 作りかけ list (nav count, /-/drafts) gains this draft on arrival and changes its stage word as it moves.
   const queryClient = useQueryClient()
   useEffect(() => { void queryClient.invalidateQueries({ queryKey: buildKeys.drafts(me.projectId) }) }, [queryClient, me.projectId, stage])
-  const appView = build.app ? lookup.viewFor(build.app) : undefined
-  const creationAccess = useCreatedAppAccess(me.projectId, build.app, appView?.platform?.publish)
-  const releases = lookup.input.releasesByApplication[draft.createdApplicationId ?? '']?.components.flatMap((component) => component.releases) ?? []
-  const released = implementedReleaseReady(appView?.platform, releases, {
-    draftId: draft.id, initialReleaseId: build.session.initialReleaseId,
-    taskCount: build.implementation.state.tasks.length, tasks: build.implementation.state.tasks,
-  })
-  const url = released ? appView?.platform?.publish?.publicUrl ?? appView?.platform?.publish?.tailnetUrl : undefined
-  const shareText = build.app ? deriveAccess(appView?.platform?.publish?.access, build.app, groups, creationAccess.error instanceof AccessForbiddenError ? 'forbidden' : creationAccess.error ? 'failed' : undefined).label : shareScopeLabel('private')
+  const { appView, creationAccess, released, url, shareText } = useCreatedAppView({ projectId: me.projectId, draft, app: build.app, groups, initialReleaseId: build.session.initialReleaseId, tasks: build.implementation.state.tasks })
   const planPending = isBuildPending(draft.creationPlanGenerations.at(-1))
   const updatingPlan = build.session.prepareRequested && planPending
   const primary = { ...build.result.primary, enabled: build.result.primary.enabled && !build.busy && !sharing && !updatingPlan }

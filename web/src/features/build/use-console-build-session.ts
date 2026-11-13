@@ -55,6 +55,8 @@ export interface ConsoleBuildActions {
   /** Re-reads after `resume` (an authenticated request lets the server continue). */
   resume(): Promise<void>
   dismissConflict(): void
+  /** Hides a refused write's notice; the write is not resent and nothing is re-read. */
+  dismissFailure(): void
 }
 
 export interface ConsoleBuildSession {
@@ -226,6 +228,7 @@ export function useConsoleBuildSession(sessionId: string, options: { api?: Build
     },
     resume: () => reread().catch(() => undefined),
     dismissConflict: () => setConflict(undefined),
+    dismissFailure: () => setFailure(undefined),
   }
 
   const view = session ? deriveConsoleBuildView({

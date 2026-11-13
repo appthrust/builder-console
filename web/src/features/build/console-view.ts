@@ -47,6 +47,8 @@ export interface ConsoleProgress {
   /** The server's stage; an unknown one is shown as generic work in progress. */
   stage: BuildStage
   observedAt: string
+  /** Since the active turn was accepted (`createdAt`), for "first start takes longer" waits (§13). */
+  elapsedMs: number
   /** At most three short, safe descriptions chosen by the server. */
   activity: readonly string[]
   /** No new observation for `SLOW_OBSERVATION_MS`. */
@@ -107,6 +109,7 @@ export function deriveConsoleBuildView(input: ConsoleViewInput): ConsoleBuildVie
   const progress = activeTurn?.progress ? {
     stage: activeTurn.progress.stage,
     observedAt: activeTurn.progress.observedAt,
+    elapsedMs: Math.max(0, input.now - Date.parse(activeTurn.createdAt)),
     activity: activeTurn.progress.activity,
     slow: Boolean(observing) && input.now - Date.parse(activeTurn.progress.observedAt) > SLOW_OBSERVATION_MS,
   } : undefined

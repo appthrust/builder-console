@@ -12,11 +12,17 @@
 // Progress: `advance` on an initializing session creates its Platform draft
 // (through the Platform mock) and reserves the opening turn; every GET of an
 // active turn moves it one step (accepted → running → validating → reply).
-// A conversation whose intent is `change` ends in `awaiting_confirmation` with a
-// proposed spec; `resolution` accepts (new revision) or keeps it. A plan turn
-// walks syncing_spec → starting_plan → planning → succeeded. The resolver answers
-// console-v1 for a draft a session owns, else platform-v1 (the Platform draft
-// read that follows decides whether the draft exists).
+// A conversation whose intent is `change` (or an `auto` message asking for a change: 「…にして」「…を追加」)
+// ends in `awaiting_confirmation` with a proposed spec that adds the message as a rule; `resolution`
+// accepts (new revision) or keeps it. `suggestions` (or an `auto` message asking for 候補/提案/おすすめ)
+// answers with two concrete candidates; 「ほかの名前」 or `undecided` keeps an open decision. These are
+// the mock's stand-in for the model; a real reply comes from the server's validated AgentTurn output.
+// A plan turn writes the confirmed spec to the Platform draft (syncing_spec), starts a Platform plan
+// generation (starting_plan) and follows it (planning; it settles with the Platform mock's `plan-generation`
+// toggles); success records `session.plan` (current), an accepted spec change after it marks the plan stale,
+// and a Platform creation execution on the draft moves the session to `created` (no more turns). Publish
+// preferences are written to the draft too. The resolver answers console-v1 for a draft a session owns, else
+// platform-v1 (the Platform draft read that follows decides whether the draft exists).
 import { createHash } from 'node:crypto'
 import type { z } from 'zod'
 import {
@@ -25,6 +31,7 @@ import {
 } from '../api/contracts/console/schema/build-sessions'
 // A cycle (mock-console → here → mock-platform → mock-console); neither side reads the other at load time.
 import { MOCK_PROJECT_ID, platformRoutes } from './mock-platform'
+import { parseSpec, serializeSpec } from '../model/build/spec'
 
 type SessionWire = z.input<typeof buildSession>
 type ConversationTurnWire = z.input<typeof buildConversationTurn>
@@ -48,12 +55,10 @@ const BASE = '/api/console/v1/build-sessions'
 
 let sessions = new Map<string, Stored>()
 let replays = new Map<string, Replay>()
-let generations = 0
 
 export function resetBuildSessions() {
   sessions = new Map()
   replays = new Map()
-  generations = 0
 }
 
 const stamp = () => new Date().toISOString()
@@ -92,20 +97,53 @@ function idle(stored: Stored, changes: Partial<SessionWire> = {}) {
   stored.session = { ...rest, ...changes, version: stored.session.version + 1, updatedAt: stamp(), capabilities: { canConverse: true, canRequestPlan: true }, nextAction: 'none' }
 }
 
-function reply(turn: ConversationTurnWire, specChanged: boolean) {
-  const suggestions = turn.request.intent === 'suggestions'
+type ReplyKind = 'change' | 'suggestions' | 'undecided' | 'answer'
+
+/** What the stand-in model does with a request: the typed intent first, then the words of an `auto` message. */
+function replyKind(request: ConversationTurnWire['request']): ReplyKind {
+  if (request.intent === 'change' || request.intent === 'suggestions' || request.intent === 'undecided') return request.intent
+  if (request.intent !== 'auto') return 'answer'
+  if (/ほかの名前|別の名前/.test(request.message)) return 'undecided'
+  if (/候補|提案|おすすめ/.test(request.message)) return 'suggestions'
+  if (/にして|を追加|に変えて|にしたい/.test(request.message)) return 'change'
+  return 'answer'
+}
+
+function reply(turn: ConversationTurnWire, kind: ReplyKind) {
+  const changed = kind === 'change'
+  const suggestions = kind === 'suggestions'
+  const asks = kind === 'answer'
   return {
     schemaVersion: 1 as const, turnId: turn.id, attempt: turn.attempt, baseSpecRevision: turn.baseSpecRevision,
-    answer: specChanged ? '仕様の変更案をまとめました。反映するか選んでください。' : suggestions ? '候補を二つ挙げます。' : 'ご質問の点を確認しました。',
-    summary: specChanged ? '依頼の内容を仕様に加えます' : '',
-    changes: specChanged ? [turn.request.message.slice(0, 200)] : [],
+    answer: changed ? '仕様の変更案をまとめました。反映するか選んでください。' : suggestions ? '候補を二つ挙げます。' : kind === 'undecided' ? 'いまの名前は変えずに、別の名前を一緒に考えましょう。' : 'ご質問の点を確認しました。',
+    summary: changed ? '依頼の内容を仕様に加えます' : '',
+    changes: changed ? [turn.request.message.slice(0, 200)] : [],
     candidates: suggestions ? [{ id: 'first', label: '申請ノート', description: '申請を記録して承認まで追えます' }, { id: 'second', label: '申請ボード', description: '申請の状況を一覧で見られます' }] : [],
-    openDecisions: [], nextQuestion: specChanged || suggestions ? null : 'ほかに決めたいことはありますか？', suggestedReplies: [], specChanged,
+    openDecisions: kind === 'undecided' ? [{ topic: 'アプリ名', wish: turn.request.message.slice(0, 200) }] : [],
+    nextQuestion: asks ? 'ほかに決めたいことはありますか？' : null,
+    suggestedReplies: asks ? [{ id: 'nothing-more', label: '特にない', message: '特にありません' }, { id: 'approval', label: '承認の流れ', message: '承認の流れを決めたい' }] : [],
+    specChanged: changed,
   }
 }
 
-/** One observation of the active turn: it moves one step, as the server would after observing Platform. */
-function observe(stored: Stored, turn: TurnWire): TurnWire {
+/** The proposed specification of a change: the confirmed one with the request added as a rule. */
+function proposedMarkdown(current: string, message: string): string {
+  const { spec, body } = parseSpec(current)
+  return serializeSpec({ ...spec, rules: [...spec.rules, message.slice(0, 200)] }, body)
+}
+
+/** A Platform draft call made by the mock server (the Platform mock's own routes, as the real server's adapter would). */
+async function platform(method: string, path: string, body?: unknown): Promise<Response | undefined> {
+  const url = new URL(`/api/v1/projects/${MOCK_PROJECT_ID}/application-drafts/${path}`, 'http://mock.local')
+  return platformRoutes(new Request(url, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }), url)
+}
+
+/**
+ * One observation of the active turn: it moves one step, as the server would after observing Platform. A plan
+ * turn writes the confirmed specification to the draft (syncing_spec), starts a Platform plan generation
+ * (starting_plan) and follows it (planning); success records `session.plan` on the revision it was made from.
+ */
+async function observe(stored: Stored, turn: TurnWire): Promise<TurnWire> {
   const now = stamp()
   const progress = (stage: NonNullable<TurnWire['progress']>['stage']) => ({ stage, observedAt: now, activity: [] })
   let next: TurnWire = turn
@@ -113,23 +151,39 @@ function observe(stored: Stored, turn: TurnWire): TurnWire {
     if (turn.state === 'accepted' || turn.state === 'dispatching') next = { ...turn, state: 'running', progress: progress('thinking'), nextAction: 'observe', updatedAt: now }
     else if (turn.state === 'running') next = { ...turn, state: 'validating', progress: progress('validating'), nextAction: 'observe', updatedAt: now }
     else if (turn.state === 'validating') {
-      const changed = turn.request.intent === 'change'
-      if (changed) {
-        const markdown = `${stored.session.specification.markdown}\n- ${turn.request.message}\n`
+      const kind = replyKind(turn.request)
+      if (kind === 'change') {
+        const markdown = proposedMarkdown(stored.session.specification.markdown, turn.request.message)
         bump(stored, { nextAction: 'confirm' })
-        next = { ...turn, state: 'awaiting_confirmation', progress: progress('awaiting_confirmation'), nextAction: 'confirm', reply: reply(turn, true), proposedSpec: { sha256: sha256(markdown), markdown }, sessionVersion: stored.session.version, updatedAt: now }
+        next = { ...turn, state: 'awaiting_confirmation', progress: progress('awaiting_confirmation'), nextAction: 'confirm', reply: reply(turn, kind), proposedSpec: { sha256: sha256(markdown), markdown }, sessionVersion: stored.session.version, updatedAt: now }
       } else {
         idle(stored)
-        next = { ...turn, state: 'succeeded', nextAction: 'none', reply: reply(turn, false), sessionVersion: stored.session.version, updatedAt: now }
+        next = { ...turn, state: 'succeeded', nextAction: 'none', reply: reply(turn, kind), sessionVersion: stored.session.version, updatedAt: now }
       }
     }
   } else {
-    if (turn.state === 'accepted') next = { ...turn, state: 'syncing_spec', progress: progress('syncing_spec'), projection: { state: 'syncing' }, updatedAt: now }
-    else if (turn.state === 'syncing_spec') next = { ...turn, state: 'starting_plan', progress: progress('starting_plan'), projection: { state: 'applied', appliedRevision: turn.specRevision }, updatedAt: now }
-    else if (turn.state === 'starting_plan') next = { ...turn, state: 'planning', platformGenerationId: `generation-${++generations}`, updatedAt: now }
-    else if (turn.state === 'planning') {
-      idle(stored, { lifecycle: 'planned', projection: { state: 'applied', appliedRevision: turn.specRevision } })
-      next = { ...turn, state: 'succeeded', nextAction: 'none', sessionVersion: stored.session.version, updatedAt: now }
+    const draftId = stored.session.draftId!
+    const failed = (error: 'draft_spec_conflict' | 'service_unavailable' | 'agent_failed', message: string) => {
+      idle(stored, { lifecycle: stored.session.plan ? 'planned' : 'specifying' })
+      return { ...turn, state: 'failed' as const, nextAction: 'none' as const, failure: { error, message }, sessionVersion: stored.session.version, updatedAt: now }
+    }
+    if (turn.state === 'accepted') {
+      const synced = await platform('PATCH', draftId, { specMarkdown: stored.session.specification.markdown })
+      next = synced?.ok
+        ? { ...turn, state: 'syncing_spec', progress: progress('syncing_spec'), projection: { state: 'syncing' }, updatedAt: now }
+        : { ...failed('draft_spec_conflict', 'the draft specification could not be written'), projection: { state: 'conflict' } }
+    } else if (turn.state === 'syncing_spec') next = { ...turn, state: 'starting_plan', progress: progress('starting_plan'), projection: { state: 'applied', appliedRevision: turn.specRevision }, updatedAt: now }
+    else if (turn.state === 'starting_plan') {
+      const started = await platform('POST', `${draftId}/creation-plan-generations`, {})
+      const generation = started?.ok ? ((await started.json()) as { resource: { id: string } }).resource.id : undefined
+      next = generation ? { ...turn, state: 'planning', platformGenerationId: generation, updatedAt: now } : failed('service_unavailable', 'the plan generation could not be started')
+    } else if (turn.state === 'planning') {
+      const read = await platform('GET', `${draftId}/creation-plan-generations/${turn.platformGenerationId}`)
+      const status = read?.ok ? ((await read.json()) as { status: string }).status : undefined
+      if (status === 'succeeded') {
+        idle(stored, { lifecycle: 'planned', projection: { state: 'applied', appliedRevision: turn.specRevision }, plan: { specRevision: turn.specRevision, stale: false } })
+        next = { ...turn, state: 'succeeded', nextAction: 'none', sessionVersion: stored.session.version, updatedAt: now }
+      } else if (status === 'failed') next = failed('agent_failed', 'the plan generation failed')
     }
   }
   stored.turns = stored.turns.map((item) => item.id === turn.id ? next : item)
@@ -223,7 +277,9 @@ function resolveTurn(stored: Stored, turnId: string, body: unknown): Response {
   const accept = parsed.data.decision === 'accept_spec'
   const revision = stored.session.specification.revision + 1
   if (accept) stored.revisions.push({ revision, sha256: turn.proposedSpec.sha256, markdown: turn.proposedSpec.markdown, sourceTurnId: turn.id, createdAt: stamp() })
-  idle(stored, accept ? { specification: { revision, sha256: turn.proposedSpec.sha256, markdown: turn.proposedSpec.markdown } } : {})
+  // A plan made from an earlier revision no longer matches the accepted specification.
+  const plan = accept && stored.session.plan ? { plan: { ...stored.session.plan, stale: stored.session.plan.specRevision !== revision } } : {}
+  idle(stored, accept ? { specification: { revision, sha256: turn.proposedSpec.sha256, markdown: turn.proposedSpec.markdown }, ...plan } : {})
   const next: ConversationTurnWire = { ...turn, state: 'succeeded', nextAction: 'none', resolution: parsed.data, sessionVersion: stored.session.version, updatedAt: stamp() }
   stored.turns = stored.turns.map((item) => item.id === turn.id ? next : item)
   return answer(200, next, { ETag: etag(stored.session.version) })
@@ -276,7 +332,15 @@ export async function buildSessionRoutes(request: Request, url: URL, caller: { o
   if (!stored || stored.owner !== owner) return notFound()
   const path = url.pathname
 
-  if (!sub && method === 'GET') return sessionAnswer(stored)
+  if (!sub && method === 'GET') {
+    // Creation runs on the Platform draft; once an execution exists the session is created and takes no more turns.
+    if (stored.session.lifecycle === 'planned' && stored.session.draftId) {
+      const read = await platform('GET', stored.session.draftId)
+      const draft = read?.ok ? (await read.json()) as { creationExecutions?: unknown[] } : undefined
+      if (draft?.creationExecutions?.length) bump(stored, { lifecycle: 'created', nextAction: 'none', capabilities: { canConverse: false, canRequestPlan: false } })
+    }
+    return sessionAnswer(stored)
+  }
   if (sub === 'advance' && !subId && method === 'POST') return write(request, owner, path, true, (_, version) => stale(stored, version) ?? advance(stored))
   if (sub === 'archive' && !subId && method === 'POST') {
     return write(request, owner, path, true, (_, version) => {
@@ -288,13 +352,16 @@ export async function buildSessionRoutes(request: Request, url: URL, caller: { o
     })
   }
   if (sub === 'publish-preferences' && !subId && method === 'PATCH') {
-    return write(request, owner, path, true, (body, version) => {
+    return write(request, owner, path, true, async (body, version) => {
       const conflict = stale(stored, version)
       if (conflict) return conflict
       const parsed = buildPublishInput.safeParse(body)
       if (!parsed.success) return invalid(parsed.error.issues)
       bump(stored, {})
-      const result: PublishWire = { desired: parsed.data, sessionVersion: stored.session.version, sync: { state: 'pending' } }
+      // The typed preference is the draft's publish preference (design §12); the sync state says whether it landed.
+      const synced = stored.session.draftId ? await platform('PATCH', stored.session.draftId, { publishPreferences: parsed.data }) : undefined
+      const sync: PublishWire['sync'] = !synced ? { state: 'pending' } : synced.ok ? { state: 'applied' } : { state: 'failed', failure: { error: 'service_unavailable', message: 'the draft publish preferences could not be written' } }
+      const result: PublishWire = { desired: parsed.data, sessionVersion: stored.session.version, sync }
       return answer(202, result, { ETag: etag(stored.session.version) })
     })
   }
@@ -308,7 +375,7 @@ export async function buildSessionRoutes(request: Request, url: URL, caller: { o
   const turn = stored.turns.find((item) => item.id === subId)
   if (!turn) return fail(404, 'not_found', 'turn not found', { resource: 'operation' })
   if (!action && method === 'GET') {
-    const observed = turn.id === stored.session.activeTurnId ? observe(stored, turn) : turn
+    const observed = turn.id === stored.session.activeTurnId ? await observe(stored, turn) : turn
     return answer(200, observed, { ETag: etag(stored.session.version) })
   }
   if (action === 'resolution' && method === 'POST') return write(request, owner, path, true, (body, version) => stale(stored, version) ?? resolveTurn(stored, turn.id, body))

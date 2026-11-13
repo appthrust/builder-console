@@ -87,7 +87,8 @@ describe('the twelve operations', () => {
     const revision = await api.specRevision(session.id, current.specification.revision)
     expect(revision.revision).toBe(1)
     const publish = await api.setPublishPreferences(session.id, { name: '経費ノート', shareScope: 'group' }, { key: mintIdempotencyKey(), version: current.version })
-    expect(publish.sync.state).toEqual({ kind: 'known', value: 'pending' })
+    // The mock writes the typed preference to the session's Platform draft, as the server does.
+    expect(publish.sync.state).toEqual({ kind: 'known', value: 'applied' })
     await api.list()
     expect((await api.listTurns(session.id)).items.length).toBeGreaterThan(0)
     expect(await api.resolve(current.draftId!)).toEqual({ engine: 'console-v1', sessionId: session.id })

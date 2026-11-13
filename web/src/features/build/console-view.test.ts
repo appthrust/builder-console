@@ -42,7 +42,7 @@ describe('active turn and progress', () => {
     const view = deriveConsoleBuildView(input({ session: active, turns: [listed], activeTurn: observed }))
     expect(view.turns).toHaveLength(1)
     expect(view.activeTurn).toBe(observed)
-    expect(view.progress).toEqual({ stage: { kind: 'known', value: 'thinking' }, observedAt: '2026-11-12T00:00:05Z', activity: ['入力を確認しています'], slow: false })
+    expect(view.progress).toEqual({ stage: { kind: 'known', value: 'thinking' }, observedAt: '2026-11-12T00:00:05Z', elapsedMs: 10_000, activity: ['入力を確認しています'], slow: false })
   })
   test('no new observation for 60 s reads as slow, never as failed', () => {
     const observed = turn('turn-running')

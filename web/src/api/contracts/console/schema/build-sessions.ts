@@ -123,6 +123,7 @@ export const buildSession = z.strictObject({
   draftId: observed(opaqueID), specification: buildSpecification, activeTurnId: observed(id), projection: buildProjection,
   capabilities: z.strictObject({ canConverse: z.boolean(), canRequestPlan: z.boolean() }), nextAction: z.enum(buildNextActions),
   pollAfterMs: observed(z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)), failure: observed(buildError),
+  plan: observed(z.strictObject({ specRevision: revision, stale: z.boolean() })),
 })
 export const buildCreateSession = z.strictObject({ kind: z.literal('new-app'), groupId: opaqueID, intent: nonblank(4000, 4000), locale: z.enum(['ja', 'en']) })
 export const buildPublishInput = z.strictObject({

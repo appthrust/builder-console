@@ -42,6 +42,10 @@ beforeEach(async () => {
   window.sessionStorage.clear()
   const warn = spyOn(console, 'warn').mockImplementation(() => {})
   restore.push(() => warn.mockRestore())
+  // Radix RadioGroup (the console page's publish audience) checks `closest('form') instanceof HTMLFormElement`.
+  const form = Object.getOwnPropertyDescriptor(globalThis, 'HTMLFormElement')
+  Object.defineProperty(globalThis, 'HTMLFormElement', { configurable: true, value: window.HTMLFormElement })
+  restore.push(() => form ? Object.defineProperty(globalThis, 'HTMLFormElement', form) : Reflect.deleteProperty(globalThis, 'HTMLFormElement'))
   const url = new URL('/api/v1/__mock/codex', 'http://mock.test')
   await platformRoutes(new Request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ available: true }) }), url)
 })
