@@ -1,4 +1,4 @@
-import { ApplicationReleaseOverview, ComponentReleaseState, type Application, type ApplicationStack, type Publish } from '@appthrust/api-schema/platform-api'
+import type { Application, ApplicationReleaseOverview, ApplicationStack, ComponentReleaseState, Publish } from '@appthrust/api-schema/platform-api'
 import { test, expect, seed, captureWrite } from '../support/fixtures'
 
 test.describe('App releases @app-releases', () => {
@@ -92,7 +92,8 @@ test.describe('App releases @app-releases', () => {
       }] },
     }))
 
-    const overview = ApplicationReleaseOverview.parse(await (await request.get(`${root}/applications/mitsumori/releases?branchId=production`)).json())
+    // The mock's wire as served (no schema parse that would fill defaults into the copy).
+    const overview = await (await request.get(`${root}/applications/mitsumori/releases?branchId=production`)).json() as ApplicationReleaseOverview
     const history = {
       ...overview, applicationId,
       components: overview.components.map((component) => ({
@@ -104,7 +105,7 @@ test.describe('App releases @app-releases', () => {
     }
     await page.route((url) => url.pathname === `${root}/applications/${applicationId}/releases`, (route) =>
       route.fulfill({ json: history }))
-    const releaseState = ComponentReleaseState.parse(await (await request.get(`${root}/applications/mitsumori/branches/production/components/mitsumori-web/release-state`)).json())
+    const releaseState = await (await request.get(`${root}/applications/mitsumori/branches/production/components/mitsumori-web/release-state`)).json() as ComponentReleaseState
     const statePath = `${root}/applications/${applicationId}/branches/production/components/${scope.componentId}/release-state`
     await page.route(`**${root}/applications/${applicationId}/branches/*/components/*/release-state`, (route) =>
       new URL(route.request().url()).pathname === statePath

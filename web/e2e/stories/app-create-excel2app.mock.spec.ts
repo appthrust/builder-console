@@ -6,7 +6,7 @@ import { toDraftWorkbook } from '../../src/features/excel2app/model'
 import { buildCopy } from '../../src/model/build/copy'
 import { isPrepareTurn } from '../../src/model/build/questions'
 import { openCreateWizard } from '../support/create-wizard'
-import { captureWrite, expect, seed, test, type MockControl } from '../support/fixtures'
+import { captureWrite, expect, seed, test, withExpectedFailures, type MockControl } from '../support/fixtures'
 
 const ordersWorkbook = fileURLToPath(new URL('./fixtures/excel2app-orders.xlsx', import.meta.url))
 const sparseWorkbook = fileURLToPath(new URL('./fixtures/excel2app-ledger.xlsx', import.meta.url))
@@ -183,7 +183,8 @@ test.describe('Excel ledger to AI build @excel2app', () => {
     await expect(newTab.getByRole('log')).not.toContainText('誰に見せますか？')
     await mock.platform('plan-generation', { autoAdvance: true })
     await mock.platform('implementation-run', { autoAdvance: true })
-    await newTab.getByRole('button', { name: buildCopy.questions.kickoffReply, exact: true }).click()
+    // The proposal action and the AI's reply chip carry the same words; answer with the chip.
+    await newTab.getByRole('region', { name: '会話', exact: true }).getByRole('button', { name: buildCopy.questions.kickoffReply, exact: true }).click()
     await expect(newTab.getByRole('button', { name: 'この内容で作る', exact: true })).toBeEnabled({ timeout: 20_000 })
     const creation = await captureWrite(newTab, 'POST', /\/creation-executions\/[^/]+\/run$/, () => newTab.getByRole('button', { name: 'この内容で作る', exact: true }).click())
     expect((await creation.request.response())?.status()).toBe(202)
@@ -243,10 +244,12 @@ test.describe('Excel ledger to AI build @excel2app', () => {
       status: 409, contentType: 'application/json',
       body: JSON.stringify({ error: { code: 'conflict', message: 'application already created', details: { reason: 'ApplicationCreated' } } }),
     }))
-    await page.getByTestId('excel2app-chat-input').fill('一覧をカード表示に')
-    await page.getByTestId('excel2app-chat-send').click()
-    await expect(page.getByTestId('excel2app-created')).toContainText(textJa.created.title)
-    await expect(page.getByTestId('excel2app-chat-input')).toBeDisabled()
+    await withExpectedFailures([{ method: 'POST', path: `${draftPath}/conversation-turns`, status: 409, count: 1, reason: 'another tab created the application first (ApplicationCreated)' }], async () => {
+      await page.getByTestId('excel2app-chat-input').fill('一覧をカード表示に')
+      await page.getByTestId('excel2app-chat-send').click()
+      await expect(page.getByTestId('excel2app-created')).toContainText(textJa.created.title)
+      await expect(page.getByTestId('excel2app-chat-input')).toBeDisabled()
+    })
     await expect(page.getByTestId('excel2app-chat-retry')).toHaveCount(0)
     await page.getByRole('button', { name: textJa.back, exact: true }).click()
     await expect(page.getByRole('button', { name: textJa.spec.edit, exact: true })).toBeDisabled()
@@ -259,8 +262,10 @@ test.describe('Excel ledger to AI build @excel2app', () => {
       body: JSON.stringify({ error: { code: 'conflict', message: 'application already created', details: { reason: 'ApplicationCreated' } } }),
     }))
     await page.goto('/-/excel2app')
-    await page.getByTestId('excel2app-sample-defects').click()
-    await expect(page.getByTestId('excel2app-created')).toContainText(textJa.created.title)
+    await withExpectedFailures([{ method: 'POST', path: '/api/v1/projects/{projectId}/application-drafts/{draftId}/conversation-turns', status: 409, count: 1, reason: 'the application was created before the analysis turn (ApplicationCreated)' }], async () => {
+      await page.getByTestId('excel2app-sample-defects').click()
+      await expect(page.getByTestId('excel2app-created')).toContainText(textJa.created.title)
+    })
     await expect(page.getByTestId('excel2app-analysis-retry')).toHaveCount(0)
     await expect(page.getByTestId('excel2app-offline')).toHaveCount(0)
     await expect(page.getByRole('button', { name: textJa.back, exact: true })).toBeDisabled()
@@ -328,13 +333,15 @@ test.describe('Excel ledger to AI build @excel2app', () => {
     const rejectedTurn = page.waitForResponse((response) =>
       response.request().method() === 'POST'
       && /\/conversation-turns$/.test(new URL(response.url()).pathname))
-    const workbook = await captureWrite(page, 'POST', /\/application-drafts\/[^/]+\/workbooks$/, () => page.getByTestId('excel2app-sample-defects').click())
-    expect((await workbook.request.response())?.status()).toBe(201)
-    expect((await rejectedTurn).status()).toBe(412)
     const notice = page.getByTestId('excel2app-analysis-unavailable')
-    await expect(notice).toContainText(textJa.analysis.unavailableTitle)
-    await expect(notice).toContainText(textJa.analysis.unavailableBody)
-    await expect(page.getByTestId('excel2app-analysis-retry')).toBeVisible()
+    await withExpectedFailures([{ method: 'POST', path: '/api/v1/projects/{projectId}/application-drafts/{draftId}/conversation-turns', status: 412, count: 1, reason: 'AI became unavailable after the workbook was saved' }], async () => {
+      const workbook = await captureWrite(page, 'POST', /\/application-drafts\/[^/]+\/workbooks$/, () => page.getByTestId('excel2app-sample-defects').click())
+      expect((await workbook.request.response())?.status()).toBe(201)
+      expect((await rejectedTurn).status()).toBe(412)
+      await expect(notice).toContainText(textJa.analysis.unavailableTitle)
+      await expect(notice).toContainText(textJa.analysis.unavailableBody)
+      await expect(page.getByTestId('excel2app-analysis-retry')).toBeVisible()
+    })
     await expect(page.getByRole('heading', { name: textJa.analysis.capabilities, exact: true })).not.toBeVisible()
     await expect(page.getByTestId('excel2app-offline')).toHaveCount(0)
     await testInfo.attach('analysis-precondition-notice', { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' })
@@ -358,12 +365,14 @@ test.describe('Excel ledger to AI build @excel2app', () => {
       } else await route.continue()
     })
     await page.goto('/-/excel2app')
-    await page.getByTestId('excel2app-files-input').setInputFiles([sparseWorkbook, ordersWorkbook])
-    await expect(page).toHaveURL(/\/-\/excel2app\?draft=/)
-    await expect(page.getByTestId('excel2app-analyse')).toBeEnabled()
-    await expect(page.getByTestId('excel2app-file')).toHaveCount(2)
     const failed = page.locator('[data-testid="excel2app-file"][data-state="invalid"]')
-    await expect(failed).toContainText('excel2app-ledger.xlsx')
+    await withExpectedFailures([{ method: 'POST', path: '/api/v1/projects/{projectId}/application-drafts/{draftId}/workbooks', status: 400, count: 1, reason: 'the Platform rejects one workbook row (WorkbookRowInvalid)' }], async () => {
+      await page.getByTestId('excel2app-files-input').setInputFiles([sparseWorkbook, ordersWorkbook])
+      await expect(page).toHaveURL(/\/-\/excel2app\?draft=/)
+      await expect(page.getByTestId('excel2app-analyse')).toBeEnabled()
+      await expect(page.getByTestId('excel2app-file')).toHaveCount(2)
+      await expect(failed).toContainText('excel2app-ledger.xlsx')
+    })
     await expect(failed).toContainText(textJa.pick.invalid({ sheet: '台帳', row: 5 }))
     await expect(page.locator('[data-testid="excel2app-file"][data-state="stored"]')).toContainText('excel2app-orders.xlsx')
     await failed.getByRole('button', { name: textJa.pick.remove, exact: true }).click()

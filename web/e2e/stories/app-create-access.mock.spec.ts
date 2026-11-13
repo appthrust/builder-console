@@ -1,4 +1,4 @@
-import { expect, seed, test } from '../support/fixtures'
+import { expect, freeUrlNameChecks, seed, test, withExpectedFailures } from '../support/fixtures'
 import { continueToShare, fillAppDetails, openCreateWizard, pickImage, pickShareScope, submitCreateWizard, waitForAppPage } from '../support/create-wizard'
 
 test('creation retries delivery_pending with one key and completes sharing only after policy observation @mock @story', async ({ page, mock }, testInfo) => {
@@ -15,17 +15,21 @@ test('creation retries delivery_pending with one key and completes sharing only 
   })
   try {
     await openCreateWizard(page)
-    await pickImage(page, 'ghcr.io/acme/demo:1.0.0')
-    await fillAppDetails(page, { displayName: 'Access proof' })
-    expect(await continueToShare(page)).toBe('access-proof')
+    await withExpectedFailures([freeUrlNameChecks(3)], async () => {
+      await pickImage(page, 'ghcr.io/acme/demo:1.0.0')
+      await fillAppDetails(page, { displayName: 'Access proof' })
+      expect(await continueToShare(page)).toBe('access-proof')
+    })
     await pickShareScope(page, '自分だけ')
-    await submitCreateWizard(page, 'image')
-    await waitForAppPage(page, { displayName: 'Access proof', slug: 'access-proof', groupPath: seed.groups.teamA.path })
-    await mock.advance()
-    await mock.advance()
-    await mock.advance()
-    await expect(page.getByTestId('app-url')).toBeVisible({ timeout: 12_000 })
-    await expect.poll(() => writes.length, { timeout: 12_000 }).toBe(2)
+    await withExpectedFailures([{ method: 'PUT', path: '/api/v1/projects/{projectId}/publishes/access-proof-web/access', status: 409, count: 1, reason: 'the first access write meets delivery_pending' }], async () => {
+      await submitCreateWizard(page, 'image')
+      await waitForAppPage(page, { displayName: 'Access proof', slug: 'access-proof', groupPath: seed.groups.teamA.path })
+      await mock.advance()
+      await mock.advance()
+      await mock.advance()
+      await expect(page.getByTestId('app-url')).toBeVisible({ timeout: 12_000 })
+      await expect.poll(() => writes.length, { timeout: 12_000 }).toBe(2)
+    })
     const share = page.getByTestId('create-progress').locator('[data-step="share"]')
     await expect(share).not.toHaveAttribute('data-state', 'done')
     expect(writes[0]?.body).toEqual({ mode: 'Authenticated', externalAuthorization: { appInstallation: 'builder-console' } })
@@ -52,18 +56,22 @@ test('creation retries delivery_pending with one key and completes sharing only 
 test('a rejected creation access write stays unfinished until sharing is successfully applied @mock @story', async ({ page, mock }) => {
   await mock.platform('access-forbidden', { forbidden: true })
   await openCreateWizard(page)
-  await pickImage(page, 'ghcr.io/acme/demo:1.0.0')
-  await fillAppDetails(page, { displayName: 'Access recovery' })
-  await continueToShare(page)
+  await withExpectedFailures([freeUrlNameChecks(3)], async () => {
+    await pickImage(page, 'ghcr.io/acme/demo:1.0.0')
+    await fillAppDetails(page, { displayName: 'Access recovery' })
+    await continueToShare(page)
+  })
   await pickShareScope(page, '自分だけ')
-  await submitCreateWizard(page, 'image')
-  await waitForAppPage(page, { displayName: 'Access recovery', slug: 'access-recovery', groupPath: seed.groups.teamA.path })
-  await mock.advance()
-  await mock.advance()
-  await mock.advance()
   const share = page.getByTestId('create-progress').locator('[data-step="share"]')
-  await expect(share).toHaveAttribute('data-state', 'failed', { timeout: 12_000 })
-  await expect(page.getByText('基盤の編集権限（Team Editor）が必要です', { exact: true })).toBeVisible()
+  await withExpectedFailures([{ method: 'PUT', path: '/api/v1/projects/{projectId}/publishes/access-recovery-web/access', status: 403, count: 1, reason: 'the Platform refuses the access write without Team Editor' }], async () => {
+    await submitCreateWizard(page, 'image')
+    await waitForAppPage(page, { displayName: 'Access recovery', slug: 'access-recovery', groupPath: seed.groups.teamA.path })
+    await mock.advance()
+    await mock.advance()
+    await mock.advance()
+    await expect(share).toHaveAttribute('data-state', 'failed', { timeout: 12_000 })
+    await expect(page.getByText('基盤の編集権限（Team Editor）が必要です', { exact: true })).toBeVisible()
+  })
   await mock.platform('access-forbidden', { forbidden: false })
   await page.getByRole('button', { name: '共有', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: '共有', exact: true })

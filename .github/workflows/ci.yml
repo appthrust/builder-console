@@ -56,3 +56,94 @@ jobs:
         with:
           bun-version: 1.4.1
       - run: bun test hack
+
+  # Every browser story against the in-memory mock (web/e2e). Runs on every PR
+  # and main push without a path filter: any server, schema or web change can
+  # break a user flow. Chromium and its OS libraries come from the official
+  # Playwright image for the locked @playwright/test version, so no apt
+  # install happens at run time.
+  console-mock-stories:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    container:
+      # Must match @playwright/test in web/bun.lock (checked below).
+      image: mcr.microsoft.com/playwright:v1.65.0-noble@sha256:9beb546099e11f52d62e505537914870e01a67e0e6b00ae41da4775324e73dbe
+      options: --ipc=host
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      # setup-bun extracts with `unzip`, which the Playwright image does not
+      # ship; npm installs the same pinned Bun release without apt.
+      - name: Install Bun 1.4.1
+        working-directory: /
+        run: npm install --global --no-audit --no-fund bun@1.4.1 && bun --version
+      - run: bun install --frozen-lockfile
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check the image matches the locked Playwright
+        run: |
+          locked="$(bun -e 'console.log(require("@playwright/test/package.json").version)')"
+          if [ "$locked" != "1.65.0" ]; then
+            echo "::error::web/bun.lock pins @playwright/test $locked but the job image is v1.65.0; update the console-mock-stories image tag and digest"
+            exit 1
+          fi
+      - run: bun run typecheck:e2e
+      - id: stories
+        run: bun run test:e2e:mock
+      - name: Reject an empty, partial or skipped story run
+        if: ${{ !cancelled() && steps.stories.outcome != 'skipped' }}
+        run: |
+          # shellcheck disable=SC2016 # the JavaScript template literals are not shell expansions
+          bun -e '
+            const { readdirSync } = require("node:fs")
+            const report = await Bun.file("test-results/results.json").json()
+            const { expected, unexpected, flaky, skipped } = report.stats
+            const executed = expected + unexpected + flaky
+            const files = new Map()
+            const visit = (suite) => {
+              for (const spec of suite.specs ?? []) files.set(spec.file, (files.get(spec.file) ?? 0) + spec.tests.length)
+              for (const child of suite.suites ?? []) visit(child)
+            }
+            for (const suite of report.suites) visit(suite)
+            const missing = readdirSync("e2e/stories").filter((file) => file.endsWith(".spec.ts") && !files.get(file))
+            console.log(`executed=${executed} passed=${expected} failed=${unexpected} flaky=${flaky} skipped=${skipped} files=${files.size}`)
+            const errors = []
+            if (executed === 0) errors.push("no story test was executed")
+            if (skipped > 0) errors.push(`${skipped} story test(s) skipped or fixme`)
+            if (missing.length > 0) errors.push(`story files without an executed @mock test: ${missing.join(", ")}`)
+            for (const error of errors) console.log(`::error::${error}`)
+            process.exit(errors.length ? 1 : 0)
+          '
+      - name: Upload story reports, screenshots and traces
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: console-mock-stories-${{ github.run_attempt }}
+          path: |
+            web/playwright-report/
+            web/test-results/
+            web/e2e/results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # The single required check: green only when every CI job above succeeded.
+  # A failed, cancelled or skipped child fails it. Add new CI jobs to `needs`.
+  console-verification:
+    if: always()
+    needs: [server, web, publisher, console-mock-stories]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every CI job to succeed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          jq -r 'to_entries[] | "\(.key)=\(.value.result)"' <<<"$RESULTS"
+          jq -e 'length == 4 and all(.[]; .result == "success")' <<<"$RESULTS" >/dev/null || {
+            echo "::error::console-verification requires server, web, publisher and console-mock-stories to succeed"
+            exit 1
+          }

@@ -1,4 +1,4 @@
-import { expect, seed, test } from '../support/fixtures'
+import { expect, freeUrlNameChecks, seed, test, withExpectedFailures } from '../support/fixtures'
 import {
   continueToShare,
   fillAppDetails,
@@ -18,9 +18,12 @@ test.describe('App create from an existing repository @create', () => {
     const group = seed.groups.teamA
 
     await openCreateWizard(page)
-    await pickExistingRepository(page, repositoryName)
-    await fillAppDetails(page, { displayName, description, tags })
-    const slug = await continueToShare(page)
+    let slug = ''
+    await withExpectedFailures([freeUrlNameChecks(2)], async () => {
+      await pickExistingRepository(page, repositoryName)
+      await fillAppDetails(page, { displayName, description, tags })
+      slug = await continueToShare(page)
+    })
     expect(slug).toBe('sales-dashboard')
     await pickShareScope(page, '全社')
     await expect(page.getByTestId('confirm-summary')).toContainText(`「${displayName}」を ${group.name} のアプリとして作り、全社に公開します`)

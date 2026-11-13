@@ -1515,15 +1515,21 @@ function stackBody(raw: unknown): CreateApplicationStackRequest | undefined {
   return raw as CreateApplicationStackRequest
 }
 
-/** The platform's publish rule (publish.go): gateway needs customDomain + hostnamePattern; wildcard needs subdomain. */
-function publishProblem(publish: CreateApplicationStackRequest['publish']): string | undefined {
+const PUBLISH_URL_TAKEN = 'Another publish already uses this URL.'
+
+/**
+ * The platform's publish rule (publish.go): gateway needs customDomain + hostnamePattern; wildcard needs subdomain.
+ * The URL conflict skips the publish being written (publish.go rejectPublishEndpointConflict skips the same name),
+ * so re-creating a component's own publish is an update, not a conflict.
+ */
+function publishProblem(publish: CreateApplicationStackRequest['publish'], ownStackId?: string): string | undefined {
   if (!publish?.enabled) return undefined
   if (!publish.customDomain) return "'customDomain' is required for gateway publish"
   if (!publish.hostnamePattern) return "'hostnamePattern' is required for gateway publish"
   if (publish.hostnamePattern === 'wildcard' && !publish.subdomain) return "'subdomain' is required for wildcard publish"
   const host = (publish.hostnamePattern === 'wildcard' ? `${publish.subdomain}.${publish.customDomain}` : publish.customDomain).trim().toLowerCase().replace(/\.$/, '')
   const path = publish.path?.trim() || '/'
-  if ([...state.stacks.values()].some((stack) => stack.host.toLowerCase().replace(/\.$/, '') === host && (stack.publishPath ?? '/') === (path.startsWith('/') ? path : `/${path}`))) return 'Another publish already uses this URL.'
+  if ([...state.stacks.values()].some((stack) => stack.id !== ownStackId && stack.host.toLowerCase().replace(/\.$/, '') === host && (stack.publishPath ?? '/') === (path.startsWith('/') ? path : `/${path}`))) return PUBLISH_URL_TAKEN
   return undefined
 }
 
@@ -2437,7 +2443,9 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
       const body = await request.json() as { applicationId: string; branchId: string; componentId: string; destination: { type: string }; customDomain?: string; hostnamePattern?: 'wildcard' | 'apex'; subdomain?: string; idempotencyKey?: string }
       const stack = state.stacks.get(body.applicationId)
       if (!stack || body.branchId !== 'production' || body.componentId !== webId(stack)) return error(404, 'not_found', 'production web component not found')
-      const problem = publishProblem({ enabled: true, customDomain: body.customDomain, hostnamePattern: body.hostnamePattern, subdomain: body.subdomain })
+      const problem = publishProblem({ enabled: true, customDomain: body.customDomain, hostnamePattern: body.hostnamePattern, subdomain: body.subdomain }, stack.id)
+      // Like the platform: another publish holding the URL is 409 publish_url_conflict.
+      if (problem === PUBLISH_URL_TAKEN) return error(409, 'conflict', 'publish endpoint is already owned by another publish', { reason: 'publish_url_conflict' })
       if (body.destination?.type !== 'gateway' || problem) return error(400, 'invalid_argument', problem ?? 'gateway destination is required')
       stack.host = body.hostnamePattern === 'wildcard' ? `${body.subdomain}.${body.customDomain}` : body.customDomain!
       return json(toPublish(stack), 201)

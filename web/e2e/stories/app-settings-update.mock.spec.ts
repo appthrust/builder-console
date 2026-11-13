@@ -14,6 +14,9 @@ function expectVariables(body: unknown, featureValue?: string) {
 
 test.describe('App settings update @app', () => {
   test('updates app details, sharing, environment values, and group with persisted readback @mock @story', async ({ page, mock }) => {
+    // Several saves with readback, a group move and two reloads: about 13 s locally, 28–30 s on
+    // GitHub runners (27.9 s and 29.5 s passing, 31.6 s timed out on run 43359019553).
+    test.setTimeout(60_000)
     void mock
     const app = seed.apps.mitsumori
     const appPath = `/${app.groupPath}/${app.slug}`

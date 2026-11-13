@@ -1,10 +1,14 @@
 import type { Page } from '@playwright/test'
-import { test, expect, seed } from '../support/fixtures'
+import { test, expect, seed, withExpectedFailures, type ExpectedFailure } from '../support/fixtures'
 
 // データ tab, read side (design/platform/builder-console-app-data.md). The mock
 // serves one 備品在庫 catalog for every app database (src/dev/mock-database-data.ts).
 const app = seed.apps.mitsumori
 const dataUrl = `/${app.groupPath}/${app.slug}/-/data`
+
+/** The data tab's first read: the Platform API answers why the database cannot be listed. */
+const tablesRefused = (status: number, reason: string): ExpectedFailure =>
+  ({ method: 'GET', path: '/api/v1/projects/{projectId}/databases/{database}/schema/tables', status, count: 1, reason })
 
 /** The 表 Select above the grid. */
 const tableSelect = (page: Page) => page.getByRole('combobox', { name: '表', exact: true })
@@ -114,22 +118,28 @@ test.describe('App data @app-data', () => {
 
   test('forbidden, suspended, unsupported and empty databases are explained, never a grid @mock @story', async ({ page, mock }) => {
     await mock.platform('data', { mode: 'forbidden' })
-    await page.goto(dataUrl)
-    await expect(page.getByText('データを見る権限がまだありません', { exact: true })).toBeVisible()
+    await withExpectedFailures([tablesRefused(403, 'no data read permission')], async () => {
+      await page.goto(dataUrl)
+      await expect(page.getByText('データを見る権限がまだありません', { exact: true })).toBeVisible()
+    })
     await expect(page.getByText('基盤の担当者に「データの閲覧」を依頼してください')).toBeVisible()
     await expect(page.getByRole('link', { name: /担当者に聞く/ })).toBeVisible()
     await expect(page.getByRole('navigation', { name: 'アプリのページ' }).getByLabel('データを見る権限がまだありません')).toBeVisible()
     await expect(page.getByRole('table')).toHaveCount(0)
 
     await mock.platform('data', { mode: 'suspended' })
-    await page.reload()
-    await expect(page.getByText('データベースは停止中です。アプリを開くと起動し、データが見られます。')).toBeVisible()
+    await withExpectedFailures([tablesRefused(412, 'the database is suspended')], async () => {
+      await page.reload()
+      await expect(page.getByText('データベースは停止中です。アプリを開くと起動し、データが見られます。')).toBeVisible()
+    })
     await expect(page.getByRole('link', { name: '開く ↗' })).toHaveAttribute('href', /^https:\/\/mitsumori\./)
     await expect(page.getByRole('table')).toHaveCount(0)
 
     await mock.platform('data', { mode: 'unsupported' })
-    await page.reload()
-    await expect(page.getByText('この種類のデータベースはまだ対応していません')).toBeVisible()
+    await withExpectedFailures([tablesRefused(412, 'the database engine is not supported')], async () => {
+      await page.reload()
+      await expect(page.getByText('この種類のデータベースはまだ対応していません')).toBeVisible()
+    })
     await expect(page.getByRole('table')).toHaveCount(0)
 
     await mock.platform('data', { mode: 'empty' })
@@ -144,9 +154,11 @@ test.describe('App data @app-data', () => {
     const config = (url: URL) => url.pathname === '/config'
     await page.route(config, (route) => route.fulfill({ json: { projectId: 'commerce', dashboardUrl: settingsUrl } }))
     await mock.platform('data', { mode: 'subject-unbound' })
-    await page.goto(dataUrl)
     const notice = page.getByRole('status').filter({ hasText: 'いまのチームメンバー登録では、データへのアクセスが許可されていません' })
-    await expect(notice).toContainText('まだサインインしていません。このメールアドレスで最初にサインインすると、データベースと実行環境へのアクセスが許可されます。')
+    await withExpectedFailures([tablesRefused(412, 'the signed-in subject is not bound to a Team member')], async () => {
+      await page.goto(dataUrl)
+      await expect(notice).toContainText('まだサインインしていません。このメールアドレスで最初にサインインすると、データベースと実行環境へのアクセスが許可されます。')
+    })
     await expect(notice.getByRole('link', { name: 'チームの設定を開く' })).toHaveAttribute('href', settingsUrl)
     // Not the generic 403: the Data tab carries the lock named after this cause, and no grid renders.
     await expect(page.getByText('データを見る権限がまだありません', { exact: true })).toHaveCount(0)
@@ -154,17 +166,25 @@ test.describe('App data @app-data', () => {
     await expect(page.getByRole('table')).toHaveCount(0)
 
     // The overview's データベースの変更 card gets the same notice from the change list's 412.
-    await page.goto(`/${app.groupPath}/${app.slug}`)
     const changes = page.getByRole('region', { name: 'データベースの変更' })
-    await expect(changes.getByRole('status')).toContainText('いまのチームメンバー登録では、データへのアクセスが許可されていません')
+    await withExpectedFailures([{ method: 'GET', path: '/api/v1/projects/{projectId}/databases/{database}/changes', status: 412, count: 1, reason: 'the change list is refused for the same unbound subject' }], async () => {
+      await page.goto(`/${app.groupPath}/${app.slug}`)
+      await expect(changes.getByRole('status')).toContainText('いまのチームメンバー登録では、データへのアクセスが許可されていません')
+    })
     await expect(changes.getByRole('link', { name: 'チームの設定を開く' })).toHaveAttribute('href', settingsUrl)
-    await page.goto(dataUrl)
+    // Wait for the data tab before switching the cause, so the reload does not cut its reads off.
+    await withExpectedFailures([tablesRefused(412, 'the signed-in subject is not bound to a Team member')], async () => {
+      await page.goto(dataUrl)
+      await expect(notice).toContainText('まだサインインしていません。')
+    })
 
     await mock.platform('data', { mode: 'not-persisted' })
     await page.unroute(config)
     await page.route(config, (route) => route.fulfill({ json: { projectId: 'commerce' } }))
-    await page.reload()
-    await expect(notice).toContainText('役割は基盤の管理者またはグループから来ています。このユーザーをチームメンバーとして追加すると、データベースと実行環境へのアクセスが許可されます。')
+    await withExpectedFailures([tablesRefused(412, 'the role comes from an administrator or group, not a Team member')], async () => {
+      await page.reload()
+      await expect(notice).toContainText('役割は基盤の管理者またはグループから来ています。このユーザーをチームメンバーとして追加すると、データベースと実行環境へのアクセスが許可されます。')
+    })
     // Without a Dashboard URL in the config the link is left out rather than guessed.
     await expect(notice.getByRole('link')).toHaveCount(0)
   })

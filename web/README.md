@@ -251,6 +251,102 @@ schema declares a default).
 (`role`, `registry`, `codex`, `stack-conflict`, `github-repository`,
 `plan-generation`, `implementation-run`, `logs`, `bare-500`, `app-draft`, ...).
 
+### Browser stories
+
+`e2e/stories/*.mock.spec.ts` drive Chromium through the SPA against the
+in-memory mock. Playwright starts its own mock (`CONSOLE_E2E_MOCK_PORT`, default
+54395) and Vite (`CONSOLE_E2E_PORT`, default 5209):
+
+```sh
+bun x playwright install chromium   # once per @playwright/test version
+bun run typecheck:e2e
+bun run test:e2e:mock               # every @mock story, one worker
+bun run test:e2e:mock -- e2e/stories/app-delete.mock.spec.ts   # one file
+```
+
+`APPTHRUST_E2E_REUSE_SERVER=1` reuses servers you already started (ignored in
+CI). Reports: `playwright-report/` (HTML), `test-results/junit.xml` and
+`test-results/results.json`; failure screenshots and traces under `e2e/results/`
+(`bun x playwright show-trace <trace.zip>`). There are no retries and
+`test.only` fails the run. Each test has 30 s; a story that needs more calls
+`test.setTimeout` (at most 120 s).
+
+CI (`console-mock-stories`) runs the same command in the
+`mcr.microsoft.com/playwright` image of the locked Playwright version, rejects a
+report with no executed test, a skipped/fixme test or a story file without an
+executed `@mock` test, and uploads the reports. Bumping `@playwright/test` in
+`bun.lock` requires the matching image tag and digest in `.github/workflows/ci.yml`.
+
+Import `test`, `expect` and helpers from `e2e/support/fixtures.ts` only. For
+every test it automatically:
+
+- resets both mocks before the test (no need to request the `mock` fixture);
+- watches every page, popup and iframe of the browser context from before the
+  first navigation, and fails the test at teardown when it saw any of:
+  `console.error` (warnings are only counted); an uncaught exception or
+  unhandled rejection; a transport failure (`requestfailed`); an HTTP 4xx/5xx
+  response for any request (API, document, script, style, image, preview);
+  the shared error boundary (`data-testid="console-error-boundary"` in
+  `src/routes/root.tsx`) being inserted, even if a retry replaced it before the
+  end; text nodes rendering `undefined` or `NaN` at the end of the test.
+  The 404 page, 「権限がありません」 and 「準備中」 states are ordinary UI and not the boundary.
+
+The failure lists each problem with its URL, method and status or message
+(never request or response bodies); the `browser-problems` attachment keeps the
+same list plus counts of console warnings and of GETs the page ended itself.
+Two such endings are not transport failures, although Chromium reports both as
+`net::ERR_ABORTED`: the Vite dev server runs React StrictMode, which mounts every
+effect twice, so the first `/launcher` read or preview probe of a page is aborted
+in the same task that started it and sent again; and the preview probe cancels
+the body after reading the status (the status itself is still judged). A
+navigation scope covers each test-driven `page.goto`, `reload`, `goBack` and
+`goForward` (until the call returns) and each main-frame document load such as a
+followed link (until the new document commits): a GET/HEAD the replaced document
+started before the navigation landed may be cut off during it. A GET of an iframe
+the page removed while it loaded is not a failure either. A probe aborted by its
+timer, a read timeout, a read cancelled when its component unmounted, an aborted
+write, a failed document load and any other `net::ERR_ABORTED` is a problem
+unless declared.
+
+A story that provokes a failure on purpose declares it around the action that
+causes it:
+
+```ts
+import { test, expect, withExpectedFailures } from '../support/fixtures'
+
+await withExpectedFailures([{
+  method: 'PUT',
+  path: '/api/v1/projects/{projectId}/publishes/{publishId}/access',
+  status: 403,           // or transportError: 'net::ERR_ABORTED'
+  count: 1,
+  reason: 'Team Viewer cannot change publication access',
+}], async () => {
+  await dialog.getByRole('button', { name: '保存', exact: true }).click()
+  await expect(dialog.getByText('基盤の編集権限（Team Editor）が必要です')).toBeVisible()
+})
+```
+
+`path` is the URL pathname with `{name}` for one segment (or a RegExp). The
+declaration is one test step and applies only while its action runs: exactly
+`count` matching responses must occur inside it (one missing or one extra fails
+the step), and the same failure outside it is a problem. After the action the
+scope stays open until each declared response has arrived (up to 10 s), so the
+count never depends on the UI rendering before the response event; make the
+action wait for the UI that shows the failure. Console errors and other failures inside the
+step still fail the test. Polling failures need a deterministic count: hold or
+release the route explicitly instead of counting timer ticks.
+
+Every declaration is an exact count except one: the create wizard's URL-name
+probe (`freeUrlNameChecks(moments)` in `e2e/support/fixtures.ts`). The wizard
+checks a name when it proposes one, when the name field is left and on 次へ, and
+次へ joins a check of the same name that is still running. How many `GET
+/api/console/resolve` 404s that produces depends on machine speed (CI saw two
+where a local run saw three), so this probe accepts one up to the number of
+distinct moments the flow can check. What matters is asserted exactly instead:
+`continueToShare` waits for the 404 of the final name itself, so the wizard never
+moves on without a completed check of the name it shows. Do not use a range for
+anything else.
+
 ## Japanese UI copy
 
 Copy lives in `src/copy/*` and the per-feature `copy.ts` files. Render it
@@ -374,7 +470,9 @@ non-engineers, with engineering words only under 「詳しい人向け」
   stage has internal `preparing`, `implementing`, and `done` phases. One ladder
   retains the placement, design, and template-startup steps, then adds each
   screen and publication readiness. The preview card appears when a task starts;
-  its iframe additionally requires a successful HTTP readiness probe.
+  its iframe additionally requires a successful HTTP readiness probe. A preview
+  already shown stays mounted when a retry, skip or change starts a new run
+  with every task pending, so the app is not reloaded.
   `model/build/progress.ts#implementationProgress` takes tasks, current task,
   step, the current task's start time and activity tail, plus a clock.
 - Improvement sessions (`design/platform/builder-console-app-improvement.md`)

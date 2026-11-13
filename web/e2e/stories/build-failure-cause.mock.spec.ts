@@ -27,7 +27,10 @@ for (const surface of ['app', 'build'] as const) {
       const draft = (await created.json()).resource
       await page.route(`**${root}/application-drafts/${draft.id}`, async (route) => {
         const response = await route.fetch()
-        await route.fulfill({ response, json: { ...(await response.json()), ownerUserId: 'sub-yamada', createdApplicationStackId: 'mitsumori', buildFailure: failed ? failure : undefined } })
+        // A poll the navigation below cuts off disposes its fetched response; nothing is left to answer.
+        const body: unknown = await response.json().catch(() => undefined)
+        if (body === undefined) return
+        await route.fulfill({ response, json: { ...(body as object), ownerUserId: 'sub-yamada', createdApplicationStackId: 'mitsumori', buildFailure: failed ? failure : undefined } })
       })
       path = `/-/build/${draft.id}`
     }

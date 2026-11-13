@@ -37,14 +37,18 @@ export function NotFound({ attemptedPath }: { attemptedPath?: string } = {}) {
   )
 }
 
-/** In-page load failure (inside the shell). Retry re-runs the route's loaders and resets failed suspense queries. */
+/**
+ * In-page load failure (inside the shell). Retry re-runs the route's loaders and resets failed suspense queries.
+ * `console-error-boundary` marks the shared route/root boundary for browser stories; a hidden resource
+ * (`not_found`) is the normal 404 page, not a boundary failure.
+ */
 export function RouteError({ error }: ErrorComponentProps) {
   const router = useRouter()
   const queryErrorResetBoundary = useQueryErrorResetBoundary()
   useEffect(() => queryErrorResetBoundary.reset(), [queryErrorResetBoundary])
   if (isConsoleError(error, 'not_found')) return <NotFound />
   return (
-    <div className="mx-auto max-w-xl py-8">
+    <div className="mx-auto max-w-xl py-8" data-testid="console-error-boundary">
       <LoadFailed error={error} onRetry={() => void router.invalidate()} />
     </div>
   )

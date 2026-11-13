@@ -35,8 +35,14 @@ export function ImplementPanel({ state, preparation, released, previewNotice, pr
   const reference = state.failure?.reference ? buildFailureReference(state.failure.reference) : undefined
   const nothingImplemented = state.phase === 'done' && !implemented(state)
   const progress = buildProgress(preparation, state, now, released)
-  const previewStarted = state.tasks.some((task) => task.status === 'running' || task.status === 'done' || task.status === 'failed')
   const previewReady = Boolean(state.previewUrl) && state.previewStatus === 'ready'
+  const taskStarted = state.tasks.some((task) => task.status === 'running' || task.status === 'done' || task.status === 'failed')
+  // The preview first appears with the first task. A new run (retry, skip, change)
+  // starts with every task pending; a preview already shown stays mounted then,
+  // instead of tearing down the iframe and reloading the app when a task starts.
+  const [previewShown, setPreviewShown] = useState(false)
+  if (previewReady && taskStarted && !previewShown) setPreviewShown(true)
+  const previewStarted = taskStarted || (previewShown && previewReady)
   const newTabAvailable = Boolean(state.previewUrl) && (previewReady || state.previewStatus === 'error' || state.previewStatus === 'timed-out')
   const previewMessage = state.previewStatus === 'error' ? copy.previewError : state.previewStatus === 'timed-out' ? copy.previewTimedOut : copy.preparing
   const openPreview = () => {

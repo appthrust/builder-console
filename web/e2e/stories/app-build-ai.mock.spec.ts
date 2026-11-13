@@ -1,4 +1,4 @@
-import { test, expect, seed, captureWrite } from '../support/fixtures'
+import { test, expect, seed, captureWrite, withExpectedFailures } from '../support/fixtures'
 import { textJa } from '../../src/model/build/copy'
 
 const FIRST_TURN = textJa.questions.firstTurn
@@ -13,10 +13,9 @@ test.describe('AI build session @app-build-ai', () => {
     const draftsPath = `/api/v1/projects/${seed.projectId}/application-drafts`
     await mock.platform('codex', { available: true })
     await mock.platform('plan-generation', { outcome: 'succeeded', autoAdvance: false, publish: false })
+    // Readiness probes meet the gateway's 503 until the story lets the app listen.
     let previewListening = false
-    let previewProbes = 0
     await page.route('**/dev-workspaces/*/proxy/preview/', async (route) => {
-      if (route.request().method() === 'GET') previewProbes++
       if (!previewListening) {
         await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ kind: 'Status', message: 'error trying to reach service: connection refused', code: 503 }) })
       } else await route.continue()
@@ -48,7 +47,8 @@ test.describe('AI build session @app-build-ai', () => {
     await expect(conversation).toContainText('見積の PDF には何を載せますか？', { timeout: 20_000 })
     await expect(page.getByRole('button', { name: '会社ロゴと連絡先', exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: '支払期限と振込先', exact: true })).toBeVisible()
-    await expect(page.getByRole('button', { name: KICKOFF_REPLY, exact: true })).toHaveCount(0)
+    // The proposal action is offered, but the AI's reply chips do not yet include it.
+    await expect(page.getByRole('region', { name: '会話', exact: true }).getByRole('button', { name: KICKOFF_REPLY, exact: true })).toHaveCount(0)
     await expect(page.getByRole('region', { name: '仕様', exact: true })).toContainText('品目')
     for (const [answer, question] of [
       ['会社ロゴと連絡先', '見積の承認はどうしますか？'],
@@ -59,7 +59,7 @@ test.describe('AI build session @app-build-ai', () => {
       await expect(conversation).toContainText(question, { timeout: 20_000 })
       await expect(page.getByTestId('build-session')).toHaveAttribute('data-stage', 'ask')
     }
-    const kickoff = await captureWrite(page, 'POST', `${draftPath}/conversation-turns`, () => page.getByRole('button', { name: KICKOFF_REPLY, exact: true }).click())
+    const kickoff = await captureWrite(page, 'POST', `${draftPath}/conversation-turns`, () => page.getByRole('region', { name: '会話', exact: true }).getByRole('button', { name: KICKOFF_REPLY, exact: true }).click())
     expect(kickoff.body).toEqual({ message: KICKOFF_REPLY })
     await expect(page.getByRole('button', { name: 'この内容で作る', exact: true })).toBeEnabled({ timeout: 20_000 })
     await expect(page.getByTestId('build-session')).toHaveAttribute('data-stage', 'decide')
@@ -78,11 +78,6 @@ test.describe('AI build session @app-build-ai', () => {
     await page.reload()
     await expect(page).toHaveURL(sessionUrl)
     await expect(conversation).toContainText(reply)
-    // The prepare action sits on the AI's proposal; after the reply changed the spec it regenerates the plan first.
-    const run = await captureWrite(page, 'POST', /\/creation-executions\/[^/]+\/run$/, () => page.getByRole('button', { name: /^(この内容で作る|計画を更新して作る)$/ }).click())
-    expect((await run.request.response())?.status()).toBe(202)
-    // The mock settles the execution on polls; the session binds the app and submits a server run.
-    await expect(page.getByTestId('build-session')).toHaveAttribute('data-stage', 'build', { timeout: 20_000 })
     // Only the mock server advances implementation tasks; the browser reads the draft.
     const advanceUntil = async (visible: () => Promise<void>) => {
       for (let attempt = 0; attempt < 12; attempt++) {
@@ -91,12 +86,22 @@ test.describe('AI build session @app-build-ai', () => {
       }
       await visible()
     }
-    await advanceUntil(() => expect(page.getByText('画面の準備をしています', { exact: true })).toBeVisible({ timeout: 2_000 }))
-    await expect.poll(() => previewProbes).toBeGreaterThan(0)
-    await expect(page.locator('iframe')).toHaveCount(0)
-    await expect(page.getByRole('button', { name: '見てみる', exact: true })).toBeDisabled()
-    await expect(page.getByRole('button', { name: '新しいタブで開く', exact: true })).toBeDisabled()
-    previewListening = true
+    const preview = '/api/v1/projects/{projectId}/dev-workspaces/{workspaceId}/proxy/preview/'
+    // The console probes every four seconds; the app listens right after the first 503 is shown.
+    await withExpectedFailures([{ method: 'GET', path: preview, status: 503, count: 1, reason: 'the first preview probe reaches the workspace before the app listens' }], async () => {
+      const firstProbe = page.waitForResponse((response) => response.url().endsWith('/proxy/preview/') && response.status() === 503)
+      // The prepare action sits on the AI's proposal; after the reply changed the spec it regenerates the plan first.
+      const run = await captureWrite(page, 'POST', /\/creation-executions\/[^/]+\/run$/, () => page.getByRole('button', { name: /^(この内容で作る|計画を更新して作る)$/ }).click())
+      expect((await run.request.response())?.status()).toBe(202)
+      // The mock settles the execution on polls; the session binds the app and submits a server run.
+      await expect(page.getByTestId('build-session')).toHaveAttribute('data-stage', 'build', { timeout: 20_000 })
+      await advanceUntil(() => expect(page.getByText('画面の準備をしています', { exact: true })).toBeVisible({ timeout: 2_000 }))
+      await firstProbe
+      await expect(page.locator('iframe')).toHaveCount(0)
+      await expect(page.getByRole('button', { name: '見てみる', exact: true })).toBeDisabled()
+      await expect(page.getByRole('button', { name: '新しいタブで開く', exact: true })).toBeDisabled()
+      previewListening = true
+    })
     await advanceUntil(() => expect(page.frameLocator('iframe').getByRole('heading', { name: /^プレビュー:/ })).toBeVisible({ timeout: 2_000 }))
     await expect(page.getByRole('button', { name: '見てみる', exact: true })).toBeEnabled()
     await expect(page.getByRole('link', { name: '新しいタブで開く', exact: true })).toHaveAttribute('href', /\/proxy\/preview\/$/)
@@ -229,9 +234,11 @@ test.describe('AI build session @app-build-ai', () => {
     })
     await page.goto('/new')
     await page.getByLabel('やりたいことを書く', { exact: true }).fill('いいかんじに人事情報管理したい')
-    await page.getByRole('button', { name: 'AI と作る', exact: true }).click()
     const retry = page.getByRole('button', { name: 'もう一度試す', exact: true })
-    await expect(retry).toBeVisible()
+    await withExpectedFailures([{ method: 'POST', path: '/api/v1/projects/{projectId}/application-drafts/{draftId}/conversation-turns', status: 503, count: 1, reason: 'the opening turn meets a temporary Platform failure' }], async () => {
+      await page.getByRole('button', { name: 'AI と作る', exact: true }).click()
+      await expect(retry).toBeVisible()
+    })
     expect(turnMessages).toEqual([FIRST_TURN])
     await page.reload()
     await expect(retry).toBeVisible()
@@ -276,12 +283,14 @@ test.describe('AI build session @app-build-ai', () => {
       expect(response.status()).toBe(202)
       await route.fulfill({ status: 409, json: { error: { code: 'conflict', message: 'implementation run is running' } } })
     })
-    await page.goto(`/-/build/${draft.id}`)
     const latest = async () => (await (await request.get(path)).json()).implementationRuns?.at(-1)
-    await expect.poll(async () => (await latest())?.status).toBe('pending')
-    await mock.advance()
     const ladder = page.getByRole('list', { name: 'アプリを作る手順', exact: true })
-    await expect(ladder.getByLabel('いまの動き', { exact: true })).toHaveText('AI に依頼を送っています', { timeout: 15_000 })
+    await withExpectedFailures([{ method: 'POST', path: runsPath, status: 409, count: 1, reason: 'another tab started the implementation run first' }], async () => {
+      await page.goto(`/-/build/${draft.id}`)
+      await expect.poll(async () => (await latest())?.status).toBe('pending')
+      await mock.advance()
+      await expect(ladder.getByLabel('いまの動き', { exact: true })).toHaveText('AI に依頼を送っています', { timeout: 15_000 })
+    })
     expect(writes).toEqual([runsPath])
     const original = await latest()
     const taskId = original.currentTaskId
@@ -336,6 +345,8 @@ test.describe('AI build session @app-build-ai', () => {
     page.on('request', (write) => {
       if (write.method() === 'POST' && new URL(write.url()).pathname === `${root}/publishes`) repairs.push(write.postDataJSON())
     })
+    // After the repaired publish appears the session applies its access; reload only once that write has answered.
+    const accessWrite = page.waitForResponse((response) => response.request().method() === 'PUT' && new URL(response.url()).pathname === `${root}/publishes/${created.createdApplicationId}-web/access`)
     await page.goto(`/-/build/${draft.id}`)
     await expect.poll(() => repairs).toEqual([{
       applicationId: created.createdApplicationId, branchId: 'production', componentId: `${created.createdApplicationId}-web`,
@@ -343,6 +354,7 @@ test.describe('AI build session @app-build-ai', () => {
       idempotencyKey: `build-publish-${draft.id}-${created.createdApplicationId}`,
     }])
     await expect.poll(async () => (await (await request.get(`${root}/publishes`)).json()).data.find((publish: { applicationId: string }) => publish.applicationId === created.createdApplicationId)?.publicUrl).toBe(`https://${created.createdApplicationId}.commerce.appthrust.test/`)
+    expect((await accessWrite).ok()).toBe(true)
     await page.reload()
     await expect(page.getByTestId('build-session')).toBeVisible()
     expect(repairs).toHaveLength(1)
@@ -352,9 +364,11 @@ test.describe('AI build session @app-build-ai', () => {
   test('a draft another account started (404) explains ownership instead of asking to reload @mock @story', async ({ page }, testInfo) => {
     // appthrust.ink 2026-10-16: a build link opened under another account showed
     // 「しばらくしてから再読み込み」 with a retry that could never succeed.
-    await page.goto('/-/build/draft-someone-elses')
     const state = page.getByRole('heading', { level: 1, name: 'この作りかけは開けません' })
-    await expect(state).toBeVisible()
+    await withExpectedFailures([{ method: 'GET', path: '/api/v1/projects/{projectId}/application-drafts/draft-someone-elses', status: 404, count: 1, reason: 'the Platform API hides another account\'s draft' }], async () => {
+      await page.goto('/-/build/draft-someone-elses')
+      await expect(state).toBeVisible()
+    })
     await expect(page.getByText(/いまは .+ でサインインしています/)).toBeVisible()
     await expect(page.getByRole('button', { name: '再読み込み' })).toHaveCount(0)
     await page.screenshot({ path: testInfo.outputPath('draft-not-found.png'), fullPage: true })

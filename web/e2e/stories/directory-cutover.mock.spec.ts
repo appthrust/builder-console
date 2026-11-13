@@ -45,8 +45,11 @@ test.describe('Directory cutover @directory', () => {
     await page.goto('/-/account')
     await expect(main.getByRole('link', { name: 'ディレクトリで変更する', exact: true })).toHaveAttribute('href', /\/people\/me$/)
 
+    // The Directory app serves the profile; the mock has no Directory UI, so stand in for its page.
+    await page.route((url) => url.pathname === '/people/p-sato', (route) => route.fulfill({ contentType: 'text/html', body: '<h1>Directory profile</h1>' }))
     await page.goto('/-/people/p-sato')
     await page.waitForURL((url) => url.pathname === '/people/p-sato')
+    await expect(page.getByRole('heading', { name: 'Directory profile', exact: true })).toBeVisible()
   })
 
   test('a console admin moves people and groups into the Directory once and sees the result @mock @story', async ({ page, mock }) => {

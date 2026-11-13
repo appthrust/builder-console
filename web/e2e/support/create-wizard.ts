@@ -39,13 +39,22 @@ export async function fillAppDetails(page: Page, details: { displayName?: string
   }
 }
 
-/** Preserve the displayed suggestion, including a generated name for a Japanese-only title. */
+/**
+ * Preserve the displayed suggestion, including a generated name for a Japanese-only title.
+ * The wizard moves on only after this exact name was checked free (resolve 404), whether
+ * 次へ sent the check or joined the one leaving the name field had started.
+ */
 export async function continueToShare(page: Page): Promise<string> {
   const suggestion = page.getByTestId('url-name')
   await expect(suggestion).toHaveText(/^[a-z0-9][a-z0-9-]*$/)
   const slug = (await suggestion.innerText()).trim()
   await expect(page.getByLabel(/^所属グループ/)).toContainText(seed.groups.teamA.name)
+  const finalNameChecked = page.waitForResponse((response) => {
+    const url = new URL(response.url())
+    return url.pathname === '/api/console/resolve' && url.searchParams.get('path') === `/${seed.groups.teamA.path}/${slug}` && response.status() === 404
+  })
   await page.getByRole('button', { name: '次へ', exact: true }).click()
+  await finalNameChecked
   await expect(page.getByRole('heading', { name: '誰に見せますか？' })).toBeVisible()
   return slug
 }

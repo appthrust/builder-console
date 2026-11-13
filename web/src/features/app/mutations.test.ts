@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import { ORPCError } from '@orpc/client'
-import { deleteAppResources, SourceStillReferencedError, type AppDeletion, type AppDeletionDeps } from './mutations'
+import { QueryClient } from '@tanstack/react-query'
+import { consoleKeys } from '../../api/console'
+import { keys } from '../../api/queries'
+import { deleteAppResources, forgetDeletedApp, readsDeletedApp, SourceStillReferencedError, type AppDeletion, type AppDeletionDeps } from './mutations'
 
 const notFound = () => new ORPCError('NOT_FOUND', { status: 404 })
 const referenced = (stackIds: string[]) =>
@@ -75,5 +78,47 @@ describe('deleteAppResources', () => {
     const retry = deps()
     await deleteAppResources('commerce', progress, retry.value)
     expect(retry.calls).toEqual(['source:keihi-src', 'console:a-keihi'])
+  })
+})
+
+describe('forgetDeletedApp', () => {
+  const deleted = { appId: 'a-keihi', applicationId: 'keihi', stackId: 'keihi', webComponentId: 'keihi-web' }
+
+  test('takes the app out of every cached list and leaves the others', async () => {
+    const queryClient = new QueryClient()
+    queryClient.setQueryData(keys.applications('commerce'), { data: [{ id: 'keihi' }, { id: 'nippo' }], meta: { total: 2 } })
+    queryClient.setQueryData(keys.stacks('commerce'), { data: [{ id: 'keihi' }, { id: 'nippo' }] })
+    queryClient.setQueryData(consoleKeys.apps({ scope: 'mine' }), [{ id: 'a-keihi' }, { id: 'a-nippo' }])
+    await forgetDeletedApp(queryClient, 'commerce', deleted)
+    expect(queryClient.getQueryData<unknown>(keys.applications('commerce'))).toEqual({ data: [{ id: 'nippo' }], meta: { total: 2 } })
+    expect(queryClient.getQueryData<unknown>(keys.stacks('commerce'))).toEqual({ data: [{ id: 'nippo' }] })
+    expect(queryClient.getQueryData<unknown>(consoleKeys.apps({ scope: 'mine' }))).toEqual([{ id: 'a-nippo' }])
+  })
+
+  test('cancels the deleted app\'s in-flight reads only', async () => {
+    const queryClient = new QueryClient()
+    const signals: Record<string, AbortSignal> = {}
+    const hang = (name: string) => ({ signal }: { signal: AbortSignal }) => {
+      signals[name] = signal
+      return new Promise(() => {})
+    }
+    void queryClient.fetchQuery({ queryKey: keys.releases('commerce', 'keihi', 'production'), queryFn: hang('keihi') }).catch(() => {})
+    void queryClient.fetchQuery({ queryKey: keys.releases('commerce', 'nippo', 'production'), queryFn: hang('nippo') }).catch(() => {})
+    await forgetDeletedApp(queryClient, 'commerce', deleted)
+    expect(signals.keihi?.aborted).toBe(true)
+    expect(signals.nippo?.aborted).toBe(false)
+  })
+
+  test('matches reads of the deleted app, never project lists or other apps', () => {
+    const reads = (queryKey: readonly unknown[]) => readsDeletedApp({ queryKey }, 'commerce', deleted)
+    expect(reads(consoleKeys.app('a-keihi'))).toBe(true)
+    expect(reads(consoleKeys.appTools('a-keihi'))).toBe(true)
+    expect(reads(keys.releases('commerce', 'keihi', 'production'))).toBe(true)
+    expect(reads(keys.releaseState('commerce', 'keihi', 'production', 'keihi-web'))).toBe(true)
+    expect(reads(keys.logs('commerce', 'keihi-web', 'production'))).toBe(true)
+    expect(reads(consoleKeys.app('a-nippo'))).toBe(false)
+    expect(reads(keys.releases('commerce', 'nippo', 'production'))).toBe(false)
+    expect(reads(keys.applications('commerce'))).toBe(false)
+    expect(reads(consoleKeys.apps({ scope: 'mine' }))).toBe(false)
   })
 })
