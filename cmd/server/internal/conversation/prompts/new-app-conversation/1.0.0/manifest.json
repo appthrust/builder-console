@@ -1,0 +1,10 @@
+{
+  "id": "new-app-conversation/1.0.0",
+  "replySchemaVersion": 1,
+  "templateSha256": "63b8cd7e2e710bcfc72e9bfe76948bb3dadfc86b9576aafecbb99fe80f8f8259",
+  "repairSha256": "ffbc5d3c0f8973996e444a894fa5a02757b675c2c343e7b54d9f1ac67e89c328",
+  "schemaSha256": "34c16d9bc8b057cbe4772dcb521a0e4faabd168deb7eb8bc6603c77c7e21ed3b",
+  "requiredPlatformCapabilities": [
+    "agent-turn-artifacts-v1"
+  ]
+}
