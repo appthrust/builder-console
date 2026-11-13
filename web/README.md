@@ -299,8 +299,8 @@ Two such endings are not transport failures, although Chromium reports both as
 effect twice, so the first `/launcher` read or preview probe of a page is aborted
 in the same task that started it and sent again; and the preview probe cancels
 the body after reading the status (the status itself is still judged). A
-navigation scope covers each test-driven `page.goto`, `reload`, `goBack` and
-`goForward` (until the call returns) and each main-frame document load such as a
+navigation scope covers each test-driven `page.goto`, `reload`, `goBack`,
+`goForward` and `close` (until the call returns) and each main-frame document load such as a
 followed link (until the new document commits): a GET/HEAD the replaced document
 started before the navigation landed may be cut off during it. A GET of an iframe
 the page removed while it loaded is not a failure either. A probe aborted by its

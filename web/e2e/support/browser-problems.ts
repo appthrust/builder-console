@@ -9,7 +9,7 @@
 //   very task that started it (React StrictMode's development-only double
 //   effect), or its body cancelled after the response arrived. Neither is a
 //   GET/HEAD the page started before the test called goto/reload/goBack/
-//   goForward on it (the replaced document's reads), nor a GET of an iframe
+//   goForward/close on it (the replaced or closed document's reads), nor a GET of an iframe
 //   the page removed. Every other `net::ERR_ABORTED`, including a write or a
 //   probe a timer aborted, fails;
 // - the shared error boundary (`data-testid="console-error-boundary"`) ever
@@ -281,9 +281,10 @@ export class BrowserProblemCollector {
    * one commits, so a GET/HEAD it started before the navigation landed is its
    * read; when such a read fails with `net::ERR_ABORTED` during the navigation
    * (or within a second of its end, for event delivery), it is not a failure.
-   * A navigation is a test-driven `goto`/`reload`/`goBack`/`goForward` (until
-   * the call returns) or any main-frame document request, such as a followed
-   * link (until the main frame commits). Writes and later aborts stay judged.
+   * A navigation is a test-driven `goto`/`reload`/`goBack`/`goForward`/`close`
+   * (until the call returns; closing a tab ends its document the same way) or
+   * any main-frame document request, such as a followed link (until the main
+   * frame commits). Writes and later aborts stay judged.
    */
   private scopeNavigations(page: Page) {
     const windows: NavigationWindow[] = []
@@ -293,8 +294,8 @@ export class BrowserProblemCollector {
       const now = Date.now()
       for (const window of windows) if (window.end === undefined && window.byDocument) window.end = now
     })
-    for (const name of ['goto', 'reload', 'goBack', 'goForward'] as const) {
-      const navigate = page[name].bind(page) as (...args: unknown[]) => Promise<Response | null>
+    for (const name of ['goto', 'reload', 'goBack', 'goForward', 'close'] as const) {
+      const navigate = page[name].bind(page) as (...args: unknown[]) => Promise<Response | null | void>
       Object.assign(page, {
         [name]: async (...args: unknown[]) => {
           const window: NavigationWindow = { start: Date.now(), byDocument: false }
