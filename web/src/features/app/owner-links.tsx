@@ -1,4 +1,4 @@
-import type { Person } from '../../api/console'
+import type { Person } from '../../model/contracts/console'
 import { copy } from '../../copy'
 import { Avatar, cn, PersonLink } from '../../ui'
 

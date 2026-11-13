@@ -1,19 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import {
-  avatarUrl,
-  buildGroupTree,
-  canManageGroup,
-  ConsoleApiError,
-  createConsoleApi,
-  directoryLinks,
-  flattenGroupTree,
-  isValidSlug,
-  membershipRoots,
-  pathPrefixes,
-  screenshotUrl,
-  subtreeIds,
-  type Group,
-} from './console'
+import { avatarUrl, ConsoleApiError, createConsoleTransport, directoryLinks, screenshotUrl } from './console'
+import { buildGroupTree, canManageGroup, flattenGroupTree, isValidSlug, membershipRoots, pathPrefixes, subtreeIds, type Group } from '../model/contracts/console'
+import { createConsoleApi } from './console-unverified'
+import { groupsContract } from './contracts/console/groups'
+import { meContract } from './contracts/console/me'
+import { createTestGateway } from './testing/gateway'
 import { copy } from '../copy'
 
 const group = (id: string, parentId: string | null, name: string, path: string): Group => ({
@@ -43,13 +34,11 @@ type Call = { input: string; init: RequestInit }
 
 function recorder(responses: Response[]) {
   const calls: Call[] = []
-  const api = createConsoleApi(
-    async (input, init) => {
-      calls.push({ input, init })
-      return responses.shift() ?? new Response(null, { status: 500 })
-    },
-  )
-  return { api, calls }
+  const fetcher = async (input: string, init: RequestInit) => {
+    calls.push({ input, init })
+    return responses.shift() ?? new Response(null, { status: 500 })
+  }
+  return { api: createConsoleApi(createConsoleTransport(fetcher)), gateway: createTestGateway({ consoleFetch: fetcher }), calls }
 }
 
 describe('createConsoleApi', () => {
@@ -101,11 +90,11 @@ describe('createConsoleApi', () => {
   })
 
   test('a contract 5xx envelope is not transient; a network failure is', async () => {
-    const { api } = recorder([Response.json({ error: 'upstream_unavailable', message: 'platform down' }, { status: 502 })])
-    await expect(api.me()).rejects.toMatchObject({ status: 502, code: 'upstream_unavailable', transient: false, message: 'platform down' })
+    const { gateway } = recorder([Response.json({ error: 'upstream_unavailable', message: 'platform down' }, { status: 502 })])
+    await expect(gateway.console(meContract, undefined)).rejects.toMatchObject({ status: 502, code: 'upstream_unavailable', transient: false, message: 'platform down' })
 
-    const offline = createConsoleApi(async () => Promise.reject(new TypeError('Failed to fetch')))
-    await expect(offline.me()).rejects.toMatchObject({ status: 0, transient: true, message: copy.errors.transient })
+    const offline = createTestGateway({ consoleFetch: async () => Promise.reject(new TypeError('Failed to fetch')) })
+    await expect(offline.console(meContract, undefined)).rejects.toMatchObject({ status: 0, transient: true, message: copy.errors.transient })
   })
 
   test('screenshot upload posts multipart without a JSON content type; reorder, remove, the catalog and tools use the contract paths', async () => {
@@ -149,7 +138,7 @@ describe('createConsoleApi', () => {
 
   test('Directory calls go through the same-origin proxy; empty batches make no call; >100 ids are split', async () => {
     const person = { id: 'p/1', subject: null, pending: true, email: 'new@example.com', displayName: 'New', avatarVersion: null }
-    const { api, calls } = recorder([
+    const { api, gateway, calls } = recorder([
       Response.json({ items: [] }),
       Response.json({ items: [person] }),
       Response.json({ items: [] }),
@@ -168,7 +157,7 @@ describe('createConsoleApi', () => {
     expect(await api.directory.people(many)).toEqual([person])
     await api.directory.person('p/1')
     expect(await api.directory.createPerson({ email: 'new@example.com', displayName: 'New' })).toEqual(person)
-    await api.directory.groups()
+    await gateway.console(groupsContract, undefined)
     await api.directory.members('g/1')
     await api.directory.users('山田')
     expect(await api.admin.directoryMigrate()).toEqual({ imported: { people: 1, groups: 0, memberships: 0 }, conflicts: [] })

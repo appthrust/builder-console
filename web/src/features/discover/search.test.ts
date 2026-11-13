@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import type { BusinessApp, DirectoryEntry } from '../../api/console'
+import type { BusinessApp, DirectoryEntry } from '../../api/console-unverified'
 import { matchesAppSearch, matchesDirectoryEntrySearch } from './search'
 
 const owner = { id: 'owner', subject: 's', pending: false, displayName: 'Storage Proof', email: 'storage@example.com', avatarVersion: null }

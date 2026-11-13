@@ -3,8 +3,10 @@ import { useMutation, useQueryClient, type Query, type QueryClient } from '@tans
 import { useNavigate } from '@tanstack/react-router'
 import { useRef } from 'react'
 import { client, type PlatformApiClient } from '../../api/client'
-import { keys } from '../../api/queries'
-import { consoleApi, consoleKeys, type BusinessApp, type DirectoryUser, type Person, type UpdateAppInput } from '../../api/console'
+import { consoleApi, type BusinessApp, type DirectoryUser, type UpdateAppInput } from '../../api/console-unverified'
+import { keys } from '../../api/queries/shared'
+import { consoleKeys, postComment, removeComment } from '../../api/queries/console'
+import { type Person } from '../../model/contracts/console'
 import { platformErrorEnvelope } from '../../api/platform-error'
 import type { AppView } from '../../model/app'
 import { paths } from '../../routes/paths'
@@ -48,11 +50,13 @@ export function useSaveGuide(appId: string) {
   })
 }
 
+// Comment writes are decoded at the boundary. The thread is read back after any outcome: an
+// answer that could not be read says nothing about whether the write happened.
 export function usePostComment(appId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (body: string) => consoleApi.comments.post(appId, body),
-    onSuccess: async () => {
+    mutationFn: (body: string) => postComment(appId, body),
+    onSettled: async () => {
       await queryClient.invalidateQueries({ queryKey: consoleKeys.comments(appId) })
     },
   })
@@ -61,8 +65,8 @@ export function usePostComment(appId: string) {
 export function useRemoveComment(appId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (commentId: string) => consoleApi.comments.remove(appId, commentId),
-    onSuccess: async () => {
+    mutationFn: (commentId: string) => removeComment(appId, commentId),
+    onSettled: async () => {
       await queryClient.invalidateQueries({ queryKey: consoleKeys.comments(appId) })
     },
   })

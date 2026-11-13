@@ -8,7 +8,7 @@ import { useShell } from '../../shell/use-shell'
 import { ActionError, Button, Dialog, Field, HrefLink, LinkButton, Notice, StatusPill, TextArea } from '../../ui'
 import { text } from './copy'
 import { canReview, requestedChanges } from './model'
-import { proposalPreviewOptions, useProposalDecision, useProposalPeople } from './queries'
+import { proposalPreviewOptions, useProposalDecision, useProposalPeople } from '../../api/queries/proposal'
 
 export function ProposalStatus({ proposal }: { proposal: SourceChangeProposal }) {
   const status = proposal.phase === 'Applied' ? 'live' : proposal.phase === 'ApplyFailed' ? 'failed' : proposal.phase === 'Applying' || proposal.phase === 'Accepted' ? 'deploying' : 'unfinished'

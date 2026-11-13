@@ -4,7 +4,7 @@
 // source repository. A check that cannot answer does not block submission.
 import { ORPCError } from '@orpc/client'
 import type { PlatformApiClient } from '../../api/client'
-import type { ConsoleApi } from '../../api/console'
+import type { ConsoleApi } from '../../api/console-unverified'
 import { platformErrorEnvelope } from '../../api/platform-error'
 import {
   buildSourceRepositoryRequest,

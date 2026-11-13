@@ -1,7 +1,7 @@
 // データ tab wording (design/platform/builder-console-app-data.md "Product language"
 // and "States"). Use spreadsheet language in both languages, not PostgreSQL
 // terms such as schema, primary key or PostgREST.
-import type { MembershipUnboundReason } from '../../../api/queries'
+import type { MembershipUnboundReason } from '../../../api/queries/data'
 import { locale, localized } from '../../../shell/language'
 import { dataTextEn } from './copy.en'
 

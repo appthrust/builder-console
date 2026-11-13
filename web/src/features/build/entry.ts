@@ -1,5 +1,5 @@
 import { createDraft, listDrafts } from '../../api/build'
-import { membershipRoots, type Group, type Me } from '../../api/console'
+import { membershipRoots, type Group, type Me } from '../../model/contracts/console'
 import { findResumableDraft } from '../../model/build/resume'
 import { initialSession, readBuildSession, saveBuildSession, titleFromIntent } from './session'
 import { text } from './copy'

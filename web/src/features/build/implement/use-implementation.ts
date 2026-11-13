@@ -2,7 +2,7 @@ import type { ApplicationDraft, ApplicationDraftImplementationHandoff, Applicati
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
 import * as api from '../../../api/build'
-import { BUILD_POLL_MS, buildDraftOptions, buildKeys } from '../../../api/build-queries'
+import { BUILD_POLL_MS, buildDraftOptions, buildKeys } from '../../../api/queries/build'
 import { platformErrorEnvelope } from '../../../api/platform-error'
 import { getWorkspace, restartWorkspace } from '../../../api/workspace'
 import { classifyBuildFailure, type BuildFailure } from '../../../model/build'

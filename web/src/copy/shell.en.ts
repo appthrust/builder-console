@@ -226,6 +226,10 @@ export const shellEn: typeof shell = {
     confirmTyping: (text: string) => `Type “${text}” to confirm.`,
     configLoadFailed: 'We could not load the console’s project settings. Please reload the page.',
     creationSteps: 'Creation steps',
+    refreshFailed: (at: string) => `Could not refresh (last loaded: ${at}).`,
+    panelFailed: 'This part could not be shown.',
+    unknownPerson: 'Unknown user',
+    resultUnconfirmed: 'We could not confirm the result. Reload to check whether it went through.',
   },
   unsavedChanges: {
     title: 'Leave without saving?',

@@ -1,5 +1,5 @@
 import { createRoute, redirect } from '@tanstack/react-router'
-import { appQuery } from '../api/queries'
+import { appQuery } from '../api/queries/console'
 import { paths } from './paths'
 import { notFoundOn404 } from './resource'
 import { rootRoute } from './root'

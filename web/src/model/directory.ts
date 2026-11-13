@@ -1,4 +1,5 @@
-import type { DirectoryEntry, Group, Person } from '../api/console'
+import type { DirectoryEntry } from '../api/console-unverified'
+import type { Group, Person } from './contracts/console'
 import type { AppView } from './app'
 
 /** Directory candidates reuse the existing view's draft and initial-publication gates. */

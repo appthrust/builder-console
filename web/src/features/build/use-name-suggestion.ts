@@ -1,8 +1,8 @@
 import type { ApplicationDraft } from '@appthrust/api-schema/platform-api'
 import { useQuery } from '@tanstack/react-query'
-import { buildKeys } from '../../api/build-queries'
+import { buildKeys } from '../../api/queries/build'
 import { client } from '../../api/client'
-import { consoleApi } from '../../api/console'
+import { consoleApi } from '../../api/console-unverified'
 import type { BuildFailure } from '../../model/build/types'
 import { suggestFreeUrlName } from '../create/availability'
 

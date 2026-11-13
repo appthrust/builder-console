@@ -6,10 +6,12 @@ import { createRoot } from 'react-dom/client'
 import { copy } from '../copy'
 import { SessionExpiryBoundary } from '../ui/session-expired'
 import { getDraft } from './build'
-import { buildDraftOptions } from './build-queries'
+import { buildDraftOptions } from './queries/build'
 import { platformFetch } from './client'
-import { createConsoleApi } from './console'
-import { retryQuery, retryReadQuery } from './queries'
+import { groupsContract } from './contracts/console/groups'
+import { meContract } from './contracts/console/me'
+import { createTestGateway } from './testing/gateway'
+import { retryQuery, retryReadQuery } from './queries/shared'
 import { checkSessionResponse, isSessionExpiredError, sessionExpiryStore, signInAgain } from './session-expiry'
 
 const originalFetch = globalThis.fetch
@@ -46,9 +48,9 @@ test.each(expiredResponses)('Platform API %s settles as session expiry and block
 
 test.each(expiredResponses)('Console/Directory %s uses the same session expiry latch', async (_name, response) => {
   const fetcher = mock(async (_input: string, _init: RequestInit) => response())
-  const api = createConsoleApi(fetcher)
-  await expect(api.me()).rejects.toMatchObject({ status: 401, code: 'SESSION_EXPIRED' })
-  await expect(api.directory.groups()).rejects.toMatchObject({ code: 'SESSION_EXPIRED' })
+  const gateway = createTestGateway({ consoleFetch: fetcher })
+  await expect(gateway.console(meContract, undefined)).rejects.toMatchObject({ status: 401, code: 'SESSION_EXPIRED' })
+  await expect(gateway.console(groupsContract, undefined)).rejects.toMatchObject({ code: 'SESSION_EXPIRED' })
   expect(fetcher).toHaveBeenCalledTimes(1)
   expect(fetcher.mock.calls[0]?.[1].redirect).toBe('manual')
 })

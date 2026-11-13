@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { LayoutGrid } from 'lucide-react'
-import { appsQuery } from '../../api/queries'
+import { appsQuery } from '../../api/queries/console'
 import { copy } from '../../copy'
 import { paths } from '../../routes/paths'
 import { useShell } from '../../shell/use-shell'

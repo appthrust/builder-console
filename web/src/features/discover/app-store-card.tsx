@@ -1,5 +1,6 @@
 import { Check } from 'lucide-react'
-import { screenshotUrl, type DirectoryEntry } from '../../api/console'
+import { screenshotUrl } from '../../api/console'
+import { type DirectoryEntry } from '../../api/console-unverified'
 import { copy } from '../../copy'
 import type { AppView } from '../../model/app'
 import { paths } from '../../routes/paths'

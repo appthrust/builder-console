@@ -1,9 +1,9 @@
 import type { Publish } from '@appthrust/api-schema/platform-api'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
-import type { BusinessApp } from '../../api/console'
+import type { BusinessApp } from '../../api/console-unverified'
 import { createdAppAccessRetryDelay, putAppAccess, retryCreatedAppAccess } from '../../api/access'
-import { keys } from '../../api/queries'
+import { keys } from '../../api/queries/shared'
 import { isPublishPreparationPending } from '../../api/publish-retry'
 import { matchesAccess } from '../../model/access'
 

@@ -5,25 +5,13 @@ import { createORPCClient, ORPCError } from '@orpc/client'
 import { OpenAPILink } from '@orpc/openapi-client/fetch'
 import { QueryClient, QueryObserver, skipToken } from '@tanstack/react-query'
 import type { PlatformApiClient } from './client'
+import { ResponseContractError } from './boundary'
 import { ConsoleApiError } from './console'
-import {
-  appQuery,
-  componentLogsQuery,
-  consoleConfigQuery,
-  createConnectionsQuery,
-  creationToolsQuery,
-  dataPreconditionReason,
-  githubRepositoriesQuery,
-  isDataForbidden,
-  membershipUnboundReason,
-  projectIdQuery,
-  queryClient,
-  readRetryDelay,
-  resolveQuery,
-  retryDelay,
-  retryQuery,
-  retryReadQuery,
-} from './queries'
+import { appQuery, consoleConfigQuery, projectIdQuery, resolveQuery } from './queries/console'
+import { componentLogsQuery } from './queries/app'
+import { createConnectionsQuery, creationToolsQuery, githubRepositoriesQuery } from './queries/catalog'
+import { dataPreconditionReason, isDataForbidden, membershipUnboundReason } from './queries/data'
+import { queryClient, readRetryDelay, retryDelay, retryQuery, retryReadQuery } from './queries/shared'
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
@@ -55,15 +43,17 @@ test('config failure fails closed without retries or another project', async () 
   const fetch = mock(async () => new Response('not found', { status: 404 }))
   globalThis.fetch = fetch as unknown as typeof globalThis.fetch
   const client = new QueryClient({ defaultOptions: { queries: { retry: 3 } } })
-  await expect(client.fetchQuery(projectIdQuery())).rejects.toThrow('Console config request failed (404)')
+  await expect(client.fetchQuery(projectIdQuery())).rejects.toMatchObject({ status: 404, code: 'not_found' })
   expect(fetch).toHaveBeenCalledTimes(1)
   client.clear()
 })
 
-test.each([{}, { projectId: '' }, { projectId: 'wrong/project' }, { projectId: 12 }])(
-  'invalid config fails closed: %j', async (config) => {
+test.each([[{}, 'missing'], [{ projectId: '' }, 'invalid_value'], [{ projectId: 'wrong/project' }, 'invalid_value'], [{ projectId: 12 }, 'invalid_type']] as const)(
+  'invalid config fails closed: %j', async (config, code) => {
     globalThis.fetch = mock(async () => Response.json(config)) as unknown as typeof fetch
-    await expect(projectIdQuery().queryFn()).rejects.toThrow('Console config contains an invalid projectId')
+    const error = await projectIdQuery().queryFn().catch((caught: unknown) => caught)
+    expect(error).toBeInstanceOf(ResponseContractError)
+    expect(error).toMatchObject({ operationId: 'consoleGetConfig', issues: [{ path: '/projectId', code }] })
   }
 )
 

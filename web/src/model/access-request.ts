@@ -1,4 +1,4 @@
-import { isValidSlug } from '../api/console'
+import { isValidSlug } from './contracts/console'
 
 export type AccessDenialReason = 'unknown_app' | 'unknown_person' | 'not_visible'
 

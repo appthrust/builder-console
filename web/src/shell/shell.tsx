@@ -10,7 +10,7 @@ import { useSelector } from '@tanstack/react-store'
 import { Check, ChevronDown, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Settings, UserRound, X } from 'lucide-react'
 import { Dialog as RDialog, Popover } from 'radix-ui'
 import { useEffect, type ReactNode } from 'react'
-import { useMe } from '../api/queries'
+import { useMe } from '../api/queries/console'
 import { copy } from '../copy'
 import { paths } from '../routes/paths'
 import {

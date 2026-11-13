@@ -1,7 +1,7 @@
 import { notFound } from '@tanstack/react-router'
 import { FileQuestion } from 'lucide-react'
 import { isPlatformNotFound } from '../../api/platform-error'
-import { useMe } from '../../api/queries'
+import { useMe } from '../../api/queries/console'
 import { paths } from '../../routes/paths'
 import { EmptyState, LinkButton } from '../../ui'
 import { text } from './copy'

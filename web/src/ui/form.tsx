@@ -1,7 +1,7 @@
 import { Check, ChevronDown } from 'lucide-react'
 import { Checkbox as RCheckbox, RadioGroup, Select as RSelect } from 'radix-ui'
 import type { InputHTMLAttributes, ReactNode, Ref, TextareaHTMLAttributes } from 'react'
-import type { GroupNode } from '../api/console'
+import type { GroupNode } from '../model/contracts/console'
 import { copy } from '../copy'
 import { cn } from './cn'
 

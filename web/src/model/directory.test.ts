@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import type { DirectoryEntry, Group, Person } from '../api/console'
+import type { DirectoryEntry } from '../api/console-unverified'
+import type { Group, Person } from './contracts/console'
 import type { AppView } from './app'
 import { groupDirectory, isFinished, makersOf, storeOrder, storeScore } from './directory'
 

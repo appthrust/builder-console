@@ -1,7 +1,7 @@
 // 作ったコードから: pick one of the repositories the GitHub 連携 can see.
 import { Lock, Search } from 'lucide-react'
 import { useEffect, useId, useState } from 'react'
-import { useGitHubRepositories } from '../../../api/queries'
+import { useGitHubRepositories } from '../../../api/queries/catalog'
 import { copy } from '../../../copy'
 import type { PickedRepository } from '../../../model/create'
 import { Button, Field, LoadFailed, Skeleton, TextInput } from '../../../ui'

@@ -3,7 +3,7 @@
 import { useStore } from '@tanstack/react-form'
 import { Plus, X } from 'lucide-react'
 import { useState, type KeyboardEvent } from 'react'
-import type { GroupNode } from '../../../api/console'
+import type { GroupNode } from '../../../model/contracts/console'
 import { copy } from '../../../copy'
 import { appUrl, isValidAppName } from '../../../model/create'
 import { Button, Field, GroupSelect, TextInput } from '../../../ui'

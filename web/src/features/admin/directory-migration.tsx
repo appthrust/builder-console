@@ -1,6 +1,8 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { consoleApi, directoryLinks, type DirectoryMigrationResult, type Me } from '../../api/console'
+import { consoleApi, type DirectoryMigrationResult } from '../../api/console-unverified'
+import { directoryLinks } from '../../api/console'
+import { type Me } from '../../model/contracts/console'
 import { Button, ConfirmDialog, LinkButton, Notice } from '../../ui'
 import { text } from './copy'
 

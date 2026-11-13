@@ -3,7 +3,10 @@ import type {
   BeginApplicationDraftCreationExecutionRequest, CreateApplicationDraftCreationPlanGenerationRequest,
   CreateApplicationDraftImplementationRunRequest, CreateApplicationDraftRequest, CreatePublishRequest, UpdateApplicationDraftRequest,
 } from '@appthrust/api-schema/platform-api'
+import type { BuildDraft } from '../model/contracts/build'
 import { client } from './client'
+import { getApplicationDraftContract } from './contracts/platform/build'
+import { apiGateway } from './gateway'
 
 // Keep the stable mutation envelope intact. Ordinary mutations get a fresh key;
 // resumable plan handoffs and publish repair explicitly reuse their attempt key.
@@ -15,8 +18,9 @@ export function listDrafts(projectId: string) {
   return client.platformApiListApplicationDrafts({ projectId })
 }
 
-export function getDraft(projectId: string, draftId: string) {
-  return client.platformApiGetApplicationDraft({ projectId, id: draftId })
+/** The authoritative draft, decoded at the boundary (reference vertical: every later draft read copies this shape). */
+export function getDraft(projectId: string, draftId: string): Promise<BuildDraft> {
+  return apiGateway.platform(getApplicationDraftContract, { projectId, id: draftId })
 }
 
 export function addWorkbook(projectId: string, draftId: string, workbook: ApplicationDraftWorkbook, idempotencyKey: string): Promise<ApplicationDraftWorkbookAddResponse> {

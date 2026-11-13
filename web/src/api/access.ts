@@ -1,5 +1,5 @@
 import { ORPCError } from '@orpc/client'
-import type { ShareScope } from './console'
+import type { ShareScope } from './console-unverified'
 import { client } from './client'
 import { platformErrorEnvelope } from './platform-error'
 import { isPublishPreparationPending, publishPreparationRetryDelay } from './publish-retry'

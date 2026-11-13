@@ -3,7 +3,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryHistory, createRootRoute, createRouter, RouterContextProvider } from '@tanstack/react-router'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { preserveLanguage } from '../../../test/language'
-import { consoleKeys, createConsoleApi, type Membership } from '../../api/console'
+import { consoleKeys } from '../../api/queries/console'
+import { createConsoleApi, type Membership } from '../../api/console-unverified'
+import { createConsoleTransport } from '../../api/console'
+import { createTestGateway } from '../../api/testing/gateway'
+import { groupsContract } from '../../api/contracts/console/groups'
+import { meContract } from '../../api/contracts/console/me'
 import { copy } from '../../copy'
 import { consoleRoutes } from '../../dev/mock-console'
 import { setLanguage } from '../../shell/language'
@@ -18,7 +23,8 @@ async function fixture(path: string, init?: RequestInit) {
   return response
 }
 
-const consoleApi = createConsoleApi(fixture)
+const consoleApi = createConsoleApi(createConsoleTransport(fixture))
+const gateway = createTestGateway({ consoleFetch: fixture })
 const localStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
 let restoreLanguage: () => void
 beforeEach(async () => {
@@ -35,7 +41,7 @@ afterEach(() => {
 /** The members tab of a seeded group; `loaded: false` leaves the member list pending. */
 async function renderMembersTab(groupId: string, { loaded = true } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
-  const [me, groups] = await Promise.all([consoleApi.me(), consoleApi.directory.groups()])
+  const [me, groups] = await Promise.all([gateway.console(meContract, undefined), gateway.console(groupsContract, undefined)])
   const group = groups.find((candidate) => candidate.id === groupId)
   if (!group) throw new Error(`Missing group ${groupId}`)
   client.setQueryData(consoleKeys.me, me)

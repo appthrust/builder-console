@@ -1,7 +1,7 @@
 import { useSuspenseQuery } from '@tanstack/react-query'
 import { createRoute, redirect } from '@tanstack/react-router'
 import { directoryLinks } from '../api/console'
-import { meQuery, personQuery } from '../api/queries'
+import { meQuery, personQuery } from '../api/queries/console'
 import { PersonPage } from '../features/discover'
 import { notFoundOn404 } from './resource'
 import { rootRoute } from './root'

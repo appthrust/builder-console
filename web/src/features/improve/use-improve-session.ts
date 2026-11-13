@@ -2,12 +2,12 @@ import type { ApplicationDraft, ApplicationDraftConversationTurn } from '@appthr
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import * as api from '../../api/build'
-import { buildDraftOptions, buildKeys } from '../../api/build-queries'
+import { buildDraftOptions, buildKeys } from '../../api/queries/build'
 import { platformErrorEnvelope } from '../../api/platform-error'
 import { classifyBuildFailure, type BuildFailure } from '../../model/build'
 import { deriveImprove } from '../../model/improve'
 import { useImplementation } from '../build/implement'
-import { proposalOptions } from '../proposals/queries'
+import { proposalOptions } from '../../api/queries/proposal'
 import { proposalTerminal, proposalWaiting } from '../proposals/model'
 
 /**

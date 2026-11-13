@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
-import { ConsoleApiError, createConsoleApi, type CreateAppInput } from '../../api/console'
+import { ConsoleApiError, createConsoleTransport } from '../../api/console'
+import { createConsoleApi, type CreateAppInput } from '../../api/console-unverified'
 import { consoleRoutes } from '../../dev/mock-console'
 import type { AppDetails } from '../create/submit'
 import { bindCreatedConsoleApp, ConsoleAppCreationError } from './bind-created-console-app'
@@ -31,7 +32,7 @@ beforeEach(async () => {
 afterEach(async () => { await fetchConsole('/api/console/__mock/reset', { method: 'POST' }) })
 
 function harness(createdAppId?: string) {
-  const api = createConsoleApi(fetchConsole)
+  const api = createConsoleApi(createConsoleTransport(fetchConsole))
   const apps = {
     ...api.apps,
     list: mock(api.apps.list), get: mock(api.apps.get), create: mock(api.apps.create),

@@ -1,6 +1,6 @@
 import { useForm, useStore } from '@tanstack/react-form'
 import { z } from 'zod'
-import type { BusinessApp } from '../../../api/console'
+import type { BusinessApp } from '../../../api/console-unverified'
 import { copy } from '../../../copy'
 import { ActionError, Field, TextArea, TextInput, useUnsavedChangesGuard } from '../../../ui'
 import { text } from '../copy'

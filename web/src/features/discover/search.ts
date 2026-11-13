@@ -1,4 +1,4 @@
-import type { BusinessApp, DirectoryEntry } from '../../api/console'
+import type { BusinessApp, DirectoryEntry } from '../../api/console-unverified'
 
 type SearchableApp = Pick<BusinessApp, 'displayName' | 'description' | 'group' | 'tags' | 'capabilities' | 'owners'>
 

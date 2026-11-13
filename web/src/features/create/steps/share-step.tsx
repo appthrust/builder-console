@@ -2,7 +2,8 @@
 // (the owner group by default). 社外にも is for console admins only.
 import { useStore } from '@tanstack/react-form'
 import { Building2, Globe, Lock, TriangleAlert, Users } from 'lucide-react'
-import type { GroupNode, ShareScope } from '../../../api/console'
+import type { GroupNode } from '../../../model/contracts/console'
+import type { ShareScope } from '../../../api/console-unverified'
 import { copy } from '../../../copy'
 import { shareScopeLabel } from '../../../model/access'
 import { GroupChecklist, RadioCards } from '../../../ui'

@@ -1,10 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
 import { MoreHorizontal, Trash2 } from 'lucide-react'
 import { useId, useState } from 'react'
-import { isConsoleError, membershipRoots, type AppComment, type Group, type Me, type Person } from '../../api/console'
-import { commentsQuery, useGroups, useMe } from '../../api/queries'
+import { isConsoleError } from '../../api/console'
+import { isUnknownPerson, membershipRoots, type AppComment, type Group, type Me, type Person } from '../../model/contracts/console'
+import { commentsQuery, useGroups, useMe } from '../../api/queries/console'
 import { copy, relativeTime } from '../../copy'
-import { ActionError, Avatar, Button, ConfirmDialog, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, IconButton, Loading, Notice, Section, TextArea } from '../../ui'
+import { ActionError, Avatar, Button, ConfirmDialog, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, IconButton, Notice, ResourceBoundary, Section, TextArea } from '../../ui'
 import { text } from './copy'
 import { usePostComment, useRemoveComment } from './mutations'
 
@@ -102,52 +103,63 @@ function CommentThread({ appId, owners, canDeleteAny }: CommentsProps) {
         {post.error ? <CommentError error={post.error} /> : null}
       </form>
 
-      {comments.isPending ? <Loading /> : null}
-      {comments.error ? (
-        <div className="mt-4 space-y-3">
-          <CommentError error={comments.error} />
-          <Button size="sm" onClick={() => void comments.refetch()} loading={comments.isFetching}>{copy.common.retry}</Button>
-        </div>
-      ) : null}
-      {comments.data?.length === 0 && !comments.error ? <p className="py-6 text-sm text-stone-500">{text.comments.empty}</p> : null}
-      {comments.data && comments.data.length > 0 ? (
-        <ul className="mt-4 divide-y divide-stone-100">
-          {comments.data.map((comment) => {
-            const authorDepartment = comment.author.id === me.person.id ? department : undefined
-            return (
-              <li key={comment.id} className="flex items-start gap-3 py-4">
-                <Avatar person={comment.author} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-stone-500">
-                    <span className="text-sm font-medium break-words text-stone-900">{comment.author.displayName}</span>
-                    {authorDepartment ? <span>{authorDepartment}</span> : null}
-                    {ownerIds.has(comment.author.id) ? <span className="rounded bg-stone-100 px-1.5 py-0.5 text-stone-700">{text.comments.ownerBadge}</span> : null}
-                    <time dateTime={comment.createdAt}>{relativeTime(comment.createdAt)}</time>
-                  </div>
-                  <p className="mt-2 text-sm leading-relaxed break-words whitespace-pre-wrap text-stone-800">{comment.body}</p>
-                </div>
-                {canDeleteComment(comment, me.person.id, canDeleteAny) ? (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <IconButton label={text.comments.menu} icon={<MoreHorizontal />} />
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onSelect={() => {
-                        remove.reset()
-                        setDeleting(comment)
-                      }} className="text-bad-ink data-highlighted:bg-bad-soft data-highlighted:text-bad-ink [&_svg]:text-bad">
-                        <Trash2 aria-hidden />
-                        {text.comments.delete}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                ) : null}
-              </li>
-            )
-          })}
-        </ul>
-      ) : null}
-      {comments.data && comments.data.length >= COMMENT_LIST_LIMIT ? <p className="mt-3 text-xs text-stone-500">{text.comments.truncated}</p> : null}
+      {/* The list can fail or go stale on its own; the composer above stays usable either way. */}
+      <div className="mt-4">
+        <ResourceBoundary
+          query={comments}
+          resetKey={appId}
+          failure={(error, retry) => (
+            <div className="space-y-3">
+              <CommentError error={error} />
+              <Button size="sm" onClick={retry} loading={comments.isFetching}>{copy.common.retry}</Button>
+            </div>
+          )}
+        >
+          {(list) => list.length === 0 ? <p className="py-6 text-sm text-stone-500">{text.comments.empty}</p> : (
+            <>
+              <ul className="divide-y divide-stone-100">
+                {list.map((comment) => {
+                  const authorDepartment = comment.author.id === me.person.id ? department : undefined
+                  // A removed person keeps their comment, shown without a name or contact that no longer exists.
+                  const author = isUnknownPerson(comment.author) ? undefined : comment.author
+                  const authorName = author ? author.displayName : copy.common.unknownPerson
+                  return (
+                    <li key={comment.id} className="flex items-start gap-3 py-4">
+                      <Avatar person={author ?? { id: comment.author.id, displayName: authorName, avatarVersion: null }} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-stone-500">
+                          <span className={author ? 'text-sm font-medium break-words text-stone-900' : 'text-sm font-medium text-stone-500'}>{authorName}</span>
+                          {authorDepartment ? <span>{authorDepartment}</span> : null}
+                          {ownerIds.has(comment.author.id) ? <span className="rounded bg-stone-100 px-1.5 py-0.5 text-stone-700">{text.comments.ownerBadge}</span> : null}
+                          <time dateTime={comment.createdAt}>{relativeTime(comment.createdAt)}</time>
+                        </div>
+                        <p className="mt-2 text-sm leading-relaxed break-words whitespace-pre-wrap text-stone-800">{comment.body}</p>
+                      </div>
+                      {canDeleteComment(comment, me.person.id, canDeleteAny) ? (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <IconButton label={text.comments.menu} icon={<MoreHorizontal />} />
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onSelect={() => {
+                              remove.reset()
+                              setDeleting(comment)
+                            }} className="text-bad-ink data-highlighted:bg-bad-soft data-highlighted:text-bad-ink [&_svg]:text-bad">
+                              <Trash2 aria-hidden />
+                              {text.comments.delete}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      ) : null}
+                    </li>
+                  )
+                })}
+              </ul>
+              {list.length >= COMMENT_LIST_LIMIT ? <p className="mt-3 text-xs text-stone-500">{text.comments.truncated}</p> : null}
+            </>
+          )}
+        </ResourceBoundary>
+      </div>
 
       <ConfirmDialog
         open={deleting !== undefined}
