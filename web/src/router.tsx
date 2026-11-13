@@ -1,5 +1,5 @@
 import { createRouter } from '@tanstack/react-router'
-import { queryClient } from './api/queries'
+import { queryClient } from './api/queries/shared'
 import { NotFound, RouteError, RoutePending } from './routes/root'
 import { routeTree } from './routes/tree'
 

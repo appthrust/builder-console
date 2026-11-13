@@ -14,7 +14,7 @@ import type {
   PublishPhase,
   ReleasePhase,
 } from '@appthrust/api-schema/platform-api'
-import type { BusinessApp } from '../api/console'
+import type { BusinessApp } from '../api/console-unverified'
 import { copy, relativeTime, reasonHelp, reasonText, type ConsoleStatus } from '../copy'
 import { text as appText } from '../features/app/copy'
 import { buildCopy } from './build/copy'

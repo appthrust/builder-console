@@ -1,6 +1,6 @@
 import { ExternalLink } from 'lucide-react'
 import { directoryLinks } from '../../api/console'
-import { useMe } from '../../api/queries'
+import { useMe } from '../../api/queries/console'
 import { copy } from '../../copy'
 import { LANGUAGES, setLanguage, useLanguage } from '../../shell/language'
 import { LinkButton, PageHeader, RadioCards, Section, useDocumentTitle } from '../../ui'

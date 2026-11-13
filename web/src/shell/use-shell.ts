@@ -1,7 +1,7 @@
 import { useMatch } from '@tanstack/react-router'
 import { useSelector } from '@tanstack/react-store'
-import { membershipRoots, type Group, type Me } from '../api/console'
-import { useGroups, useMe } from '../api/queries'
+import { membershipRoots, type Group, type Me } from '../model/contracts/console'
+import { useGroups, useMe } from '../api/queries/console'
 import { setMembershipGroup, shellStore } from './store'
 
 export type Shell = {

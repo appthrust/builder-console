@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { BusinessApp } from '../../api/console'
+import type { BusinessApp } from '../../api/console-unverified'
 import { initialValues, type CreateValues } from './form'
 import type { CreateProgress, SubmitPhase } from './submit'
 

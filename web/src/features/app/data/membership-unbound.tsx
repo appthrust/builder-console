@@ -4,7 +4,8 @@
 // the データ tab and the データベースの変更 card; it is fixed on the
 // Dashboard's Team settings, linked when the console config names it.
 import { ExternalLink } from 'lucide-react'
-import { membershipUnboundReason, useDashboardSettingsUrl } from '../../../api/queries'
+import { membershipUnboundReason } from '../../../api/queries/data'
+import { useDashboardSettingsUrl } from '../../../api/queries/console'
 import { LinkButton, Notice } from '../../../ui'
 import { dataText } from './copy'
 

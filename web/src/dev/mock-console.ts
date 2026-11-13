@@ -28,29 +28,9 @@
 // 日報 has none yet, 勤怠申請 waits for Tools to install, 会議室予約 cannot reach it,
 // the rest have no Tools built-in app (panel hidden), and drafts answer as unbound apps. `POST
 // /api/console/__mock/tools {appId, state: 'list' | 'empty' | 'pending' | 'unavailable' | 'absent'}` switches one app.
-import type {
-  AccessRequest,
-  ApiError,
-  AppComment,
-  AppTool,
-  AppTools,
-  BusinessApp,
-  DirectoryEntry,
-  DirectoryMigration,
-  DirectoryMigrationResult,
-  DirectoryUser,
-  Group,
-  Me,
-  MemberRole,
-  Membership,
-  Person,
-  PersonProfile,
-  PlatformSettings,
-  Resolved,
-  Screenshot,
-  SharePolicy,
-} from '../api/console'
-import { isValidSlug } from '../api/console'
+import type { AccessRequest, AppTool, AppTools, BusinessApp, DirectoryEntry, DirectoryMigrationResult, DirectoryUser, MemberRole, Membership, PersonProfile, PlatformSettings, Resolved, Screenshot, SharePolicy } from '../api/console-unverified'
+import type { ApiError } from '../api/console'
+import { isValidSlug, type AppComment, type DirectoryMigration, type Group, type Me, type Person } from '../model/contracts/console'
 import { imageInfo, mockAvatarPng, mockScreenPng, type Rgb, type ScreenshotType } from './mock-images'
 
 type Role = 'Admin' | 'Editor' | 'Viewer'

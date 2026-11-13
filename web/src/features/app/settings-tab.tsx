@@ -1,6 +1,6 @@
 import type { ApplicationSourceRepository } from '@appthrust/api-schema/platform-api'
 import { Trash2 } from 'lucide-react'
-import type { BusinessApp } from '../../api/console'
+import type { BusinessApp } from '../../api/console-unverified'
 import { copy } from '../../copy'
 import type { AppView } from '../../model/app'
 import type { AccessDisplay } from '../../model/access'

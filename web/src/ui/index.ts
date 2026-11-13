@@ -4,6 +4,7 @@ export { Button, buttonClasses, IconButton, LinkButton, OpenLink, type ButtonPro
 export { cn } from './cn'
 export { DataTable } from './data-table'
 export { ActionError, EmptyState, isSignInError, Loading, LoadFailed, Notice, Skeleton, StatusPill, type NoticeTone } from './feedback'
+export { ResourceBoundary, type ResourceQuery } from './resource-boundary'
 export {
   Checkbox,
   controlClasses,

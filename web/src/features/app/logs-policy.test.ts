@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { ORPCError } from '@orpc/client'
-import { isLogsForbidden, logsPollInterval } from '../../api/queries'
+import { isLogsForbidden, logsPollInterval } from '../../api/queries/app'
 
 test('log permission denial stops after the first request, without transport retries', () => {
   const error = new ORPCError('FORBIDDEN', { status: 403 })

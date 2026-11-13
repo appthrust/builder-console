@@ -2,6 +2,7 @@ import { AlertTriangle, CheckCircle2, Info, Loader2, RotateCw, XCircle } from 'l
 import type { ReactNode } from 'react'
 import { isAccessDenied } from '../api/client'
 import { isConsoleError } from '../api/console'
+import { isResponseContractError } from '../api/boundary'
 import { AccessForbiddenError } from '../api/access'
 import { platformErrorEnvelope } from '../api/platform-error'
 import { isPublishPreparationPending } from '../api/publish-retry'
@@ -140,6 +141,8 @@ export function ActionError({ error }: { error: unknown }) {
   if (error instanceof AccessForbiddenError) return <Notice tone="error">{error.message}</Notice>
   if (isAccessDenied(error)) return <Notice tone="error">{copy.common.accessDenied}</Notice>
   if (isPublishPreparationPending(error)) return <Notice tone="warning">{copy.errors.publishPreparationPending}</Notice>
+  // The write was sent; only its answer is unreadable. Never imply it failed or invite a blind resend.
+  if (isResponseContractError(error)) return <Notice tone="warning">{error.outcome === 'write_unconfirmed' ? copy.common.resultUnconfirmed : copy.common.loadFailed}</Notice>
   if (isConsoleError(error) && error.transient) return <Notice tone="error" title={copy.errors.transient} />
   const known = consoleErrorText(error)
   if (known) return <Notice tone="error">{known}</Notice>

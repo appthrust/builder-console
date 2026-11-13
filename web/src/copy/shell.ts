@@ -229,6 +229,14 @@ export const shell = {
     confirmTyping: (text: string) => `確認のため「${text}」と入力してください。`,
     configLoadFailed: 'コンソールのプロジェクト設定を読み込めませんでした。ページを再読み込みしてください。',
     creationSteps: '作成の手順',
+    /** A poll failed after an earlier success; `at` is when the shown data was read. */
+    refreshFailed: (at: string) => `更新できませんでした。最後に取得できたのは ${at} です。`,
+    /** A panel crashed while rendering; never shows the error itself. */
+    panelFailed: 'この部分を表示できませんでした。',
+    /** A person the server can no longer resolve (removed from the directory). */
+    unknownPerson: '不明な利用者',
+    /** A write was sent but its answer could not be read: it may or may not have happened. */
+    resultUnconfirmed: '処理結果を確認できませんでした。画面を読み込み直して、反映されたか確かめてください。',
   },
   unsavedChanges: {
     title: '保存せずに移動しますか？',

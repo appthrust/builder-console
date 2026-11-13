@@ -1,5 +1,5 @@
 import type { ApplicationSourceRepository } from '@appthrust/api-schema/platform-api'
-import type { BusinessApp } from '../../api/console'
+import type { BusinessApp } from '../../api/console-unverified'
 import { copy } from '../../copy'
 import type { AppView } from '../../model/app'
 import { ConfirmDialog, Notice } from '../../ui'

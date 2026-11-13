@@ -9,7 +9,8 @@ import type {
   CreateApplicationSourceRepositoryRequest,
 } from '@appthrust/api-schema/platform-api'
 import { ORPCError } from '@orpc/client'
-import { isConsoleError, type BusinessApp, type ConsoleApi, type SharePolicy } from '../../api/console'
+import { isConsoleError } from '../../api/console'
+import { type BusinessApp, type ConsoleApi, type SharePolicy } from '../../api/console-unverified'
 import type { PlatformApiClient } from '../../api/client'
 import { platformErrorEnvelope } from '../../api/platform-error'
 import { queueCreatedAppAccess } from './access'

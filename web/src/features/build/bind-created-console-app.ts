@@ -1,4 +1,5 @@
-import { ConsoleApiError, isConsoleError, type BusinessApp, type ConsoleApi } from '../../api/console'
+import { ConsoleApiError, isConsoleError } from '../../api/console'
+import { type BusinessApp, type ConsoleApi } from '../../api/console-unverified'
 import { bindCreatedApp, ensureDraft, type AppDetails } from '../create/submit'
 import { text } from './copy'
 

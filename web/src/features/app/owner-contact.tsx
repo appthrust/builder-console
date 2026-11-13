@@ -1,5 +1,5 @@
 import { Mail } from 'lucide-react'
-import type { BusinessApp } from '../../api/console'
+import type { BusinessApp } from '../../api/console-unverified'
 import { LinkButton } from '../../ui'
 import { text } from './copy'
 

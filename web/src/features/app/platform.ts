@@ -1,7 +1,7 @@
 // Joins between the console record and the platform read models the app page needs.
 import type { ApplicationSourceRepository } from '@appthrust/api-schema/platform-api'
-import type { BusinessApp } from '../../api/console'
-import type { ComponentScope } from '../../api/queries'
+import type { BusinessApp } from '../../api/console-unverified'
+import type { ComponentScope } from '../../api/queries/app'
 import type { AppView } from '../../model/app'
 
 /** The web component of the bound application, when the platform has observed it. */

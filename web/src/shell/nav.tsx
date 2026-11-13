@@ -4,8 +4,9 @@
 // with their names as tooltips, badges reduced to a dot; the group tree needs the full width.
 import { Building2, ChevronRight, CircleHelp, Globe, House, PencilLine, Settings2, UserRound, UsersRound } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
-import { buildGroupTree, directoryLinks, pathPrefixes, type GroupNode } from '../api/console'
-import { useApps } from '../api/queries'
+import { buildGroupTree, pathPrefixes, type GroupNode } from '../model/contracts/console'
+import { directoryLinks } from '../api/console'
+import { useApps } from '../api/queries/console'
 import { copy } from '../copy'
 import { useAppViews } from '../features/app/use-app-views'
 import { useUnfinished } from '../features/discover/drafts'

@@ -5,7 +5,7 @@
 import type { DatabaseRowsMutationResponse, DatabaseRowsResponse } from '@appthrust/api-schema/platform-api'
 import { skipToken, useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { client } from '../../../api/client'
-import { keys } from '../../../api/queries'
+import { keys } from '../../../api/queries/shared'
 import { rowKey, toDataRow, type Collection, type DataRow } from '../../../model/data-catalog'
 
 export interface UpdateRowInput {

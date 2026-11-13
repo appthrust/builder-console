@@ -1,5 +1,5 @@
 import type { PublishAccess, PublishAccessRequest } from '@appthrust/api-schema/platform-api'
-import type { SharePolicy, ShareScope } from '../api/console'
+import type { SharePolicy, ShareScope } from '../api/console-unverified'
 import { copy } from '../copy'
 import { sharingCopy } from '../copy/sharing'
 import { text } from '../features/app/copy'

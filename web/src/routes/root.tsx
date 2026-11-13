@@ -3,7 +3,7 @@ import { createRootRouteWithContext, Outlet, useRouter, useRouterState, type Err
 import { FileQuestion } from 'lucide-react'
 import { useEffect } from 'react'
 import { isConsoleError } from '../api/console'
-import { groupsQuery, meQuery } from '../api/queries'
+import { groupsQuery, meQuery } from '../api/queries/console'
 import { copy } from '../copy'
 import { Shell } from '../shell/shell'
 import { EmptyState, LinkButton, Loading, LoadFailed, UnsavedChangesProvider, useDocumentTitle } from '../ui'

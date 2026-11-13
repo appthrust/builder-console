@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import { ORPCError } from '@orpc/client'
 import { QueryClient } from '@tanstack/react-query'
-import { consoleKeys } from '../../api/console'
-import { keys } from '../../api/queries'
+import { consoleKeys } from '../../api/queries/console'
+import { keys } from '../../api/queries/shared'
 import { deleteAppResources, forgetDeletedApp, readsDeletedApp, SourceStillReferencedError, type AppDeletion, type AppDeletionDeps } from './mutations'
 
 const notFound = () => new ORPCError('NOT_FOUND', { status: 404 })

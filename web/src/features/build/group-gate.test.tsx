@@ -3,8 +3,12 @@ import type { ApplicationDraftCreationToolRegistryResponse } from '@appthrust/ap
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterContextProvider } from '@tanstack/react-router'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { consoleKeys, createConsoleApi, type Group } from '../../api/console'
-import { createConnectionsQuery, creationToolsQuery } from '../../api/queries'
+import { consoleKeys } from '../../api/queries/console'
+import { createTestGateway } from '../../api/testing/gateway'
+import { groupsContract } from '../../api/contracts/console/groups'
+import { meContract } from '../../api/contracts/console/me'
+import { type Group } from '../../model/contracts/console'
+import { createConnectionsQuery, creationToolsQuery } from '../../api/queries/catalog'
 import { copy } from '../../copy'
 import { aiPolicyExplanation } from '../../copy/ai-policy'
 import { consoleRoutes } from '../../dev/mock-console'
@@ -25,7 +29,7 @@ async function fixture(path: string, init?: RequestInit) {
   return response
 }
 
-const consoleApi = createConsoleApi(fixture)
+const gateway = createTestGateway({ consoleFetch: fixture })
 const localStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
 let restoreLanguage: () => void
 beforeEach(() => {
@@ -39,7 +43,7 @@ afterEach(() => {
 })
 
 test('AI ownership resolves current group, membership root, effective id, then no group', async () => {
-  const [seed] = await consoleApi.directory.groups()
+  const [seed] = await gateway.console(groupsContract, undefined)
   if (!seed) throw new Error('Missing directory fixture')
   const parent: Group = { ...seed, id: 'parent', parentId: null }
   const child: Group = { ...seed, id: 'child', parentId: parent.id }
@@ -55,7 +59,7 @@ test('AI ownership resolves current group, membership root, effective id, then n
 async function renderPage(path: '/new' | '/-/build/draft-1', hasGroup: boolean, availability?: Partial<ApplicationDraftCreationToolRegistryResponse>) {
   const [{ BuildPage }, { NewAppPage }] = await Promise.all([import('./build-page'), import('../create/new-app-page')])
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
-  const [me, groups] = await Promise.all([consoleApi.me(), consoleApi.directory.groups()])
+  const [me, groups] = await Promise.all([gateway.console(meContract, undefined), gateway.console(groupsContract, undefined)])
   const caller = { ...me, canCreateApps: true, effectiveGroupIds: hasGroup ? [groups[0]!.id] : [] }
   client.setQueryData(consoleKeys.me, caller)
   client.setQueryData(consoleKeys.groups, groups)

@@ -1,4 +1,4 @@
-import type { DirectoryEntry } from '../../api/console'
+import type { DirectoryEntry } from '../../api/console-unverified'
 import { copy, relativeTime } from '../../copy'
 import { paths } from '../../routes/paths'
 import { AppIcon, Button, HrefLink, LinkButton, Notice, PageHeader, useDocumentTitle } from '../../ui'

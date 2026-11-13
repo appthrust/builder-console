@@ -5,8 +5,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterContextProvider } from '@tanstack/react-router'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
-import { consoleKeys, createConsoleApi } from '../../api/console'
-import { createConnectionsQuery, creationToolsQuery } from '../../api/queries'
+import { consoleKeys } from '../../api/queries/console'
+import { createTestGateway } from '../../api/testing/gateway'
+import { groupsContract } from '../../api/contracts/console/groups'
+import { meContract } from '../../api/contracts/console/me'
+import { createConnectionsQuery, creationToolsQuery } from '../../api/queries/catalog'
 import { copy } from '../../copy'
 import { consoleRoutes } from '../../dev/mock-console'
 import { platformRoutes } from '../../dev/mock-platform'
@@ -39,8 +42,8 @@ afterEach(() => {
 })
 
 test.each([true, false])('new app distinguishes pending domain and recovers on its scheduled poll: admin=%s', async (admin) => {
-  const api = createConsoleApi(fixture)
-  const [me, groups] = await Promise.all([api.me(), api.directory.groups()])
+  const gateway = createTestGateway({ consoleFetch: fixture })
+  const [me, groups] = await Promise.all([gateway.console(meContract, undefined), gateway.console(groupsContract, undefined)])
   const project = `/api/v1/projects/${me.projectId}`
   const [templates, definitions, sources, registries, domains, tools] = await Promise.all([
     `${project}/application-templates`, '/api/v1/application-stack-definitions',

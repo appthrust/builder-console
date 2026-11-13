@@ -1,5 +1,6 @@
 // SharePolicy wording: who can open an app, as the group names the company uses.
-import type { BusinessApp, Group, SharePolicy } from '../api/console'
+import type { BusinessApp, SharePolicy } from '../api/console-unverified'
+import type { Group } from './contracts/console'
 import { copy } from '../copy'
 import { text } from '../features/app/copy'
 

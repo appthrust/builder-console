@@ -1,6 +1,7 @@
 import { ChevronLeft, ChevronRight, ImagePlus, Trash2 } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
-import { isConsoleError, screenshotUrl, type Screenshot } from '../../api/console'
+import { isConsoleError, screenshotUrl } from '../../api/console'
+import { type Screenshot } from '../../api/console-unverified'
 import { ActionError, Button, ConfirmDialog, Dialog, Field, IconButton, Notice, TextInput } from '../../ui'
 import { text } from './copy'
 import { useRemoveScreenshot, useReorderScreenshots, useUploadScreenshot } from './mutations'

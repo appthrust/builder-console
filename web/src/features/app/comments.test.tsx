@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { ConsoleApiError, type AppComment, type Group } from '../../api/console'
+import { ConsoleApiError } from '../../api/console'
+import { type AppComment, type Group } from '../../model/contracts/console'
 import { canDeleteComment, commentDepartment, commentErrorText, commentInput, commentPreview } from './comments'
 import { text } from './copy'
 import { capabilitiesError, parseCapabilities } from './guide-tab'

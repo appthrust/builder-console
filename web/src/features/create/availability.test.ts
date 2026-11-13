@@ -1,7 +1,8 @@
 import { describe, expect, mock, test } from 'bun:test'
 import type { ApplicationStackDefinition, ApplicationTemplateSummary } from '@appthrust/api-schema/platform-api'
 import { ORPCError } from '@orpc/client'
-import { ConsoleApiError, type BusinessApp, type Resolved } from '../../api/console'
+import { ConsoleApiError } from '../../api/console'
+import { type BusinessApp, type Resolved } from '../../api/console-unverified'
 import { resolveCreateCatalog, type SourceConnections } from '../../model/create'
 import { checkNameAvailability, suggestFreeUrlName, type AvailabilityDeps, type AvailabilityRequest } from './availability'
 

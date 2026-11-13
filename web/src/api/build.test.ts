@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, expect, mock, test } from 'bun:test'
 import { QueryClient, QueryObserver, skipToken } from '@tanstack/react-query'
 import * as api from './build'
-import { BUILD_POLL_MS, buildDraftOptions, buildExecutionOptions, buildGenerationOptions, buildKeys, buildToolsOptions, buildTurnOptions, draftsOptions } from './build-queries'
-import { readRetryDelay, retryReadQuery } from './queries'
+import { BUILD_POLL_MS, buildDraftOptions, buildExecutionOptions, buildGenerationOptions, buildKeys, buildToolsOptions, buildTurnOptions, draftsOptions } from './queries/build'
+import { readRetryDelay, retryReadQuery } from './queries/shared'
 import { isPublishPreparationPending } from './publish-retry'
 
 const originalFetch = globalThis.fetch

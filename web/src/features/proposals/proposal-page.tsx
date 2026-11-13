@@ -1,14 +1,14 @@
 import type { SourceChangeProposal } from '@appthrust/api-schema/platform-api'
 import { useQuery } from '@tanstack/react-query'
-import { appsQuery } from '../../api/queries'
-import { buildDraftOptions } from '../../api/build-queries'
+import { appsQuery } from '../../api/queries/console'
+import { buildDraftOptions } from '../../api/queries/build'
 import { runVersion } from '../../model/improve'
 import { paths } from '../../routes/paths'
 import { useShell } from '../../shell/use-shell'
 import { HrefLink, LinkButton, LoadFailed, Loading, PageHeader, useDocumentTitle } from '../../ui'
 import { text } from './copy'
 import { ProposalActions, ProposalFeedback, ProposalPreview, ProposalStatus } from './proposal-ui'
-import { proposalDiffOptions, proposalOptions, proposalsOptions, useProposalPeople } from './queries'
+import { proposalDiffOptions, proposalOptions, proposalsOptions, useProposalPeople } from '../../api/queries/proposal'
 
 export function ProposalPage({ id }: { id: string }) {
   const { me } = useShell()

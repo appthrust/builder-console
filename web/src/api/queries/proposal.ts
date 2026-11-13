@@ -1,11 +1,13 @@
+// Source change proposals: list, detail, diff, preview, people and the decision mutation.
 import type { SourceChangeProposal, SourceChangeProposalDecisionRequest, SourceChangeProposalListQuery } from '@appthrust/api-schema/platform-api'
 import { queryOptions, skipToken, useMutation, useQueries, useQueryClient } from '@tanstack/react-query'
-import { buildKeys } from '../../api/build-queries'
-import { client } from '../../api/client'
-import { consoleApi } from '../../api/console'
-import { POLL_INTERVAL_MS, readRetryDelay, retryReadQuery } from '../../api/queries'
-import { devWorkspaceProxyUrl, getWorkspace } from '../../api/workspace'
-import { proposalTerminal } from './model'
+import { buildKeys } from './build'
+import { client } from '../client'
+import { consoleApi } from '../console-unverified'
+import { POLL_INTERVAL_MS, readRetryDelay, retryReadQuery } from './shared'
+import { devWorkspaceProxyUrl, getWorkspace } from '../workspace'
+// Pure phase rule owned by the proposals feature (W7 may move it to model/ with its contract).
+import { proposalTerminal } from '../../features/proposals/model'
 
 export const proposalKeys = {
   all: ['proposals'] as const,
