@@ -13,7 +13,7 @@ import { ORPCError } from '@orpc/client'
 import { isResponseContractError } from '../../api/boundary'
 import { isConsoleError } from '../../api/console'
 import type { CreateApi } from '../../api/create'
-import { platformErrorEnvelope } from '../../api/platform-error'
+import { isTransientError, platformErrorEnvelope } from '../../api/platform-error'
 import { knownValue } from '../../model/contracts/build'
 import type { ShareChoice, SourceRepository, SourceRepositoryRequest, StackValidation } from '../../model/contracts/catalog'
 import type { BusinessApp } from '../../model/contracts/console'
@@ -220,7 +220,9 @@ async function failed(error: unknown, progress: CreateProgress, phase: SubmitPha
     await api.removeApp(progress.draft.id).catch(() => undefined)
     throw new CreateFailed(error, {}, true)
   }
-  throw new CreateFailed(error, isResponseContractError(error) ? { ...progress, unconfirmed: phase } : progress, forbidden)
+  if (isResponseContractError(error)) throw new CreateFailed(error, { ...progress, unconfirmed: phase }, forbidden)
+  // An answer that says the write did not happen ends its attempt; a call nothing answered may have been applied and keeps its key.
+  throw new CreateFailed(error, isTransientError(error) ? progress : { ...progress, attempts: undefined }, forbidden)
 }
 
 type SourcePath = Exclude<CreatePath, { kind: 'image' }>
@@ -254,6 +256,13 @@ function madeBy(repository: SourceRepository, request: SourceRepositoryRequest):
   return request.existing
     ? sameName(repository.existing?.repository, request.existing.repository)
     : sameName(repository.destination?.repositoryName, request.destination?.repositoryName) && sameName(repository.image.imagePath, request.image?.imagePath)
+}
+
+/** The attempts left once `step`'s resource is recorded. */
+function settled(attempts: CreateProgress['attempts'], step: 'source' | 'stack'): CreateProgress['attempts'] {
+  const rest: NonNullable<CreateProgress['attempts']> = { ...attempts }
+  delete rest[step]
+  return rest.source || rest.stack ? rest : undefined
 }
 
 const sameOrigin = (a: SourceAttempt['origin'], b: SourceAttempt['origin']) =>
@@ -321,7 +330,7 @@ export async function submitCreate(
           const repository = await deps.api.createSourceRepository(request.projectId, body, attempt.key)
           progress.sourceRepositoryId = repository.id
           progress.sourceRepositoryOrigin = origin
-          progress.attempts = { ...progress.attempts, source: undefined }
+          progress.attempts = settled(progress.attempts, 'source')
           deps.onProgress?.({ ...progress })
         }
         source = { kind: 'application-source-repository', sourceRepositoryId: progress.sourceRepositoryId }
@@ -340,7 +349,7 @@ export async function submitCreate(
       const stack = await deps.api.createStack(request.projectId, stackRequest, attempt.key)
       progress.stackId = stack.id
       progress.stackAppName = appName
-      progress.attempts = { ...progress.attempts, stack: undefined }
+      progress.attempts = settled(progress.attempts, 'stack')
       deps.onProgress?.({ ...progress })
     }
 
@@ -393,6 +402,7 @@ export async function confirmCreate(
     if (made) {
       progress.sourceRepositoryId = made.id
       progress.sourceRepositoryOrigin = sourceOrigin(appName, request.path, deps.catalog)
+      progress.attempts = settled(progress.attempts, 'source')
     }
   }
   if (phase === 'platform' && !progress.stackId) {
@@ -401,6 +411,7 @@ export async function confirmCreate(
     if (made) {
       progress.stackId = made.id
       progress.stackAppName = appName
+      progress.attempts = settled(progress.attempts, 'stack')
     }
   }
   return { progress }

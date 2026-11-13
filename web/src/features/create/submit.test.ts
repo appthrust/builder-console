@@ -79,7 +79,7 @@ const wireRepository = (body: { destination?: { repositoryName: string }; existi
   id, projectId: 'pj', ...(body.sourceConnectionId ? { sourceConnectionId: body.sourceConnectionId } : {}),
   ...(body.destination ? { destination: { repositoryName: body.destination.repositoryName, visibility: 'private' } } : {}),
   ...(body.existing ? { existing: { repository: body.existing.repository } } : {}),
-  image: { imagePath: 'ghcr.io/acme/x', tagFilter: 'edge-', versioningScheme: 'Alphabetical' }, status: 'pending', conditions: [],
+  image: { imagePath: `ghcr.io/acme/${body.destination?.repositoryName ?? body.existing?.repository.split('/')[1]?.toLowerCase() ?? 'x'}`, tagFilter: 'edge-', versioningScheme: 'Alphabetical' }, status: 'pending', conditions: [],
 })
 const wireStack = (id: string, applicationName: string, sourceRepositoryRefName?: string) => ({
   id, projectId: 'pj', templateId: 'nextjs-postgres', applicationName, sourceKind: sourceRepositoryRefName ? 'application-source-repository' : 'sample-image',
@@ -109,6 +109,7 @@ function operationOf(method: string, path: string): { op: Op; id?: string } | un
 function deps(answers: Partial<Record<Op, Answer>> = {}, state: { apps?: unknown[]; repositories?: unknown[]; stacks?: unknown[] } = {}) {
   const calls: string[] = []
   const bodies: Partial<Record<Op, Array<Record<string, unknown>>>> = {}
+  const keys: Partial<Record<Op, Array<string | null>>> = {}
   const defaults: Record<Op, Answer> = {
     createApp: () => json(wireDraft, 201),
     updateApp: () => json(wireDraft),
@@ -131,6 +132,7 @@ function deps(answers: Partial<Record<Op, Answer>> = {}, state: { apps?: unknown
     const body = request.method === 'GET' || request.method === 'DELETE' ? {} : ((await request.clone().json()) as Record<string, unknown>)
     calls.push(route.op === 'bindApp' ? `bindApp:${String(body.stackId)}:${String(body.appName)}` : route.op === 'deleteSource' ? `deleteSource:${route.id}` : route.op)
     ;(bodies[route.op] ??= []).push(body)
+    ;(keys[route.op] ??= []).push(request.headers.get('Idempotency-Key'))
     return (answers[route.op] ?? defaults[route.op])(body, request)
   }
   const gateway = createTestGateway({
@@ -145,7 +147,7 @@ function deps(answers: Partial<Record<Op, Answer>> = {}, state: { apps?: unknown
     connections,
     onPhase: () => {},
   }
-  return { value, api, calls, bodies }
+  return { value, api, calls, bodies, keys }
 }
 
 const fail = (promise: Promise<unknown>) => promise.then(() => { throw new Error('expected a failure') }, (error: unknown) => error as CreateFailed)
@@ -208,8 +210,10 @@ describe('submitCreate', () => {
     const saved: CreateProgress[] = []
     value.onProgress = (progress) => { saved.push(progress) }
     await submitCreate(request, {}, value)
-    expect(saved.map((item) => [item.draft?.id, item.sourceRepositoryId, item.stackId])).toEqual([
-      ['app-1', undefined, undefined], ['app-1', 'mitsumori-src', undefined], ['app-1', 'mitsumori-src', 'mitsumori'],
+    // Each create's key is saved before it is sent, so a reload mid-create resends with the same key.
+    expect(saved.map((item) => [item.draft?.id, item.sourceRepositoryId, item.stackId, Boolean(item.attempts?.source), Boolean(item.attempts?.stack)])).toEqual([
+      ['app-1', undefined, undefined, false, false], ['app-1', undefined, undefined, true, false], ['app-1', 'mitsumori-src', undefined, false, false],
+      ['app-1', 'mitsumori-src', undefined, false, true], ['app-1', 'mitsumori-src', 'mitsumori', false, false],
     ])
   })
 
@@ -465,7 +469,8 @@ describe('an unreadable 2xx answer to a create step (X5: no resend, readback onl
     const first = deps({ createSource: malformed })
     const failure = await fail(submitCreate(request, {}, first.value))
     expectSafe(failure)
-    expect(failure.progress).toEqual({ draft, unconfirmed: 'source' })
+    expect(failure.progress).toMatchObject({ draft, unconfirmed: 'source', attempts: { source: { key: first.keys.createSource?.[0] } } })
+    expect(failure.progress.sourceRepositoryId).toBeUndefined()
     expect(first.calls).toEqual(['createApp', 'validateSource', 'createSource'])
 
     const readback = deps({}, { repositories: [wireRepository({ destination: { repositoryName: 'other' } }, 'other-src'), wireRepository({ destination: { repositoryName: 'mitsumori' } }, 'mitsumori-src')] })
@@ -490,7 +495,7 @@ describe('an unreadable 2xx answer to a create step (X5: no resend, readback onl
     const first = deps({ createStack: malformed })
     const failure = await fail(submitCreate(request, {}, first.value))
     expectSafe(failure)
-    expect(failure.progress).toEqual({ draft, sourceRepositoryId: 'mitsumori-src', sourceRepositoryOrigin: templateOrigin, unconfirmed: 'platform' })
+    expect(failure.progress).toMatchObject({ draft, sourceRepositoryId: 'mitsumori-src', sourceRepositoryOrigin: templateOrigin, unconfirmed: 'platform', attempts: { stack: { key: first.keys.createStack?.[0] } } })
 
     const foreign = deps({}, { stacks: [wireStack('mitsumori-other', 'mitsumori', 'someone-else-src')] })
     expect((await confirmCreate(request, failure.progress, foreign.value)).progress.stackId).toBeUndefined()
@@ -536,5 +541,53 @@ describe('an unreadable 2xx answer to a create step (X5: no resend, readback onl
     const broken = deps({ stacks: () => json({ data: [{ id: SECRET }] }) })
     await expect(confirmCreate(request, failure.progress, broken.value)).rejects.toMatchObject({ code: 'response_contract_invalid', outcome: 'read_failed' })
     expect(failure.progress.unconfirmed).toBe('platform')
+  })
+
+  test('a source repository the readback cannot see yet is not created twice: the resend reuses the first attempt\'s key', async () => {
+    const first = deps({ createSource: malformed })
+    const failure = await fail(submitCreate(request, {}, first.value))
+    const firstKey = first.keys.createSource?.[0]
+    expect(firstKey).toBeTruthy()
+    expect(failure.progress.attempts?.source?.key).toBe(firstKey!)
+
+    // Accepted but not listed yet: the empty list is not proof that nothing was made.
+    const confirmed = await confirmCreate(request, failure.progress, deps().value)
+    expect(confirmed.progress.sourceRepositoryId).toBeUndefined()
+    expect(confirmed.progress.attempts?.source?.key).toBe(firstKey!)
+
+    const retry = deps()
+    await submitCreate(request, confirmed.progress, retry.value)
+    expect(retry.keys.createSource).toEqual([firstKey!])
+  })
+
+  test('a stack the readback cannot see yet is not created twice: the resend reuses the first attempt\'s key', async () => {
+    const first = deps({ createStack: malformed })
+    const failure = await fail(submitCreate(request, {}, first.value))
+    const firstKey = first.keys.createStack?.[0]
+    const confirmed = await confirmCreate(request, failure.progress, deps().value)
+    expect(confirmed.progress.stackId).toBeUndefined()
+    const retry = deps()
+    await submitCreate(request, confirmed.progress, retry.value)
+    expect(retry.keys.createStack).toEqual([firstKey!])
+    expect(retry.calls).toEqual(['validateStack', 'createStack', 'bindApp:mitsumori:mitsumori'])
+  })
+
+  test('a call nothing answered keeps its key; an answer that refused the write ends the attempt', async () => {
+    const lost = deps({ createStack: () => new Response('upstream connect error', { status: 503, headers: { 'Content-Type': 'text/plain' } }) })
+    const transient = await fail(submitCreate(request, {}, lost.value))
+    expect(transient.progress.attempts?.stack?.key).toBe(lost.keys.createStack?.at(-1)!)
+    const refused = await fail(submitCreate(request, {}, deps({ createStack: () => platformError(409, 'conflict', 'taken') }).value))
+    expect(refused.progress.attempts).toBeUndefined()
+  })
+
+  test('another owner\'s repository of the same name is never adopted', async () => {
+    const failure = await fail(submitCreate(request, {}, deps({ createSource: malformed }).value))
+    const otherOwner = { ...wireRepository({ destination: { repositoryName: 'mitsumori' } }, 'other-src'), image: { imagePath: 'ghcr.io/someone-else/mitsumori' } }
+    const otherConnection = wireRepository({ destination: { repositoryName: 'mitsumori' }, sourceConnectionId: 'gh-other' }, 'other-connection-src')
+    const readback = deps({}, { repositories: [otherOwner, otherConnection] })
+    const confirmed = await confirmCreate(request, failure.progress, readback.value)
+    expect(confirmed.progress.sourceRepositoryId).toBeUndefined()
+    const mine = deps({}, { repositories: [wireRepository({ destination: { repositoryName: 'mitsumori' }, sourceConnectionId: 'gh' }, 'mitsumori-src')] })
+    expect((await confirmCreate(request, failure.progress, mine.value)).progress.sourceRepositoryId).toBe('mitsumori-src')
   })
 })

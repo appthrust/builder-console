@@ -38,6 +38,11 @@ const sessionSchema = z.object({
     stackId: z.string().optional(), stackAppName: z.string().optional(),
     // A reload keeps an unconfirmed step unconfirmed: only the readback may follow.
     unconfirmed: phases.optional(),
+    // Keys of creates that may have been applied: a resend reuses them so Platform replays instead of creating twice.
+    attempts: z.object({
+      source: z.object({ key: z.string(), origin: z.object({ appName: z.string(), kind: z.enum(['template', 'existing']), repository: z.string().optional(), templateId: z.string().optional() }) }).optional(),
+      stack: z.object({ key: z.string(), appName: z.string(), sourceRepositoryId: z.string().optional() }).optional(),
+    }).optional(),
   }),
   phase: phases.optional(),
   failure: z.object({ message: z.string() }).optional(),
