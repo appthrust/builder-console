@@ -100,17 +100,45 @@ describe('rows page (platformApiGetDatabaseRows)', () => {
 })
 
 describe('row writes (platformApiCreate/Update/DeleteDatabaseRow)', () => {
-  test('the written row is rows[0]; an answer without one is unconfirmed, never success', () => {
-    for (const contract of [createDatabaseRowContract, updateDatabaseRowContract, deleteDatabaseRowContract]) {
+  const rowIs = (value: { key: string; values: unknown }) => expect(value).toEqual({ key: '1', values: row })
+  test('the written row is rows[0] under the 表 key; an answer without it is unconfirmed, never success', () => {
+    for (const contract of [createDatabaseRowContract('id'), updateDatabaseRowContract('id', '1'), deleteDatabaseRowContract('id', '1')]) {
       assertWireContractCases(contract, [
-        { name: 'the written row', variant: 'present', path: '/rows', wire: written, expect: { accept: true, value: row } },
+        { name: 'the written row', variant: 'present', path: '/rows', wire: written, expect: { accept: true, check: rowIs } },
         { name: 'no rows: Platform answers an error instead (internal/k8s/database_rows_write.go:162)', variant: 'empty', path: '/rows', wire: { ...written, rows: [] }, expect: { accept: false, issues: [{ path: '/rows', code: 'invalid_value' }] } },
         { name: 'absent rows', variant: 'absent', path: '/rows', wire: without(written, 'rows'), expect: { accept: false, issues: [{ path: '/rows', code: 'missing' }] } },
         { name: 'null rows', variant: 'null', path: '/rows', wire: { ...written, rows: null }, expect: { accept: false, issues: [{ path: '/rows', code: 'invalid_type' }] } },
         { name: 'a row that is a string', variant: 'unknown', path: '/rows/*', wire: { ...written, rows: [SECRET] }, expect: { accept: false, issues: [{ path: '/rows/*', code: 'invalid_type' }] } },
-        { name: 'the operation receipt is not read', variant: 'unknown', path: '/', wire: { ...written, operation: SECRET }, expect: { accept: true, value: row } },
+        { name: 'an empty row is no written row (it cannot be addressed)', variant: 'empty', path: '/rows/*', wire: { ...written, rows: [{}] }, expect: { accept: false, issues: [{ path: '/rows/*', code: 'invalid_value' }] } },
+        { name: 'a row without its key column', variant: 'absent', path: '/rows/*', wire: { ...written, rows: [without(row, 'id')] }, expect: { accept: false, issues: [{ path: '/rows/*', code: 'invalid_value' }] } },
+        { name: 'a null key', variant: 'null', path: '/rows/*', wire: { ...written, rows: [{ ...row, id: null }] }, expect: { accept: false, issues: [{ path: '/rows/*', code: 'invalid_value' }] } },
+        { name: 'an empty key', variant: 'empty', path: '/rows/*', wire: { ...written, rows: [{ ...row, id: '' }] }, expect: { accept: false, issues: [{ path: '/rows/*', code: 'invalid_value' }] } },
+        { name: 'a key that is an object', variant: 'unknown', path: '/rows/*', wire: { ...written, rows: [{ ...row, id: { value: SECRET } }] }, expect: { accept: false, issues: [{ path: '/rows/*', code: 'invalid_value' }] } },
+        { name: 'the operation receipt is not read', variant: 'unknown', path: '/', wire: { ...written, operation: SECRET }, expect: { accept: true, check: rowIs } },
       ])
     }
+  })
+
+  test('an update or delete answering another row is unconfirmed; a text key is read as written', () => {
+    for (const contract of [updateDatabaseRowContract('id', '1'), deleteDatabaseRowContract('id', '1')]) {
+      assertWireContractCases(contract, [
+        { name: 'another row', variant: 'unknown', path: '/rows/*', wire: { ...written, rows: [{ ...row, id: 2 }] }, expect: { accept: false, issues: [{ path: '/rows/*', code: 'invalid_value' }] } },
+      ])
+    }
+    const code = '1b4e28ba-2fa1-11d2-883f-0016d3cca427'
+    assertWireContractCases(updateDatabaseRowContract('code', code), [
+      { name: 'a uuid key', variant: 'present', path: '/rows/*', wire: { ...written, rows: [{ code, name: 'x' }] }, expect: { accept: true, value: { key: code, values: { code, name: 'x' } } } },
+    ])
+    assertWireContractCases(createDatabaseRowContract('code'), [
+      { name: 'a new row under its text key', variant: 'present', path: '/rows/*', wire: { ...written, rows: [{ code, name: 'x' }] }, expect: { accept: true, value: { key: code, values: { code, name: 'x' } } } },
+    ])
+  })
+
+  test('the key column is a database column name: it is never named in the issue or the report', () => {
+    assertWireContractCases(updateDatabaseRowContract(SECRET, '1'), [
+      { name: 'the addressed key column holds another row', variant: 'unknown', path: '/rows/*', wire: { ...written, rows: [{ [SECRET]: 2 }] }, expect: { accept: false, issues: [{ path: '/rows/*', code: 'invalid_value' }] } },
+      { name: 'the addressed key column is missing', variant: 'absent', path: '/rows/*', wire: { ...written, rows: [{ [`${SECRET}-other`]: 1 }] }, expect: { accept: false, issues: [{ path: '/rows/*', code: 'invalid_value' }] } },
+    ])
   })
 })
 

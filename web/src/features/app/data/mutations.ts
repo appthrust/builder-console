@@ -17,7 +17,7 @@ import {
 } from '../../../api/queries/data'
 import { keys } from '../../../api/queries/shared'
 import type { DatabaseRowsPage } from '../../../model/contracts/data'
-import { rowKey, toDataRow, type Collection, type DataRow } from '../../../model/data-catalog'
+import { rowKey, type Collection, type DataRow } from '../../../model/data-catalog'
 import { isUnconfirmedWrite } from '../notices'
 
 export interface UpdateRowInput {
@@ -59,7 +59,11 @@ export function useRowWriteConfirmation(projectId: string, databaseId: string, c
   return { unconfirmed, confirming, confirm }
 }
 
-/** Create / update / delete one row of `collection`; each resolves to the row the database returned. */
+/**
+ * Create / update / delete one row of `collection`; each resolves to the row
+ * the database returned, verified at the boundary to be the row addressed (an
+ * answer without it is unconfirmed: nothing is patched, dropped or reported saved).
+ */
 export function useDatabaseRowMutations(projectId: string, databaseId: string, collection: Collection) {
   const queryClient = useQueryClient()
   const target: DatabaseRowTarget = { projectId, databaseId, schema: collection.schema, table: collection.name }
@@ -68,31 +72,34 @@ export function useDatabaseRowMutations(projectId: string, databaseId: string, c
   const unavailableKey = ['database-row-editing-unavailable', projectId, databaseId] as const
   const editingUnavailable = useFlag(unavailableKey)
   const confirmation = useRowWriteConfirmation(projectId, databaseId, collection)
-  // A row without its key cannot be addressed: the 表 is read back instead of patched.
-  const returned = (values: DatabaseRowsPage['rows'][number]): DataRow | undefined => toDataRow(collection, values)
+  /** Rows are addressed by the 表's single key column; a 表 without one has no row writes (nothing is sent). */
+  const keyColumn = (): string => {
+    if (!collection.primaryKey) throw new Error('a 表 without a single key column has no row writes')
+    return collection.primaryKey
+  }
   const onError = (error: unknown) => {
     if (isUnconfirmedWrite(error)) queryClient.setQueryData(unconfirmedKey(target), true)
   }
 
   const create = useMutation({
-    mutationFn: async (values: Record<string, unknown>) => returned(await createDatabaseRow(target, values)),
+    mutationFn: (values: Record<string, unknown>): Promise<DataRow> => createDatabaseRow(target, keyColumn(), values),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: prefix }),
     onError,
   })
 
   const update = useMutation({
-    mutationFn: async ({ key, values, expected }: UpdateRowInput) => returned(await updateDatabaseRow(target, key, values, expected)),
-    onSuccess: async (row, input) => {
-      if (row) await writeRowToCache(queryClient, target, collection, input.key, row.values)
+    mutationFn: ({ key, values, expected }: UpdateRowInput): Promise<DataRow> => updateDatabaseRow(target, keyColumn(), key, values, expected),
+    onSuccess: async (row) => {
+      await writeRowToCache(queryClient, target, collection, row.key, row.values)
       return queryClient.invalidateQueries({ queryKey: prefix })
     },
     onError,
   })
 
   const remove = useMutation({
-    mutationFn: async (key: string) => returned(await deleteDatabaseRow(target, key)),
-    onSuccess: async (_, key) => {
-      await writeRowToCache(queryClient, target, collection, key, undefined)
+    mutationFn: (key: string): Promise<DataRow> => deleteDatabaseRow(target, keyColumn(), key),
+    onSuccess: async (row) => {
+      await writeRowToCache(queryClient, target, collection, row.key, undefined)
       return queryClient.invalidateQueries({ queryKey: prefix })
     },
     onError,

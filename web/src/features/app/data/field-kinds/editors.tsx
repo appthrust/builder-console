@@ -107,7 +107,7 @@ function KeyEditor({ id, value, onChange, invalid, disabled }: EditorProps) {
   return <TextInput id={id} value={value} onChange={(event) => onChange(event.target.value)} invalid={invalid} disabled={disabled} autoComplete="off" spellCheck={false} className="font-mono" />
 }
 
-export const fieldEditors: Record<Exclude<FieldKind, 'unsupported'>, ComponentType<EditorProps>> = {
+export const fieldEditors: Record<FieldKind, ComponentType<EditorProps>> = {
   text: TextEditor,
   longtext: LongTextEditor,
   integer: NumberEditor,
@@ -124,8 +124,8 @@ export const fieldEditors: Record<Exclude<FieldKind, 'unsupported'>, ComponentTy
 /**
  * One labelled form row. Read-only fields (auto-filled keys and timestamps)
  * are text: 「自動で入ります」 on create, the stored value on edit. A column of a
- * type this console does not know has no input: its fixed placeholder says it
- * keeps its stored value.
+ * type without a dedicated input is the plain text editor, with the type named
+ * beside the label and in the hint.
  */
 export function FieldEditor({
   id,
@@ -159,24 +159,23 @@ export function FieldEditor({
       </div>
     )
   }
-  if (field.kind === 'unsupported') {
-    return (
-      <div data-field={field.name}>
-        <p className="text-sm font-medium text-stone-800">{field.label}</p>
-        <p className="mt-1.5 text-sm text-stone-400">{formatValue(field, stored)}</p>
-        <p className="mt-1 text-xs text-stone-500">{error ?? writeText.field.unsupportedNote}</p>
-      </div>
-    )
-  }
   const Editor = fieldEditors[field.kind]
   const required = !field.nullable && !(mode === 'create' && field.hasDefault)
   const hint = field.reference
     ? writeText.field.referenceHint(referenceLabel ?? field.reference.table)
     : field.kind === 'json'
       ? writeText.field.jsonHint
-      : undefined
+      : field.unlistedType
+        ? writeText.field.unlistedType(field.unlistedType)
+        : undefined
+  const label = field.unlistedType ? (
+    <>
+      {field.label}
+      <span className="font-mono text-[11px] font-normal text-stone-500" data-testid="field-type">{field.unlistedType}</span>
+    </>
+  ) : field.label
   return (
-    <Field id={id} label={field.label} required={required} error={error} hint={hint}>
+    <Field id={id} label={label} required={required} error={error} hint={hint}>
       <Editor id={id} field={field} value={value} onChange={onChange} invalid={!!error} mode={mode} disabled={disabled} />
     </Field>
   )

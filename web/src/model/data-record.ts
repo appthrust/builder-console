@@ -63,8 +63,7 @@ export function formatTimestampFull(value: unknown): string | undefined {
 }
 
 function fieldFormValue(field: Field, value: unknown): string {
-  // A value of a type this console does not know never reaches an input.
-  if (value === null || value === undefined || field.kind === 'unsupported') return ''
+  if (value === null || value === undefined) return ''
   switch (field.kind) {
     case 'boolean':
       return value === true ? 'true' : value === false ? 'false' : ''
@@ -162,8 +161,6 @@ function parseValue(field: Field, raw: string): Parsed {
       return UUID.test(trimmed) ? { value: trimmed.toLowerCase() } : { error: v.uuid(field.label) }
     case 'reference':
       return { value: trimmed }
-    case 'unsupported':
-      return { error: v.unsupported(field.label) }
   }
 }
 
@@ -171,19 +168,14 @@ function parseValue(field: Field, raw: string): Parsed {
  * Form → row values. Read-only fields (auto-filled keys and timestamps) are
  * never emitted. An empty input means: on create, leave it to the column
  * default when there is one; otherwise null when the column allows it, else
- * 「○○ は必須です」. A column of a type this console does not know is never
- * emitted: an update leaves it as stored, and a new row cannot be made
- * without it (the column would be dropped unseen).
+ * 「○○ は必須です」. A column of an unlisted type is text like any other: the
+ * database judges its value.
  */
 export function parseFormValues(collection: Collection, form: FormValues, mode: FormMode): ParsedForm {
   const values: Record<string, unknown> = {}
   const errors: Record<string, string> = {}
   for (const field of collection.fields) {
     if (field.readOnly) continue
-    if (field.kind === 'unsupported') {
-      if (mode === 'create') errors[field.name] = writeText.validation.unsupported(field.label)
-      continue
-    }
     const raw = form[field.name] ?? ''
     if (raw.trim() === '') {
       if (mode === 'create' && field.hasDefault) continue
@@ -232,16 +224,20 @@ export function diff(before: Record<string, unknown>, after: Record<string, unkn
 
 /**
  * The optimistic-lock payload of an update: the values the user last saw for
- * each changed column, plus `updated_at` when the row has one. JSON columns
- * are left out: PostgreSQL has no equality for `json`, and `updated_at` or the
- * other columns still detect the concurrent write.
+ * each changed column, plus `updated_at` when the row has one. JSON columns,
+ * and any column whose stored value is an object or array, are left out:
+ * PostgreSQL has no equality for `json`, the text a column's value arrives as
+ * need not be the text it compares by, and `updated_at` or the other columns
+ * still detect the concurrent write.
  */
 export function expectedFor(collection: Collection, row: DataRow, changed: Record<string, unknown>): Record<string, unknown> {
   const expected: Record<string, unknown> = {}
   for (const name of Object.keys(changed)) {
     if (!(name in row.values)) continue
     if (collection.fields.find((field) => field.name === name)?.kind === 'json') continue
-    expected[name] = row.values[name] ?? null
+    const stored = row.values[name]
+    if (stored !== null && typeof stored === 'object') continue
+    expected[name] = stored ?? null
   }
   const updatedAt = row.values[UPDATED_AT]
   if (updatedAt !== null && updatedAt !== undefined) expected[UPDATED_AT] = updatedAt

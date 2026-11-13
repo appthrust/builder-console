@@ -450,9 +450,14 @@ non-engineers, with engineering words only under 「詳しい人向け」
   `src/model/contracts/data.ts`). Table lists, columns, key lists, rows and the
   change list are required (`[]` when empty; absent or null fails); only a
   column's `enumValues` and a review's `findings` read an omission as `[]`.
-  A row write's value is `rows[0]`; an answer without it is unconfirmed. A
-  column type the console does not know is a fixed placeholder, never sorted,
-  edited or sent, and its 表 offers no 「行を追加」. An unknown relation type is
+  A row write's value is `rows[0]` carrying the 表's key (for an update or
+  delete, the addressed row's); any other answer is unconfirmed. The type
+  list in `model/data-catalog.ts` only picks an input: a column of a type it
+  does not list is plain text (sortable, editable, sent as typed, required by
+  its own NOT NULL / default) with the type named beside the label and in the
+  grid header, and only the database judges the value (a rejection that names
+  the column lands on that field). An object or array value of such a column
+  shows as JSON text and is sent only when edited. An unknown relation type is
   read-only; an unknown change phase, risk or run phase offers no 承認 or 再実行.
   A failed rows or change-list refresh keeps the last rows under one
   「更新できませんでした」 notice (the change list also stops its actions). A row

@@ -35,9 +35,8 @@ export const writeTextJa = {
     none: '（なし）',
     choose: '選んでください',
     jsonHint: '{ } や [ ] の形で書きます',
-    /** A column of a type this console does not know: its value is never shown or sent. */
-    unsupported: '（この画面では表示できません）',
-    unsupportedNote: 'この列はこの画面では変更できません。保存しても、いまの値のまま残ります。',
+    /** A column whose database type has no dedicated input here: the person types the value as text. */
+    unlistedType: (type: string) => `専用の入力欄がない型です（${type}）。入力した値をそのまま保存します。`,
   },
   validation: {
     required: (label: string) => `${label} は必須です`,
@@ -49,7 +48,6 @@ export const writeTextJa = {
     json: (label: string) => `${label} の書き方が正しくありません`,
     boolean: (label: string) => `${label} は「はい」か「いいえ」を選んでください`,
     uuid: (label: string) => `${label} の形式が正しくありません`,
-    unsupported: (label: string) => `${label} はこの画面では入力できないため、行を追加できません`,
     fixBelow: '入力内容を確認してください。',
   },
   errors: {

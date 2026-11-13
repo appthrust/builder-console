@@ -4,7 +4,7 @@
 import { ORPCError } from '@orpc/client'
 import { queryOptions, skipToken, useQueries, useQuery, type QueryClient } from '@tanstack/react-query'
 import { useMemo } from 'react'
-import type { DatabaseChange, DatabaseChangeAccepted, DatabaseRowsPage, DatabaseTable, RowValues } from '../../model/contracts/data'
+import type { DatabaseChange, DatabaseChangeAccepted, DatabaseRowsPage, DatabaseTable, RowValues, WrittenRow } from '../../model/contracts/data'
 import { isOneOf } from '../../model/contracts/build'
 import { deriveCatalog, rowKey, type Catalog, type Collection } from '../../model/data-catalog'
 import {
@@ -203,25 +203,29 @@ export interface DatabaseRowTarget {
 
 const rowParams = (target: DatabaseRowTarget) => ({ projectId: target.projectId, id: target.databaseId, schema: target.schema, table: target.table })
 
-/** Inserts one row; answers the row as the database stored it (201). */
-export function createDatabaseRow(target: DatabaseRowTarget, values: Record<string, unknown>, gateway: Gateway = apiGateway): Promise<RowValues> {
-  return gateway.platform(createDatabaseRowContract, { params: rowParams(target), body: { values } })
+/**
+ * Inserts one row; answers the row as the database stored it (201), read
+ * under the 表's single key column `primaryKey`.
+ */
+export function createDatabaseRow(target: DatabaseRowTarget, primaryKey: string, values: Record<string, unknown>, gateway: Gateway = apiGateway): Promise<WrittenRow> {
+  return gateway.platform(createDatabaseRowContract(primaryKey), { params: rowParams(target), body: { values } })
 }
 
-/** Changes the columns in `values` of row `key`, locked on `expected`; answers the updated row. */
+/** Changes the columns in `values` of row `key`, locked on `expected`; answers that row as updated. */
 export function updateDatabaseRow(
   target: DatabaseRowTarget,
+  primaryKey: string,
   key: string,
   values: Record<string, unknown>,
   expected: Record<string, unknown>,
   gateway: Gateway = apiGateway,
-): Promise<RowValues> {
-  return gateway.platform(updateDatabaseRowContract, { params: { ...rowParams(target), key }, body: { values, expected } })
+): Promise<WrittenRow> {
+  return gateway.platform(updateDatabaseRowContract(primaryKey, key), { params: { ...rowParams(target), key }, body: { values, expected } })
 }
 
-/** Deletes row `key`; answers the deleted row. */
-export function deleteDatabaseRow(target: DatabaseRowTarget, key: string, gateway: Gateway = apiGateway): Promise<RowValues> {
-  return gateway.platform(deleteDatabaseRowContract, { params: { ...rowParams(target), key } })
+/** Deletes row `key`; answers that row as it was deleted. */
+export function deleteDatabaseRow(target: DatabaseRowTarget, primaryKey: string, key: string, gateway: Gateway = apiGateway): Promise<WrittenRow> {
+  return gateway.platform(deleteDatabaseRowContract(primaryKey, key), { params: { ...rowParams(target), key } })
 }
 
 /**

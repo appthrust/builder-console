@@ -62,11 +62,6 @@ function MonoCell({ field, value }: CellProps) {
   return <span className="block max-w-[10rem] truncate font-mono text-xs text-stone-500">{formatValue(field, value)}</span>
 }
 
-/** A database type this console does not know: a fixed placeholder, never the value. */
-function UnsupportedCell({ field }: CellProps) {
-  return <span className="whitespace-nowrap text-xs text-stone-400">{formatValue(field, undefined)}</span>
-}
-
 export const cellRenderers: Record<FieldKind, CellRenderer> = {
   text: PlainCell,
   longtext: LongTextCell,
@@ -79,14 +74,13 @@ export const cellRenderers: Record<FieldKind, CellRenderer> = {
   reference: ReferenceCell,
   json: MonoCell,
   uuid: MonoCell,
-  unsupported: UnsupportedCell,
 }
 
 /** Column classes by kind: numbers align right. */
 export const cellAlign: Partial<Record<FieldKind, string>> = { integer: 'text-right', number: 'text-right' }
 
 export function FieldCell(props: CellProps) {
-  if (props.field.kind !== 'unsupported' && (props.value === null || props.value === undefined)) {
+  if (props.value === null || props.value === undefined) {
     return <span className="text-stone-400">{formatValue(props.field, props.value)}</span>
   }
   const Render = cellRenderers[props.field.kind]

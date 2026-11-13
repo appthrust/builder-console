@@ -9,7 +9,7 @@ import type { BusinessApp } from '../../../model/contracts/console'
 import { dataPreconditionReason, isDataForbidden, useDatabaseCatalog, useDatabaseRows, type DatabaseCatalogQuery } from '../../../api/queries/data'
 import { copy, relativeTime } from '../../../copy'
 import type { AppView } from '../../../model/app'
-import { canAddRows, rowKey, toDataRow, type Catalog, type Collection, type DataRow } from '../../../model/data-catalog'
+import { rowKey, toDataRow, type Catalog, type Collection, type DataRow } from '../../../model/data-catalog'
 import { paths, type AppDataSearch } from '../../../routes/paths'
 import { Button, Card, EmptyState, LinkButton, Loading, LoadFailed, Notice, ResourceBoundary, TextInput } from '../../../ui'
 import { text } from '../copy'
@@ -131,7 +131,7 @@ function CollectionView({ projectId, databaseId, app, view, catalog, catalogQuer
   const sheetOpen = creating || openRow !== undefined
   // A row write that may have happened unseen keeps every write of the 表 off until it is read back.
   const confirmation = useRowWriteConfirmation(projectId, databaseId, collection)
-  const canAdd = canAddRows(collection) && canEdit
+  const canAdd = collection.editable && canEdit
   // The 表's size for the Select: the latest read unless a search narrowed it.
   const estimate = (q ? undefined : rows.data?.totalEstimate) ?? collection.rowCountEstimate
   const fetchedAt = rows.dataUpdatedAt ? relativeTime(new Date(rows.dataUpdatedAt).toISOString()) : undefined
@@ -159,11 +159,6 @@ function CollectionView({ projectId, databaseId, app, view, catalog, catalogQuer
           <p className="mt-2 inline-flex items-center gap-1.5 text-sm text-stone-600">
             <Eye aria-hidden className="size-4 text-stone-400" />
             {dataText.readOnly}
-          </p>
-        ) : canEdit && !canAddRows(collection) ? (
-          <p className="mt-2 inline-flex items-center gap-1.5 text-sm text-stone-600">
-            <Eye aria-hidden className="size-4 shrink-0 text-stone-400" />
-            {dataText.unsupportedColumns}
           </p>
         ) : null}
       </Card>

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import type { DatabaseTableColumn, DatabaseTableSchema } from '@appthrust/api-schema/platform-api'
 import { tableOf, tableRefOf } from '../api/testing/data-domain'
 import {
-  canAddRows, deriveCatalog, deriveCollection as deriveFromTable, displayValue, formatValue, rowKey, toDataRow, unsupportedFields, type Collection, type Field,
+  deriveCatalog, deriveCollection as deriveFromTable, displayValue, formatValue, rowKey, toDataRow, type Collection, type Field,
 } from './data-catalog'
 
 /** The description as the Platform marshals it, read through the production reader first. */
@@ -177,9 +177,9 @@ describe('deriveCollection kind mapping', () => {
     ['json', 'json'],
     ['text[]', 'json'],
     ['uuid', 'uuid'],
-    ['tsvector', 'unsupported'],
-    ['interval', 'unsupported'],
-    ['bytea', 'unsupported'],
+    ['tsvector', 'text'],
+    ['interval', 'text'],
+    ['bytea', 'text'],
   ] as const)('%s → %s', (type, kind) => {
     expect(field(deriveCollection({ ...products, columns: [column('value', type)] }), 'value').kind).toBe(kind)
   })
@@ -192,33 +192,43 @@ describe('deriveCollection kind mapping', () => {
     expect(field(collection, 'stock').enumValues).toBeUndefined()
   })
 
-  test('a user-defined type without enum values is not guessed to be text or an enum', () => {
-    expect(field(deriveCollection({ ...products, columns: [column('value', 'public.item_category', { enumValues: [] })] }), 'value').kind).toBe('unsupported')
-    expect(field(deriveCollection({ ...products, columns: [column('value', 'public.item_category')] }), 'value').kind).toBe('unsupported')
+  test('a user-defined type without enum values is plain text named by its type', () => {
+    for (const init of [{ enumValues: [] }, {}]) {
+      expect(field(deriveCollection({ ...products, columns: [column('value', 'public.item_category', init)] }), 'value')).toMatchObject({ kind: 'text', unlistedType: 'public.item_category' })
+    }
   })
 })
 
-describe('a column of a type this console does not know', () => {
-  const withVector = deriveCollection({ ...products, columns: [...products.columns, column('search_vector', 'tsvector', { description: '検索用' })] })
-  const vector = field(withVector, 'search_vector')
+describe('a column whose type has no dedicated input', () => {
+  const withInterval = deriveCollection({ ...products, columns: [...products.columns, column('lead_time', 'interval', { description: '@long 納期' })] })
 
-  test('shows a fixed placeholder, never its value, not even when empty', () => {
-    for (const value of ["'laptop':1 'note':2", null, undefined, { a: 1 }]) expect(formatValue(vector, value)).toBe('（この画面では表示できません）')
+  test('is text (longtext with @long) named by its database type; listed types carry no type name', () => {
+    expect(field(withInterval, 'lead_time')).toMatchObject({ kind: 'longtext', unlistedType: 'interval', label: '納期', required: false, readOnly: false })
+    expect(field(withInterval, 'stock').unlistedType).toBeUndefined()
+    expect(field(withInterval, 'category').unlistedType).toBeUndefined()
+    expect(field(withInterval, 'supplier_id').unlistedType).toBeUndefined()
   })
 
-  test('keeps the 表 editable row by row but offers no new rows (the column would be dropped unseen)', () => {
-    expect(unsupportedFields(withVector).map((item) => item.name)).toEqual(['search_vector'])
-    expect(withVector.editable).toBe(true)
-    expect(canAddRows(withVector)).toBe(false)
-    expect(canAddRows(deriveCollection(products))).toBe(true)
-    expect(canAddRows(deriveCollection({ ...products, type: 'view' }))).toBe(false)
+  test('keeps NOT NULL / default from the column metadata', () => {
+    const required = field(deriveCollection({ ...products, columns: [column('span', 'interval', { nullable: false })] }), 'span')
+    expect(required).toMatchObject({ required: true, nullable: false, hasDefault: false })
+    const defaulted = field(deriveCollection({ ...products, columns: [column('span', 'interval', { nullable: false, hasDefault: true })] }), 'span')
+    expect(defaulted).toMatchObject({ required: false, hasDefault: true })
   })
 
-  test('never names a row: the display field skips it and a display value falls back to the key', () => {
-    const onlyVector = deriveCollection({ ...products, primaryKey: [], columns: [column('vector', 'tsvector'), column('qty', 'integer')] })
-    expect(onlyVector.displayField).toBe('qty')
-    const keyed = deriveCollection({ ...products, primaryKey: ['code'], columns: [column('code', 'bytea', { primaryKey: true })] })
-    expect(displayValue(keyed, { key: 'k-1', values: { code: '\\x00ff' } })).toBe('k-1')
+  test('shows its value as text; an object or array value as its JSON text, never [object Object]', () => {
+    const leadTime = field(withInterval, 'lead_time')
+    expect(formatValue(leadTime, '3 days 04:00:00')).toBe('3 days 04:00:00')
+    expect(formatValue(leadTime, 12)).toBe('12')
+    expect(formatValue(leadTime, { days: 3 })).toBe('{"days":3}')
+    expect(formatValue(leadTime, [1, 2])).toBe('[1,2]')
+    expect(formatValue(leadTime, null)).toBe('（なし）')
+  })
+
+  test('can name a row like any text column', () => {
+    const onlyInet = deriveCollection({ ...products, primaryKey: ['id'], columns: [column('id', 'integer', { primaryKey: true }), column('address', 'inet')] })
+    expect(onlyInet.displayField).toBe('address')
+    expect(displayValue(onlyInet, { key: '1', values: { id: 1, address: '10.0.0.1' } })).toBe('10.0.0.1')
   })
 })
 

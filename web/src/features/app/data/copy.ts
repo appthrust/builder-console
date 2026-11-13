@@ -14,7 +14,6 @@ export const dataTextJa = {
   searchPlaceholder: 'この表を検索',
   addRow: '行を追加',
   readOnly: 'この表は見るだけです',
-  unsupportedColumns: 'この表にはこの画面で扱えない列があるため、ここでは行を追加できません',
   gridCaption: (label: string) => `${label}の行`,
   referenceHint: (label: string) => `${label} の行`,
   previousPage: '前の 50 行',

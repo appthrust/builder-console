@@ -5,16 +5,10 @@
 // comments and their `@` tags); the データ tab sees Catalog / Collection /
 // Field / DataRow only.
 import { copy } from '../copy'
-import { writeText } from '../features/app/data/copy-write'
 import { locale } from '../shell/language'
 import type { DatabaseColumn, DatabaseTable, DatabaseTableRef, RowValues } from './contracts/data'
 
-/**
- * `unsupported`: a database type this console does not know. The column is
- * shown as a fixed placeholder (its value never), is not sortable or
- * editable, and a 表 with one cannot get new rows here.
- */
-export type FieldKind = 'text' | 'longtext' | 'integer' | 'number' | 'boolean' | 'date' | 'timestamp' | 'enum' | 'reference' | 'json' | 'uuid' | 'unsupported'
+export type FieldKind = 'text' | 'longtext' | 'integer' | 'number' | 'boolean' | 'date' | 'timestamp' | 'enum' | 'reference' | 'json' | 'uuid'
 
 export interface Field {
   name: string
@@ -28,6 +22,12 @@ export interface Field {
   nullable: boolean
   enumValues?: readonly string[]
   reference?: { schema: string; table: string; column: string }
+  /**
+   * The database's type name when the console has no dedicated input for it
+   * (`interval`, `inet`, a user-defined type …): the column is plain text,
+   * shown and sent as typed, and only the database judges the value.
+   */
+  unlistedType?: string
 }
 
 export interface Collection {
@@ -92,9 +92,10 @@ function humanize(name: string): string {
 }
 
 /**
- * PostgreSQL type names (modifier stripped) → kind; `timestamp…`, arrays, enums
- * and references are decided in fieldKind. A name not listed is `unsupported`,
- * never guessed to be text.
+ * PostgreSQL type names (modifier stripped) → kind: the input the form offers.
+ * `timestamp…`, arrays, enums and references are decided in listedKind. A name
+ * not listed is plain text (and named to the person as such); the list picks
+ * an input, it never decides what the database accepts.
  */
 const TYPE_KIND: Record<string, FieldKind> = {
   text: 'text', 'character varying': 'text', varchar: 'text', citext: 'text', character: 'text', char: 'text', bpchar: 'text', name: 'text',
@@ -107,15 +108,15 @@ const TYPE_KIND: Record<string, FieldKind> = {
   uuid: 'uuid',
 }
 
-function fieldKind(column: DatabaseColumn, long: boolean): FieldKind {
+/** The column's input kind; undefined for a type name the list above does not know. */
+function listedKind(column: DatabaseColumn): FieldKind | undefined {
   if (column.references) return 'reference'
   if (column.enumValues.length) return 'enum'
   // `character varying(40)` / `numeric(10,2)` carry a modifier the kind ignores.
   const type = column.type.trim().toLowerCase().replace(/\s*\(.*\)$/, '')
   if (type.endsWith('[]') || type === 'array') return 'json'
   if (type.startsWith('timestamp')) return 'timestamp'
-  const kind = Object.hasOwn(TYPE_KIND, type) ? TYPE_KIND[type]! : 'unsupported'
-  return kind === 'text' && long ? 'longtext' : kind
+  return Object.hasOwn(TYPE_KIND, type) ? TYPE_KIND[type] : undefined
 }
 
 const AUTO_TIMESTAMPS: Record<string, true> = { created_at: true, updated_at: true }
@@ -123,7 +124,8 @@ const AUTO_TIMESTAMPS: Record<string, true> = { created_at: true, updated_at: tr
 function deriveField(column: DatabaseColumn): Field | undefined {
   const comment = parseComment(column.description)
   if (comment.tags.has('hidden')) return undefined
-  const kind = fieldKind(column, comment.tags.has('long'))
+  const base = listedKind(column)
+  const kind = (base ?? 'text') === 'text' && comment.tags.has('long') ? 'longtext' : base ?? 'text'
   return {
     name: column.name,
     label: comment.label ?? (column.name === 'id' ? copy.app.dataValue.idLabel : humanize(column.name)),
@@ -134,6 +136,7 @@ function deriveField(column: DatabaseColumn): Field | undefined {
     nullable: column.nullable,
     ...(kind === 'enum' ? { enumValues: column.enumValues } : {}),
     ...(column.references ? { reference: { ...column.references } } : {}),
+    ...(base ? {} : { unlistedType: column.type.trim() }),
   }
 }
 
@@ -146,7 +149,7 @@ export function deriveCollection(schema: DatabaseTable): Collection {
   const displayField =
     fields.find((field) => (field.kind === 'text' || field.kind === 'longtext') && field.name !== primaryKey)?.name ??
     primaryKey ??
-    fields.find((field) => field.kind !== 'unsupported')?.name ??
+    fields[0]?.name ??
     ''
   return {
     id: `${schema.schema}.${schema.name}`,
@@ -175,20 +178,6 @@ export function deriveCatalog(tables: readonly DatabaseTableRef[], schemas: read
   return { collections }
 }
 
-/** Fields this console cannot show or edit (a database type it does not know). */
-export function unsupportedFields(collection: Collection): Field[] {
-  return collection.fields.filter((field) => field.kind === 'unsupported')
-}
-
-/**
- * 「行を追加」 is offered: an editable 表 whose every column this console can
- * fill. A column it cannot show would otherwise be left out of the new row
- * without the person ever seeing it.
- */
-export function canAddRows(collection: Collection): boolean {
-  return collection.editable && unsupportedFields(collection).length === 0
-}
-
 /** The single key value as the `{key}` path segment; undefined without a single key column or value. */
 export function rowKey(collection: Collection, values: RowValues): string | undefined {
   if (!collection.primaryKey) return undefined
@@ -202,6 +191,15 @@ export function toDataRow(collection: Collection, values: RowValues): DataRow | 
 }
 
 const pad = (value: number) => String(value).padStart(2, '0')
+
+/**
+ * A stored value as text: strings, numbers and booleans as written; an object
+ * or array (a value whose shape the column's input does not hold) as its JSON
+ * text, never `[object Object]`.
+ */
+export function valueText(value: unknown): string {
+  return value !== null && typeof value === 'object' ? JSON.stringify(value) : String(value)
+}
 
 function truncate(text: string): string {
   const chars = Array.from(text)
@@ -241,8 +239,6 @@ function formatTimestamp(value: unknown): string {
 
 /** Grid text for one value in the current locale. The full value is the row sheet's job. */
 export function formatValue(field: Field, value: unknown): string {
-  // A value of a type this console does not know is never shown, not even as text.
-  if (field.kind === 'unsupported') return writeText.field.unsupported
   if (value === null || value === undefined) return copy.app.dataValue.none
   switch (field.kind) {
     case 'boolean':
@@ -258,13 +254,13 @@ export function formatValue(field: Field, value: unknown): string {
     case 'json':
       return copy.app.dataValue.json
   }
-  return truncate(typeof value === 'object' ? JSON.stringify(value) : String(value))
+  return truncate(valueText(value))
 }
 
 /** Names a row for people: its display column, else its key. */
 export function displayValue(collection: Collection, row: DataRow): string {
   const value = row.values[collection.displayField]
   const field = collection.fields.find((item) => item.name === collection.displayField)
-  if (value === null || value === undefined || value === '' || !field || field.kind === 'unsupported') return row.key
+  if (value === null || value === undefined || value === '' || !field) return row.key
   return formatValue(field, value)
 }

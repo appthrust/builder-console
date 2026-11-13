@@ -10,7 +10,7 @@ import { useEffect, useId, useRef, useState, type Dispatch, type FormEvent, type
 import { databaseTableSchemaQuery } from '../../../api/queries/data'
 import { platformErrorEnvelope } from '../../../api/platform-error'
 import { copy } from '../../../copy'
-import { deriveCollection, displayValue, formatValue, type Collection, type DataRow, type Field } from '../../../model/data-catalog'
+import { deriveCollection, displayValue, formatValue, valueText, type Collection, type DataRow, type Field } from '../../../model/data-catalog'
 import {
   changedFields,
   CREATED_AT,
@@ -210,10 +210,6 @@ function SheetBody({
     if (!base) {
       mutations.create.mutate(parsed.values, {
         onSuccess: (saved) => {
-          if (!saved) {
-            onOpenChange(false)
-            return
-          }
           setCreated(saved)
           setEditing(false)
           setNotice({ tone: 'success', text: writeText.sheet.created })
@@ -232,7 +228,7 @@ function SheetBody({
       { key: base.key, values: changes, expected: expectedFor(collection, base, changes) },
       {
         onSuccess: (saved) => {
-          if (created && saved) setCreated(saved)
+          if (created) setCreated(saved)
           setEditing(false)
           setNotice({ tone: 'success', text: writeText.sheet.saved })
         },
@@ -466,19 +462,22 @@ function RowValues({ collection, row, fields, referenceLabels }: { collection: C
         const empty = value === null || value === undefined
         return (
           <div key={field.name} data-field={field.name} className="grid gap-1 py-2.5 sm:grid-cols-[9rem_1fr] sm:gap-4">
-            <dt className="text-sm text-stone-500">{field.label}</dt>
+            <dt className="text-sm text-stone-500">
+              {field.label}
+              {field.unlistedType ? <span className="ml-1.5 font-mono text-[11px] text-stone-400" data-testid="field-type">{field.unlistedType}</span> : null}
+            </dt>
             <dd className="min-w-0 text-sm break-words text-stone-900">
-              {empty || field.kind === 'unsupported' ? (
+              {empty ? (
                 <span className="text-stone-400">{formatValue(field, value)}</span>
               ) : field.kind === 'json' ? (
                 <pre className="overflow-x-auto rounded-md bg-stone-50 p-2 font-mono text-xs">{JSON.stringify(value, null, 2)}</pre>
               ) : field.kind === 'timestamp' ? (
                 formatTimestampFull(value) ?? formatValue(field, value)
               ) : field.kind === 'text' || field.kind === 'longtext' || field.kind === 'uuid' ? (
-                <span className="whitespace-pre-wrap">{String(value)}</span>
+                <span className="whitespace-pre-wrap">{valueText(value)}</span>
               ) : field.kind === 'reference' ? (
                 <>
-                  <span className="font-mono">{String(value)}</span>
+                  <span className="font-mono">{valueText(value)}</span>
                   {field.reference ? (
                     <span className="ml-2 text-xs text-stone-500">
                       {writeText.sheet.referenceNote(writeText.field.referenceHint(referenceLabels.get(`${field.reference.schema}.${field.reference.table}`) ?? field.reference.table))}

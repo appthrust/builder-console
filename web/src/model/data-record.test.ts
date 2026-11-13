@@ -190,22 +190,42 @@ describe('parseFormValues', () => {
     expect(updated.errors).toEqual({ stock: '在庫 は必須です' })
   })
 
-  test('a column of a type this console does not know never reaches an input or the payload; a new row cannot drop it unseen', () => {
-    const withVector: Collection = { ...products, fields: [...products.fields, field('search_vector', '検索用', 'unsupported')] }
-    const row: DataRow = { key: '1', values: { ...laptop.values, search_vector: "'laptop':1" } }
-    const form = toFormValues(withVector, row)
-    expect(form.search_vector).toBe('')
-    const updated = parseFormValues(withVector, { ...form, stock: '7' }, 'update')
-    expect(updated.errors).toEqual({})
-    expect('search_vector' in updated.values).toBe(false)
-    // The stored value stays as it is: the update sends only what changed.
-    const changes = diff(parseFormValues(withVector, form, 'update').values, updated.values)
-    expect(changes).toEqual({ stock: 7 })
-    expect(expectedFor(withVector, row, changes)).not.toHaveProperty('search_vector')
+  test('a column of an unlisted type is text: typed, required and sent like any other; an untouched object value is never sent', () => {
+    const withUnlisted: Collection = {
+      ...products,
+      fields: [
+        ...products.fields,
+        field('lead_time', '納期', 'text', { unlistedType: 'interval' }),
+        field('area', '範囲', 'text', { unlistedType: 'geometry' }),
+        field('span', '期間', 'text', { unlistedType: 'interval', required: true, nullable: false }),
+        field('window', '時間帯', 'text', { unlistedType: 'tstzrange', nullable: false, hasDefault: true }),
+      ],
+    }
+    const row: DataRow = { key: '1', values: { ...laptop.values, lead_time: '3 days', area: { type: 'Point', coordinates: [1, 2] }, span: '1 day', window: '[2026-01-01,2026-02-01)' } }
+    const form = toFormValues(withUnlisted, row)
+    expect(form).toMatchObject({ lead_time: '3 days', area: '{"type":"Point","coordinates":[1,2]}', span: '1 day' })
+    const before = parseFormValues(withUnlisted, form, 'update').values
 
-    const created = parseFormValues(withVector, { ...createForm({}), search_vector: "'typed':1" }, 'create')
-    expect(created.errors).toEqual({ search_vector: '検索用 はこの画面では入力できないため、行を追加できません' })
-    expect('search_vector' in created.values).toBe(false)
+    // Untouched: nothing of them is sent, the object value included.
+    expect(diff(before, parseFormValues(withUnlisted, { ...form, stock: '7' }, 'update').values)).toEqual({ stock: 7 })
+    // Edited as text: sent as typed, for the database to judge.
+    const edited = diff(before, parseFormValues(withUnlisted, { ...form, lead_time: ' 2 weeks ', area: 'POINT(3 4)' }, 'update').values)
+    expect(edited).toEqual({ lead_time: ' 2 weeks ', area: 'POINT(3 4)' })
+    // The lock compares the text value; a stored object is left to updated_at.
+    expect(expectedFor(withUnlisted, row, edited)).toEqual({ lead_time: '3 days', updated_at: laptop.values.updated_at })
+
+    const created = parseFormValues(withUnlisted, { ...createForm({}), lead_time: '', area: '', span: '', window: '' }, 'create')
+    expect(created.errors).toEqual({ span: '期間 は必須です' })
+    expect(created.values).toMatchObject({ lead_time: null, area: null })
+    expect('window' in created.values).toBe(false)
+    expect(parseFormValues(withUnlisted, { ...createForm({}), span: '2 days' }, 'create').values).toMatchObject({ span: '2 days' })
+  })
+
+  test('the database rejecting an unlisted-type value lands on that field when the answer names the column, else on the form', () => {
+    const withUnlisted: Collection = { ...products, fields: [...products.fields, field('lead_time', '納期', 'text', { unlistedType: 'interval' })] }
+    const rejected = (details: Record<string, unknown>): PlatformErrorEnvelope => ({ status: 400, code: 'invalid_argument', message: 'invalid input syntax for type interval', details: { reason: 'constraint_violation', sqlstate: '22P02', ...details } })
+    expect(mapSaveError(rejected({ column: 'lead_time' }), withUnlisted)).toEqual({ kind: 'constraint', fieldErrors: { lead_time: '納期 の値が正しくありません' }, message: '納期 の値が正しくありません' })
+    expect(mapSaveError(rejected({}), withUnlisted)).toEqual({ kind: 'constraint', fieldErrors: {}, message: '入力した値が正しくありません' })
   })
 })
 

@@ -50,6 +50,16 @@ export interface DatabaseTable {
 /** One row as the database returned it: column name → stored JSON value. */
 export type RowValues = Readonly<Record<string, unknown>>
 
+/**
+ * The row a write answered, read back under the key the console addresses it
+ * by (the 表's single key column, as the `{key}` path segment). A write whose
+ * answer carries no such row, or another row, is unconfirmed, never this.
+ */
+export interface WrittenRow {
+  key: string
+  values: RowValues
+}
+
 /** One page of a table's rows. */
 export interface DatabaseRowsPage {
   rows: RowValues[]

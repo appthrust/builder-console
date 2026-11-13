@@ -8,6 +8,7 @@ import type { RowValues } from '../../../model/contracts/data'
 import { toDataRow, type Catalog, type Collection, type DataRow } from '../../../model/data-catalog'
 import { Button, cn, DataTable, IconButton } from '../../../ui'
 import { dataText } from './copy'
+import { writeText } from './copy-write'
 import { cellAlign, FieldCell } from './field-kinds/cells'
 
 export interface GridSort {
@@ -69,9 +70,17 @@ export function RecordGrid({
     const labels = new Map(catalog.collections.map((item) => [`${item.schema}.${item.name}`, item.label]))
     return collection.fields.map((field) => ({
       id: field.name,
-      header: field.label,
+      // A type without a dedicated input is named after the label (its values are shown and edited as text).
+      header: field.unlistedType
+        ? () => (
+            <span className="inline-flex items-baseline gap-1" title={writeText.field.unlistedType(field.unlistedType!)}>
+              {field.label}
+              <span className="font-mono text-[11px] font-normal text-stone-400" data-testid="column-type">{field.unlistedType}</span>
+            </span>
+          )
+        : field.label,
       accessorFn: (row) => row.values[field.name],
-      enableSorting: field.kind !== 'json' && field.kind !== 'unsupported',
+      enableSorting: field.kind !== 'json',
       cell: ({ row }) => (
         <FieldCell
           field={field}

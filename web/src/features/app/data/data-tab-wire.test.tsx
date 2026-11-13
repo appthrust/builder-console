@@ -343,42 +343,143 @@ describe('X5: a row write answered 2xx unreadably', () => {
   })
 })
 
-describe('a column of a type this console does not know', () => {
-  test('is a fixed placeholder in the grid and the Sheet, has no input, never travels in a save, and the 表 offers no new rows', async () => {
-    const vector = { name: 'search_vector', type: 'tsvector', nullable: true, hasDefault: false, primaryKey: false, description: '検索用' }
-    rewrites.push({ method: 'GET', path: DESCRIBE, once: false, body: (wire) => ({ ...wire, columns: [...(wire.columns as unknown[]), vector] }) })
-    rewrites.push({ method: 'GET', path: ROWS, once: false, body: (wire) => ({ ...wire, rows: (wire.rows as Json[]).map((row) => ({ ...row, search_vector: SECRET })) }) })
+describe('X5: a row write answered 2xx with a row the console cannot address ({rows:[{}]})', () => {
+  test('save: no row is patched, no 保存しました, the edit stays; only the confirmation', async () => {
+    await renderData()
+    const sheet = await editLaptop()
+    await act(async () => { type(input('在庫', sheet), '4') })
+    await settle()
+    const before = rowsPages()
+    rewrites.push({ method: 'PATCH', path: ROW, once: true, body: (wire) => ({ ...wire, rows: [{}] }) })
+    await click(button(writeText.sheet.save, sheet))
+    expect(count('PATCH', ROW)).toBe(1)
+    expect(rowsPages().every(([, data], index) => Object.is(data, before[index]![1]))).toBe(true)
+    expect(sheet.textContent).not.toContain(writeText.sheet.saved)
+    expectOnlyConfirm(sheet)
+    expect(input('在庫', sheet).value).toBe('4')
+    expect(button(writeText.sheet.save, sheet).disabled).toBe(true)
+    await settle()
+    expect(count('PATCH', ROW)).toBe(1)
+  })
+
+  test('add: the Sheet stays on the typed form, nothing is reported added; only the confirmation', async () => {
+    await renderData()
+    await click(button(dataText.addRow, container))
+    const sheet = dialog()!
+    await act(async () => {
+      type(input('商品名', sheet), 'スピーカー')
+      type(input('単価', sheet), '5000')
+    })
+    await settle()
+    rewrites.push({ method: 'POST', path: ROWS, once: true, body: (wire) => ({ ...wire, rows: [{}] }) })
+    await click(button(writeText.sheet.save, sheet))
+    expect(count('POST', ROWS)).toBe(1)
+    expect(dialog()).toBe(sheet)
+    expect(sheet.textContent).not.toContain(writeText.sheet.created)
+    expectOnlyConfirm(sheet)
+    expect(input('商品名', sheet).value).toBe('スピーカー')
+    expect(button(writeText.sheet.save, sheet).disabled).toBe(true)
+  })
+
+  test('delete: the row is not dropped from the 表 and the Sheet stays; the read-back decides', async () => {
+    await renderData()
+    await mockFetch(`${DATABASE}/tables/public/products/rows`, { method: 'POST', body: JSON.stringify({ values: { name: '削除用', unit_price: 1 } }), headers: { 'Content-Type': 'application/json' } })
+    await refreshRows()
+    const added = rowsPages()[0]![1]!.rows.find((row) => row.name === '削除用')!
+    await act(async () => { await router.navigate({ href: `${APP_PATH}/-/data?table=public.products&row=${added.id}` }) })
+    await settle()
+    const sheet = dialog()!
+    const trigger = button(writeText.sheet.menu, sheet)
+    await act(async () => { trigger.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }) as unknown as Event) })
+    await settle()
+    await click([...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) => item.textContent?.includes(writeText.sheet.delete))!)
+    const confirm = dialog()!
+    const before = rowsPages()
+    rewrites.push({ method: 'DELETE', path: ROW, once: true, body: (wire) => ({ ...wire, rows: [{}] }) })
+    await click(button(writeText.deleteDialog.confirm, confirm))
+    expect(count('DELETE', ROW)).toBe(1)
+    expect(rowsPages().every(([, data], index) => Object.is(data, before[index]![1]))).toBe(true)
+    expect(gridRows().some((row) => row?.includes('削除用'))).toBe(true)
+    expect(sheet.isConnected).toBe(true)
+    expectOnlyConfirm(confirm)
+    expect(button(writeText.deleteDialog.confirm, confirm).disabled).toBe(true)
+
+    await click(button(text.unconfirmed.confirm, confirm))
+    expect(count('DELETE', ROW)).toBe(1)
+    expect(dialog()).toBeUndefined()
+    expect(gridRows().some((row) => row?.includes('削除用'))).toBe(false)
+  })
+})
+
+describe('a column whose database type has no dedicated input', () => {
+  test('is shown and edited as text with its type named, travels in a save, and a database rejection lands on the field', async () => {
+    const leadTime = { name: 'lead_time', type: 'interval', nullable: true, hasDefault: false, primaryKey: false, description: '納期' }
+    const area = { name: 'area', type: 'geometry', nullable: true, hasDefault: false, primaryKey: false, description: '範囲' }
+    const point = { type: 'Point', coordinates: [1, 2] }
+    rewrites.push({ method: 'GET', path: DESCRIBE, once: false, body: (wire) => ({ ...wire, columns: [...(wire.columns as unknown[]), leadTime, area] }) })
+    rewrites.push({ method: 'GET', path: ROWS, once: false, body: (wire) => ({ ...wire, rows: (wire.rows as Json[]).map((row) => ({ ...row, lead_time: '3 days', area: point })) }) })
     await renderData()
     expect(gridRows()).toHaveLength(12)
-    expect([...grid().querySelectorAll('thead th')].some((header) => header.textContent?.includes('検索用'))).toBe(true)
-    expect(grid().textContent).toContain(writeText.field.unsupported)
-    expect(pageText()).not.toContain(SECRET)
-    expect(buttons(container).some((item) => item.textContent?.trim() === dataText.addRow)).toBe(false)
-    expect(pageText()).toContain(dataText.unsupportedColumns)
+    const header = [...grid().querySelectorAll<HTMLElement>('thead th')].find((item) => item.textContent?.includes('納期'))!
+    expect(header.querySelector('[data-testid="column-type"]')?.textContent).toBe('interval')
+    // Sortable like any text column.
+    expect(header.querySelector('button')).not.toBeNull()
+    expect(gridRows()[0]).toContain('3 days')
+    expect(gridRows()[0]).toContain('{"type":"Point","coordinates":[1,2]}')
+    expect(pageText()).not.toContain('[object Object]')
+    expect(button(dataText.addRow, container).disabled).toBe(false)
 
     const sheet = await editLaptop()
-    const field = sheet.querySelector<HTMLElement>('[data-field="search_vector"]')!
-    expect(field.textContent).toContain(writeText.field.unsupported)
-    expect(field.textContent).toContain(writeText.field.unsupportedNote)
-    expect(field.querySelector('input, textarea, select, button')).toBeNull()
-    expect(sheet.textContent).not.toContain(SECRET)
+    const leadInput = input('納期', sheet)
+    expect(leadInput.value).toBe('3 days')
+    expect(leadInput.closest('div')!.parentElement!.textContent).toContain(writeText.field.unlistedType('interval'))
+    expect(sheet.querySelector('[data-testid="field-type"]')?.textContent).toBe('interval')
+    expect(input('範囲', sheet).value).toBe('{"type":"Point","coordinates":[1,2]}')
 
-    let body: unknown
+    // The Platform names the column of a rejected value: answer as it would for an interval it cannot parse.
+    const bodies: unknown[] = []
+    let answer: (body: Json) => Response = () => Response.json({ error: { code: 'invalid_argument', message: 'invalid input syntax for type interval', details: { reason: 'constraint_violation', sqlstate: '22P02', column: 'lead_time' } } }, { status: 400 })
     const original = globalThis.fetch
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const request = input instanceof Request ? input : new Request(new URL(String(input), window.location.href), init)
-      if (request.method === 'PATCH') body = await request.clone().json()
-      return mockFetch(request)
+      if (request.method !== 'PATCH') return mockFetch(request)
+      const body = (await request.json()) as Json
+      bodies.push(body)
+      requests.push({ method: 'PATCH', path: new URL(request.url).pathname, status: 0 })
+      return answer(body)
     }) as typeof globalThis.fetch
     try {
-      await act(async () => { type(input('在庫', sheet), '6') })
+      await act(async () => { type(leadInput, 'two weeks-ish') })
+      await settle()
+      await click(button(writeText.sheet.save, sheet))
+      expect(bodies).toEqual([{ values: { lead_time: 'two weeks-ish' }, expected: expect.objectContaining({ lead_time: '3 days' }) }])
+      expect(leadInput.getAttribute('aria-invalid')).toBe('true')
+      expect(sheet.textContent).toContain('納期 の値が正しくありません')
+      expect(leadInput.value).toBe('two weeks-ish')
+
+      answer = (body) => Response.json({
+        columns: [], rowCount: 1, limit: 1, offset: 0, truncated: false, fetchedAt: '2026-11-13T00:00:00Z', operation: {},
+        rows: [{ id: 1, name: 'ノートPC', stock: 8, area: point, ...(body.values as Json) }],
+      })
+      await act(async () => { type(leadInput, '2 weeks') })
       await settle()
       await click(button(writeText.sheet.save, sheet))
     } finally {
       globalThis.fetch = original
     }
-    expect(body).toMatchObject({ values: { stock: 6 } })
-    expect(JSON.stringify(body)).not.toContain('search_vector')
+    // The untouched object value is never sent; the edited text is, as typed.
+    expect(bodies[1]).toMatchObject({ values: { lead_time: '2 weeks' } })
+    expect(JSON.stringify(bodies)).not.toContain('area')
     expect(sheet.textContent).toContain(writeText.sheet.saved)
+  })
+
+  test('the 表 still offers 行を追加, whose form has the text input, not required for a nullable column', async () => {
+    const leadTime = { name: 'lead_time', type: 'interval', nullable: true, hasDefault: false, primaryKey: false, description: '納期' }
+    rewrites.push({ method: 'GET', path: DESCRIBE, once: false, body: (wire) => ({ ...wire, columns: [...(wire.columns as unknown[]), leadTime] }) })
+    await renderData()
+    await click(button(dataText.addRow, container))
+    const sheet = dialog()!
+    expect(input('納期', sheet).value).toBe('')
+    expect(input('納期', sheet).closest('div')!.parentElement!.textContent).not.toContain(copy.common.required)
   })
 })

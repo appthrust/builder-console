@@ -12,9 +12,10 @@
 // Every other collection is required: Go always writes it, and null (a nil
 // slice) is a failure, never "nothing". A column's `type` is the database's
 // own type name, an open vocabulary interpreted by model/data-catalog.ts.
-// A row write answers the written row as `rows[0]`; an answer without a row
-// never becomes a value (the write may still have happened: callers read
-// back, never resend).
+// A row write answers the written row as `rows[0]`, which must carry the 表's
+// key column (and, for an update or delete, the row the request addressed);
+// an answer without such a row never becomes a value (the write may still
+// have happened: callers read back, never resend).
 import {
   DatabaseChange as CanonicalDatabaseChange,
   DatabaseChangeMutationResource,
@@ -29,7 +30,7 @@ import {
 } from '@appthrust/api-schema/platform-api'
 import { z } from 'zod'
 import type {
-  DatabaseChange, DatabaseChangeAccepted, DatabaseColumn, DatabaseRowsPage, DatabaseTable, DatabaseTableRef, RowValues,
+  DatabaseChange, DatabaseChangeAccepted, DatabaseColumn, DatabaseRowsPage, DatabaseTable, DatabaseTableRef, RowValues, WrittenRow,
 } from '../../../model/contracts/data'
 import { absentMeansEmpty, openEnum } from '../../boundary'
 import { platformContract } from '../define'
@@ -74,9 +75,23 @@ export const rowsPageReader: z.ZodType<DatabaseRowsPage> = z.object({
 /**
  * A row write's answer is the written (or deleted) row: Platform answers an
  * error instead of an empty `rows` (platform-api internal/k8s/database_rows_write.go:162),
- * so a success without one is broken.
+ * so a success without one is broken. The row must also be one the console
+ * can address: its `primaryKey` column holds a string or number (the `{key}`
+ * path segment), equal to `key` when the request addressed a row. Otherwise
+ * the answer is broken at `/rows/*` (the column name is never named).
  */
-export const writtenRowReader: z.ZodType<RowValues> = z.object({ rows: z.array(rowReader).min(1) }).transform(({ rows }) => rows[0]!)
+export function writtenRowReader(primaryKey: string, key?: string): z.ZodType<WrittenRow> {
+  return z.object({ rows: z.array(rowReader).min(1) }).transform(({ rows }, ctx): WrittenRow => {
+    const values = rows[0]!
+    const stored = values[primaryKey]
+    const written = typeof stored === 'string' || typeof stored === 'number' ? String(stored) : ''
+    if (written === '' || (key !== undefined && written !== key)) {
+      ctx.addIssue({ code: 'custom', path: ['rows', 0], message: 'the written row is not the addressed row' })
+      return z.NEVER
+    }
+    return { key: written, values }
+  })
+}
 
 const findings = absentMeansEmpty(z.array(DatabaseChangeReviewFinding.pick({ message: true })), {
   path: '/data/*/review/findings',
@@ -136,31 +151,31 @@ export const getDatabaseRowsContract = platformContract({
   reader: rowsPageReader,
 })
 
-/** 201 (platform-api internal/handler/database_rows.go:36). */
-export const createDatabaseRowContract = platformContract({
+/** 201 (platform-api internal/handler/database_rows.go:36); the new row is read under the 表's key column. */
+export const createDatabaseRowContract = (primaryKey: string) => platformContract({
   operationId: 'platformApiCreateDatabaseRow',
   method: 'POST',
   routeTemplate: ROWS,
   successStatuses: [201],
-  reader: writtenRowReader,
+  reader: writtenRowReader(primaryKey),
 })
 
-/** 200 (platform-api internal/handler/database_rows.go:59). */
-export const updateDatabaseRowContract = platformContract({
+/** 200 (platform-api internal/handler/database_rows.go:59); the answer must be row `key`. */
+export const updateDatabaseRowContract = (primaryKey: string, key: string) => platformContract({
   operationId: 'platformApiUpdateDatabaseRow',
   method: 'PATCH',
   routeTemplate: `${ROWS}/{key}`,
   successStatuses: [200],
-  reader: writtenRowReader,
+  reader: writtenRowReader(primaryKey, key),
 })
 
-/** 200 with the deleted row (platform-api internal/handler/database_rows.go:72). */
-export const deleteDatabaseRowContract = platformContract({
+/** 200 with the deleted row (platform-api internal/handler/database_rows.go:72); the answer must be row `key`. */
+export const deleteDatabaseRowContract = (primaryKey: string, key: string) => platformContract({
   operationId: 'platformApiDeleteDatabaseRow',
   method: 'DELETE',
   routeTemplate: `${ROWS}/{key}`,
   successStatuses: [200],
-  reader: writtenRowReader,
+  reader: writtenRowReader(primaryKey, key),
 })
 
 /** 200 (platform-api internal/handler/database.go:1420). */
