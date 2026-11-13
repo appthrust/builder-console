@@ -1,6 +1,6 @@
 // Mock runtime and offline fallback share the integrated business narrative.
 // Production reads the narrative authored by the staged Excel analysis turn.
-import type { ApplicationDraftWorkbookSummary, ExcelAnalysis } from '@appthrust/api-schema/platform-api'
+import type { CompleteExcelAnalysis, WorkbookSummary } from '../../model/contracts/excel'
 import { text } from './copy'
 import { designText } from './design-copy'
 import type { AppPlan } from './model'
@@ -10,7 +10,7 @@ export const DEADLINE_HEADER = /期限|予定|納期/
 export const unique = <T,>(items: T[]) => [...new Set(items)]
 export const quotedList = (names: string[]) => text.analysis.quoted(names.slice(0, LIST_LIMIT), names.length > LIST_LIMIT)
 
-export function analysisNarrative(analysis: Omit<ExcelAnalysis, 'summary' | 'bullets'>, plan: AppPlan, workbooks: ApplicationDraftWorkbookSummary[]): { summary: string; bullets: string[] } {
+export function analysisNarrative(analysis: Omit<CompleteExcelAnalysis, 'summary' | 'bullets'>, plan: AppPlan, workbooks: WorkbookSummary[]): { summary: string; bullets: string[] } {
   const s = text.analysis.summary
   const main = [...analysis.entities].sort((a, b) => Number(b.kind === 'records') - Number(a.kind === 'records') || b.importRows - a.importRows)[0]
   const summary = main ? designText.summary(workbooks.length, plan.entities.length, plan.totalImportRows) : designText.none

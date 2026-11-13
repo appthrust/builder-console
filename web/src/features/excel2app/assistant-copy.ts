@@ -1,5 +1,5 @@
 import { localized } from '../../shell/language'
-import type { Accent, Density, ListLayout } from './ui-design'
+import type { Accent, Density, ListLayout } from '../../model/contracts/excel'
 import { textEn } from './assistant-copy.en'
 
 export const textJa = {

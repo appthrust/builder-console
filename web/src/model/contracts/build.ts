@@ -33,6 +33,7 @@ import type {
   DevWorkspaceRead,
 } from '@appthrust/api-schema/platform-api'
 import type { OpenValue } from '../../api/boundary'
+import type { ExcelAnalysis, ExcelProgress, UiDesign } from './excel'
 
 export type DraftPhase = ApplicationDraftPhase
 export type TurnKind = ApplicationDraftConversationTurnKind
@@ -50,7 +51,7 @@ export type WorkspacePhase = DevWorkspacePhase
 export type ConditionStatus = CanonicalCondition['status']
 export type PreviewDatabaseEngine = DevWorkspacePreviewDatabaseEngine
 
-export type BuildTurn = Omit<CanonicalTurn, 'kind' | 'status'> & { kind: OpenValue<TurnKind>; status: OpenValue<TurnStatus> }
+export type BuildTurn = Omit<CanonicalTurn, 'kind' | 'status' | 'excelProgress' | 'uiDesign'> & { kind: OpenValue<TurnKind>; status: OpenValue<TurnStatus>; excelProgress?: ExcelProgress; uiDesign?: UiDesign }
 export type BuildGeneration = Omit<CanonicalGeneration, 'status' | 'stage'> & { status: OpenValue<GenerationStatus>; stage?: OpenValue<GenerationStage> }
 export type BuildExecutionStep = Omit<CanonicalStep, 'status' | 'phase'> & { status: OpenValue<ExecutionStepStatus>; phase?: OpenValue<ExecutionStepPhase> }
 export type BuildExecution = Omit<CanonicalExecution, 'status' | 'steps'> & { status: OpenValue<ExecutionStatus>; steps: BuildExecutionStep[] }
@@ -68,13 +69,16 @@ export type CreatedSourceRepository = ApplicationDraftCreatedSourceRepository
  * arrays (an older server omits them when empty); `phase` and every job
  * status are open values.
  */
-export type BuildDraft = Omit<CanonicalDraft, 'phase' | 'conversationTurns' | 'creationPlanGenerations' | 'creationExecutions' | 'implementationRuns' | 'createdSourceRepositories'> & {
+export type BuildDraft = Omit<CanonicalDraft, 'phase' | 'conversationTurns' | 'creationPlanGenerations' | 'creationExecutions' | 'implementationRuns' | 'createdSourceRepositories' | 'excelAnalysis' | 'uiDesign'> & {
   phase: OpenValue<DraftPhase>
   conversationTurns: BuildTurn[]
   creationPlanGenerations: BuildGeneration[]
   creationExecutions: BuildExecution[]
   implementationRuns: ImplementationRun[]
   createdSourceRepositories: CreatedSourceRepository[]
+  /** Read through the Excel readers (model/contracts/excel.ts): open kinds, design parts read one by one. */
+  excelAnalysis?: ExcelAnalysis
+  uiDesign?: UiDesign
 }
 export type BuildDraftList = { data: BuildDraft[] }
 export type CreationPlan = NonNullable<BuildDraft['creationPlan']>

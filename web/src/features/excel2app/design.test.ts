@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { describe, expect, test } from 'bun:test'
 import { ExcelAnalysis, ExcelWorkbookReading } from '@appthrust/api-schema/platform-api'
 import { parseSpec } from '../../model/build/spec'
+import { excelAnalysisOf } from '../../model/contracts/excel'
 import { designFromReadings, readingOf, type DesignInput } from './design'
 import { entityRows, planApp, toDraftWorkbook, type WorkbookGrid } from './model'
 import { SAMPLE_SETS } from './samples'
@@ -131,7 +132,7 @@ test('the specification describes file roles, merged records, migration findings
   const inputs = structuredClone(orders)
   inputs[1]!.summary.truncated = true
   const analysis = designFromReadings(inputs)
-  const markdown = excelSpecMarkdown(analysis, planApp(analysis, '受注管理'), inputs.map((input) => input.summary))
+  const markdown = excelSpecMarkdown(analysis, planApp(excelAnalysisOf(analysis), '受注管理'), inputs.map((input) => input.summary))
   const { spec, body } = parseSpec(markdown)
   expect(spec).toMatchObject({ name: '受注管理', importFrom: 'excel' })
   expect(spec.records.map((record) => record.name)).toEqual(analysis.entities.map((entity) => entity.name))

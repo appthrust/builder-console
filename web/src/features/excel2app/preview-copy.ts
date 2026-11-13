@@ -44,6 +44,12 @@ export const previewTextJa = {
   preparing: 'AI が仕様書から画面を用意しています…',
   /** The frame when the first design could not be made; the chat offers もう一度. */
   notReady: '画面はまだ用意できていません。',
+  /** A screen, list layout, card or field of a kind this console does not know: the rest of the design stays usable. */
+  unsupported: 'この部分はいまの画面では表示できません。',
+  /** A list, form or dashboard the server sent in a shape this console cannot read. */
+  broken: 'この部分を読み込めませんでした。',
+  /** A screen of a kind this console does not know, in the navigation. */
+  unsupportedScreen: '未対応の画面',
 }
 
 export const previewText = localized({ ja: previewTextJa, en: previewTextEn })

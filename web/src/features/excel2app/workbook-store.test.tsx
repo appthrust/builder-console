@@ -1,12 +1,15 @@
 import { afterEach, beforeEach, expect, mock, spyOn, test, type Mock } from 'bun:test'
-import type { ApplicationDraft, ApplicationDraftWorkbook, ApplicationDraftWorkbookSummary, ExcelAnalysis } from '@appthrust/api-schema/platform-api'
+import type { ApplicationDraft, ApplicationDraftWorkbook, ApplicationDraftWorkbookSummary } from '@appthrust/api-schema/platform-api'
 import { ORPCError } from '@orpc/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, useLayoutEffect } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import * as api from '../../api/build'
+import * as excelQueries from '../../api/queries/excel'
 import { draftOf, turnOf } from '../../api/testing/build-domain'
-import type { BuildDraft } from '../../model/contracts/build'
+import { workbookListFrom } from '../../api/testing/excel-domain'
+import { isOneOf, type BuildDraft } from '../../model/contracts/build'
+import type { ExcelAnalysis } from '../../model/contracts/excel'
 import { buildKeys } from '../../api/queries/build'
 import { keys } from '../../api/queries/shared'
 import type { BuildFailure } from '../../model/build/types'
@@ -43,6 +46,8 @@ interface FlowUnderTest {
   setHint(hint: string): void
   analysis: { problem?: AnalysisProblem; failure?: BuildFailure; continueOffline(): Promise<void>; retry(): void }
   spec: { save(body: string): Promise<boolean> }
+  design: { complete: boolean }
+  handOff(publish: { name: string; shareScope: 'private' | 'group' | 'company' }): Promise<boolean>
 }
 let client: QueryClient
 let root: Root
@@ -56,8 +61,8 @@ let add: Mock<typeof api.addWorkbook>
 let removeDraft: Mock<typeof api.deleteDraft>
 let removeWorkbook: Mock<typeof api.removeWorkbook>
 let get: Mock<typeof api.getDraft>
-let list: Mock<typeof api.listWorkbooks>
-let grid: Mock<typeof api.getWorkbook>
+let list: Mock<typeof excelQueries.listWorkbooks>
+let grid: Mock<typeof excelQueries.getWorkbook>
 let turn: Mock<typeof api.createTurn>
 let parse: Mock<typeof xlsx.readXlsx>
 let confirm: Mock<(message?: string) => boolean>
@@ -116,11 +121,11 @@ beforeEach(() => {
     return draftOf(next)
   })
   get = spyOn(api, 'getDraft').mockImplementation(async (_projectId, id) => draftOf(drafts.get(id)!))
-  list = spyOn(api, 'listWorkbooks').mockImplementation(async (_projectId, id) => {
+  list = spyOn(excelQueries, 'listWorkbooks').mockImplementation(async (_projectId, id) => {
     const data = (drafts.get(id)?.source?.workbooks ?? []).map((workbook) => ({ workbook }))
-    return { data, meta: { total: data.length } }
+    return workbookListFrom({ data, meta: { total: data.length } })
   })
-  grid = spyOn(api, 'getWorkbook').mockImplementation(async (_projectId, _id, workbookId) => grids.get(workbookId)!)
+  grid = spyOn(excelQueries, 'getWorkbook').mockImplementation(async (_projectId, _id, workbookId) => grids.get(workbookId)!)
   turn = spyOn(api, 'createTurn').mockImplementation(async (_projectId, id, request) => {
     const result = { id: 'turn-1', kind: request.kind ?? 'conversation', userMessage: request.message || 'Analyze workbooks', status: 'pending' as const, startedAt: at, devWorkspaceId: 'ws-1' }
     drafts.set(id, { ...drafts.get(id)!, conversationTurns: [result] })
@@ -222,7 +227,7 @@ test('analysis requires confirmation before set changes; cancelling never writes
   await act(async () => { await flow.addFiles([new File([], 'May.xlsx')]); await flow.removeWorkbook(summary.id, summary.id) })
   expect(add).not.toHaveBeenCalled()
   expect(removeWorkbook).not.toHaveBeenCalled()
-  expect(flow.draft?.excelAnalysis).toEqual(analysed.excelAnalysis)
+  expect(flow.draft?.excelAnalysis).toEqual(draftOf(analysed).excelAnalysis)
   confirm.mockReturnValue(true)
   await act(async () => { await flow.removeWorkbook(summary.id, summary.id) })
   expect(flow.draft?.source).toBeUndefined()
@@ -300,6 +305,18 @@ test('a later successful file reuses the draft retained after failed cleanup', a
   expect(flow.draft?.source?.workbooks.map((member) => member.fileName)).toEqual(['good.xlsx'])
 })
 
+test.each([['unknown', false], ['text', true]] as const)('on resumption, an analysis field of kind %s with a readable design sets the hand-off gate to %s', async (fieldKind, open) => {
+  const entity = { name: '台帳', kind: 'records', fields: [{ name: '番号', kind: 'id' }, { name: '署名欄', kind: fieldKind === 'unknown' ? 'signature' : 'text' }], rules: [], importRows: 1, sources: [{ workbookId: summary.id, sheet: '台帳', headerRow: 0, dataRows: 1, columns: [{ index: 0, field: '番号' }] }] }
+  const design = { appName: '台帳', accent: 'teal', density: 'comfortable', screens: [{ id: 'list:台帳', kind: 'list', entity: '台帳', title: '台帳', hidden: false }], lists: {}, forms: {}, dashboard: { cards: [] }, notes: [] }
+  seedDraft({ ...draft, source: { kind: 'excel', revision: at, workbooks: [summary] }, excelAnalysis: { summary: 'Done', bullets: [], capabilities: [], entities: [entity], workbooks: [{ workbookId: summary.id, role: 'records', summary: '' }], flows: [], findings: [] }, uiDesign: design } as ApplicationDraft)
+  await render(draft.id)
+  expect(flow.design.complete).toBe(open)
+  let started = false
+  await act(async () => { started = await flow.handOff({ name: '台帳', shareScope: 'group' }) })
+  expect(started).toBe(open)
+  expect(update).toHaveBeenCalledTimes(open ? 1 : 0)
+})
+
 test('explicit offline continuation integrates the whole set and saves only its specification', async () => {
   client.setQueryData(keys.creationTools(projectId), { codexAvailable: false })
   await render()
@@ -307,7 +324,7 @@ test('explicit offline continuation integrates the whole set and saves only its 
   await act(async () => { await flow.analysis.continueOffline() })
   expect(flow.offline).toBe(true)
   expect(flow.reading?.workbooks).toHaveLength(2)
-  expect(flow.reading?.entities.find((entity) => entity.kind === 'records')?.sources).toHaveLength(2)
+  expect(flow.reading?.entities.find((entity) => isOneOf(entity.kind, 'records'))?.sources).toHaveLength(2)
   expect(flow.draft?.specMarkdown).toContain('April.xlsx')
   expect(flow.draft?.specMarkdown).toContain('May.xlsx')
   expect(flow.draft?.excelAnalysis).toBeUndefined()

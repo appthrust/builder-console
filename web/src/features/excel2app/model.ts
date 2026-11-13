@@ -3,7 +3,9 @@
 // calculation rules, capabilities) and the app plan derived from that.
 // Everything here is pure; `xlsx.ts` and `samples.ts` produce `WorkbookGrid`s,
 // `spec.ts` writes the specification document, `page.tsx` renders.
-import type { ApplicationDraftWorkbook, ExcelAnalysis, ExcelAnalysisSource } from '@appthrust/api-schema/platform-api'
+import { isOneOf } from '../../model/contracts/build'
+import type { AnalysisField, AnalysisRule, AnalysisSource, Capability, ColumnKind, EntityKind, ExcelAnalysis, RuleCategory, ScreenKind, SheetRole, StoredWorkbook } from '../../model/contracts/excel'
+import type { OpenValue } from '../../api/boundary'
 
 export type CellValue = string | number | boolean | Date | null
 
@@ -35,7 +37,7 @@ export interface WorkbookGrid {
  * The reader's grid is sparse (blank rows and cells are holes); the API requires every row to be
  * an array, so holes become `[]` and `null` here. `Array.from` visits holes, `map` would keep them.
  */
-export function toDraftWorkbook(workbook: WorkbookGrid): ApplicationDraftWorkbook {
+export function toDraftWorkbook(workbook: WorkbookGrid): StoredWorkbook {
   return {
     fileName: workbook.fileName,
     sheets: workbook.sheets.map((sheet) => ({
@@ -49,7 +51,7 @@ export function toDraftWorkbook(workbook: WorkbookGrid): ApplicationDraftWorkboo
   }
 }
 
-export function fromDraftWorkbook(workbook: ApplicationDraftWorkbook): WorkbookGrid {
+export function fromDraftWorkbook(workbook: StoredWorkbook): WorkbookGrid {
   return {
     fileName: workbook.fileName,
     sheets: workbook.sheets.map((sheet) => ({
@@ -62,8 +64,6 @@ export function fromDraftWorkbook(workbook: ApplicationDraftWorkbook): WorkbookG
     })),
   }
 }
-
-export type ColumnKind = 'id' | 'text' | 'longText' | 'number' | 'date' | 'choice' | 'boolean' | 'person' | 'reference' | 'attachment' | 'formula'
 
 export interface ColumnReading {
   index: number
@@ -78,8 +78,6 @@ export interface ColumnReading {
   referenceSheet?: string
 }
 
-export type RuleCategory = 'calc' | 'lookup' | 'aggregate' | 'date' | 'condition'
-
 /** One formula pattern of a sheet, humanized: `金額 = 数量 × 単価`. */
 export interface Rule {
   column: string
@@ -88,8 +86,6 @@ export interface Rule {
   /** Rows that carry this pattern. */
   rows: number
 }
-
-export type SheetRole = 'records' | 'master' | 'summary' | 'empty'
 
 export interface SheetReading {
   name: string
@@ -105,8 +101,6 @@ export interface SheetReading {
   workflow?: { column: string; stages: string[] }
 }
 
-export type Capability = 'entry' | 'choices' | 'calculation' | 'lookup' | 'aggregate' | 'workflow' | 'deadlines'
-
 export interface Reading {
   fileName: string
   sheets: SheetReading[]
@@ -114,25 +108,20 @@ export interface Reading {
   capabilities: Capability[]
 }
 
-export interface PlannedField {
-  name: string
-  kind: ColumnKind
-  options?: string[]
-  referenceEntity?: string
-}
+/** A field of the plan; its kind is the analysis's, which a newer Platform may name in a way this console does not know. */
+export type PlannedField = AnalysisField
 
 export interface PlannedEntity {
   name: string
-  kind: 'records' | 'master'
+  /** An entity of a kind this console does not know gets no screens. */
+  kind: OpenValue<EntityKind>
   fields: PlannedField[]
-  rules: Rule[]
+  rules: AnalysisRule[]
   importRows: number
   workflow?: { column: string; stages: string[] }
   key?: string[]
-  sources: ExcelAnalysisSource[]
+  sources: AnalysisSource[]
 }
-
-export type ScreenKind = 'list' | 'form' | 'detail' | 'board' | 'master' | 'dashboard'
 
 export interface PlannedScreen {
   kind: ScreenKind
@@ -416,6 +405,7 @@ export function readingCapabilities(sheets: SheetReading[]): Capability[] {
   return capabilities
 }
 
+/** The screens the analysis implies. An entity of a kind this console does not know gets none (it is not guessed to be a ledger). */
 export function planApp(analysis: Pick<ExcelAnalysis, 'entities' | 'capabilities'>, name: string): AppPlan {
   const entities: PlannedEntity[] = analysis.entities.map((entity) => ({
     ...entity,
@@ -423,15 +413,13 @@ export function planApp(analysis: Pick<ExcelAnalysis, 'entities' | 'capabilities
   }))
   const screens: PlannedScreen[] = []
   for (const entity of entities) {
-    if (entity.kind === 'master') {
-      screens.push({ kind: 'master', entity: entity.name })
-      continue
-    }
+    if (isOneOf(entity.kind, 'master')) screens.push({ kind: 'master', entity: entity.name })
+    if (!isOneOf(entity.kind, 'records')) continue
     screens.push({ kind: 'list', entity: entity.name }, { kind: 'form', entity: entity.name }, { kind: 'detail', entity: entity.name })
     if (entity.workflow) screens.push({ kind: 'board', entity: entity.name })
   }
-  if (analysis.capabilities.includes('aggregate')) {
-    const first = entities.find((entity) => entity.kind === 'records')
+  if (analysis.capabilities.some((capability) => isOneOf(capability, 'aggregate'))) {
+    const first = entities.find((entity) => isOneOf(entity.kind, 'records'))
     if (first) screens.push({ kind: 'dashboard', entity: first.name })
   }
   return {
@@ -449,7 +437,7 @@ export interface EntityRow {
 }
 
 /** Source order is stable; constants never turn an otherwise blank row into a record. */
-export function entityRows(entity: Pick<PlannedEntity, 'fields' | 'sources' | 'key'>, grids: ReadonlyMap<string, WorkbookGrid>): EntityRow[] {
+export function entityRows(entity: { fields: readonly { name: string }[]; sources: readonly AnalysisSource[]; key?: readonly string[] }, grids: ReadonlyMap<string, WorkbookGrid>): EntityRow[] {
   const result: EntityRow[] = []
   const seen = new Set<string>()
   for (const source of entity.sources) {

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import type { UiDesign } from '@appthrust/api-schema/platform-api'
+import { excelAnalysisOf, uiDesignOf, type CompleteUiDesign } from '../../model/contracts/excel'
+import { designFrom } from '../../api/testing/excel-domain'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { preserveLanguage } from '../../../test/language'
 import { setLanguage } from '../../shell/language'
@@ -24,8 +25,10 @@ afterEach(() => restoreLanguage())
 const workbook = SAMPLE_SETS.find((sample) => sample.id === 'defects')!.workbooks[0]!
 const summary = { id: 'wb-000000000001', fileName: workbook.fileName, sheetCount: 3, rowCount: 28, truncated: false, bytes: 100, digest: 'a'.repeat(64), addedAt: '2026-10-26T00:01:00Z' }
 const grids = new Map([[summary.id, workbook]])
-const plan = planApp(designFromReadings([{ summary, grid: workbook }]), '不具合管理台帳')
-const design: UiDesign = defaultUiDesign(plan)
+const plan = planApp(excelAnalysisOf(designFromReadings([{ summary, grid: workbook }])), '不具合管理台帳')
+/** The design as built in the browser (complete), and as the step receives it: read through the same constructor as the server's. */
+const complete: CompleteUiDesign = defaultUiDesign(plan)
+const design = uiDesignOf(complete)
 const ENTITY = '不具合一覧'
 
 const render = (props: Partial<UiPreviewStepProps> = {}) =>
@@ -167,15 +170,26 @@ test('chat copy switches to English', () => {
 
 test('a new design focuses the first shown screen it changed', () => {
   const list = screenId('list', ENTITY)
-  const withCards = { ...design, lists: { ...design.lists, [ENTITY]: { ...design.lists[ENTITY], layout: 'cards' as const } } }
-  expect(changedScreenId(design, withCards)).toBe(list)
-  const form = design.forms[ENTITY]
-  expect(changedScreenId(design, { ...design, forms: { ...design.forms, [ENTITY]: { ...form, twoColumns: !form.twoColumns } } })).toBe(screenId('form', ENTITY))
-  const renamed = { ...design, screens: design.screens.map((screen) => (screen.id === list ? { ...screen, title: '不具合の一覧' } : screen)) }
-  expect(changedScreenId(design, renamed)).toBe(list)
-  const dashboard = { ...design, dashboard: { cards: design.dashboard.cards.slice(1) } }
-  expect(changedScreenId(design, dashboard)).toBe(design.screens.find((screen) => screen.kind === 'dashboard')?.id)
+  const changed = (next: CompleteUiDesign) => changedScreenId(design, uiDesignOf(next))
+  expect(changed({ ...complete, lists: { ...complete.lists, [ENTITY]: { ...complete.lists[ENTITY], layout: 'cards' } } })).toBe(list)
+  const form = complete.forms[ENTITY]
+  expect(changed({ ...complete, forms: { ...complete.forms, [ENTITY]: { ...form, twoColumns: !form.twoColumns } } })).toBe(screenId('form', ENTITY))
+  expect(changed({ ...complete, screens: complete.screens.map((screen) => (screen.id === list ? { ...screen, title: '不具合の一覧' } : screen)) })).toBe(list)
+  expect(changed({ ...complete, dashboard: { cards: complete.dashboard.cards.slice(1) } })).toBe(complete.screens.find((screen) => screen.kind === 'dashboard')?.id)
   // App-wide settings and an identical copy (a re-poll) move nothing.
-  expect(changedScreenId(design, { ...design, accent: 'rose', density: 'compact' })).toBeUndefined()
-  expect(changedScreenId(design, structuredClone(design))).toBeUndefined()
+  expect(changed({ ...complete, accent: 'rose', density: 'compact' })).toBeUndefined()
+  expect(changed(structuredClone(complete))).toBeUndefined()
+})
+
+test('a design with a part this console cannot read says why undo and the hand-off are paused; the chat stays open', () => {
+  const served = designFrom({ ...complete, screens: [...complete.screens, { id: 'calendar:x', kind: 'calendar', entity: ENTITY, title: '予定表', hidden: false }] })
+  const html = render({ design: served, canUndo: false })
+  expect(html).toContain('data-testid="excel2app-design-incomplete"')
+  expect(html).toContain('「元に戻す」と実装へ進むことは止めています')
+  expect(html).toContain('data-testid="excel2app-ui-preview"')
+  expect(tagOf(html, 'excel2app-chat-input')).not.toContain('disabled=""')
+  expect(tagOf(html, 'excel2app-chat-undo')).toContain('disabled=""')
+  expect(render()).not.toContain('excel2app-design-incomplete')
+  // A created draft shows no pause note: nothing can be written there anyway.
+  expect(render({ design: served, readOnly: true })).not.toContain('excel2app-design-incomplete')
 })

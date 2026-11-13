@@ -2,11 +2,14 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { preserveLanguage } from '../../../test/language'
 import { setLanguage } from '../../shell/language'
+import { isOneOf } from '../../model/contracts/build'
+import { excelAnalysisOf, uiDesignOf, type CompleteUiDesign, type UiDesign } from '../../model/contracts/excel'
+import { designFrom } from '../../api/testing/excel-domain'
 import { designFromReadings } from './design'
 import { planApp } from './model'
 import { previewTextJa } from './preview-copy'
 import { SAMPLE_SETS } from './samples'
-import { defaultUiDesign, screenId, type UiDesign } from './ui-design'
+import { defaultUiDesign, screenId } from './ui-design'
 import { UiPreview } from './ui-preview'
 
 let restoreLanguage: () => void
@@ -19,12 +22,19 @@ afterEach(() => restoreLanguage())
 const workbook = SAMPLE_SETS.find((sample) => sample.id === 'defects')!.workbooks[0]!
 const summary = { id: 'wb-000000000001', fileName: workbook.fileName, sheetCount: 3, rowCount: 28, truncated: false, bytes: 100, digest: 'a'.repeat(64), addedAt: '2026-10-26T00:01:00Z' }
 const grids = new Map([[summary.id, workbook]])
-const plan = planApp(designFromReadings([{ summary, grid: workbook }]), '不具合管理台帳')
+const plan = planApp(excelAnalysisOf(designFromReadings([{ summary, grid: workbook }])), '不具合管理台帳')
 const ENTITY = '不具合一覧'
 
 // No `today`: the page mounts the preview without one, so overdue counts use the default 2026-10-26.
-const render = (id: string, design: UiDesign = defaultUiDesign(plan)) =>
-  renderToStaticMarkup(<UiPreview plan={plan} design={design} grids={grids} screenId={id} onScreenChange={() => {}} />)
+// A design built here is read through the same constructor as the server's.
+const render = (id: string, design: CompleteUiDesign = defaultUiDesign(plan)) =>
+  renderToStaticMarkup(<UiPreview plan={plan} design={uiDesignOf(design)} grids={grids} screenId={id} onScreenChange={() => {}} />)
+
+/** A design as a newer (or broken) Platform might send it: the local default with `change` applied, read by the production reader. */
+const SECRET = 'SENTINEL-design-5c1e'
+const served = (change: (wire: CompleteUiDesign) => unknown) => designFrom(change(structuredClone(defaultUiDesign(plan))))
+const renderServed = (id: string, design: UiDesign, analysisPlan = plan) =>
+  renderToStaticMarkup(<UiPreview plan={analysisPlan} design={design} grids={grids} screenId={id} onScreenChange={() => {}} />)
 
 const count = (html: string, needle: string) => html.split(needle).length - 1
 
@@ -52,7 +62,7 @@ test('the list shows real rows, newest first, with a colored pill per 状態', (
 
 test('cards layout, grouping and accent follow the design', () => {
   const base = defaultUiDesign(plan)
-  const design: UiDesign = { ...base, accent: 'blue', density: 'compact', lists: { ...base.lists, [ENTITY]: { ...base.lists[ENTITY], layout: 'cards', groupBy: '工程', searchable: false, filters: [] } } }
+  const design: CompleteUiDesign = { ...base, accent: 'blue', density: 'compact', lists: { ...base.lists, [ENTITY]: { ...base.lists[ENTITY], layout: 'cards', groupBy: '工程', searchable: false, filters: [] } } }
   const html = render(screenId('list', ENTITY), design)
   expect(html).not.toContain('<table')
   expect(html).toContain('data-layout="cards"')
@@ -131,15 +141,78 @@ test('merged entity rows and master labels come from every mapped workbook, not 
     ...entity, name: entity.kind === 'records' ? '受注' : '顧客',
     fields: entity.fields.map((field) => field.referenceEntity ? { ...field, referenceEntity: '顧客' } : field),
   })) }
-  const plan = planApp(renamed, 'Orders')
-  const entity = plan.entities.find((entity) => entity.kind === 'records')!
+  const plan = planApp(excelAnalysisOf(renamed), 'Orders')
+  const entity = plan.entities.find((entity) => isOneOf(entity.kind, 'records'))!
   expect(entity.sources).toHaveLength(2)
   expect(entity.fields.find((field) => field.name === '顧客コード')?.referenceEntity).toBe('顧客')
   const grids = new Map(inputs.map((input) => [input.summary.id, input.grid]))
-  const html = renderToStaticMarkup(<UiPreview plan={plan} design={defaultUiDesign(plan)} grids={grids} screenId={screenId('list', entity.name)} onScreenChange={() => {}} />)
+  const html = renderToStaticMarkup(<UiPreview plan={plan} design={uiDesignOf(defaultUiDesign(plan))} grids={grids} screenId={screenId('list', entity.name)} onScreenChange={() => {}} />)
   expect(html).toContain('April item')
   expect(html).toContain('May item')
-  const form = renderToStaticMarkup(<UiPreview plan={plan} design={defaultUiDesign(plan)} grids={grids} screenId={screenId('form', entity.name)} onScreenChange={() => {}} />)
+  const form = renderToStaticMarkup(<UiPreview plan={plan} design={uiDesignOf(defaultUiDesign(plan))} grids={grids} screenId={screenId('form', entity.name)} onScreenChange={() => {}} />)
   expect(form).toContain('C-1 — April customer')
   expect(form).toContain('C-2 — May customer')
+})
+
+test('a screen of a kind this console does not know keeps its place with a fixed note; the other screens render', () => {
+  const design = served((wire) => ({ ...wire, screens: [...wire.screens, { id: `calendar:${ENTITY}`, kind: 'calendar', entity: ENTITY, title: '予定表', hidden: false }] }))
+  const unknown = renderServed(`calendar:${ENTITY}`, design)
+  expect(unknown).toContain('data-testid="excel2app-ui-preview-nav-unsupported"')
+  expect(unknown).toContain('data-testid="excel2app-ui-preview-screen-unsupported"')
+  expect(unknown).toContain(previewTextJa.unsupported)
+  expect(unknown).toContain('予定表')
+  const list = renderServed(screenId('list', ENTITY), design)
+  expect(list).toContain('data-layout="table"')
+  expect(list).toContain(previewTextJa.shown(8, 12))
+})
+
+test('a dashboard in a shape this console cannot read shows the fixed error there only; no payload is shown', () => {
+  const design = served((wire) => ({ ...wire, dashboard: { cards: SECRET } }))
+  expect(design.dashboard).toEqual({ state: 'broken' })
+  const dashboard = renderServed(screenId('dashboard', ENTITY), design)
+  expect(dashboard).toContain('data-testid="excel2app-ui-preview-broken"')
+  expect(dashboard).toContain(previewTextJa.broken)
+  expect(dashboard).not.toContain(SECRET)
+  expect(renderServed(screenId('list', ENTITY), design)).toContain(previewTextJa.shown(8, 12))
+  expect(renderServed(screenId('form', ENTITY), design)).toContain('<form')
+})
+
+test('one broken list shows the fixed error on its screen; its form and detail stay usable', () => {
+  const design = served((wire) => ({ ...wire, lists: { ...wire.lists, [ENTITY]: { ...wire.lists[ENTITY], columns: [SECRET, 3] } } }))
+  const list = renderServed(screenId('list', ENTITY), design)
+  expect(list).toContain(previewTextJa.broken)
+  expect(list).not.toContain(SECRET)
+  expect(list).not.toContain('<table')
+  expect(renderServed(screenId('form', ENTITY), design)).toContain('<form')
+  expect(renderServed(screenId('detail', ENTITY), design)).toContain('クラッチディスク ハブの焼入れ硬さ不足')
+})
+
+test('an unknown list layout or card kind is a local unsupported part, never read as a table or a count', () => {
+  const design = served((wire) => ({
+    ...wire,
+    lists: { ...wire.lists, [ENTITY]: { ...wire.lists[ENTITY], layout: 'timeline' } },
+    dashboard: { cards: [...wire.dashboard.cards, { id: 'forecast', title: '来月の見込み', kind: 'forecast' }] },
+  }))
+  const list = renderServed(screenId('list', ENTITY), design)
+  expect(list).toContain(previewTextJa.unsupported)
+  expect(list).not.toContain('data-layout')
+  const dashboard = renderServed(screenId('dashboard', ENTITY), design)
+  expect(dashboard).toContain('data-card="unsupported"')
+  expect(dashboard).toContain('来月の見込み')
+  expect(dashboard).toContain('data-card="count"')
+})
+
+test('a field of an unknown kind shows its cell text in lists and no guessed input in forms', () => {
+  const analysis = excelAnalysisOf(designFromReadings([{ summary, grid: workbook }]))
+  const entity = analysis.entities.find((item) => item.name === ENTITY)!
+  const target = entity.fields.find((field) => isOneOf(field.kind, 'date'))!
+  const unknownPlan = planApp({ ...analysis, entities: analysis.entities.map((item) => item === entity ? { ...item, fields: item.fields.map((field) => field === target ? { ...field, kind: { kind: 'unknown' as const } } : field) } : item) }, '不具合管理台帳')
+  const design = uiDesignOf(defaultUiDesign(plan))
+  const form = renderServed(screenId('form', ENTITY), design, unknownPlan)
+  // The field keeps its place in the form; its control is the fixed note, not a guessed date input.
+  const field = form.slice(form.indexOf(`data-field="${target.name}"`)).split('data-field=')[1]!
+  expect(field).toContain('data-testid="excel2app-ui-preview-unsupported-field"')
+  expect(field).not.toContain('type="date"')
+  const list = renderServed(screenId('list', ENTITY), design, unknownPlan)
+  expect(list).toContain(previewTextJa.shown(8, 12))
 })

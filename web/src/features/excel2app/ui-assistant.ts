@@ -1,6 +1,12 @@
+// Client-side UI decisions for the offline fallback and the mock runtime. It
+// changes a complete design (every part known), so nothing it writes back can
+// drop a part; plan fields of a kind this console does not know are never made
+// editable inputs.
+import { isOneOf, knownValue } from '../../model/contracts/build'
+import type { Accent, CompleteCard, CompleteForm, CompleteList, CompleteScreen, CompleteUiDesign, ScreenKind } from '../../model/contracts/excel'
 import { text } from './assistant-copy'
-import type { AppPlan, PlannedEntity, PlannedField, ScreenKind } from './model'
-import { screenId, type Accent, type DashboardCard, type FormDesign, type ListDesign, type ScreenDesign, type UiDesign } from './ui-design'
+import type { AppPlan, PlannedEntity, PlannedField } from './model'
+import { screenId } from './ui-design'
 
 const normalize = (value: string) => value.normalize('NFKC').toLowerCase().replace(/[\s「」『』“”"'`]/g, '')
 const removal = /いらない|要らない|不要|非表示|隠|削除|除外|外して|取り除|消して|しない|やめ|解除|無効|オフ|なし|無し|disable|remove|hide|without|\boff\b|don't/i
@@ -42,7 +48,7 @@ function mentionedFields(entity: PlannedEntity | undefined, instruction: string)
     .map((match) => match.field)
 }
 
-function mentionedScreens(design: UiDesign, instruction: string, entity?: string): ScreenDesign[] {
+function mentionedScreens(design: CompleteUiDesign, instruction: string, entity?: string): CompleteScreen[] {
   const source = normalize(instruction)
   return design.screens.flatMap((screen) => {
     const labels = [screen.title, ...(entity && screen.entity !== entity ? [] : screenAliases[screen.kind])]
@@ -51,6 +57,11 @@ function mentionedScreens(design: UiDesign, instruction: string, entity?: string
     const label = matches.sort((a, b) => source.indexOf(a) - source.indexOf(b) || b.length - a.length)[0]
     return [{ screen, index: source.indexOf(label), length: label.length }]
   }).sort((a, b) => a.index - b.index || b.length - a.length).map(({ screen }) => screen)
+}
+
+/** Whether a form may offer the field as an input: ID and formula fields are computed, an unknown kind cannot be rendered. */
+function editable(field: PlannedField): boolean {
+  return knownValue(field.kind) !== undefined && !isOneOf(field.kind, 'id', 'formula')
 }
 
 interface Position {
@@ -91,7 +102,7 @@ function newName(value: string): string {
   return value.replace(/(?:に(?:変更|改名|して|する|変えて)?(?:して)?(?:ください|下さい)?|と(?:呼んで|して)(?:ください)?)\s*[。.!！]?$/, '').trim()
 }
 
-function nextClause(design: UiDesign, plan: AppPlan, input: string): { clause: string; rest: string } {
+function nextClause(design: CompleteUiDesign, plan: AppPlan, input: string): { clause: string; rest: string } {
   // Consume names and quoted labels before looking for joins. In particular,
   // punctuation and words such as "and" inside a header are data, not syntax.
   const names = [
@@ -123,7 +134,7 @@ function nextClause(design: UiDesign, plan: AppPlan, input: string): { clause: s
  * Unsupported clauses stay in build notes; mixed replies identify each saved note
  * rather than claiming the whole preview is unchanged. No-ops keep undo history clean.
  */
-export function applyInstruction(design: UiDesign, plan: AppPlan, instruction: string): { design: UiDesign; reply: string; changed: boolean; focusScreenId?: string } {
+export function applyInstruction(design: CompleteUiDesign, plan: AppPlan, instruction: string): { design: CompleteUiDesign; reply: string; changed: boolean; focusScreenId?: string } {
   let rest = instruction.trim()
   if (!rest) return { design: { ...design }, reply: text.reply.empty, changed: false }
   let next = design
@@ -146,17 +157,17 @@ export function applyInstruction(design: UiDesign, plan: AppPlan, instruction: s
 }
 
 interface ClauseResult {
-  design: UiDesign
+  design: CompleteUiDesign
   reply: string
   changed: boolean
   focusScreenId?: string
   matched: boolean
 }
 
-function applyClause(design: UiDesign, plan: AppPlan, instruction: string): ClauseResult {
+function applyClause(design: CompleteUiDesign, plan: AppPlan, instruction: string): ClauseResult {
   const input = instruction.trim()
   const source = normalize(input)
-  const records = plan.entities.filter((entity) => entity.kind === 'records')
+  const records = plan.entities.filter((entity) => isOneOf(entity.kind, 'records'))
   const namedEntity = records.filter((entity) => source.includes(normalize(entity.name))).sort((a, b) => b.name.length - a.name.length)[0]
   const entity = namedEntity ?? records.find((candidate) => mentionedFields(candidate, input).length > 0) ?? records[0]
   const fields = mentionedFields(entity, input)
@@ -167,14 +178,14 @@ function applyClause(design: UiDesign, plan: AppPlan, instruction: string): Clau
   const form = entity ? design.forms[entity.name] : undefined
   const removing = removal.test(input)
 
-  const finish = (next: UiDesign, reply: string, changed: boolean, focusScreenId?: string) => ({ design: next, reply: changed ? reply : text.reply.unchanged(reply), changed, matched: true, ...(focusScreenId ? { focusScreenId } : {}) })
+  const finish = (next: CompleteUiDesign, reply: string, changed: boolean, focusScreenId?: string) => ({ design: next, reply: changed ? reply : text.reply.unchanged(reply), changed, matched: true, ...(focusScreenId ? { focusScreenId } : {}) })
   const note = () => ({ design: { ...design, notes: [...design.notes, input] }, reply: text.reply.note, changed: true, matched: false })
-  const updateList = (patch: Partial<ListDesign>, reply: string) => {
+  const updateList = (patch: Partial<CompleteList>, reply: string) => {
     if (!entity || !list) return note()
     const next = { ...list, ...patch }
     return finish({ ...design, lists: { ...design.lists, [entity.name]: next } }, reply, JSON.stringify(list) !== JSON.stringify(next), screenId('list', entity.name))
   }
-  const updateForm = (patch: Partial<FormDesign>, reply: string) => {
+  const updateForm = (patch: Partial<CompleteForm>, reply: string) => {
     if (!entity || !form) return note()
     const next = { ...form, ...patch }
     return finish({ ...design, forms: { ...design.forms, [entity.name]: next } }, reply, JSON.stringify(form) !== JSON.stringify(next), screenId('form', entity.name))
@@ -216,13 +227,13 @@ function applyClause(design: UiDesign, plan: AppPlan, instruction: string): Clau
   const dashboardScreen = design.screens.find((item) => item.kind === 'dashboard' && item.entity === main?.name)
   if (main && dashboardScreen && /件数|合計|count|total|sum/i.test(input) && !removing) {
     const dashboardField = mentionedFields(main, input)[0]
-    let card: DashboardCard | undefined
+    let card: CompleteCard | undefined
     if (/期限切れ|期限超過|overdue/i.test(input)) {
-      const deadline = main.fields.find((item) => item.kind === 'date' && /期限|予定|deadline|due/i.test(item.name))
+      const deadline = main.fields.find((item) => isOneOf(item.kind, 'date') && /期限|予定|deadline|due/i.test(item.name))
       if (deadline) card = { id: `overdue:${deadline.name}`, title: text.card.overdue, kind: 'overdue', field: deadline.name }
     } else if (dashboardField && /別|ごと|count\s*by/i.test(input)) {
       card = { id: `countBy:${dashboardField.name}`, title: text.card.countBy(dashboardField.name), kind: 'countBy', field: dashboardField.name }
-    } else if (dashboardField?.kind === 'number' && /合計|total|sum/i.test(input)) {
+    } else if (isOneOf(dashboardField?.kind, 'number') && /合計|total|sum/i.test(input)) {
       card = { id: `sum:${dashboardField.name}`, title: text.card.sum(dashboardField.name), kind: 'sum', field: dashboardField.name }
     } else if (!dashboardField && /^(?:全体の|全|すべての)?件数(?:を出して|を表示|を追加)?$|total\s*count/i.test(input)) {
       card = { id: 'count', title: text.card.count(main.name), kind: 'count' }
@@ -239,7 +250,7 @@ function applyClause(design: UiDesign, plan: AppPlan, instruction: string): Clau
     return updateForm({ twoColumns }, text.reply.formColumns(entity.name, twoColumns))
   }
   if (entity && form && /必須|任意|required|optional/i.test(input)) {
-    if (!field || field.kind === 'id' || field.kind === 'formula') return note()
+    if (!field || !editable(field)) return note()
     const required = !removing && !/任意|optional/i.test(input)
     return updateForm({
       fields: required && !form.fields.includes(field.name) ? [...form.fields, field.name] : form.fields,
@@ -282,7 +293,7 @@ function applyClause(design: UiDesign, plan: AppPlan, instruction: string): Clau
       const names = (position ? [field] : fields).map((item) => item.name)
       // Formula/ID fields cannot be edited. Requests to expose them in forms
       // remain notes rather than creating a misleading editable preview.
-      if (scope !== 'list' && !removing && fields.some((item) => item.kind === 'id' || item.kind === 'formula')) return note()
+      if (scope !== 'list' && !removing && fields.some((item) => !editable(item))) return note()
       const nextList = list && scope !== 'form' ? { ...list, columns: position ? moveName(list.columns, field.name, position) : removing ? list.columns.filter((name) => !names.includes(name)) : [...new Set([...list.columns, ...names])] } : list
       const nextForm = form && scope !== 'list' ? {
         ...form,
@@ -312,21 +323,21 @@ function applyClause(design: UiDesign, plan: AppPlan, instruction: string): Clau
 }
 
 /** Three to five actionable chips, derived from the current design, not history. */
-export function suggestedInstructions(design: UiDesign, plan: AppPlan): string[] {
-  const entity = plan.entities.find((item) => item.kind === 'records')
+export function suggestedInstructions(design: CompleteUiDesign, plan: AppPlan): string[] {
+  const entity = plan.entities.find((item) => isOneOf(item.kind, 'records'))
   const list = entity ? design.lists[entity.name] : undefined
   const form = entity ? design.forms[entity.name] : undefined
   const suggestions: string[] = []
-  const status = entity?.fields.find((field) => field.name === entity.workflow?.column) ?? entity?.fields.find((field) => field.kind === 'choice')
+  const status = entity?.fields.find((field) => field.name === entity.workflow?.column) ?? entity?.fields.find((field) => isOneOf(field.kind, 'choice'))
   if (list && !list.colorField && status) suggestions.push(text.suggest.color(status.name))
   if (list) suggestions.push(text.suggest.layout(list.layout === 'table' ? 'cards' : 'table'))
   if (form) suggestions.push(text.suggest.formColumns(!form.twoColumns))
-  const group = entity?.fields.find((field) => field.name !== list?.groupBy && (field.kind === 'choice' || field.kind === 'person' || field.kind === 'reference'))
+  const group = entity?.fields.find((field) => field.name !== list?.groupBy && isOneOf(field.kind, 'choice', 'person', 'reference'))
   if (list && !list.groupBy && group) suggestions.push(text.suggest.group(group.name))
   const dashboard = design.screens.find((screen) => screen.kind === 'dashboard' && !screen.hidden)
   if (dashboard && design.screens.find((screen) => !screen.hidden)?.id !== dashboard.id) suggestions.push(text.suggest.dashboardFirst)
   if (dashboard && group && !design.dashboard.cards.some((card) => card.kind === 'countBy' && card.field === group.name)) suggestions.push(text.suggest.countBy(group.name))
-  if (dashboard && entity?.fields.some((field) => field.kind === 'date' && /期限|予定|deadline|due/i.test(field.name)) && !design.dashboard.cards.some((card) => card.kind === 'overdue')) suggestions.push(text.suggest.overdue)
+  if (dashboard && entity?.fields.some((field) => isOneOf(field.kind, 'date') && /期限|予定|deadline|due/i.test(field.name)) && !design.dashboard.cards.some((card) => card.kind === 'overdue')) suggestions.push(text.suggest.overdue)
   suggestions.push(text.suggest.accent(design.accent === 'blue' ? 'teal' : 'blue'), text.suggest.density(design.density === 'compact' ? 'comfortable' : 'compact'))
   const hidden = design.screens.find((screen) => screen.hidden)
   if (hidden) suggestions.push(text.suggest.showScreen(hidden.title))

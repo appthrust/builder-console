@@ -1,4 +1,4 @@
-import { ApplicationDraftWorkbookLimits, type ApplicationDraftWorkbookSummary } from '@appthrust/api-schema/platform-api'
+import { workbookLimits, type WorkbookSummary } from '../../model/contracts/excel'
 
 export type WorkbookFileState = 'reading' | 'storing' | 'stored' | 'unsupported' | 'unreadable' | 'tooLarge' | 'duplicate' | 'setFull' | 'setTooLarge' | 'invalid' | 'failed'
 
@@ -9,7 +9,8 @@ export interface CollectedWorkbook {
   state: WorkbookFileState
   workbookId?: string
   location?: { sheet?: string; row?: number }
-  problem?: 'busy' | 'created'
+  /** `unconfirmed`: the add answered in a shape this console cannot read; retried with the same key only after a re-read. */
+  problem?: 'busy' | 'created' | 'unconfirmed'
 }
 
 /** Hidden directories, hidden files and Excel owner files never enter the queue. */
@@ -59,14 +60,14 @@ export async function filesFromDrop(transfer: DataTransfer): Promise<File[]> {
   return files
 }
 
-export function workbookBudget(workbooks: readonly ApplicationDraftWorkbookSummary[]) {
+export function workbookBudget(workbooks: readonly WorkbookSummary[]) {
   return {
     files: workbooks.length,
     bytes: workbooks.reduce((sum, workbook) => sum + workbook.bytes, 0),
     sheets: workbooks.reduce((sum, workbook) => sum + workbook.sheetCount, 0),
-    maxFiles: ApplicationDraftWorkbookLimits.maxWorkbooks,
-    maxBytes: ApplicationDraftWorkbookLimits.maxSetBytes,
-    maxSheets: ApplicationDraftWorkbookLimits.maxSetSheets,
-    maxWorkbookBytes: ApplicationDraftWorkbookLimits.maxWorkbookBytes,
+    maxFiles: workbookLimits.maxWorkbooks,
+    maxBytes: workbookLimits.maxSetBytes,
+    maxSheets: workbookLimits.maxSetSheets,
+    maxWorkbookBytes: workbookLimits.maxWorkbookBytes,
   }
 }
