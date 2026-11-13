@@ -9,6 +9,7 @@ export const dataTextEn: typeof dataTextJa = {
   searchPlaceholder: 'Search this table',
   addRow: 'Add row',
   readOnly: 'This table is view-only',
+  unsupportedColumns: 'This table has columns this screen cannot handle, so rows cannot be added here',
   gridCaption: (label: string) => `Rows in ${label}`,
   referenceHint: (label: string) => `Row in ${label}`,
   previousPage: 'Previous 50 rows',

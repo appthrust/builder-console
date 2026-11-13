@@ -445,6 +445,20 @@ non-engineers, with engineering words only under 「詳しい人向け」
   successful data for the same key during failed polls; build/draft pages show
   a load-error card only when no data has loaded, never in place of cached work.
   Data from another draft, app or project is not used as placeholder data.
+- The データ tab and 「データベースの変更」 read every answer through
+  `src/api/contracts/platform/data.ts` (domain types in
+  `src/model/contracts/data.ts`). Table lists, columns, key lists, rows and the
+  change list are required (`[]` when empty; absent or null fails); only a
+  column's `enumValues` and a review's `findings` read an omission as `[]`.
+  A row write's value is `rows[0]`; an answer without it is unconfirmed. A
+  column type the console does not know is a fixed placeholder, never sorted,
+  edited or sent, and its 表 offers no 「行を追加」. An unknown relation type is
+  read-only; an unknown change phase, risk or run phase offers no 承認 or 再実行.
+  A failed rows or change-list refresh keeps the last rows under one
+  「更新できませんでした」 notice (the change list also stops its actions). A row
+  or change write answered 2xx unreadably is not cached or resent: the 表 or
+  list offers only 「最新の状態を確認する」 (the row latch outlives the Sheet),
+  and the Sheet keeps the person's edits on top of the read-back.
 - API requests use manual redirects: an edge 401, OIDC redirect (including an
   opaque cross-origin redirect), or successful HTML login page ends the local
   session instead of masquerading as an API result. Platform and Console/Directory

@@ -30,6 +30,8 @@ export const writeTextEn: typeof writeTextJa = {
     none: '(None)',
     choose: 'Choose an option',
     jsonHint: 'Use { } or [ ] to write this value',
+    unsupported: '(Cannot be shown here)',
+    unsupportedNote: 'This column cannot be changed here. Saving keeps its current value.',
   },
   validation: {
     required: (label: string) => `${label} is required`,
@@ -41,6 +43,7 @@ export const writeTextEn: typeof writeTextJa = {
     json: (label: string) => `Check the format of ${label}`,
     boolean: (label: string) => `Choose “Yes” or “No” for ${label}`,
     uuid: (label: string) => `Check the format of ${label}`,
+    unsupported: (label: string) => `${label} cannot be entered here, so rows cannot be added`,
     fixBelow: 'Check your entries.',
   },
   errors: {

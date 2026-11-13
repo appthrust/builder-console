@@ -4,6 +4,7 @@
 import { getCoreRowModel, useReactTable, type ColumnDef, type SortingState, type Updater } from '@tanstack/react-table'
 import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react'
 import { useMemo, type ReactNode } from 'react'
+import type { RowValues } from '../../../model/contracts/data'
 import { toDataRow, type Catalog, type Collection, type DataRow } from '../../../model/data-catalog'
 import { Button, cn, DataTable, IconButton } from '../../../ui'
 import { dataText } from './copy'
@@ -17,7 +18,7 @@ export interface GridSort {
 interface GridRow {
   id: string
   row?: DataRow
-  values: Record<string, unknown>
+  values: RowValues
 }
 
 export function RecordGrid({
@@ -38,7 +39,7 @@ export function RecordGrid({
 }: {
   catalog: Catalog
   collection: Collection
-  rows: readonly Record<string, unknown>[]
+  rows: readonly RowValues[]
   sort: GridSort
   onSortChange: (sort: GridSort) => void
   /** Link that opens the row sheet; omitted for 表 whose rows have no key. */
@@ -53,14 +54,16 @@ export function RecordGrid({
   refreshing: boolean
   onRefresh: () => void
 }) {
-  const data = useMemo<GridRow[]>(
-    () =>
-      rows.map((values, index) => {
-        const row = toDataRow(collection, values)
-        return { id: row ? `k:${row.key}` : `i:${offset + index}`, row, values }
-      }),
-    [rows, collection, offset]
-  )
+  const data = useMemo<GridRow[]>(() => {
+    // Two rows answering the same key keep distinct grid ids (the second is identified by position).
+    const seen = new Set<string>()
+    return rows.map((values, index) => {
+      const row = toDataRow(collection, values)
+      const id = row && !seen.has(row.key) ? `k:${row.key}` : `i:${offset + index}`
+      if (row) seen.add(row.key)
+      return { id, row, values }
+    })
+  }, [rows, collection, offset])
 
   const columns = useMemo<ColumnDef<GridRow>[]>(() => {
     const labels = new Map(catalog.collections.map((item) => [`${item.schema}.${item.name}`, item.label]))
@@ -68,7 +71,7 @@ export function RecordGrid({
       id: field.name,
       header: field.label,
       accessorFn: (row) => row.values[field.name],
-      enableSorting: field.kind !== 'json',
+      enableSorting: field.kind !== 'json' && field.kind !== 'unsupported',
       cell: ({ row }) => (
         <FieldCell
           field={field}

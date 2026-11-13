@@ -36,6 +36,7 @@ import {
   useReturnFocus,
   useUnsavedChangesGuard,
 } from '../../../ui'
+import { isUnconfirmedWrite, UnconfirmedNotice } from '../notices'
 import { writeText } from './copy-write'
 import { DeleteRowDialog } from './delete-dialog'
 import { FieldEditor } from './field-kinds/editors'
@@ -189,6 +190,8 @@ function SheetBody({
 
   const save = (event: FormEvent) => {
     event.preventDefault()
+    // A write that may have happened is read back first; nothing is sent again before that.
+    if (mutations.unconfirmed) return
     const parsed = parseFormValues(collection, form, mode)
     setFieldErrors(parsed.errors)
     setSaveError(undefined)
@@ -198,6 +201,8 @@ function SheetBody({
       return
     }
     const onError = (error: unknown) => {
+      // An unreadable 2xx keeps the form as typed; the notice offers only the read-back.
+      if (isUnconfirmedWrite(error)) return
       const mapped = fail(error, 'save')
       setFieldErrors(mapped.fieldErrors)
       setSaveError(mapped)
@@ -262,6 +267,35 @@ function SheetBody({
     }
   }
 
+  /**
+   * 「最新の状態を確認する」 after an unconfirmed write: the 表 is read back.
+   * An edit keeps the person's own changes on top of the row as it is now
+   * stored (a write that did happen leaves nothing to save); a row that is
+   * gone closes the Sheet. A new row's form stays as typed.
+   */
+  const confirmWrite = async () => {
+    if (!(await mutations.confirm())) return
+    const subject = base ?? current
+    if (!subject) return
+    const latest = mutations.cachedRow(subject.key)
+    if (!latest) {
+      if (editing && !deleteOpen) {
+        setSaveError({ kind: 'other', fieldErrors: {}, message: writeText.errors.notFound })
+        return
+      }
+      setDeleteOpen(false)
+      onOpenChange(false)
+      return
+    }
+    if (created) setCreated(latest)
+    if (!editing) return
+    setForm(rebaseForm(collection, subject, latest, form))
+    setBase(latest)
+    setSaveError(undefined)
+    setFieldErrors({})
+    setNotice({ tone: 'info', text: writeText.errors.reloadedSame })
+  }
+
   const confirmDelete = () => {
     if (!current) return
     setDeleteError(undefined)
@@ -271,6 +305,7 @@ function SheetBody({
         onOpenChange(false)
       },
       onError: (error) => {
+        if (isUnconfirmedWrite(error)) return
         const mapped = fail(error, 'delete')
         if (mapped.kind === 'editingUnavailable') setSaveError(mapped)
         else setDeleteError(mapped.message)
@@ -288,12 +323,12 @@ function SheetBody({
         <RDialog.Title className="min-w-0 flex-1 pt-1.5 text-base font-semibold break-words text-stone-900">{title}</RDialog.Title>
         {current && !editing && writable ? (
           <>
-            <Button size="sm" icon={<Pencil />} onClick={startEditing}>
+            <Button size="sm" icon={<Pencil />} onClick={startEditing} disabled={mutations.unconfirmed}>
               {writeText.sheet.edit}
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button ref={menuRef} size="sm" tone="ghost" aria-label={writeText.sheet.menu}>
+                <Button ref={menuRef} size="sm" tone="ghost" aria-label={writeText.sheet.menu} disabled={mutations.unconfirmed}>
                   <MoreHorizontal aria-hidden />
                 </Button>
               </DropdownMenuTrigger>
@@ -317,6 +352,7 @@ function SheetBody({
       </div>
 
       <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+        {mutations.unconfirmed ? <UnconfirmedNotice confirming={mutations.confirming} onConfirm={() => void confirmWrite()} /> : null}
         {notice ? <Notice tone={notice.tone}>{notice.text}</Notice> : null}
         {!collection.editable ? (
           <p className="flex items-center gap-2 text-sm text-stone-500">
@@ -373,7 +409,7 @@ function SheetBody({
           <Button onClick={cancelEditing} disabled={pending}>
             {writeText.sheet.cancel}
           </Button>
-          <Button type="submit" form={formId} tone="primary" loading={pending}>
+          <Button type="submit" form={formId} tone="primary" loading={pending} disabled={mutations.unconfirmed}>
             {pending ? writeText.sheet.saving : writeText.sheet.save}
           </Button>
         </div>
@@ -413,6 +449,7 @@ function SheetBody({
           onConfirm={confirmDelete}
           pending={mutations.remove.isPending}
           error={deleteError}
+          unconfirmed={mutations.unconfirmed ? { confirming: mutations.confirming, onConfirm: () => void confirmWrite() } : undefined}
           returnFocusRef={menuRef}
         />
       ) : null}
@@ -431,7 +468,7 @@ function RowValues({ collection, row, fields, referenceLabels }: { collection: C
           <div key={field.name} data-field={field.name} className="grid gap-1 py-2.5 sm:grid-cols-[9rem_1fr] sm:gap-4">
             <dt className="text-sm text-stone-500">{field.label}</dt>
             <dd className="min-w-0 text-sm break-words text-stone-900">
-              {empty ? (
+              {empty || field.kind === 'unsupported' ? (
                 <span className="text-stone-400">{formatValue(field, value)}</span>
               ) : field.kind === 'json' ? (
                 <pre className="overflow-x-auto rounded-md bg-stone-50 p-2 font-mono text-xs">{JSON.stringify(value, null, 2)}</pre>

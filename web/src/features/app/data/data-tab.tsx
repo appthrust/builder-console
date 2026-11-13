@@ -9,14 +9,16 @@ import type { BusinessApp } from '../../../model/contracts/console'
 import { dataPreconditionReason, isDataForbidden, useDatabaseCatalog, useDatabaseRows, type DatabaseCatalogQuery } from '../../../api/queries/data'
 import { copy, relativeTime } from '../../../copy'
 import type { AppView } from '../../../model/app'
-import { rowKey, toDataRow, type Catalog, type Collection, type DataRow } from '../../../model/data-catalog'
+import { canAddRows, rowKey, toDataRow, type Catalog, type Collection, type DataRow } from '../../../model/data-catalog'
 import { paths, type AppDataSearch } from '../../../routes/paths'
-import { Button, Card, EmptyState, LinkButton, Loading, LoadFailed, Notice, TextInput } from '../../../ui'
+import { Button, Card, EmptyState, LinkButton, Loading, LoadFailed, Notice, ResourceBoundary, TextInput } from '../../../ui'
 import { text } from '../copy'
+import { StaleNotice, UnconfirmedNotice } from '../notices'
 import { OwnerContact } from '../owner-contact'
 import { CollectionNav } from './collection-nav'
 import { dataText } from './copy'
 import { MembershipUnboundNotice } from './membership-unbound'
+import { useRowWriteConfirmation } from './mutations'
 import { RecordGrid, type GridSort } from './record-grid'
 import { RecordSheet } from './record-sheet'
 
@@ -124,15 +126,17 @@ function CollectionView({ projectId, databaseId, app, view, catalog, catalogQuer
     if (draft.trim() !== q) setDraft(q)
   }
 
-  const pageRows = rows.data?.rows ?? []
-  const openValues = search.row ? pageRows.find((item) => rowKey(collection, item) === search.row) : undefined
+  const openValues = search.row ? rows.data?.rows.find((item) => rowKey(collection, item) === search.row) : undefined
   const openRow: DataRow | undefined = openValues ? toDataRow(collection, openValues) : undefined
-  const canAdd = collection.editable && canEdit
+  const sheetOpen = creating || openRow !== undefined
+  // A row write that may have happened unseen keeps every write of the 表 off until it is read back.
+  const confirmation = useRowWriteConfirmation(projectId, databaseId, collection)
+  const canAdd = canAddRows(collection) && canEdit
   // The 表's size for the Select: the latest read unless a search narrowed it.
   const estimate = (q ? undefined : rows.data?.totalEstimate) ?? collection.rowCountEstimate
   const fetchedAt = rows.dataUpdatedAt ? relativeTime(new Date(rows.dataUpdatedAt).toISOString()) : undefined
   const addButton = canAdd ? (
-    <Button tone="primary" icon={<Plus aria-hidden />} onClick={() => setCreating(true)}>
+    <Button tone="primary" icon={<Plus aria-hidden />} onClick={() => setCreating(true)} disabled={confirmation.unconfirmed}>
       {dataText.addRow}
     </Button>
   ) : null
@@ -156,45 +160,57 @@ function CollectionView({ projectId, databaseId, app, view, catalog, catalogQuer
             <Eye aria-hidden className="size-4 text-stone-400" />
             {dataText.readOnly}
           </p>
+        ) : canEdit && !canAddRows(collection) ? (
+          <p className="mt-2 inline-flex items-center gap-1.5 text-sm text-stone-600">
+            <Eye aria-hidden className="size-4 shrink-0 text-stone-400" />
+            {dataText.unsupportedColumns}
+          </p>
         ) : null}
       </Card>
 
-      {rows.error ? (
-        <Blocked error={rows.error} app={app} view={view} isAdmin={isAdmin} onRetry={() => void rows.refetch()} />
-      ) : rows.isPending ? (
-        <Loading />
-      ) : (
-        <RecordGrid
-          // A fresh grid (and horizontal scroll) per 表; keys are siblings of the sheet's.
-          key={`grid:${collection.id}`}
-          catalog={catalog}
-          collection={collection}
-          rows={pageRows}
-          sort={sort}
-          onSortChange={(next) => {
-            setSort(next)
-            setPage({ q, offset: 0 })
-          }}
-          rowHref={collection.primaryKey ? (row) => paths.appData(app.group.path, app.slug, { table: collection.id, q: q || undefined, row: row.key }) : undefined}
-          emptyState={
-            q ? (
-              <EmptyState icon={<Search />} title={dataText.noMatches(q)} action={<Button onClick={() => setDraft('')}>{dataText.clearSearch}</Button>} />
-            ) : (
-              <EmptyState icon={<Table2 />} title={dataText.noRows} action={offset === 0 ? addButton : undefined} />
-            )
-          }
-          offset={offset}
-          limit={DATA_PAGE_SIZE}
-          hasNext={rows.data?.truncated ?? false}
-          onPage={(next) => setPage({ q, offset: next })}
-          fetchedAt={fetchedAt}
-          refreshing={rows.isFetching}
-          onRefresh={() => {
-            void rows.refetch()
-            catalogQuery.refetch()
-          }}
-        />
-      )}
+      <ResourceBoundary
+        query={rows}
+        resetKey={collection.id}
+        failure={(error, retry) => <Blocked error={error} app={app} view={view} isAdmin={isAdmin} onRetry={retry} />}
+      >
+        {(page, stale) => (
+          <div className="space-y-3">
+            {/* One notice by the grid: the rows' own, else the 表 descriptions'. */}
+            {stale ?? (catalogQuery.stale ? <StaleNotice updatedAt={catalogQuery.stale.updatedAt} refetching={catalogQuery.isFetching} onRetry={catalogQuery.refetch} /> : null)}
+            {confirmation.unconfirmed && !sheetOpen ? <UnconfirmedNotice confirming={confirmation.confirming} onConfirm={() => void confirmation.confirm()} /> : null}
+            <RecordGrid
+              // A fresh grid (and horizontal scroll) per 表; keys are siblings of the sheet's.
+              key={`grid:${collection.id}`}
+              catalog={catalog}
+              collection={collection}
+              rows={page.rows}
+              sort={sort}
+              onSortChange={(next) => {
+                setSort(next)
+                setPage({ q, offset: 0 })
+              }}
+              rowHref={collection.primaryKey ? (row) => paths.appData(app.group.path, app.slug, { table: collection.id, q: q || undefined, row: row.key }) : undefined}
+              emptyState={
+                q ? (
+                  <EmptyState icon={<Search />} title={dataText.noMatches(q)} action={<Button onClick={() => setDraft('')}>{dataText.clearSearch}</Button>} />
+                ) : (
+                  <EmptyState icon={<Table2 />} title={dataText.noRows} action={offset === 0 ? addButton : undefined} />
+                )
+              }
+              offset={offset}
+              limit={DATA_PAGE_SIZE}
+              hasNext={page.truncated}
+              onPage={(next) => setPage({ q, offset: next })}
+              fetchedAt={fetchedAt}
+              refreshing={rows.isFetching}
+              onRefresh={() => {
+                void rows.refetch()
+                catalogQuery.refetch()
+              }}
+            />
+          </div>
+        )}
+      </ResourceBoundary>
 
       {collection.primaryKey ? (
         <RecordSheet
@@ -203,7 +219,7 @@ function CollectionView({ projectId, databaseId, app, view, catalog, catalogQuer
           databaseId={databaseId}
           collection={collection}
           row={creating ? null : openRow ?? null}
-          open={creating || openRow !== undefined}
+          open={sheetOpen}
           onOpenChange={(open) => {
             if (open) return
             if (creating) setCreating(false)

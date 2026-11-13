@@ -189,6 +189,24 @@ describe('parseFormValues', () => {
     const updated = parseFormValues(products, { ...toFormValues(products, laptop), stock: '' }, 'update')
     expect(updated.errors).toEqual({ stock: '在庫 は必須です' })
   })
+
+  test('a column of a type this console does not know never reaches an input or the payload; a new row cannot drop it unseen', () => {
+    const withVector: Collection = { ...products, fields: [...products.fields, field('search_vector', '検索用', 'unsupported')] }
+    const row: DataRow = { key: '1', values: { ...laptop.values, search_vector: "'laptop':1" } }
+    const form = toFormValues(withVector, row)
+    expect(form.search_vector).toBe('')
+    const updated = parseFormValues(withVector, { ...form, stock: '7' }, 'update')
+    expect(updated.errors).toEqual({})
+    expect('search_vector' in updated.values).toBe(false)
+    // The stored value stays as it is: the update sends only what changed.
+    const changes = diff(parseFormValues(withVector, form, 'update').values, updated.values)
+    expect(changes).toEqual({ stock: 7 })
+    expect(expectedFor(withVector, row, changes)).not.toHaveProperty('search_vector')
+
+    const created = parseFormValues(withVector, { ...createForm({}), search_vector: "'typed':1" }, 'create')
+    expect(created.errors).toEqual({ search_vector: '検索用 はこの画面では入力できないため、行を追加できません' })
+    expect('search_vector' in created.values).toBe(false)
+  })
 })
 
 describe('diff', () => {

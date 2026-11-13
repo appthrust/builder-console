@@ -1,13 +1,4 @@
 {
-  "features/app/data/mutations.ts": {
-    "raw-platform-client": 1,
-    "wire-cast": 1,
-    "wire-schema-import": 1
-  },
-  "features/app/database-changes.tsx": {
-    "raw-platform-client": 1,
-    "wire-schema-import": 1
-  },
   "features/discover/drafts.tsx": {
     "wire-schema-import": 1
   },
@@ -21,9 +12,6 @@
     "wire-schema-import": 1
   },
   "features/proposals/proposal-ui.tsx": {
-    "wire-schema-import": 1
-  },
-  "model/data-catalog.ts": {
     "wire-schema-import": 1
   }
 }

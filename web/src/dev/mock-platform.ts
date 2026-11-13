@@ -2665,7 +2665,8 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
       approvals: [...approvals, { id: `${change.id}-a${approvals.length + 1}`, decision, approver: 'yamada@acme.example', ...(reason ? { reason } : {}), createdAt: stamp() }],
       approval: decision === 'Approved' ? { ...approval, approvedCount: approval.approvedCount + 1 } : { ...approval, rejected: true },
     } satisfies Partial<DatabaseChange>)
-    return json(mutation('DatabaseChange', change.id, change), 201)
+    // 202 like the Platform (platform-api internal/handler/database.go:2182).
+    return json(mutation('DatabaseChange', change.id, change), 202)
   }],
   ['POST', new RegExp(`^${P}/databases/([^/]+)/changes/([^/]+)/retry$`), (m) => {
     const change = databaseChangeFor(m[2]!, m[3]!)

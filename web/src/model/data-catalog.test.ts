@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 import type { DatabaseTableColumn, DatabaseTableSchema } from '@appthrust/api-schema/platform-api'
-import { deriveCatalog, deriveCollection, displayValue, formatValue, rowKey, toDataRow, type Collection, type Field } from './data-catalog'
+import { tableOf, tableRefOf } from '../api/testing/data-domain'
+import {
+  canAddRows, deriveCatalog, deriveCollection as deriveFromTable, displayValue, formatValue, rowKey, toDataRow, unsupportedFields, type Collection, type Field,
+} from './data-catalog'
+
+/** The description as the Platform marshals it, read through the production reader first. */
+const deriveCollection = (wire: DatabaseTableSchema) => deriveFromTable(tableOf(wire))
 
 const column = (name: string, type: string, init: Partial<DatabaseTableColumn> = {}): DatabaseTableColumn => ({
   name, type, nullable: true, hasDefault: false, primaryKey: false, ...init,
@@ -87,8 +93,8 @@ describe('deriveCollection hidden rules', () => {
         { schema: 'public', name: '_audit_log', type: 'table_or_view' },
         { schema: 'public', name: 'products', type: 'table_or_view' },
         { schema: 'public', name: 'not_described', type: 'table_or_view' },
-      ],
-      [products, audit],
+      ].map(tableRefOf),
+      [products, audit].map(tableOf),
     )
     expect(catalog.collections.map((item) => [item.id, item.hidden])).toEqual([['public._audit_log', true], ['public.products', false]])
   })
@@ -103,7 +109,12 @@ describe('deriveCollection editable rules', () => {
     const view = deriveCollection({ ...products, type: 'view', primaryKey: [] })
     expect(view).toMatchObject({ kind: 'view', editable: false })
     expect(view.primaryKey).toBeUndefined()
-    expect(deriveCollection({ ...products, type: 'VIEW' })).toMatchObject({ kind: 'view', editable: false })
+  })
+
+  test('a relation type this console does not know is read-only, never taken for a table', () => {
+    for (const type of ['VIEW', 'materialized_view', 'foreign_table']) {
+      expect(deriveCollection({ ...products, type })).toMatchObject({ kind: 'unknown', editable: false })
+    }
   })
 
   test('no key or a composite key is read-only, even when the server says editable', () => {
@@ -166,7 +177,9 @@ describe('deriveCollection kind mapping', () => {
     ['json', 'json'],
     ['text[]', 'json'],
     ['uuid', 'uuid'],
-    ['tsvector', 'text'],
+    ['tsvector', 'unsupported'],
+    ['interval', 'unsupported'],
+    ['bytea', 'unsupported'],
   ] as const)('%s → %s', (type, kind) => {
     expect(field(deriveCollection({ ...products, columns: [column('value', type)] }), 'value').kind).toBe(kind)
   })
@@ -179,8 +192,33 @@ describe('deriveCollection kind mapping', () => {
     expect(field(collection, 'stock').enumValues).toBeUndefined()
   })
 
-  test('a user-defined type without enum values is not an enum', () => {
-    expect(field(deriveCollection({ ...products, columns: [column('value', 'public.item_category', { enumValues: [] })] }), 'value').kind).toBe('text')
+  test('a user-defined type without enum values is not guessed to be text or an enum', () => {
+    expect(field(deriveCollection({ ...products, columns: [column('value', 'public.item_category', { enumValues: [] })] }), 'value').kind).toBe('unsupported')
+    expect(field(deriveCollection({ ...products, columns: [column('value', 'public.item_category')] }), 'value').kind).toBe('unsupported')
+  })
+})
+
+describe('a column of a type this console does not know', () => {
+  const withVector = deriveCollection({ ...products, columns: [...products.columns, column('search_vector', 'tsvector', { description: '検索用' })] })
+  const vector = field(withVector, 'search_vector')
+
+  test('shows a fixed placeholder, never its value, not even when empty', () => {
+    for (const value of ["'laptop':1 'note':2", null, undefined, { a: 1 }]) expect(formatValue(vector, value)).toBe('（この画面では表示できません）')
+  })
+
+  test('keeps the 表 editable row by row but offers no new rows (the column would be dropped unseen)', () => {
+    expect(unsupportedFields(withVector).map((item) => item.name)).toEqual(['search_vector'])
+    expect(withVector.editable).toBe(true)
+    expect(canAddRows(withVector)).toBe(false)
+    expect(canAddRows(deriveCollection(products))).toBe(true)
+    expect(canAddRows(deriveCollection({ ...products, type: 'view' }))).toBe(false)
+  })
+
+  test('never names a row: the display field skips it and a display value falls back to the key', () => {
+    const onlyVector = deriveCollection({ ...products, primaryKey: [], columns: [column('vector', 'tsvector'), column('qty', 'integer')] })
+    expect(onlyVector.displayField).toBe('qty')
+    const keyed = deriveCollection({ ...products, primaryKey: ['code'], columns: [column('code', 'bytea', { primaryKey: true })] })
+    expect(displayValue(keyed, { key: 'k-1', values: { code: '\\x00ff' } })).toBe('k-1')
   })
 })
 

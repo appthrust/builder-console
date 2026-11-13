@@ -63,7 +63,8 @@ export function formatTimestampFull(value: unknown): string | undefined {
 }
 
 function fieldFormValue(field: Field, value: unknown): string {
-  if (value === null || value === undefined) return ''
+  // A value of a type this console does not know never reaches an input.
+  if (value === null || value === undefined || field.kind === 'unsupported') return ''
   switch (field.kind) {
     case 'boolean':
       return value === true ? 'true' : value === false ? 'false' : ''
@@ -161,6 +162,8 @@ function parseValue(field: Field, raw: string): Parsed {
       return UUID.test(trimmed) ? { value: trimmed.toLowerCase() } : { error: v.uuid(field.label) }
     case 'reference':
       return { value: trimmed }
+    case 'unsupported':
+      return { error: v.unsupported(field.label) }
   }
 }
 
@@ -168,13 +171,19 @@ function parseValue(field: Field, raw: string): Parsed {
  * Form → row values. Read-only fields (auto-filled keys and timestamps) are
  * never emitted. An empty input means: on create, leave it to the column
  * default when there is one; otherwise null when the column allows it, else
- * 「○○ は必須です」.
+ * 「○○ は必須です」. A column of a type this console does not know is never
+ * emitted: an update leaves it as stored, and a new row cannot be made
+ * without it (the column would be dropped unseen).
  */
 export function parseFormValues(collection: Collection, form: FormValues, mode: FormMode): ParsedForm {
   const values: Record<string, unknown> = {}
   const errors: Record<string, string> = {}
   for (const field of collection.fields) {
     if (field.readOnly) continue
+    if (field.kind === 'unsupported') {
+      if (mode === 'create') errors[field.name] = writeText.validation.unsupported(field.label)
+      continue
+    }
     const raw = form[field.name] ?? ''
     if (raw.trim() === '') {
       if (mode === 'create' && field.hasDefault) continue

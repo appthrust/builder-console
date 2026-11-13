@@ -107,7 +107,7 @@ function KeyEditor({ id, value, onChange, invalid, disabled }: EditorProps) {
   return <TextInput id={id} value={value} onChange={(event) => onChange(event.target.value)} invalid={invalid} disabled={disabled} autoComplete="off" spellCheck={false} className="font-mono" />
 }
 
-export const fieldEditors: Record<FieldKind, ComponentType<EditorProps>> = {
+export const fieldEditors: Record<Exclude<FieldKind, 'unsupported'>, ComponentType<EditorProps>> = {
   text: TextEditor,
   longtext: LongTextEditor,
   integer: NumberEditor,
@@ -123,7 +123,9 @@ export const fieldEditors: Record<FieldKind, ComponentType<EditorProps>> = {
 
 /**
  * One labelled form row. Read-only fields (auto-filled keys and timestamps)
- * are text: 「自動で入ります」 on create, the stored value on edit.
+ * are text: 「自動で入ります」 on create, the stored value on edit. A column of a
+ * type this console does not know has no input: its fixed placeholder says it
+ * keeps its stored value.
  */
 export function FieldEditor({
   id,
@@ -154,6 +156,15 @@ export function FieldEditor({
       <div data-field={field.name}>
         <p className="text-sm font-medium text-stone-800">{field.label}</p>
         <p className="mt-1.5 text-sm text-stone-500">{text}</p>
+      </div>
+    )
+  }
+  if (field.kind === 'unsupported') {
+    return (
+      <div data-field={field.name}>
+        <p className="text-sm font-medium text-stone-800">{field.label}</p>
+        <p className="mt-1.5 text-sm text-stone-400">{formatValue(field, stored)}</p>
+        <p className="mt-1 text-xs text-stone-500">{error ?? writeText.field.unsupportedNote}</p>
       </div>
     )
   }
