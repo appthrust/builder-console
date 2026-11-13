@@ -1,6 +1,5 @@
 import { localized } from '../../shell/language'
-import type { Capability, ColumnKind, RuleCategory, ScreenKind, SheetRole } from './model'
-import { ACCENT_LABEL_JA } from './ui-design'
+import type { Accent, Capability, ColumnKind, RuleCategory, ScreenKind, SheetRole } from '../../model/contracts/excel'
 import { textEn } from './copy.en'
 
 export const textJa = {
@@ -40,6 +39,8 @@ export const textJa = {
     tooLarge: 'Excel の内容が大きすぎて保存できません（512 KiB まで）。使っていないシートを消してから選んでください。',
     busy: 'AI が作業中のため、Excel を追加・削除できません。終わってからもう一度操作してください。',
     created: 'この下書きはアプリを作成済みのため、Excel を追加・削除できません。新しく始めてください。',
+    /** The add answered in a shape this console cannot read: the file may be stored. */
+    unconfirmed: '保存できたか確認できませんでした。最新の状態を確認してください。',
     /** The draft's title and intent; the intent is the build's first request. */
     draftIntent: (file: string) => `Excel「${file}」から業務アプリを作る`,
     setIntent: (first: string, count: number) => `Excel「${first}」${count > 1 ? `ほか ${count - 1} 件` : ''}から業務アプリを作る`,
@@ -130,6 +131,11 @@ export const textJa = {
     busy: 'AI がまだ前の指示を処理しています。終わってから送り直してください。',
     offlineNote: 'AI を使わずに画面を調整しています。決まった言い回しだけを理解します。',
     toImplement: 'この画面で実装へ',
+    /** The design or the analysis holds a part this console cannot read: writing on (undo, hand-off) would drop or skip it. */
+    incomplete: {
+      title: 'この設計には、いまの画面では扱えない部分があります',
+      body: 'その部分を失わないよう、「元に戻す」と実装へ進むことは止めています。アシスタントへの指示は送れます。',
+    },
   },
   implement: {
     title: '実装',
@@ -162,6 +168,8 @@ export const textJa = {
       company: '社内のだれでも使えます。',
     },
   },
+  /** A kind, role, category or capability this console does not know. */
+  unsupported: '未対応',
   role: {
     records: '台帳',
     master: 'マスタ',
@@ -205,7 +213,8 @@ export const textJa = {
     master: 'マスタ管理',
     dashboard: 'ダッシュボード',
   } satisfies Record<ScreenKind, string>,
-  accent: ACCENT_LABEL_JA,
+  /** Also the 基調色 word of 「9. 画面の決定」 (ui-design.ts), which is always written in Japanese. */
+  accent: { teal: '緑', blue: '青', violet: '紫', amber: '琥珀', rose: '赤', stone: 'グレー' } satisfies Record<Accent, string>,
   /** Section titles and sentences of the generated specification. */
   document: {
     title: (name: string) => `「${name}」業務アプリ 仕様書`,

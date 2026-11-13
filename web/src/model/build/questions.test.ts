@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { ExcelAnalysisEntity } from '@appthrust/api-schema/platform-api'
 import { turnOf } from '../../api/testing/build-domain'
+import { analysisFrom } from '../../api/testing/excel-domain'
 import { buildCopy, textJa } from './copy'
 import { textEn } from './copy.en'
 import { currentLanguage, setLanguage } from '../../shell/language'
@@ -215,5 +216,6 @@ test('imported row count uses integrated records rather than source row totals',
   }
   expect(importedRowCount(undefined)).toBeUndefined()
   expect(importedRowCount({ entities: [] })).toBe(0)
-  expect(importedRowCount({ entities: [entity, { ...entity, name: '顧客', kind: 'master', importRows: 2 }] })).toBe(5)
+  const analysis = analysisFrom({ summary: '', bullets: [], capabilities: [], flows: [], findings: [], workbooks: [{ workbookId: 'wb-000000000001', role: 'records', summary: '' }], entities: [entity, { ...entity, name: '顧客', kind: 'master', importRows: 2 }] })
+  expect(importedRowCount(analysis)).toBe(5)
 })

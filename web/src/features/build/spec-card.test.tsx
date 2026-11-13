@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
-import type { ApplicationDraftSourceSummary, ExcelAnalysis, UiDesign } from '@appthrust/api-schema/platform-api'
+import type { ApplicationDraftSourceSummary } from '@appthrust/api-schema/platform-api'
 import { createMemoryHistory, createRootRoute, createRouter, RouterContextProvider } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -7,6 +7,7 @@ import { preserveLanguage } from '../../../test/language'
 import type { BuildMessage, BuildSpec } from '../../model/build/types'
 import { setLanguage } from '../../shell/language'
 import { importedRowCount } from '../../model/build/questions'
+import { analysisFrom, designFrom } from '../../api/testing/excel-domain'
 import { uiDecisionItems, UiDecisions } from '../excel2app/ui-decisions'
 import { SpecCard } from './artifact-pane'
 import { AssistantMessage } from './conversation-pane'
@@ -21,15 +22,15 @@ afterEach(() => restoreLanguage())
 const spec: BuildSpec = { name: '案件管理', users: ['営業'], screens: ['案件一覧'], records: [{ name: '案件', fields: ['状態'] }], rules: [], importFrom: 'csv' }
 const workbook = { id: 'wb-000000000001', fileName: '案件台帳.xlsx', sheetCount: 3, rowCount: 28, truncated: false, bytes: 100, digest: 'a'.repeat(64), addedAt: '2026-10-26T00:00:00Z' }
 const source: ApplicationDraftSourceSummary = { kind: 'excel', revision: workbook.addedAt, workbooks: [workbook] }
-const analysis: ExcelAnalysis = {
+const analysis = analysisFrom({
   summary: '', bullets: [], capabilities: [], flows: [], findings: [],
   workbooks: [{ workbookId: workbook.id, role: 'mixed', summary: '' }],
   entities: (['records', 'master'] as const).map((kind, index) => ({
     name: kind, kind, fields: [{ name: '番号', kind: 'id' }], rules: [], importRows: [12, 8][index]!,
     sources: [{ workbookId: workbook.id, sheet: kind, headerRow: 0, dataRows: 25, columns: [{ index: 0, field: '番号' }] }],
   })),
-}
-const design: UiDesign = {
+})
+const design = designFrom({
   appName: '案件管理', accent: 'teal', density: 'comfortable',
   screens: [
     { id: 'dashboard:案件', kind: 'dashboard', entity: '案件', title: 'ダッシュボード', hidden: false },
@@ -40,7 +41,7 @@ const design: UiDesign = {
   forms: { 案件: { fields: ['件名', '状態', '期限'], required: ['件名', '期限'], twoColumns: true }, 顧客: { fields: ['名前'], required: [], twoColumns: false } },
   dashboard: { cards: [{ id: 'count', title: '案件の件数', kind: 'count' }, { id: 'overdue', title: '期限切れ', kind: 'overdue', field: '期限' }] },
   notes: ['印刷用レイアウトを用意する'],
-}
+})
 
 test('an Excel draft shows the uploaded workbook as 元のデータ and the screen decisions', () => {
   const html = renderToStaticMarkup(<SpecCard spec={spec} title="案件台帳.xlsx" source={source} uiDesign={design} excelAnalysis={analysis} />)

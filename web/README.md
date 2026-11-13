@@ -117,6 +117,44 @@ limited to 4 MiB and 200 sheets. These budgets come from
 and very-hidden sheets are omitted from inference but can supply validation
 choices. `.xlsm` files are accepted without loading or executing VBA.
 
+Every Excel answer passes the response boundary once
+(`src/api/contracts/platform/excel.ts`, domain types in
+`src/model/contracts/excel.ts`):
+
+| Operation | Contract | What the console reads |
+|---|---|---|
+| `platformApiListApplicationDraftWorkbooks` | `listWorkbooksContract` | `data` (required; `[]` for an empty set, null fails), each member with its optional `reading` |
+| `platformApiGetApplicationDraftWorkbook` | `getWorkbookContract` | the stored grid, as uploaded |
+| `platformApiAddApplicationDraftWorkbook` | `addWorkbookContract` (`build.ts`) | the draft and the added (or replayed) summary |
+| draft reads and writes, conversation turns | `build.ts` contracts | `excelAnalysis`, `uiDesign` and `excelProgress` through `excelAnalysisReader`, `uiDesignReader` and `excelProgressReader` |
+
+Every server enum in a reading, analysis, design or progress (sheet role,
+column/field kind, rule category, capability, workbook role, entity and finding
+kind, accent, density, screen kind, list layout, card kind, progress stage and
+state) is an open value: a kind this console does not know reads as unknown,
+never as a known one. A design's list, form and dashboard parts are read one by
+one: a part in a shape the console cannot read is `broken`. The preview shows
+the rest of the design and a fixed note in place of an unknown or broken part.
+「元に戻す」 stays closed while a part of the current or the previous design is
+unknown or broken, and the step to implementation while a part of the design or
+the analysis is, so nothing the console cannot represent is dropped by a write
+or built unseen. Designs built in the browser go through the same constructors
+(`uiDesignOf`, `excelAnalysisOf`).
+
+A malformed draft or set re-read keeps the last good content and unsent input
+under the shared 「更新できませんでした」 notice. A write answered 2xx in a shape
+the console cannot read (workbook add, analysis or design turn, specification
+save) is not cached, its success side effect does not run (no analysis start,
+no preview), it is never resent, the rest of a batch of files is not sent, and
+the only action is 「最新の状態を確認する」. That re-read binds a file whose add
+happened; a file the re-read does not show, and each file of the batch not
+sent, is offered 「保存をやり直す」 with its unchanged `Idempotency-Key` (the
+server answers a repeated add as a replay). Tests:
+`src/api/contracts/platform/excel.test.ts` (wire variants and redaction),
+`src/features/excel2app/excel2app-page-wire.test.tsx` (unreadable writes),
+`src/features/excel2app/stale-draft.test.tsx` (a draft read in flight cannot
+undo a write) and `e2e/stories/app-create-excel2app-malformed-response.mock.spec.ts`.
+
 The local mock runtime (`src/dev/mock-platform.ts`) implements the same
 workbook and turn APIs with deterministic heuristics. With the default manual
 lifecycle, acknowledge each turn POST before `POST /api/v1/__mock/advance`;

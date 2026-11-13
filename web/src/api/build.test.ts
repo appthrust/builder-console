@@ -78,22 +78,19 @@ test('workbook set and structured turns use the draft contract routes, payloads 
   const workbook = { fileName: '台帳.xlsx', sheets: [{ name: '台帳', rows: [['名前'], ['案件']] }] }
   await api.addWorkbook('project-1', 'draft-1', workbook, 'file-key-1')
   await api.addWorkbook('project-1', 'draft-1', workbook, 'file-key-1')
-  await api.listWorkbooks('project-1', 'draft-1')
-  await api.getWorkbook('project-1', 'draft-1', 'wb-0123456789ab')
   await api.removeWorkbook('project-1', 'draft-1', 'wb-0123456789ab')
   await api.createTurn('project-1', 'draft-1', { message: '', kind: 'excel-analysis' })
   await api.createTurn('project-1', 'draft-1', { message: '__init__', kind: 'ui-design' })
   const root = '/api/v1/projects/project-1/application-drafts/draft-1'
   expect(requests.map((request) => [request.method, new URL(request.url).pathname])).toEqual([
-    ['POST', `${root}/workbooks`], ['POST', `${root}/workbooks`], ['GET', `${root}/workbooks`],
-    ['GET', `${root}/workbooks/wb-0123456789ab`], ['DELETE', `${root}/workbooks/wb-0123456789ab`],
+    ['POST', `${root}/workbooks`], ['POST', `${root}/workbooks`], ['DELETE', `${root}/workbooks/wb-0123456789ab`],
     ['POST', `${root}/conversation-turns`], ['POST', `${root}/conversation-turns`],
   ])
   expect(await requests[0]!.json()).toEqual(workbook)
   // A retried upload of the same file reuses its key, so the server replays instead of adding twice.
   expect(requests.slice(0, 2).map((request) => request.headers.get('Idempotency-Key'))).toEqual(['file-key-1', 'file-key-1'])
-  expect(await requests[5]!.json()).toEqual({ message: '', kind: 'excel-analysis' })
-  expect(await requests[6]!.json()).toEqual({ message: '__init__', kind: 'ui-design' })
+  expect(await requests[3]!.json()).toEqual({ message: '', kind: 'excel-analysis' })
+  expect(await requests[4]!.json()).toEqual({ message: '__init__', kind: 'ui-design' })
 })
 
 test('publish repair sends the branch-aware gateway body unchanged', async () => {

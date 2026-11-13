@@ -1,5 +1,5 @@
 import type {
-  ApplicationDraftWorkbook, ApplicationDraftWorkbookListResponse, ApplicationDraftWorkbookSummary, CreateApplicationDraftConversationTurnRequest,
+  ApplicationDraftWorkbook, ApplicationDraftWorkbookSummary, CreateApplicationDraftConversationTurnRequest,
   BeginApplicationDraftCreationExecutionRequest, CreateApplicationDraftCreationPlanGenerationRequest,
   CreateApplicationDraftImplementationRunRequest, CreateApplicationDraftRequest, CreatePublishRequest, UpdateApplicationDraftRequest,
 } from '@appthrust/api-schema/platform-api'
@@ -38,14 +38,6 @@ export interface WorkbookAdded { draft: BuildDraft; workbook: ApplicationDraftWo
 
 export function addWorkbook(projectId: string, draftId: string, workbook: ApplicationDraftWorkbook, idempotencyKey: string): Promise<WorkbookAdded> {
   return apiGateway.platform(addWorkbookContract, { projectId, id: draftId, ...workbook }, { idempotencyKey })
-}
-
-export function listWorkbooks(projectId: string, draftId: string): Promise<ApplicationDraftWorkbookListResponse> {
-  return client.platformApiListApplicationDraftWorkbooks({ projectId, id: draftId })
-}
-
-export function getWorkbook(projectId: string, draftId: string, workbookId: string): Promise<ApplicationDraftWorkbook> {
-  return client.platformApiGetApplicationDraftWorkbook({ projectId, id: draftId, workbookId })
 }
 
 export function removeWorkbook(projectId: string, draftId: string, workbookId: string): Promise<BuildDraft> {

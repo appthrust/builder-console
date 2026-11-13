@@ -14,4 +14,5 @@ export const decisionsTextEn: typeof decisionsTextJa = {
   dashboard: 'Dashboard',
   separator: ', ',
   partSeparator: '; ',
+  incomplete: 'Some other decisions cannot be shown on this page.',
 }

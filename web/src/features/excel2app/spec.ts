@@ -3,17 +3,18 @@
 // The excel-analysis turn writes this document on the server; the mock runtime
 // and the 「AI なしで続ける」 fallback write it here. Section 9 (画面の決定) comes
 // from the UI design: the ui-design turn writes it on the server, the fallback
-// replaces it with `withUiDecisions` at hand-off.
-import type { ApplicationDraftWorkbookSummary, ExcelAnalysis } from '@appthrust/api-schema/platform-api'
+// replaces it with `withUiDecisions` at hand-off. Only complete values are
+// written: a document never silently leaves out a part this console cannot read.
 import { serializeSpec } from '../../model/build/spec'
 import type { BuildSpec } from '../../model/build/types'
+import type { CompleteExcelAnalysis, CompleteUiDesign, WorkbookSummary } from '../../model/contracts/excel'
 import { text } from './copy'
 import { designText } from './design-copy'
 import type { AppPlan } from './model'
-import { uiDecisionsMarkdown, type UiDesign } from './ui-design'
+import { uiDecisionsMarkdown } from './ui-design'
 
 /** The specification with the front-matter the build reads (`parseSpec`): name, screens, records, rules. */
-export function excelSpecMarkdown(analysis: ExcelAnalysis, plan: AppPlan, workbooks: ApplicationDraftWorkbookSummary[]): string {
+export function excelSpecMarkdown(analysis: CompleteExcelAnalysis, plan: AppPlan, workbooks: WorkbookSummary[]): string {
   const t = text.document
   const spec: BuildSpec = {
     name: plan.name,
@@ -34,13 +35,13 @@ export function excelSpecMarkdown(analysis: ExcelAnalysis, plan: AppPlan, workbo
 const SECTION_9 = /(^|\n)## 9\.[^\n]*(?:\n(?!## )[^\n]*)*/
 
 /** The specification with its 「9. 画面の決定」 section replaced by (or extended with) the design's decisions. */
-export function withUiDecisions(specMarkdown: string, design: UiDesign): string {
+export function withUiDecisions(specMarkdown: string, design: CompleteUiDesign): string {
   const section = uiDecisionsMarkdown(design)
   if (!SECTION_9.test(specMarkdown)) return `${specMarkdown.trimEnd()}\n\n${section}\n`
   return specMarkdown.replace(SECTION_9, (_match, lead: string) => `${lead}${section}\n`)
 }
 
-export function specMarkdown(analysis: ExcelAnalysis, plan: AppPlan, workbooks: ApplicationDraftWorkbookSummary[]): string {
+export function specMarkdown(analysis: CompleteExcelAnalysis, plan: AppPlan, workbooks: WorkbookSummary[]): string {
   const t = text.document
   const lines: string[] = [`# ${t.title(plan.name)}`, '']
   lines.push(`## ${t.overview}`, designText.overview(workbooks.length, workbooks.reduce((sum, workbook) => sum + workbook.sheetCount, 0), plan.totalImportRows), '')
@@ -55,7 +56,7 @@ export function specMarkdown(analysis: ExcelAnalysis, plan: AppPlan, workbooks: 
   lines.push('')
 
   lines.push(`## ${t.data}`)
-  for (const entity of plan.entities) {
+  for (const entity of analysis.entities) {
     lines.push(`### ${t.entity(entity.name, text.role[entity.kind], entity.importRows)}`)
     const files = [...new Set(entity.sources.map((source) => workbooks.find((workbook) => workbook.id === source.workbookId)?.fileName).filter((name): name is string => name !== undefined))]
     lines.push(designText.sources(files.join(' / ')))

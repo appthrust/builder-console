@@ -37,6 +37,7 @@ export const textEn: typeof textJa = {
     tooLarge: 'The Excel contents are too large to save (512 KiB at most). Delete unused sheets and choose it again.',
     busy: 'AI is working on this draft, so files cannot be added or removed. Try again when it is done.',
     created: 'An app was already created from this draft, so files cannot be added or removed. Start over instead.',
+    unconfirmed: 'Whether this file was saved could not be confirmed. Check the latest state.',
     draftIntent: (file: string) => `Build a business app from the Excel file “${file}”`,
     setIntent: (first, count) => `Build a business app from “${first}”${count > 1 ? ` and ${count - 1} other Excel files` : ''}`,
     start: (count) => `Read ${count} files`,
@@ -121,6 +122,10 @@ export const textEn: typeof textJa = {
     busy: 'AI is still working on the previous instruction. Send it again when it is done.',
     offlineNote: 'Adjusting the screens without AI; only fixed phrasings are understood.',
     toImplement: 'Build with these screens',
+    incomplete: {
+      title: 'This design has parts this page cannot handle',
+      body: 'So that those parts are not lost, undoing and moving on to the build are paused. You can still send instructions to the assistant.',
+    },
   },
   implement: {
     title: 'Build',
@@ -153,6 +158,7 @@ export const textEn: typeof textJa = {
       company: 'Everyone at work can use it.',
     },
   },
+  unsupported: 'Unsupported',
   role: {
     records: 'Ledger',
     master: 'Master',

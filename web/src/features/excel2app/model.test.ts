@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { ExcelAnalysisEntity } from '@appthrust/api-schema/platform-api'
+import { analysisFrom } from '../../api/testing/excel-domain'
 import { entityRows, findHeaderRow, humanizeFormula, planApp, readWorkbook, type WorkbookGrid } from './model'
 import { SAMPLE_SETS } from './samples'
 import { isDateFormat, parseCellValue, parseRangeReference, serialToDate, shiftFormula, workbookPartPath } from './xlsx'
@@ -198,11 +199,14 @@ const records: ExcelAnalysisEntity = {
   rules: [], importRows: 2, key: ['番号'],
 }
 
+/** An integrated analysis as Platform sends it, read by the production reader. */
+const analysis = (entities: unknown[], capabilities: string[]) => analysisFrom({ summary: '', bullets: [], capabilities, flows: [], findings: [], workbooks: [{ workbookId: 'wb-000000000001', role: 'records', summary: '' }], entities })
+
 describe('planApp', () => {
   test('uses integrated entity names and counts, retaining source mappings and business keys', () => {
     const master: ExcelAnalysisEntity = { ...records, name: '顧客', kind: 'master', importRows: 3, workflow: undefined }
     const workflowRecords: ExcelAnalysisEntity = { ...records, fields: [...records.fields, { name: '状態', kind: 'choice' }], workflow: { field: '状態', stages: ['受付', '出荷済'] } }
-    const plan = planApp({ entities: [workflowRecords, master], capabilities: ['aggregate'] }, '営業の仕事')
+    const plan = planApp(analysis([workflowRecords, master], ['aggregate']), '営業の仕事')
     expect(plan.name).toBe('営業の仕事')
     expect(plan.entities[0]).toMatchObject({ sources: records.sources, key: ['番号'], workflow: { column: '状態', stages: ['受付', '出荷済'] } })
     expect(plan.screens).toEqual([
@@ -210,8 +214,16 @@ describe('planApp', () => {
       { kind: 'board', entity: '受注' }, { kind: 'master', entity: '顧客' }, { kind: 'dashboard', entity: '受注' },
     ])
     expect(plan.totalImportRows).toBe(5)
-    expect(planApp({ entities: [master], capabilities: ['aggregate'] }, '顧客').screens).toEqual([{ kind: 'master', entity: '顧客' }])
-    expect(planApp({ entities: [{ ...records, workflow: undefined }], capabilities: [] }, '受注').screens.map((screen) => screen.kind)).toEqual(['list', 'form', 'detail'])
+    expect(planApp(analysis([master], ['aggregate']), '顧客').screens).toEqual([{ kind: 'master', entity: '顧客' }])
+    expect(planApp(analysis([{ ...records, workflow: undefined }], []), '受注').screens.map((screen) => screen.kind)).toEqual(['list', 'form', 'detail'])
+  })
+
+  test('an entity kind or capability a newer Platform sends is not guessed: no screens, no dashboard', () => {
+    const plan = planApp(analysis([{ ...records, kind: 'archive' }, { ...records, name: '台帳' }], ['forecast']), '営業の仕事')
+    expect(plan.entities.map((entity) => entity.kind)).toEqual([{ kind: 'unknown' }, { kind: 'known', value: 'records' }])
+    expect(plan.screens).toEqual([{ kind: 'list', entity: '台帳' }, { kind: 'form', entity: '台帳' }, { kind: 'detail', entity: '台帳' }])
+    // The unknown entity's rows still count: they are imported, only its screens are not decided here.
+    expect(plan.totalImportRows).toBe(4)
   })
 })
 

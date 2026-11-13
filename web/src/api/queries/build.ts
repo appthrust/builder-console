@@ -1,6 +1,6 @@
 import { isCancelledError, queryOptions, skipToken, useQuery, type QueryClient } from '@tanstack/react-query'
 import { jobState, type BuildDraft } from '../../model/contracts/build'
-import { getDraft, getWorkbook, listDrafts, listWorkbooks } from '../build'
+import { getDraft, listDrafts } from '../build'
 import { POLL_INTERVAL_MS, readRetryDelay, retryReadQuery } from './shared'
 
 export const BUILD_POLL_MS = 3_000
@@ -53,28 +53,6 @@ export async function readDraft(client: QueryClient, projectId: string, draftId:
     if (cached) return cached
     throw error
   }
-}
-
-/** Membership and readings change with the set revision and analysis turn. */
-export function draftWorkbooksOptions(projectId: string, draftId: string, version: string) {
-  return queryOptions({
-    queryKey: buildKeys.workbooks(projectId, draftId, version),
-    queryFn: projectId && draftId ? () => listWorkbooks(projectId, draftId) : skipToken,
-    retry: retryReadQuery,
-    retryDelay: readRetryDelay,
-  })
-}
-
-/** A member's parsed grid is immutable for its lifetime. */
-export function draftWorkbookGridOptions(projectId: string, draftId: string, workbookId: string) {
-  return queryOptions({
-    queryKey: buildKeys.workbook(projectId, draftId, workbookId),
-    queryFn: projectId && draftId && workbookId ? () => getWorkbook(projectId, draftId, workbookId) : skipToken,
-    retry: retryReadQuery,
-    retryDelay: readRetryDelay,
-    staleTime: Number.POSITIVE_INFINITY,
-    refetchInterval: false,
-  })
 }
 
 export function draftsOptions(projectId: string) {

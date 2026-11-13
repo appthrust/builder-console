@@ -157,33 +157,6 @@
   "features/discover/search.ts": {
     "raw-console-api": 1
   },
-  "features/excel2app/analysis.ts": {
-    "wire-schema-import": 1
-  },
-  "features/excel2app/collect.ts": {
-    "wire-schema-import": 1
-  },
-  "features/excel2app/design.ts": {
-    "wire-schema-import": 1
-  },
-  "features/excel2app/model.ts": {
-    "wire-schema-import": 1
-  },
-  "features/excel2app/page.tsx": {
-    "wire-schema-import": 1
-  },
-  "features/excel2app/spec.ts": {
-    "wire-schema-import": 1
-  },
-  "features/excel2app/ui-preview-step.tsx": {
-    "wire-schema-import": 1
-  },
-  "features/excel2app/ui-preview.tsx": {
-    "wire-schema-import": 1
-  },
-  "features/excel2app/use-excel2app-draft.ts": {
-    "wire-schema-import": 1
-  },
   "features/improve/entry.tsx": {
     "raw-console-api": 1
   },
