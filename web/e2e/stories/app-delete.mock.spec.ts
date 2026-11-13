@@ -1,4 +1,4 @@
-import { test, expect, seed, captureWrite } from '../support/fixtures'
+import { test, expect, seed, captureWrite, withExpectedFailures } from '../support/fixtures'
 
 test.describe('App delete @app', () => {
   test('deletes the stack, its source binding and the app, keeps the GitHub repository, and retires its URL @mock @story', async ({ page, mock }) => {
@@ -62,8 +62,10 @@ test.describe('App delete @app', () => {
     await expect(main.getByRole('link', { name: new RegExp(seed.apps.mitsumori.name) })).toBeVisible()
     await expect(main.getByRole('link', { name: new RegExp(app.name) })).toHaveCount(0)
 
-    await page.goto(appPath)
-    await expect(page.getByRole('heading', { level: 1, name: 'ページが見つかりません', exact: true })).toBeVisible()
+    await withExpectedFailures([{ method: 'GET', path: '/api/console/resolve', status: 404, count: 1, reason: 'the deleted app\'s URL resolves to nothing' }], async () => {
+      await page.goto(appPath)
+      await expect(page.getByRole('heading', { level: 1, name: 'ページが見つかりません', exact: true })).toBeVisible()
+    })
     await expect(main.getByText(appPath, { exact: true })).toBeVisible()
     await expect(page.getByRole('heading', { level: 1, name: app.name, exact: true })).toHaveCount(0)
   })

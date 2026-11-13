@@ -1,4 +1,4 @@
-import { expect, seed, test } from '../support/fixtures'
+import { expect, freeUrlNameChecks, seed, test, withExpectedFailures } from '../support/fixtures'
 import {
   continueToShare,
   openCreateWizard,
@@ -15,13 +15,16 @@ test.describe('App create from a business template @create', () => {
     const group = seed.groups.teamA
 
     await openCreateWizard(page)
-    await pickBusinessTemplate(page, 'biz-inventory-postgres')
-    await expect(page.getByRole('textbox', { name: 'アプリの名前 必須', exact: true })).toHaveValue(displayName)
-    await expect(page.getByLabel('説明（任意）', { exact: true })).toHaveValue(description)
-    // A kanji-only name takes the template's English word, not a random app-<hex>.
-    await expect(page.getByTestId('url-name')).toHaveText('inventory')
-    await expect(page.getByTestId('url-preview')).toContainText('https://inventory.commerce.appthrust.test')
-    const slug = await continueToShare(page)
+    let slug = ''
+    await withExpectedFailures([freeUrlNameChecks(2)], async () => {
+      await pickBusinessTemplate(page, 'biz-inventory-postgres')
+      await expect(page.getByRole('textbox', { name: 'アプリの名前 必須', exact: true })).toHaveValue(displayName)
+      await expect(page.getByLabel('説明（任意）', { exact: true })).toHaveValue(description)
+      // A kanji-only name takes the template's English word, not a random app-<hex>.
+      await expect(page.getByTestId('url-name')).toHaveText('inventory')
+      await expect(page.getByTestId('url-preview')).toContainText('https://inventory.commerce.appthrust.test')
+      slug = await continueToShare(page)
+    })
     expect(slug).toBe('inventory')
     await expect(page.getByRole('checkbox', { name: group.name, exact: true })).toBeChecked()
     await expect(page.getByTestId('share-preview')).toContainText(`${group.name} に公開`)

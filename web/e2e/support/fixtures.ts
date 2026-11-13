@@ -1,9 +1,19 @@
-// Shared story fixtures. Every test starts from the mock's seeded state:
-// `POST /api/console/__mock/reset` and `POST /api/v1/__mock/reset` restore
-// the console and Platform mocks (src/dev/mock-console.ts, mock-platform.ts).
+// Shared story fixtures: the single `test` entry for every story. Two automatic
+// fixtures run for every test, whether or not it asks for them:
+//
+// - mock reset: `POST /api/console/__mock/reset` and `POST /api/v1/__mock/reset`
+//   restore the console and Platform mocks (src/dev/mock-console.ts,
+//   mock-platform.ts) before the test starts;
+// - browser problems: ./browser-problems.ts watches the whole BrowserContext
+//   from before the first navigation, and the test fails at teardown when a
+//   console error, uncaught error, failed request, error boundary or rendered
+//   `undefined`/`NaN` was collected. Deliberate failures are declared with
+//   `withExpectedFailures` inside the step that provokes them.
 import { expect, test as base, type APIRequestContext, type Page, type Request } from '@playwright/test'
+import { BrowserProblemCollector, formatBrowserProblems, type ExpectedFailure } from './browser-problems'
 
 export { expect }
+export type { ExpectedFailure }
 
 /** Seeded identities (src/dev/mock-console.ts, mock-platform.ts). */
 export const seed = {
@@ -59,13 +69,55 @@ function mockControl(request: APIRequestContext): MockControl {
   }
 }
 
-export const test = base.extend<{ mock: MockControl }>({
+/** The current test's collector (workers run one test at a time). */
+let activeCollector: BrowserProblemCollector | undefined
+
+export const test = base.extend<{ mock: MockControl; mockReset: void; browserProblems: void }>({
+  mockReset: [async ({ request }, use) => {
+    await mockControl(request).reset()
+    await use()
+  }, { auto: true }],
+  browserProblems: [async ({ context }, use, testInfo) => {
+    const collector = await BrowserProblemCollector.install(context)
+    activeCollector = collector
+    try {
+      await use()
+    } finally {
+      activeCollector = undefined
+    }
+    const summary = await collector.finish()
+    await testInfo.attach('browser-problems', { body: JSON.stringify(summary, null, 2), contentType: 'application/json' })
+    if (summary.problems.length > 0) throw new Error(formatBrowserProblems(summary.problems))
+  }, { auto: true }],
   mock: async ({ request }, use) => {
-    const control = mockControl(request)
-    await control.reset()
-    await use(control)
+    await use(mockControl(request))
   },
 })
+
+/**
+ * Runs `action` as one step in which exactly the `expected` failures happen.
+ * Each entry names the operation (method + path), the HTTP status or transport
+ * error, the exact count and the reason. A missing or an extra occurrence fails
+ * the step; outside it the same failure is an ordinary browser problem.
+ * Unrelated console errors inside the step still fail the test.
+ */
+export async function withExpectedFailures(expected: readonly ExpectedFailure[], action: () => Promise<void>): Promise<void> {
+  const collector = activeCollector
+  if (!collector) throw new Error('withExpectedFailures must run inside a story test')
+  const title = expected
+    .map((failure) => `${failure.count}× ${failure.transportError ?? failure.status} ${failure.method} ${String(failure.path)}: ${failure.reason}`)
+    .join('; ')
+  await test.step(`expected failures: ${title}`, () => collector.expectFailures(expected, action), { box: true })
+}
+
+/**
+ * The console's `GET /resolve` answers 404 for a path nobody uses: the create
+ * wizard and the build session check a URL name that way (on blur, on 次へ, for
+ * a suggestion). Declare the checks a step makes with their exact count.
+ */
+export function freeUrlNameChecks(count: number): ExpectedFailure {
+  return { method: 'GET', path: '/api/console/resolve', status: 404, count, reason: 'the URL name is checked free (resolve answers 404)' }
+}
 
 /** A write the UI sent: the Playwright request plus its parsed JSON body (narrow before asserting). */
 export interface CapturedWrite {

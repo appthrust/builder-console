@@ -1,8 +1,9 @@
 import { ORPCError } from '@orpc/client'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient, type Query, type QueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { useRef } from 'react'
 import { client, type PlatformApiClient } from '../../api/client'
+import { keys } from '../../api/queries'
 import { consoleApi, consoleKeys, type BusinessApp, type DirectoryUser, type Person, type UpdateAppInput } from '../../api/console'
 import { platformErrorEnvelope } from '../../api/platform-error'
 import type { AppView } from '../../model/app'
@@ -193,11 +194,56 @@ export function useDeleteApp(projectId: string, app: BusinessApp, view: AppView)
       await deleteAppResources(projectId, deletion.current, { platform: client, removeApp: consoleApi.apps.remove })
     },
     onSuccess: async () => {
+      const deleted = { appId: app.id, applicationId: view.platform?.id, stackId: deletion.current?.stackId, webComponentId: view.platform?.webComponentId }
+      await forgetDeletedApp(queryClient, projectId, deleted)
       await navigate({ href: paths.group(app.group.path) })
-      queryClient.removeQueries({ queryKey: consoleKeys.app(app.id) })
-      await queryClient.invalidateQueries()
+      // Unobserved now: drop the deleted app's own reads instead of letting them refetch.
+      queryClient.removeQueries({ predicate: (query) => readsDeletedApp(query, projectId, deleted) })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: CONSOLE_ROOT }),
+        ...[keys.applications, keys.stacks, keys.publishes, keys.summaries, keys.sourceRepositories]
+          .map((key) => queryClient.invalidateQueries({ queryKey: key(projectId) })),
+      ])
     },
   })
+}
+
+export interface DeletedApp {
+  appId: string
+  applicationId?: string
+  stackId?: string
+  webComponentId?: string
+}
+
+/** A query that reads only the deleted app: its console record/tools/comments or its Platform releases, env and logs. */
+export function readsDeletedApp(query: Pick<Query, 'queryKey'>, projectId: string, deleted: DeletedApp): boolean {
+  const key = query.queryKey
+  if (key[0] === 'console') return key.slice(1).some((part) => part === deleted.appId)
+  if (deleted.applicationId && (key[0] === 'releases' || key[0] === 'release-state' || key[0] === 'env-vars')) return key[1] === projectId && key[2] === deleted.applicationId
+  if (deleted.webComponentId && key[0] === 'logs') return key[1] === projectId && key[2] === deleted.webComponentId
+  return false
+}
+
+type Listed<T> = T[] | { data?: T[]; items?: T[] } | undefined
+
+/**
+ * After a delete, before leaving its page: stop the deleted app's in-flight reads
+ * and take it out of the cached lists, so the next page derives nothing (no
+ * releases, no screenshots) from an app that no longer exists.
+ */
+export async function forgetDeletedApp(queryClient: QueryClient, projectId: string, deleted: DeletedApp): Promise<void> {
+  await queryClient.cancelQueries({ predicate: (query) => readsDeletedApp(query, projectId, deleted) })
+  // Console lists are bare arrays; Platform lists are `{ data }` envelopes.
+  const without = <T extends { id: string }>(list: Listed<T>, id: string | undefined): Listed<T> => {
+    if (!list || !id) return list
+    if (Array.isArray(list)) return list.filter((item) => item.id !== id)
+    return { ...list, ...(list.data ? { data: list.data.filter((item) => item.id !== id) } : {}), ...(list.items ? { items: list.items.filter((item) => item.id !== id) } : {}) }
+  }
+  queryClient.setQueryData<Listed<{ id: string }>>(keys.applications(projectId), (list) => without(list, deleted.applicationId))
+  queryClient.setQueryData<Listed<{ id: string }>>(keys.stacks(projectId), (list) => without(list, deleted.stackId))
+  for (const prefix of [['console', 'apps'], ['console', 'directory-apps']]) {
+    queryClient.setQueriesData<Listed<{ id: string }>>({ queryKey: prefix }, (list) => without(list, deleted.appId))
+  }
 }
 
 /** 作りかけ「やめる」: a draft has no stack yet, so only the console record goes; the list stays where it is. */

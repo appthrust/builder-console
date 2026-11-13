@@ -1,4 +1,6 @@
-import { captureWrite, expect, seed, test } from '../support/fixtures'
+import { captureWrite, expect, seed, test, withExpectedFailures } from '../support/fixtures'
+
+const accessWrite = '/api/v1/projects/{projectId}/publishes/{publishId}/access'
 
 test('scope writes platform access before console metadata and observes pending then ready @mock @story', async ({ page, mock }, testInfo) => {
   void mock
@@ -45,8 +47,10 @@ test('platform 403 changes no console metadata and explains Team Editor @mock @s
   await page.getByRole('button', { name: '共有', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: '共有', exact: true })
   await dialog.getByRole('radio', { name: /^指定した人のみ / }).click()
-  await dialog.getByRole('button', { name: '保存', exact: true }).click()
-  await expect(dialog.getByText('基盤の編集権限（Team Editor）が必要です', { exact: true })).toBeVisible()
+  await withExpectedFailures([{ method: 'PUT', path: accessWrite, status: 403, count: 1, reason: 'the Platform refuses the access write without Team Editor' }], async () => {
+    await dialog.getByRole('button', { name: '保存', exact: true }).click()
+    await expect(dialog.getByText('基盤の編集権限（Team Editor）が必要です', { exact: true })).toBeVisible()
+  })
   await expect(page.getByTestId('share-access-status')).toHaveText('未適用（基盤の権限が必要）')
   expect(writes).toEqual([])
   expect(await (await page.request.get(consolePath)).json()).toEqual(before)
@@ -69,9 +73,11 @@ for (const scope of ['private', 'group'] as const) {
     await page.getByRole('region', { name: '公開範囲', exact: true }).getByRole('button', { name: '共有', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: '共有', exact: true })
     await dialog.getByRole('radio', { name: scope === 'private' ? /^指定した人のみ / : /^グループ / }).click()
-    await dialog.getByRole('button', { name: /^(保存|公開範囲を反映する)$/ }).click()
     const failed = '公開範囲の反映に失敗（現在は誰でもアクセスできます）'
-    await expect(page.getByTestId('share-access-status')).toHaveText(failed)
+    await withExpectedFailures([{ method: 'PUT', path: accessWrite, status: 400, count: 1, reason: 'the Platform rejects the access request' }], async () => {
+      await dialog.getByRole('button', { name: /^(保存|公開範囲を反映する)$/ }).click()
+      await expect(page.getByTestId('share-access-status')).toHaveText(failed)
+    })
     expect(await (await page.request.get(consolePath)).json()).toEqual(before)
     expect(await (await page.request.get(accessPath)).json()).toEqual({ mode: 'Public' })
     await page.keyboard.press('Escape')

@@ -1,4 +1,4 @@
-import { test, expect, seed, captureWrite } from '../support/fixtures'
+import { test, expect, seed, captureWrite, freeUrlNameChecks, withExpectedFailures } from '../support/fixtures'
 import { textJa } from '../../src/model/build/copy'
 import { numberedUrlName } from '../../src/model/create'
 
@@ -36,12 +36,14 @@ test('a creation URL conflict offers a checked name and retry creates the app @a
     const url = new URL(response.url())
     return url.pathname === '/api/console/resolve' && url.searchParams.get('path')?.endsWith(`/${suggested}`) === true
   })
-  await page.getByRole('button', { name: 'この内容で作る', exact: true }).click()
   const conversation = page.getByRole('log', { name: 'AI との会話' })
-  await expect(conversation).toContainText(textJa.failure.urlNameTaken, { timeout: 20_000 })
   const choice = page.getByRole('button', { name: `${suggested} にする`, exact: true })
-  await expect(choice).toBeVisible()
-  expect((await checkedSuggestion).status()).toBe(404)
+  await withExpectedFailures([freeUrlNameChecks(1)], async () => {
+    await page.getByRole('button', { name: 'この内容で作る', exact: true }).click()
+    await expect(conversation).toContainText(textJa.failure.urlNameTaken, { timeout: 20_000 })
+    await expect(choice).toBeVisible()
+    expect((await checkedSuggestion).status()).toBe(404)
+  })
   const failed = await (await request.get(path)).json()
   expect(failed.creationExecutions.at(-1).steps.find((step: { status: string }) => step.status === 'failed')).toMatchObject({
     tool: 'appthrust.applicationStack.validate', detail: { reason: 'PublishURLConflict' },

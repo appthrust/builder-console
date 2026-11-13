@@ -64,14 +64,14 @@ bun run test:e2e:mock
 
 `test:e2e` runs the complete story suite. Configure `CONSOLE_E2E_PORT` and
 `CONSOLE_E2E_MOCK_PORT` to isolate browser runs. No live platform credentials are
-needed. `typecheck:e2e` passes, but mock E2E is deliberately excluded from CI:
-the published `@appthrust/api-schema@0.1.1` ESM files have extensionless relative
-imports. Playwright's Node loader fails during discovery with
-`Cannot find module .../dist/schemas/platform-api/common` imported by
-`dist/schemas/platform-api/index.js`. Vite and Bun resolve these imports, so the
-SPA build and unit suite work; they do not imply browser-story coverage. Fixing
-the published package's Node-ESM exports is owned by the SDK repository, not by
-an app-local source alias or loader shim.
+needed. CI runs every story on each pull request and main push (`console-mock-stories`,
+aggregated with the other jobs into the required `console-verification` check); see
+[Browser stories](web/README.md#browser-stories) for the automatic checks and how to
+declare an expected failure. Stories may import only types from
+`@appthrust/api-schema`: its published ESM files have extensionless relative imports
+that Playwright's Node loader cannot resolve, and one value import fails discovery
+of the whole suite. Fixing the package's Node-ESM exports is owned by the SDK
+repository, not by an app-local source alias or loader shim.
 
 ## Container and runtime
 

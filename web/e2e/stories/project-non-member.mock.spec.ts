@@ -1,4 +1,7 @@
-import { test, expect, seed } from '../support/fixtures'
+import { test, expect, seed, withExpectedFailures, type ExpectedFailure } from '../support/fixtures'
+
+/** A deep link resolves its path; the console answers a non-member with 403 not_project_member. */
+const refusedResolve: ExpectedFailure = { method: 'GET', path: '/api/console/resolve', status: 403, count: 1, reason: 'a non-member cannot resolve app paths' }
 
 test('explains Project non-membership with its Team, hides app actions, and lets the user log out @mock @story', async ({ page, request, mock }) => {
   const teamSlug = 'owning-project-team'
@@ -26,20 +29,26 @@ test('explains Project non-membership with its Team, hides app actions, and lets
   await expect(page.getByText('いまアプリの作成状態を確認できません', { exact: true })).toHaveCount(0)
 
   // A deep app link must not replace the explanation with a route-load failure.
-  await page.goto(`/${seed.apps.mitsumori.groupPath}/${seed.apps.mitsumori.slug}`)
-  await expect(main.getByRole('heading', { name: title, exact: true })).toBeVisible()
+  await withExpectedFailures([refusedResolve], async () => {
+    await page.goto(`/${seed.apps.mitsumori.groupPath}/${seed.apps.mitsumori.slug}`)
+    await expect(main.getByRole('heading', { name: title, exact: true })).toBeVisible()
+  })
   await expect(main.getByText(body, { exact: true })).toBeVisible()
 
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.reload()
-  await expect(main.getByRole('heading', { name: title, exact: true })).toBeVisible()
+  await withExpectedFailures([refusedResolve], async () => {
+    await page.reload()
+    await expect(main.getByRole('heading', { name: title, exact: true })).toBeVisible()
+  })
   await expect(main.getByText(body, { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'メニューを開く', exact: true })).toHaveCount(0)
 
   // Before the server has read the Project successfully, it must not invent a Team name.
   await mock.console('not-member', { teamSlug: '' })
-  await page.reload()
-  await expect(main.getByText('管理者に追加を依頼してください。', { exact: true })).toBeVisible()
+  await withExpectedFailures([refusedResolve], async () => {
+    await page.reload()
+    await expect(main.getByText('管理者に追加を依頼してください。', { exact: true })).toBeVisible()
+  })
   await expect(main.getByText(body, { exact: true })).toHaveCount(0)
 
   // The edge owns logout; prove this stays a full document navigation, not an API call.

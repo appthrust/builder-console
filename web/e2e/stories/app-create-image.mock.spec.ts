@@ -1,4 +1,4 @@
-import { expect, seed, test } from '../support/fixtures'
+import { expect, freeUrlNameChecks, seed, test, withExpectedFailures } from '../support/fixtures'
 import {
   continueToShare,
   fillAppDetails,
@@ -18,9 +18,15 @@ test.describe('App create from a container image @create', () => {
     const group = seed.groups.teamA
 
     await openCreateWizard(page)
-    await pickImage(page, imageRef)
-    await fillAppDetails(page, { displayName, description, tags })
-    const slug = await continueToShare(page)
+    let slug = ''
+    await withExpectedFailures([freeUrlNameChecks(3)], async () => {
+      await pickImage(page, imageRef)
+      // The name field's blur check must answer before 次へ, or 次へ joins it instead of checking again.
+      const blurCheck = page.waitForResponse((response) => response.url().includes('/api/console/resolve?path=') && response.url().endsWith('%2Fimage-demo'))
+      await fillAppDetails(page, { displayName, description, tags })
+      await blurCheck
+      slug = await continueToShare(page)
+    })
     expect(slug).toBe('image-demo')
     await pickShareScope(page, '自分だけ')
     await expect(page.getByTestId('confirm-summary')).toContainText(`「${displayName}」を ${group.name} のアプリとして作り、自分だけに公開します`)

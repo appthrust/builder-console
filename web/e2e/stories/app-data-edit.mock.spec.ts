@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test'
-import { test, expect, seed, captureWrite } from '../support/fixtures'
+import { test, expect, seed, captureWrite, withExpectedFailures } from '../support/fixtures'
 
 // データ tab writes on the 備品在庫 fixture (src/dev/mock-database-data.ts):
 // 表 「商品」 (public.products), row 1 「ノートPC」 with 在庫 8. Every product is
@@ -92,8 +92,10 @@ test.describe('App data edit @app', () => {
       await sheet.getByRole('button', { name: 'この行の操作', exact: true }).click()
       await page.getByRole('menuitem', { name: 'この行を削除', exact: true }).click()
       const confirm = page.getByRole('dialog', { name: '「モニター」の行を削除しますか？', exact: true })
-      await confirm.getByRole('button', { name: '削除する', exact: true }).click()
-      await expect(confirm.getByText('この行はほかの表から使われているため削除できません', { exact: true })).toBeVisible()
+      await withExpectedFailures([{ method: 'DELETE', path: `${rowsPath}/{row}`, status: 409, count: 1, reason: 'another table still references the row' }], async () => {
+        await confirm.getByRole('button', { name: '削除する', exact: true }).click()
+        await expect(confirm.getByText('この行はほかの表から使われているため削除できません', { exact: true })).toBeVisible()
+      })
       await confirm.getByRole('button', { name: 'キャンセル', exact: true }).click()
       // Cancelling the delete returns to the row, which is still there.
       await expect(sheet).toBeVisible()
@@ -109,8 +111,10 @@ test.describe('App data edit @app', () => {
     await sheet.getByLabel(/^単価/).fill('118000')
 
     await mock.platform('data-write', { mode: 'conflict' })
-    await captureWrite(page, 'PATCH', `${rowsPath}/1`, () => sheet.getByRole('button', { name: '保存', exact: true }).click())
-    await expect(sheet.getByText('ほかの人が先に変更しました。最新の内容を確認してから保存してください。', { exact: true })).toBeVisible()
+    await withExpectedFailures([{ method: 'PATCH', path: `${rowsPath}/1`, status: 409, count: 1, reason: 'someone else changed the row first' }], async () => {
+      await captureWrite(page, 'PATCH', `${rowsPath}/1`, () => sheet.getByRole('button', { name: '保存', exact: true }).click())
+      await expect(sheet.getByText('ほかの人が先に変更しました。最新の内容を確認してから保存してください。', { exact: true })).toBeVisible()
+    })
     await expect(sheet.getByLabel(/^単価/)).toHaveValue('118000')
 
     await sheet.getByRole('button', { name: '最新の内容を読み込む', exact: true }).click()
@@ -131,8 +135,10 @@ test.describe('App data edit @app', () => {
     await stock.fill('-1')
 
     await mock.platform('data-write', { mode: 'constraint' })
-    await sheet.getByRole('button', { name: '保存', exact: true }).click()
-    await expect(sheet.getByText('在庫 の値が条件を満たしていません', { exact: true })).toBeVisible()
+    await withExpectedFailures([{ method: 'PATCH', path: `${rowsPath}/1`, status: 400, count: 1, reason: 'the database rejects a negative stock (check constraint)' }], async () => {
+      await sheet.getByRole('button', { name: '保存', exact: true }).click()
+      await expect(sheet.getByText('在庫 の値が条件を満たしていません', { exact: true })).toBeVisible()
+    })
     await expect(stock).toHaveAttribute('aria-invalid', 'true')
     await expect(stock).toBeFocused()
     await expect(sheet.getByText('入力内容を確認してください。', { exact: true })).toBeVisible()
@@ -165,8 +171,10 @@ test.describe('App data edit @app', () => {
       await sheet.getByLabel(/^在庫/).fill('9')
       // Only the Platform API refuses: the console already showed the tab to this app's editor.
       await mock.platform('role', { role: 'Viewer' })
-      await sheet.getByRole('button', { name: '保存', exact: true }).click()
-      await expect(sheet.getByText('データを編集する権限がまだありません', { exact: true })).toBeVisible()
+      await withExpectedFailures([{ method: 'PATCH', path: `${rowsPath}/1`, status: 403, count: 1, reason: 'the Platform API refuses a Viewer write' }], async () => {
+        await sheet.getByRole('button', { name: '保存', exact: true }).click()
+        await expect(sheet.getByText('データを編集する権限がまだありません', { exact: true })).toBeVisible()
+      })
       await sheet.getByRole('button', { name: 'キャンセル', exact: true }).click()
       await sheet.getByRole('button', { name: '閉じる', exact: true }).click()
       await mock.platform('role', { role: 'Editor' })
@@ -177,8 +185,10 @@ test.describe('App data edit @app', () => {
       const sheet = await openRow(page, 'ノートPC')
       await sheet.getByRole('button', { name: '編集', exact: true }).click()
       await sheet.getByLabel(/^在庫/).fill('9')
-      await sheet.getByRole('button', { name: '保存', exact: true }).click()
-      await expect(sheet.getByText('行の編集はまだ有効になっていません。基盤の担当者に「データの編集」を依頼してください。', { exact: true })).toBeVisible()
+      await withExpectedFailures([{ method: 'PATCH', path: `${rowsPath}/1`, status: 412, count: 1, reason: 'row editing is not enabled for this database' }], async () => {
+        await sheet.getByRole('button', { name: '保存', exact: true }).click()
+        await expect(sheet.getByText('行の編集はまだ有効になっていません。基盤の担当者に「データの編集」を依頼してください。', { exact: true })).toBeVisible()
+      })
       await expect(sheet.getByRole('button', { name: '編集', exact: true })).toHaveCount(0)
       await expect(sheet.getByRole('button', { name: 'この行の操作', exact: true })).toHaveCount(0)
       await expect(sheet.locator('[data-field="stock"] dd')).toHaveText('8')
