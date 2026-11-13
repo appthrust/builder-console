@@ -162,9 +162,13 @@ func EntryOf(app App, canOpen bool) DirectoryEntry {
 	if screenshots == nil {
 		screenshots = []Screenshot{}
 	}
+	owners := app.Owners
+	if owners == nil {
+		owners = []Person{}
+	}
 	return DirectoryEntry{
 		ID: app.ID, Path: app.Path(), DisplayName: app.DisplayName, Description: app.Description, Icon: app.Icon,
-		Tags: tags, Capabilities: capabilities, Screenshots: screenshots, Group: app.Group, Owners: app.Owners,
+		Tags: tags, Capabilities: capabilities, Screenshots: screenshots, Group: app.Group, Owners: owners,
 		AppName: app.AppName, StackID: app.StackID, CreatedAt: app.CreatedAt, UpdatedAt: app.UpdatedAt, CanOpen: canOpen,
 	}
 }

@@ -405,7 +405,7 @@ describe('directory and comment routes', () => {
     expect(pending).toEqual({ pending: true, people: 4, groups: 6, memberships: 5 })
     expect((await call('GET', `${root}/me`)).body.migration).toEqual(pending)
     const result = await call('POST', `${root}/admin/directory-migrate`)
-    expect(result).toEqual({ status: 200, body: { imported: { people: 4, groups: 6, memberships: 5 }, conflicts: [] } })
+    expect(result).toEqual({ status: 200, body: { imported: { people: 4, groups: 6, memberships: 5 }, conflicts: [], merged: [] } })
     expect((await call('GET', `${root}/me`)).body.migration.pending).toBe(false)
     expect(await call('POST', `${root}/admin/directory-migrate`)).toEqual(result)
   })

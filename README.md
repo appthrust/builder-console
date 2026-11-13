@@ -73,6 +73,68 @@ that Playwright's Node loader cannot resolve, and one value import fails discove
 of the whole suite. Fixing the package's Node-ESM exports is owned by the SDK
 repository, not by an app-local source alias or loader shim.
 
+### Console response contracts (APT-832 / W1)
+
+`web/src/api/contracts/console/schema/` is the canonical Zod source for Console
+success wires and the HTTP error envelope. `operations.ts` in that directory
+registers all 33 SPA operations, including `/config`, screenshot multipart
+responses, and the three 204 deletes. Adapters in the parent directory reuse
+those schemas and expose the domain types in `model/contracts/console.ts`.
+Feature migrations remain separate; this slice does not replace the unverified
+facade's callers.
+
+| Operation family | Count | Responses |
+| --- | ---: | --- |
+| Bootstrap | 2 | me, config |
+| Directory proxy | 6 | groups, people, person profile, create person, members, realm users |
+| Apps and resolution | 11 | list/get/by-path/create/update/bind/delete, directory list/entry, tools, resolve |
+| Comments | 3 | list, post, delete |
+| Screenshots | 3 | multipart upload, reorder, delete |
+| Access requests | 6 | mine, create, pending, app requests, approve, decline |
+| Administration | 2 | platform settings, Directory migration |
+
+Collections carry `presence: total`; optional observations carry
+`presence: optionalObservation`. There are no blanket null/absence defaults in
+the Console readers. Missing permissions fail bootstrap. Unknown share scopes,
+roles, and request states remain explicitly unknown; unknown tagged results are
+unsupported. A removed person is `{ unknown: true, id }` in the domain, never a
+fabricated contact. The older public SDK's broad Person shape is not permission
+to invent missing email, subject, or ownership evidence.
+
+Generate and check the internal artifact from `web/`:
+
+```sh
+bun run generate:console-schema
+bun run check:console-schema
+```
+
+`cmd/server/internal/api/console-spa.openapi.json` is committed, generated, and
+**not served**. Go tests validate real response writers and handler output against
+it. `testdata/console-wire.json` contains Go-marshaled fixtures, including empty
+collections, omitted observations, pending people, and removed people; SPA tests
+replay those original wires, not parsed/defaulted values. To deliberately update
+fixtures after reviewing a writer change:
+
+```sh
+UPDATE_CONSOLE_WIRE_FIXTURES=1 go test ./cmd/server/internal/api -run '^TestConsoleWriterContract$'
+```
+
+The existing served `openapi.json` remains byte-identical to the public
+`appserver-go v0.5.0` Console contract. Compatibility tests check its listApps /
+getApp fields and fixtures against the internal schema. Replacing that public
+document needs separate review. This intentionally deviates from the design's
+single generated public document and separate `B/api-schema` package: the schema
+currently has one TypeScript consumer, so it shares the SPA's Zod installation.
+A package boundary is deferred until a second consumer needs it, avoiding
+file-dependency symlink resolution and build changes.
+
+`check:console-schema` regenerates into a temporary directory, detects drift,
+and cleans up. The existing web CI job runs it. The boundary checker also rejects
+feature/model imports of the canonical schema directory, including type-only
+imports, barrels, and assertions. PostgreSQL handler contract tests use the same
+opt-in DSN and isolated-schema cleanup as the other server integration tests.
+
+
 ## Container and runtime
 
 ```sh

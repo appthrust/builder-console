@@ -66,6 +66,7 @@ function parse(file: string, text: string): ts.SourceFile {
 /** The rules a module breaks for its importers by re-exporting raw modules or the wire package (barrels, aliases). */
 function reexportRules(files: ReadonlyMap<string, string>, file: string, seen = new Set<string>()): Set<Rule> {
   const rules = new Set<Rule>()
+  if (moduleId(file).startsWith('api/contracts/console/schema/')) rules.add('wire-schema-import')
   if (seen.has(file)) return rules
   seen.add(file)
   const text = files.get(file)
