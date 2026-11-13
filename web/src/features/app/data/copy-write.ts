@@ -35,6 +35,8 @@ export const writeTextJa = {
     none: '（なし）',
     choose: '選んでください',
     jsonHint: '{ } や [ ] の形で書きます',
+    /** A column whose database type has no dedicated input here: the person types the value as text. */
+    unlistedType: (type: string) => `専用の入力欄がない型です（${type}）。入力した値をそのまま保存します。`,
   },
   validation: {
     required: (label: string) => `${label} は必須です`,

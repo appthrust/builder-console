@@ -15,7 +15,7 @@ test('mock database changes: one applied and one awaiting; approval reports Read
   await call('POST', '/api/v1/__mock/reset')
   expect(await phases()).toEqual({ 'mitsumori-db-0001-init': 'Succeeded', [pending]: 'AwaitingApproval' })
   expect((await call('POST', `${changes}/${pending}/approvals`, { decision: 'Maybe' })).status).toBe(400)
-  expect(await call('POST', `${changes}/${pending}/approvals`, { decision: 'Approved' })).toMatchObject({ status: 201, body: { phase: 'ReadyToRun', approval: { approvedCount: 1 } } })
+  expect(await call('POST', `${changes}/${pending}/approvals`, { decision: 'Approved' })).toMatchObject({ status: 202, body: { phase: 'ReadyToRun', approval: { approvedCount: 1 } } })
   expect((await call('POST', `${changes}/${pending}/approvals`, { decision: 'Approved' })).status).toBe(409)
   expect((await phases())[pending]).toBe('ReadyToRun')
   expect((await call('GET', changes)).body.data.find((change: { id: string }) => change.id === pending)).toMatchObject({ phase: 'Succeeded', latestRevision: { revision: 2 } })

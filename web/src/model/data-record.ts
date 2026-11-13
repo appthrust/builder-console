@@ -168,7 +168,8 @@ function parseValue(field: Field, raw: string): Parsed {
  * Form → row values. Read-only fields (auto-filled keys and timestamps) are
  * never emitted. An empty input means: on create, leave it to the column
  * default when there is one; otherwise null when the column allows it, else
- * 「○○ は必須です」.
+ * 「○○ は必須です」. A column of an unlisted type is text like any other: the
+ * database judges its value.
  */
 export function parseFormValues(collection: Collection, form: FormValues, mode: FormMode): ParsedForm {
   const values: Record<string, unknown> = {}
@@ -223,16 +224,20 @@ export function diff(before: Record<string, unknown>, after: Record<string, unkn
 
 /**
  * The optimistic-lock payload of an update: the values the user last saw for
- * each changed column, plus `updated_at` when the row has one. JSON columns
- * are left out: PostgreSQL has no equality for `json`, and `updated_at` or the
- * other columns still detect the concurrent write.
+ * each changed column, plus `updated_at` when the row has one. JSON columns,
+ * and any column whose stored value is an object or array, are left out:
+ * PostgreSQL has no equality for `json`, the text a column's value arrives as
+ * need not be the text it compares by, and `updated_at` or the other columns
+ * still detect the concurrent write.
  */
 export function expectedFor(collection: Collection, row: DataRow, changed: Record<string, unknown>): Record<string, unknown> {
   const expected: Record<string, unknown> = {}
   for (const name of Object.keys(changed)) {
     if (!(name in row.values)) continue
     if (collection.fields.find((field) => field.name === name)?.kind === 'json') continue
-    expected[name] = row.values[name] ?? null
+    const stored = row.values[name]
+    if (stored !== null && typeof stored === 'object') continue
+    expected[name] = stored ?? null
   }
   const updatedAt = row.values[UPDATED_AT]
   if (updatedAt !== null && updatedAt !== undefined) expected[UPDATED_AT] = updatedAt
