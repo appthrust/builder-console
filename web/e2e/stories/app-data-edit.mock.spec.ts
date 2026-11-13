@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test'
+import type { Page, Route } from '@playwright/test'
 import { test, expect, seed, captureWrite, withExpectedFailures } from '../support/fixtures'
 
 // データ tab writes on the 備品在庫 fixture (src/dev/mock-database-data.ts):
@@ -24,6 +24,11 @@ async function openRow(page: Page, rowName: string) {
 }
 
 test.describe('App data edit @app', () => {
+  // A story that rewrites answers in the browser removes its routes before the next one starts.
+  test.afterEach(async ({ page }) => {
+    await page.unrouteAll({ behavior: 'ignoreErrors' })
+  })
+
   test('edits a value, adds a row and deletes it with confirmation @mock @story', async ({ page, mock }) => {
     void mock
     await page.goto(dataPath)
@@ -102,6 +107,58 @@ test.describe('App data edit @app', () => {
       await sheet.getByRole('button', { name: '閉じる', exact: true }).click()
       await expect(page.getByRole('link', { name: 'モニター', exact: true })).toBeVisible()
     })
+  })
+
+  test('a save answered 2xx unreadably keeps the edit, offers only 「最新の状態を確認する」 and never resends @mock @story', async ({ page, mock }, testInfo) => {
+    void mock
+    const patches: number[] = []
+    let reads = 0
+    await page.route(`**${rowsPath}**`, async (route: Route) => {
+      const method = route.request().method()
+      if (method === 'GET') reads++
+      if (method !== 'PATCH') return route.continue()
+      const response = await route.fetch()
+      patches.push(response.status())
+      // The row was written; the answer names no written row.
+      return route.fulfill({ response, json: { ...(await response.json()), rows: [] } })
+    })
+    await page.goto(dataPath)
+    const sheet = await openRow(page, 'ノートPC')
+    await sheet.getByRole('button', { name: '編集', exact: true }).click()
+    const stock = sheet.getByLabel(/^在庫/)
+    await stock.fill('6')
+    const save = sheet.getByRole('button', { name: '保存', exact: true })
+    await save.click()
+
+    const warning = sheet.getByRole('status').filter({ hasText: '処理結果を確認できませんでした' })
+    await expect(warning).toHaveCount(1)
+    await expect(warning.getByRole('button')).toHaveCount(1)
+    await expect(warning.getByRole('button', { name: '最新の状態を確認する', exact: true })).toBeVisible()
+    await expect(sheet.getByRole('button', { name: 'もう一度試す', exact: true })).toHaveCount(0)
+    await expect(sheet.getByText('保存しました。', { exact: true })).toHaveCount(0)
+    await expect(sheet.getByText('保存できませんでした', { exact: false })).toHaveCount(0)
+    await expect(save).toBeDisabled()
+    await expect(stock).toHaveValue('6')
+    // Enter in the field sends nothing either.
+    await stock.press('Enter')
+    await expect(stock).toHaveValue('6')
+    expect(patches).toEqual([200])
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath('unreadable-row-save-confirm.png'), fullPage: true })
+
+    const before = reads
+    await warning.getByRole('button', { name: '最新の状態を確認する', exact: true }).click()
+    await expect.poll(() => reads).toBeGreaterThan(before)
+    await expect(warning).toHaveCount(0)
+    // The write had happened: the read-back holds 6 under the kept edit, so saving sends nothing more.
+    await expect(sheet.getByText('最新の内容を読み込みました。確認してから保存してください。', { exact: true })).toBeVisible()
+    await expect(stock).toHaveValue('6')
+    await expect(save).toBeEnabled()
+    await save.click()
+    await expect(sheet.locator('[data-field="stock"] dd')).toHaveText('6')
+    expect(patches).toEqual([200])
+    await sheet.getByRole('button', { name: '閉じる', exact: true }).click()
+    await expect(await gridCell(page, 'ノートPC', '在庫')).toHaveText('6')
   })
 
   test('a conflicting save keeps the Sheet open, reloads the latest row and saves the draft @mock @story', async ({ page, mock }) => {

@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 import type { DatabaseTableColumn, DatabaseTableSchema } from '@appthrust/api-schema/platform-api'
-import { deriveCatalog, deriveCollection, displayValue, formatValue, rowKey, toDataRow, type Collection, type Field } from './data-catalog'
+import { tableOf, tableRefOf } from '../api/testing/data-domain'
+import {
+  deriveCatalog, deriveCollection as deriveFromTable, displayValue, formatValue, rowKey, toDataRow, type Collection, type Field,
+} from './data-catalog'
+
+/** The description as the Platform marshals it, read through the production reader first. */
+const deriveCollection = (wire: DatabaseTableSchema) => deriveFromTable(tableOf(wire))
 
 const column = (name: string, type: string, init: Partial<DatabaseTableColumn> = {}): DatabaseTableColumn => ({
   name, type, nullable: true, hasDefault: false, primaryKey: false, ...init,
@@ -87,8 +93,8 @@ describe('deriveCollection hidden rules', () => {
         { schema: 'public', name: '_audit_log', type: 'table_or_view' },
         { schema: 'public', name: 'products', type: 'table_or_view' },
         { schema: 'public', name: 'not_described', type: 'table_or_view' },
-      ],
-      [products, audit],
+      ].map(tableRefOf),
+      [products, audit].map(tableOf),
     )
     expect(catalog.collections.map((item) => [item.id, item.hidden])).toEqual([['public._audit_log', true], ['public.products', false]])
   })
@@ -103,7 +109,12 @@ describe('deriveCollection editable rules', () => {
     const view = deriveCollection({ ...products, type: 'view', primaryKey: [] })
     expect(view).toMatchObject({ kind: 'view', editable: false })
     expect(view.primaryKey).toBeUndefined()
-    expect(deriveCollection({ ...products, type: 'VIEW' })).toMatchObject({ kind: 'view', editable: false })
+  })
+
+  test('a relation type this console does not know is read-only, never taken for a table', () => {
+    for (const type of ['VIEW', 'materialized_view', 'foreign_table']) {
+      expect(deriveCollection({ ...products, type })).toMatchObject({ kind: 'unknown', editable: false })
+    }
   })
 
   test('no key or a composite key is read-only, even when the server says editable', () => {
@@ -167,6 +178,8 @@ describe('deriveCollection kind mapping', () => {
     ['text[]', 'json'],
     ['uuid', 'uuid'],
     ['tsvector', 'text'],
+    ['interval', 'text'],
+    ['bytea', 'text'],
   ] as const)('%s → %s', (type, kind) => {
     expect(field(deriveCollection({ ...products, columns: [column('value', type)] }), 'value').kind).toBe(kind)
   })
@@ -179,8 +192,43 @@ describe('deriveCollection kind mapping', () => {
     expect(field(collection, 'stock').enumValues).toBeUndefined()
   })
 
-  test('a user-defined type without enum values is not an enum', () => {
-    expect(field(deriveCollection({ ...products, columns: [column('value', 'public.item_category', { enumValues: [] })] }), 'value').kind).toBe('text')
+  test('a user-defined type without enum values is plain text named by its type', () => {
+    for (const init of [{ enumValues: [] }, {}]) {
+      expect(field(deriveCollection({ ...products, columns: [column('value', 'public.item_category', init)] }), 'value')).toMatchObject({ kind: 'text', unlistedType: 'public.item_category' })
+    }
+  })
+})
+
+describe('a column whose type has no dedicated input', () => {
+  const withInterval = deriveCollection({ ...products, columns: [...products.columns, column('lead_time', 'interval', { description: '@long 納期' })] })
+
+  test('is text (longtext with @long) named by its database type; listed types carry no type name', () => {
+    expect(field(withInterval, 'lead_time')).toMatchObject({ kind: 'longtext', unlistedType: 'interval', label: '納期', required: false, readOnly: false })
+    expect(field(withInterval, 'stock').unlistedType).toBeUndefined()
+    expect(field(withInterval, 'category').unlistedType).toBeUndefined()
+    expect(field(withInterval, 'supplier_id').unlistedType).toBeUndefined()
+  })
+
+  test('keeps NOT NULL / default from the column metadata', () => {
+    const required = field(deriveCollection({ ...products, columns: [column('span', 'interval', { nullable: false })] }), 'span')
+    expect(required).toMatchObject({ required: true, nullable: false, hasDefault: false })
+    const defaulted = field(deriveCollection({ ...products, columns: [column('span', 'interval', { nullable: false, hasDefault: true })] }), 'span')
+    expect(defaulted).toMatchObject({ required: false, hasDefault: true })
+  })
+
+  test('shows its value as text; an object or array value as its JSON text, never [object Object]', () => {
+    const leadTime = field(withInterval, 'lead_time')
+    expect(formatValue(leadTime, '3 days 04:00:00')).toBe('3 days 04:00:00')
+    expect(formatValue(leadTime, 12)).toBe('12')
+    expect(formatValue(leadTime, { days: 3 })).toBe('{"days":3}')
+    expect(formatValue(leadTime, [1, 2])).toBe('[1,2]')
+    expect(formatValue(leadTime, null)).toBe('（なし）')
+  })
+
+  test('can name a row like any text column', () => {
+    const onlyInet = deriveCollection({ ...products, primaryKey: ['id'], columns: [column('id', 'integer', { primaryKey: true }), column('address', 'inet')] })
+    expect(onlyInet.displayField).toBe('address')
+    expect(displayValue(onlyInet, { key: '1', values: { id: 1, address: '10.0.0.1' } })).toBe('10.0.0.1')
   })
 })
 
