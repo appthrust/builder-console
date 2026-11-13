@@ -2,7 +2,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { ConsoleApiError } from '../../api/console'
-import { type AppTools } from '../../api/console-unverified'
+import { type AppTools } from '../../model/contracts/console'
+import { toolsOf } from '../../api/testing/app-domain'
 import { APP_TOOLS_POLL_MS, appToolsQuery } from '../../api/queries/console'
 import { POLL_INTERVAL_MS } from '../../api/queries/shared'
 import { copy } from '../../copy'
@@ -50,7 +51,7 @@ test('no tools yet: the empty state offers Create a tool to editors and stays a 
 })
 
 test('an unreachable Tools built-in app reads as one line with a retry inside the panel, never an alert', () => {
-  const html = view({ available: true, error: 'tools_unavailable', tools: [] })
+  const html = view(toolsOf({ available: true, error: 'tools_unavailable', tools: [] }))
   expect(html).toContain(text.tools.unavailable)
   expect(html).toContain(copy.common.retry)
   expect(html).not.toContain('role="alert"')

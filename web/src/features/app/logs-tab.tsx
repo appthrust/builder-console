@@ -1,6 +1,6 @@
 import { ArrowDown, Lock, RefreshCw, ScrollText } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { BusinessApp } from '../../api/console-unverified'
+import type { BusinessApp } from '../../model/contracts/console'
 import { isLogsForbidden, type ComponentLogsQuery } from '../../api/queries/app'
 import { copy, relativeTime } from '../../copy'
 import type { AppView } from '../../model/app'
@@ -9,6 +9,7 @@ import { locale } from '../../shell/language'
 import { Button, Card, CardBody, CardHeader, EmptyState, LinkButton, Loading, Notice } from '../../ui'
 import { text } from './copy'
 import { OwnerContact } from './owner-contact'
+import { StaleNotice } from './notices'
 
 /** Within this many pixels of the end the view counts as "following" new lines. */
 const FOLLOW_SLACK_PX = 24
@@ -66,6 +67,8 @@ export function LogsTab({ app, view, logs, isAdmin }: {
           }
         />
         <CardBody>
+          {/* A failed refresh keeps the lines already read (a 403 does not: old access is not reused). */}
+          {componentId && !forbidden && logs.isError && logs.data ? <div className="mb-3"><StaleNotice updatedAt={logs.dataUpdatedAt} refetching={logs.isFetching} onRetry={() => void logs.refetch()} /></div> : null}
           {!componentId ? (
             <EmptyState icon={<ScrollText aria-hidden className="size-5" />} title={text.logs.emptyLead} />
           ) : logs.isPending ? (
@@ -80,11 +83,11 @@ export function LogsTab({ app, view, logs, isAdmin }: {
             }>
               <span className="inline-flex items-center gap-2"><Lock aria-hidden className="size-4 shrink-0" />{text.logs.forbiddenBody}</span>
             </Notice>
-          ) : logs.isError ? (
+          ) : logs.isError && !logs.data ? (
             <Notice tone="error" title={text.logs.unavailable} actions={<Button size="sm" loading={logs.isFetching} onClick={() => void logs.refetch()}>{copy.common.retry}</Button>}>
               {logs.pollingStopped ? text.logs.unavailableLead : text.logs.retryingLead}
             </Notice>
-          ) : logs.data?.pods.length === 0 ? (
+          ) : lines.length === 0 && logs.isError ? null : logs.data?.pods.length === 0 ? (
             <Notice title={copy.app.logs.stopped} actions={
               view.url ? <LinkButton external href={view.url}>{copy.app.logs.open}</LinkButton> : null
             } />

@@ -4,13 +4,14 @@
 import { ExternalLink, Lock, MoreHorizontal, Pencil, Trash2, Users } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import type { BusinessApp } from '../../api/console-unverified'
 import { appAccessRequestsQuery, useGroups, useMe } from '../../api/queries/console'
 import { databaseTablesQuery, isDataForbidden, isDataMembershipUnbound } from '../../api/queries/data'
 import { isLogsForbidden, useComponentLogs } from '../../api/queries/app'
 import { useSourceRepositories } from '../../api/queries/catalog'
 import { copy, relativeTime } from '../../copy'
 import type { AppView } from '../../model/app'
+import { isOneOf } from '../../model/contracts/build'
+import type { BusinessApp } from '../../model/contracts/console'
 import { shareSentence } from '../../model/share'
 import { deriveAccess } from '../../model/access'
 import { AccessForbiddenError } from '../../api/access'
@@ -49,6 +50,7 @@ import { ReleasesTab } from './releases-tab'
 import { SettingsTab } from './settings-tab'
 import { readCreateSession } from '../create/persistence'
 import { useAppViews } from './use-app-views'
+import { StaleNotice } from './notices'
 import { OwnerLinks } from './owner-links'
 import { ImproveButton } from '../improve/entry'
 import { BuildFailureNotice } from '../build/build-failure-notice'
@@ -75,7 +77,7 @@ export function AppPage({ app, tab }: { app: BusinessApp; tab: AppTab }) {
   const sharing = shareSentence(app.share, groups, app.group)
   const canEdit = canEditApp(app, me)
   const requests = useQuery({ ...appAccessRequestsQuery(app.id), enabled: canEdit })
-  const pendingCount = canEdit ? requests.data?.filter((request) => request.status === 'pending').length ?? 0 : 0
+  const pendingCount = canEdit ? requests.data?.filter((request) => isOneOf(request.status, 'pending')).length ?? 0 : 0
   // Phase 1: the データ tab exposes every row, so only people who may edit the app see it (design "Authorization and privacy").
   const databaseId = canEdit ? view.stack?.databaseComponentId : undefined
   // A data URL for an app without the tab shows the overview once the stacks are known.
@@ -110,6 +112,7 @@ export function AppPage({ app, tab }: { app: BusinessApp; tab: AppTab }) {
       </div>
 
       <div>
+        {views.stale && !views.failed ? <div className="mt-4"><StaleNotice updatedAt={views.updatedAt} refetching={views.refetching} onRetry={views.refetch} /></div> : null}
         {views.failed ? (
           <LoadFailed onRetry={views.refetch} error={views.error} />
         ) : current === 'overview' ? (

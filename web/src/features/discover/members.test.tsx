@@ -4,9 +4,9 @@ import { createMemoryHistory, createRootRoute, createRouter, RouterContextProvid
 import { renderToStaticMarkup } from 'react-dom/server'
 import { preserveLanguage } from '../../../test/language'
 import { consoleKeys } from '../../api/queries/console'
-import { createConsoleApi, type Membership } from '../../api/console-unverified'
-import { createConsoleTransport } from '../../api/console'
 import { createTestGateway } from '../../api/testing/gateway'
+import { membershipOf } from '../../api/testing/app-domain'
+import { membersContract } from '../../api/contracts/console/operations'
 import { groupsContract } from '../../api/contracts/console/groups'
 import { meContract } from '../../api/contracts/console/me'
 import { copy } from '../../copy'
@@ -23,7 +23,6 @@ async function fixture(path: string, init?: RequestInit) {
   return response
 }
 
-const consoleApi = createConsoleApi(createConsoleTransport(fixture))
 const gateway = createTestGateway({ consoleFetch: fixture })
 const localStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
 let restoreLanguage: () => void
@@ -46,7 +45,7 @@ async function renderMembersTab(groupId: string, { loaded = true } = {}) {
   if (!group) throw new Error(`Missing group ${groupId}`)
   client.setQueryData(consoleKeys.me, me)
   client.setQueryData(consoleKeys.groups, groups)
-  if (loaded) client.setQueryData(consoleKeys.members(group.id), await consoleApi.directory.members(group.id))
+  if (loaded) client.setQueryData(consoleKeys.members(group.id), await gateway.console(membersContract, group.id))
   const router = createRouter({ routeTree: createRootRoute(), history: createMemoryHistory({ initialEntries: [`/${group.path}/-/members`] }), isServer: true })
   await router.load()
   try {
@@ -62,7 +61,7 @@ const caption = (html: string, name: string) => html.match(new RegExp(`<caption[
 describe('direct and inherited members', () => {
   test('splitMembers keeps rows without a source group as direct, in their order', () => {
     const person = (id: string) => ({ id, subject: id, pending: false, email: `${id}@example.test`, displayName: id, avatarVersion: null })
-    const row = (id: string, inheritedFrom: string | null): Membership => ({ groupId: 'team', person: person(id), role: 'member', inheritedFrom })
+    const row = (id: string, inheritedFrom: string | null) => membershipOf({ groupId: 'team', person: person(id), role: 'member', inheritedFrom })
     const { direct, inherited } = splitMembers([row('a', 'dept'), row('b', null), row('c', 'root'), row('d', null)])
     expect(direct.map((member) => member.person.id)).toEqual(['b', 'd'])
     expect(inherited.map((member) => member.person.id)).toEqual(['a', 'c'])

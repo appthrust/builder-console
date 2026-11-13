@@ -1,11 +1,12 @@
 import { describe, expect, test } from 'bun:test'
-import type { ApplicationSourceRepository, ApplicationStack } from '@appthrust/api-schema/platform-api'
+import type { ApplicationSourceRepository } from '@appthrust/api-schema/platform-api'
+import { stackOf } from '../api/testing/app-domain'
 import { copy } from '../copy'
 import type { AppView, ConsoleApp, ConsoleAppFacts } from './app'
 import { deriveCreateProgress, repositoryLabel, showsCreateProgress, type ProgressStep } from './progress'
 import { shareSentence, widensShare } from './share'
 
-const stack: ApplicationStack = {
+const stackWire = {
   id: 'mitsumori',
   projectId: 'pj',
   templateId: 'nextjs-postgres',
@@ -16,6 +17,7 @@ const stack: ApplicationStack = {
   webComponentId: 'mitsumori-web',
   pendingSync: false,
 }
+const stack = stackOf(stackWire)
 
 const repository = (status: ApplicationSourceRepository['status'], conditions: ApplicationSourceRepository['conditions'] = []): ApplicationSourceRepository => ({
   id: 'mitsumori-src',
@@ -200,7 +202,7 @@ describe('deriveCreateProgress', () => {
   })
 
   test('image path: step 1 is the setup step, done once the stack exists', () => {
-    const imageStack = { ...stack, sourceKind: 'sample-image' as const }
+    const imageStack = stackOf({ ...stackWire, sourceKind: 'sample-image' })
     const steps = deriveCreateProgress({ view: view({}, { stack: imageStack }), shareSentence: 'x' })
     expect(steps[0]).toMatchObject({ state: 'done', title: copy.progress.setup.done })
     expect(steps[1]?.state).toBe('active')

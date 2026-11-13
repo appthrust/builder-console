@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertCircle, CheckCircle2, Clock3, FileQuestion, Lock } from 'lucide-react'
 import { useState } from 'react'
-import { consoleApi, type MyAccessRequest } from '../../api/console-unverified'
 import { isConsoleError } from '../../api/console'
-import { consoleKeys, myAccessRequestQuery, useMe } from '../../api/queries/console'
+import { consoleKeys, createAccessRequest, myAccessRequestQuery, useMe } from '../../api/queries/console'
+import type { MyAccessRequest } from '../../model/contracts/console'
+import { StaleNotice, UnconfirmedNotice, useWriteConfirmation } from '../app/notices'
 import { copy } from '../../copy'
 import { accessRequestCopy as words } from '../../copy/access-request'
 import { appOrigin, stateFromReason } from '../../model/access-request'
@@ -25,23 +26,34 @@ export function RequestAccessPage({ appName, reason }: { appName: string; reason
     throwOnError: (error) => isConsoleError(error) && error.status === 401,
   })
   const create = useMutation({
-    mutationFn: () => consoleApi.accessRequests.create({ appName, message }),
+    mutationFn: () => createAccessRequest({ appName, message }),
     throwOnError: (error) => isConsoleError(error) && error.status === 401,
     onSuccess: async (result) => {
-      queryClient.setQueryData<MyAccessRequest>(consoleKeys.accessRequestMine(appName), {
-        appName,
-        exists: true,
-        ...result,
-      })
+      const key = consoleKeys.accessRequestMine(appName)
+      // A read that started before the request must not land over its answer; an answer of a kind this console does not know is only read back.
+      await queryClient.cancelQueries({ queryKey: key, exact: true })
+      if (result.kind === 'supported') {
+        const answer = result.value
+        const next: MyAccessRequest = answer.state === 'pending'
+          ? { appName, exists: true, state: { kind: 'known', value: 'pending' }, requestedAt: answer.requestedAt }
+          : { appName, exists: true, state: { kind: 'known', value: 'granted' } }
+        queryClient.setQueryData(key, next)
+      }
       setMessage('')
-      await queryClient.invalidateQueries({ queryKey: consoleKeys.accessRequestMine(appName) })
+      await queryClient.invalidateQueries({ queryKey: key })
     },
   })
+  // A request whose answer could not be read may have been sent: read the state back before offering it again (the message stays).
+  const confirmation = useWriteConfirmation([create.error], create.reset, () => queryClient.refetchQueries({ queryKey: consoleKeys.accessRequestMine(appName), exact: true }))
+  const request = mine.data?.exists ? mine.data : undefined
   const notFound = unknownApp || mine.data?.exists === false || isConsoleError(create.error, 'not_found')
-  const state = notFound ? 'not_found' : mine.isPending ? 'loading' : mine.isError ? 'unavailable' : mine.data.state ?? 'none'
+  // A state this console does not know is neither granted nor open for a new request.
+  const state = notFound ? 'not_found' : mine.data === undefined ? mine.isError ? 'unavailable' : 'loading' : request?.state.kind === 'unknown' ? 'unavailable' : request?.state.value ?? 'none'
+  const stale = mine.isError && mine.data !== undefined
   const messageLength = Array.from(message).length
   const tooLong = messageLength > MAX_MESSAGE_LENGTH
   const canRequest = state === 'none' || state === 'declined'
+  const requestBlocked = stale || confirmation.unconfirmed
   const origin = appOrigin(appName, window.location.hostname)
   const showAppUrl = origin !== undefined && (state === 'none' || state === 'pending' || state === 'declined' || state === 'granted')
   const Icon = state === 'not_found' ? FileQuestion : state === 'granted' ? CheckCircle2 : state === 'pending' ? Clock3 : state === 'unavailable' ? AlertCircle : Lock
@@ -50,8 +62,8 @@ export function RequestAccessPage({ appName, reason }: { appName: string; reason
   if (state === 'not_found') body = words.notFoundBody
   if (state === 'granted') body = words.grantedBody
   if (state === 'unavailable') body = words.unavailableBody
-  if (state === 'pending') body = mine.data?.requestedAt ? words.waiting(new Date(mine.data.requestedAt).toLocaleString(locale())) : words.waitingWithoutDate
-  if (state === 'declined') body = mine.data?.decidedAt ? words.declinedBody(new Date(mine.data.decidedAt).toLocaleString(locale())) : words.declinedWithoutDate
+  if (state === 'pending') body = request?.requestedAt ? words.waiting(new Date(request.requestedAt).toLocaleString(locale())) : words.waitingWithoutDate
+  if (state === 'declined') body = request?.decidedAt ? words.declinedBody(new Date(request.decidedAt).toLocaleString(locale())) : words.declinedWithoutDate
 
   return (
     <div className="w-full max-w-md">
@@ -59,6 +71,7 @@ export function RequestAccessPage({ appName, reason }: { appName: string; reason
         <CardBody className="space-y-6 py-8">
           {state === 'loading' ? <Loading className="justify-center" /> : (
             <>
+              {stale ? <StaleNotice updatedAt={mine.dataUpdatedAt} refetching={mine.isFetching} onRetry={() => void mine.refetch()} /> : null}
               <div className="text-center" aria-live="polite">
                 <Icon aria-hidden className="mx-auto mb-4 size-8 text-stone-500" />
                 <h1 className="text-xl font-semibold text-stone-900">{title}</h1>
@@ -76,7 +89,7 @@ export function RequestAccessPage({ appName, reason }: { appName: string; reason
               {canRequest ? (
                 <form className="space-y-4" onSubmit={(event) => {
                   event.preventDefault()
-                  if (!tooLong && !create.isPending) create.mutate()
+                  if (!tooLong && !create.isPending && !requestBlocked) create.mutate()
                 }}>
                   <Field
                     id="access-request-message"
@@ -93,8 +106,10 @@ export function RequestAccessPage({ appName, reason }: { appName: string; reason
                       invalid={tooLong}
                     />
                   </Field>
-                  {create.error ? isConsoleError(create.error, 'too_many_requests') ? <Notice tone="error">{words.tooMany}</Notice> : <ActionError error={create.error} /> : null}
-                  <Button type="submit" tone="primary" className="w-full" loading={create.isPending} disabled={tooLong}>
+                  {confirmation.unconfirmed
+                    ? <UnconfirmedNotice onConfirm={() => void confirmation.confirm()} confirming={confirmation.confirming} />
+                    : create.error ? isConsoleError(create.error, 'too_many_requests') ? <Notice tone="error">{words.tooMany}</Notice> : <ActionError error={create.error} /> : null}
+                  <Button type="submit" tone="primary" className="w-full" loading={create.isPending} disabled={tooLong || requestBlocked}>
                     {state === 'declined' ? words.requestAgain : words.request}
                   </Button>
                 </form>

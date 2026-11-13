@@ -8,9 +8,10 @@ import {
   useReactTable,
   type SortingState,
 } from '@tanstack/react-table'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState, type ReactNode } from 'react'
-import type { BusinessApp } from '../../api/console-unverified'
+import type { BusinessApp } from '../../model/contracts/console'
+import { personName } from '../../model/directory'
 import { pendingAccessRequestsQuery } from '../../api/queries/console'
 import { copy, relativeTime } from '../../copy'
 import { paths } from '../../routes/paths'
@@ -21,10 +22,11 @@ import { useDiscardDraft } from '../app/mutations'
 import { canEditApp } from '../app/permissions'
 import { PendingBadge } from '../app/pending-badge'
 import type { AppViews } from '../app/use-app-views'
+import { StaleNotice, UnconfirmedNotice, useWriteConfirmation } from '../app/notices'
 import { text } from './copy'
 
 export const ownerNames = (app: BusinessApp) =>
-  app.owners.length > 0 ? app.owners.map((owner) => owner.displayName).join(text.list.ownerSeparator) : copy.appList.noOwner
+  app.owners.length > 0 ? app.owners.map(personName).join(text.list.ownerSeparator) : copy.appList.noOwner
 
 const appHref = (app: BusinessApp) => paths.app(app.group.path, app.slug)
 
@@ -71,7 +73,10 @@ export function AppStatus({ app, lookup }: { app: BusinessApp; lookup: AppViews 
 function UnfinishedActions({ app }: { app: BusinessApp }) {
   const { me } = useShell()
   const [open, setOpen] = useState(false)
+  const queryClient = useQueryClient()
   const discard = useDiscardDraft(app)
+  // A discard whose answer could not be read may have happened: the lists are read back before it is offered again.
+  const confirmation = useWriteConfirmation([discard.error], discard.reset, () => queryClient.refetchQueries({ queryKey: ['console', 'apps'] }))
   if (!canEditApp(app, me)) return null
   return (
     <div className="mt-1 flex flex-wrap items-center gap-x-3">
@@ -84,16 +89,17 @@ function UnfinishedActions({ app }: { app: BusinessApp }) {
         <ConfirmDialog
           open={open}
           onOpenChange={(next) => {
-            if (!next) discard.reset()
+            if (!next && !confirmation.unconfirmed) discard.reset()
             setOpen(next)
           }}
           title={text.list.discardTitle(app.displayName)}
-          body={text.list.discardBody}
+          body={confirmation.unconfirmed ? <div className="space-y-3"><p>{text.list.discardBody}</p><UnconfirmedNotice onConfirm={() => void confirmation.confirm()} confirming={confirmation.confirming} /></div> : text.list.discardBody}
           confirmLabel={discard.isPending ? text.list.discarding : text.list.discardConfirm}
           tone="danger"
           onConfirm={() => discard.mutate(undefined, { onSuccess: () => setOpen(false) })}
           pending={discard.isPending}
-          error={discard.error ?? undefined}
+          disabled={confirmation.unconfirmed}
+          error={confirmation.unconfirmed ? undefined : discard.error ?? undefined}
         />
       </div>
     </div>
@@ -113,6 +119,8 @@ function AppUrlActions({ app, lookup }: { app: BusinessApp; lookup: AppViews }) 
 
 /** Shown once above a list when the platform status could not be read; the list itself still renders. */
 export function StatusLoadNotice({ lookup }: { lookup: AppViews }) {
+  // Statuses keep showing the last good read when a refresh fails, with when it was read.
+  if (lookup.stale && !lookup.failed) return <StaleNotice updatedAt={lookup.updatedAt} refetching={lookup.refetching} onRetry={lookup.refetch} />
   if (!lookup.failed) return null
   return (
     <Notice

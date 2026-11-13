@@ -9,13 +9,15 @@ import {
 import { Users } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { type Group } from '../../model/contracts/console'
-import { type Membership } from '../../api/console-unverified'
+import { type Membership } from '../../model/contracts/console'
+import { knownValue } from '../../model/contracts/build'
 import { membersQuery } from '../../api/queries/console'
 import { copy } from '../../copy'
 import { locale } from '../../shell/language'
 import { useShell } from '../../shell/use-shell'
 import { Avatar, DataTable, Disclosure, EmptyState, LoadFailed, Skeleton } from '../../ui'
 import { text } from './copy'
+import { StaleNotice } from '../app/notices'
 
 const column = createColumnHelper<Membership>()
 
@@ -47,10 +49,11 @@ export function GroupMembers({ group }: { group: Group }) {
             <Skeleton key={index} className="h-8 w-full" />
           ))}
         </div>
-      ) : members.isError ? (
+      ) : members.isLoadingError ? (
         <LoadFailed error={members.error} onRetry={() => void members.refetch()} />
       ) : (
         <>
+          {members.isRefetchError ? <StaleNotice updatedAt={members.dataUpdatedAt} refetching={members.isFetching} onRetry={() => void members.refetch()} /> : null}
           <MemberTable members={direct} caption={copy.members.title} />
           {inherited.length > 0 ? (
             <Disclosure title={copy.members.inheritedTitle(inherited.length)}>
@@ -98,11 +101,15 @@ function MemberTable({ members, caption, showSource = false }: { members: Member
           return <span className="block truncate text-stone-600" title={email}>{email}</span>
         },
       }),
-      column.accessor('role', {
+      column.accessor((membership) => knownValue(membership.role) ?? '', {
         id: 'role',
         header: copy.members.columns.role,
         meta: { className: 'w-36' },
-        cell: ({ getValue }) => <span className="whitespace-nowrap text-stone-700">{copy.members.role[getValue()]}</span>,
+        cell: ({ getValue }) => {
+          // A role this console does not know is shown as such, never as member or manager.
+          const role = getValue()
+          return <span className="whitespace-nowrap text-stone-700">{role ? copy.members.role[role] : text.members.roleUnknown}</span>
+        },
       }),
     ]
     if (!showSource) return base

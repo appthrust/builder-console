@@ -1,31 +1,22 @@
 // Pure derivation from Platform API read models to the console view model.
 // This is the only module that interprets status vocabulary
 // (component statusKey/reasonKey, publish phase, release phase).
-import type {
-  Application,
-  ApplicationRelease,
-  ApplicationReleaseOverview,
-  ApplicationSourceRepository,
-  ApplicationStack,
-  ComponentReleaseState,
-  ComponentSummaryFactsV1,
-  Publish,
-  PublishPhase,
-  ReleasePhase,
-} from '@appthrust/api-schema/platform-api'
-import type { BusinessApp } from '../api/console-unverified'
+import type { OpenValue } from '../api/boundary'
+import type { AppPublish, AppRelease, AppStack, ComponentSummary, PlatformApplication, PublishPhase, ReleaseOverview, ReleasePhase, ReleaseState } from './contracts/app'
+import type { BusinessApp } from './contracts/console'
 import { copy, relativeTime, reasonHelp, reasonText, type ConsoleStatus } from '../copy'
 import { text as appText } from '../features/app/copy'
 import { buildCopy } from './build/copy'
 import { isProductLanguage } from './build/wording'
-import { isOneOf, type ImplementationRun, type ImplementationTask } from './contracts/build'
+import { isOneOf, knownValue, type ImplementationRun, type ImplementationTask } from './contracts/build'
 
 export type { ConsoleStatus }
 
 export interface ConsoleRelease {
   id: string
   version: string
-  phase: ReleasePhase
+  /** A phase this console does not know is never read as succeeded, failed or in flight. */
+  phase: OpenValue<ReleasePhase>
   phaseText: string
   /** finishedAt → startedAt → createdAt; the most meaningful moment for a user. */
   at?: string
@@ -42,7 +33,7 @@ export interface ConsoleApp {
   help?: string
   url?: string
   /** Same selected publish that supplies the displayed app URL. */
-  publish?: Publish
+  publish?: AppPublish
   lastRelease?: ConsoleRelease
   webComponentId?: string
   /** Port the platform resolved for the web component (explicit or from the image); 「詳しい人向け」 only. */
@@ -56,30 +47,38 @@ export interface ConsoleApp {
 export interface ConsoleAppFacts {
   /** The web component reports Ready. */
   webReady: boolean
+  /** Known phases only: an unknown phase is absent, never read as succeeded or failed. */
   webReleasePhase?: ReleasePhase
   /** Any component has a Succeeded release: the app has been up at least once. */
   everReleased: boolean
   hasPublish: boolean
+  /** Known phases only, like `webReleasePhase`. */
   publishPhase?: PublishPhase
 }
 
 export interface ConsoleAppSources {
-  application: Application
+  application: PlatformApplication
   /** The stack bound to the Console app, not an arbitrary stack of its Application. */
-  stack?: ApplicationStack
-  publishes: readonly Publish[]
-  componentSummaries: readonly ComponentSummaryFactsV1[]
-  /** ApplicationReleaseOverview for this application; undefined while unknown. */
-  releases?: ApplicationReleaseOverview
+  stack?: AppStack
+  publishes: readonly AppPublish[]
+  componentSummaries: readonly ComponentSummary[]
+  /** Release overview for this application; undefined while unknown. */
+  releases?: ReleaseOverview
+}
+
+/** What the app status needs of a source repository: whether its last image build failed (known evidence only). */
+export interface SourceRepositoryFacts {
+  id: string
+  buildFailed: boolean
 }
 
 export interface ConsoleAppsInput {
-  applications: readonly Application[]
-  stacks: readonly ApplicationStack[]
-  publishes: readonly Publish[]
-  componentSummaries: readonly ComponentSummaryFactsV1[]
-  releasesByApplication: Readonly<Record<string, ApplicationReleaseOverview | undefined>>
-  sourceRepositories?: readonly ApplicationSourceRepository[]
+  applications: readonly PlatformApplication[]
+  stacks: readonly AppStack[]
+  publishes: readonly AppPublish[]
+  componentSummaries: readonly ComponentSummary[]
+  releasesByApplication: Readonly<Record<string, ReleaseOverview | undefined>>
+  sourceRepositories?: readonly SourceRepositoryFacts[]
 }
 
 export interface VersionLabel {
@@ -90,7 +89,7 @@ export interface VersionLabel {
 
 /** Stable per-app release numbering, independent of response order and completion time. */
 export function versionLabel(
-  releases: readonly Pick<ApplicationRelease, 'id' | 'createdAt' | 'startedAt'>[],
+  releases: readonly Pick<AppRelease, 'id' | 'createdAt' | 'startedAt'>[],
   releaseId: string | undefined
 ): VersionLabel | undefined {
   const ordered = [...releases].sort((a, b) =>
@@ -110,8 +109,8 @@ export interface AppBuildProgress {
   run?: ImplementationRun
 }
 
-export function implementedReleaseReady(platform: ConsoleApp | undefined, releases: readonly Pick<ApplicationRelease, 'id' | 'componentId' | 'branchId'>[], build: AppBuildProgress): boolean {
-  if (!platform || platform.lastRelease?.phase !== 'Succeeded') return false
+export function implementedReleaseReady(platform: ConsoleApp | undefined, releases: readonly Pick<AppRelease, 'id' | 'componentId' | 'branchId'>[], build: AppBuildProgress): boolean {
+  if (!platform?.lastRelease || !isOneOf(platform.lastRelease.phase, 'Succeeded')) return false
   const history = releases.filter((release) => release.componentId === platform.webComponentId && release.branchId === platform.branchId)
   const laterRelease = build.initialReleaseId
     ? platform.lastRelease.id !== build.initialReleaseId
@@ -140,7 +139,7 @@ function buildStatusText(build: AppBuildProgress): string {
   return copy.statusText.building(screen, build.taskCount)
 }
 
-export function appSecondLine(platform: ConsoleApp, releases: readonly ApplicationRelease[], now = Date.now(), build?: AppBuildProgress): string {
+export function appSecondLine(platform: ConsoleApp, releases: readonly AppRelease[], now = Date.now(), build?: AppBuildProgress): string {
   if (build && (!build.tasks?.length || build.tasks.some((task) => !isOneOf(task.status, 'done', 'skipped')) || !implementedReleaseReady(platform, releases, build))) return buildStatusText(build)
   if (platform.status !== 'live' || !platform.url) return platform.statusText
   const version = versionLabel(releases, platform.lastRelease?.id)
@@ -155,28 +154,33 @@ const IN_FLIGHT_RELEASE_TEXT: Partial<Record<ReleasePhase, string>> = {
   get WaitingPromotion() { return copy.statusText.releaseWaiting },
 }
 
-function toConsoleRelease(release: ApplicationRelease): ConsoleRelease {
+/** The release phase in words; a phase this console does not know says so instead of guessing. */
+export function releasePhaseText(phase: OpenValue<ReleasePhase>): string {
+  return phase.kind === 'known' ? copy.releasePhase[phase.value] : appText.unsupported.releasePhase
+}
+
+function toConsoleRelease(release: AppRelease): ConsoleRelease {
   return {
     id: release.id,
     version: release.version,
     phase: release.phase,
-    phaseText: copy.releasePhase[release.phase],
+    phaseText: releasePhaseText(release.phase),
     at: release.finishedAt ?? release.startedAt ?? release.createdAt,
     createdAt: release.createdAt,
     ...(release.failureReason ? { failureReason: release.failureReason } : {}),
   }
 }
 
-function releaseTime(release: ApplicationRelease): string {
+function releaseTime(release: AppRelease): string {
   return release.createdAt ?? release.startedAt ?? ''
 }
 
 /** Application-level release queries use its creation source, never list order. */
 export function stackForApplication(
-  application: Application,
-  stacks: readonly ApplicationStack[]
-): ApplicationStack | undefined {
-  if (application.sourceKind === 'applicationStack' && application.sourceId) {
+  application: PlatformApplication,
+  stacks: readonly AppStack[]
+): AppStack | undefined {
+  if (isOneOf(application.sourceKind, 'applicationStack') && application.sourceId) {
     return stacks.find((stack) => stack.id === application.sourceId)
   }
   const candidates = stacks.filter((stack) => stack.applicationId === application.id)
@@ -184,12 +188,12 @@ export function stackForApplication(
 }
 
 /** Resolve the Application through the exact persisted Console stack binding. */
-export function applicationForStack(stackId: string | null, input: Pick<ConsoleAppsInput, 'applications' | 'stacks'>): Application | undefined {
+export function applicationForStack(stackId: string | null, input: Pick<ConsoleAppsInput, 'applications' | 'stacks'>): PlatformApplication | undefined {
   if (!stackId) return undefined
   const stack = input.stacks.find((item) => item.id === stackId)
   return input.applications.find((item) =>
     item.id === stack?.applicationId ||
-    (item.sourceKind === 'applicationStack' && item.sourceId === stackId)
+    (isOneOf(item.sourceKind, 'applicationStack') && item.sourceId === stackId)
   )
 }
 
@@ -198,11 +202,11 @@ export function applicationForStack(stackId: string | null, input: Pick<ConsoleA
  * embedded `publish` snapshot, which is only a creation-time copy.
  */
 function publishFor(
-  application: Application,
-  stack: ApplicationStack,
+  application: PlatformApplication,
+  stack: AppStack,
   branchId: string,
-  publishes: readonly Publish[]
-): Publish | undefined {
+  publishes: readonly AppPublish[]
+): AppPublish | undefined {
   const scoped = publishes.filter(
     (publish) => publish.applicationId === application.id && publish.branchId === branchId
   )
@@ -228,14 +232,16 @@ function publishFor(
  */
 export function deriveConsoleApp(sources: ConsoleAppSources): ConsoleApp {
   const { application, stack } = sources
-  if (application.status.reason === 'default_branch_unresolved') {
+  // A per-item projection failure: a reason this console does not know is not a working application either.
+  if (application.status.reason) {
+    const known = isOneOf(application.status.reason, 'default_branch_unresolved')
     return {
       id: application.id,
       name: application.name,
       branchId: '',
       stackId: stack?.id,
-      status: 'failed',
-      statusText: copy.statusText.unresolved,
+      status: known ? 'failed' : 'unknown',
+      statusText: known ? copy.statusText.unresolved : appText.unsupported.status,
       facts: { webReady: false, everReleased: false, hasPublish: false },
     }
   }
@@ -250,11 +256,11 @@ export function deriveConsoleApp(sources: ConsoleAppSources): ConsoleApp {
   const latestReleases = releaseComponents.flatMap((component) => {
     const latest = component.latestRelease
     if (!latest) return []
-    const ready = components.some((fact) => fact.id === component.id && fact.statusKey === 'Ready')
+    const ready = components.some((fact) => fact.id === component.id && isOneOf(fact.status, 'Ready'))
     const succeeded = [...component.releases].sort((a, b) => releaseTime(b).localeCompare(releaseTime(a)))
-      .find((release) => release.phase === 'Succeeded')
+      .find((release) => isOneOf(release.phase, 'Succeeded'))
     // Pending re-application of the already-running version does not stop the app.
-    return [ready && latest.phase === 'Pending' && succeeded?.version === latest.version ? succeeded : latest]
+    return [ready && isOneOf(latest.phase, 'Pending') && succeeded?.version === latest.version ? succeeded : latest]
   })
   const webRelease = latestReleases.find((release) => release.componentId === stack?.webComponentId)
 
@@ -269,13 +275,13 @@ export function deriveConsoleApp(sources: ConsoleAppSources): ConsoleApp {
     ...(web?.port ? { webPort: web.port } : {}),
     ...(stack ? { stackId: stack.id } : {}),
     facts: {
-      webReady: web?.statusKey === 'Ready',
-      ...(webRelease ? { webReleasePhase: webRelease.phase } : {}),
+      webReady: isOneOf(web?.status, 'Ready'),
+      ...(webRelease && knownValue(webRelease.phase) ? { webReleasePhase: knownValue(webRelease.phase) } : {}),
       everReleased: releaseComponents.some((component) =>
-        component.releases.some((release) => release.phase === 'Succeeded')
+        component.releases.some((release) => isOneOf(release.phase, 'Succeeded'))
       ),
       hasPublish: publish !== undefined,
-      ...(publish?.phase ? { publishPhase: publish.phase } : {}),
+      ...(knownValue(publish?.phase) ? { publishPhase: knownValue(publish?.phase) } : {}),
     },
   }
   const result = (status: ConsoleStatus, statusText: string, help?: string): ConsoleApp => ({
@@ -286,7 +292,7 @@ export function deriveConsoleApp(sources: ConsoleAppSources): ConsoleApp {
   })
 
   // 1. unknown: deletion observed, no stack, or nothing observed yet.
-  if (application.deleting || components.some((component) => component.reasonKey === 'DeletionInProgress')) {
+  if (application.deleting || components.some((component) => isOneOf(component.reason, 'DeletionInProgress'))) {
     return result('unknown', copy.statusText.deleting)
   }
   if (!stack) return result('unknown', copy.statusText.noStack)
@@ -294,30 +300,33 @@ export function deriveConsoleApp(sources: ConsoleAppSources): ConsoleApp {
   if (components.length === 0) return result('unknown', copy.statusText.noComponents)
 
   // 2. failed: a blocked/degraded component, a failed latest release, or a failed publish.
-  const broken = components.find(
-    (component) => component.statusKey === 'Blocked' || component.statusKey === 'Degraded'
-  )
-  if (broken) return result('failed', reasonText(broken.reasonKey), reasonHelp[broken.reasonKey])
+  const broken = components.find((component) => isOneOf(component.status, 'Blocked', 'Degraded'))
+  if (broken) return result('failed', componentReasonText(broken), helpFor(broken))
   // failureReason is free text without a key vocabulary; it is shown in the
   // release history, not in the one-line status sentence.
-  if (latestReleases.some((release) => release.phase === 'Failed')) {
+  if (latestReleases.some((release) => isOneOf(release.phase, 'Failed'))) {
     return result('failed', copy.statusText.releaseFailed)
   }
   // Publish `message` is operator prose (not localized), so only the phase is used.
-  if (publish?.phase === 'failed') return result('failed', copy.publishPhase.failed)
+  if (isOneOf(publish?.phase, 'failed')) return result('failed', copy.publishPhase.failed)
 
-  // 3. unknown: a component whose canonical status or dependency is unobservable.
-  const unobservable = components.find((component) => component.statusKey === 'Unknown')
-  if (unobservable) return result('unknown', reasonText(unobservable.reasonKey))
+  // 3. unknown: a component whose canonical status or dependency is unobservable,
+  // or a component status / latest release phase this console does not know.
+  const unobservable = components.find((component) => isOneOf(component.status, 'Unknown') || component.status.kind === 'unknown')
+  if (unobservable) return result('unknown', unobservable.status.kind === 'unknown' ? appText.unsupported.status : componentReasonText(unobservable))
+  if (latestReleases.some((release) => release.phase.kind === 'unknown')) return result('unknown', appText.unsupported.status)
 
   // 4. deploying: anything still settling.
-  const settling = components.find((component) => component.statusKey === 'Provisioning')
-  if (settling) return result('deploying', reasonText(settling.reasonKey))
-  const inFlight = latestReleases.find((release) => IN_FLIGHT_RELEASE_TEXT[release.phase])
-  const inFlightText = inFlight && IN_FLIGHT_RELEASE_TEXT[inFlight.phase]
+  const settling = components.find((component) => isOneOf(component.status, 'Provisioning'))
+  if (settling) return result('deploying', componentReasonText(settling))
+  const inFlightText = latestReleases.map((release) => {
+    const phase = knownValue(release.phase)
+    return phase && IN_FLIGHT_RELEASE_TEXT[phase]
+  }).find(Boolean)
   if (inFlightText) return result('deploying', inFlightText)
-  if (publish && publish.phase !== 'succeeded') {
-    return result('deploying', publish.phase ? copy.publishPhase[publish.phase] : copy.publishPhase.service_creating)
+  if (publish && !isOneOf(publish.phase, 'succeeded')) {
+    const phase = publish.phase
+    return result('deploying', !phase ? copy.publishPhase.service_creating : phase.kind === 'known' ? copy.publishPhase[phase.value] : appText.unsupported.status)
   }
   if (publish && !url) return result('deploying', copy.statusText.publishUrlMissing)
 
@@ -325,6 +334,17 @@ export function deriveConsoleApp(sources: ConsoleAppSources): ConsoleApp {
   if (!publish) return result('live', copy.statusText.liveNoUrl)
   const version = versionLabel(releaseComponents.flatMap((component) => component.releases), webRelease?.id)
   return result('live', version ? copy.statusText.liveVersion(version.label) : copy.statusText.live)
+}
+
+/** A known reason's sentence; a reason this console does not know says so (its known status still decides). */
+function componentReasonText(component: ComponentSummary): string {
+  const reason = knownValue(component.reason)
+  return reason ? reasonText(reason) : appText.unsupported.status
+}
+
+function helpFor(component: ComponentSummary): string | undefined {
+  const reason = knownValue(component.reason)
+  return reason ? reasonHelp[reason] : undefined
 }
 
 export function deriveConsoleApps(input: ConsoleAppsInput): ConsoleApp[] {
@@ -356,7 +376,7 @@ export interface AppView {
   url?: string
   /** No platform binding yet (`stackId` null). */
   draft: boolean
-  stack?: ApplicationStack
+  stack?: AppStack
   platform?: ConsoleApp
 }
 
@@ -401,9 +421,9 @@ export function deriveAppView(
 ): AppView {
   const stack = input.stacks.find((item) => item.id === app.stackId)
   const sourceId = app.stackId
-    ? stack?.sourceKind === 'application-source-repository' ? stack.sourceRepositoryRefName : undefined
+    ? isOneOf(stack?.sourceKind, 'application-source-repository') ? stack?.sourceRepositoryRefName : undefined
     : draftPlatform?.progress?.sourceRepositoryId
-  const buildFailed = sourceId !== undefined && input.sourceRepositories?.some((source) => source.id === sourceId && source.build?.state === 'failed')
+  const buildFailed = sourceId !== undefined && input.sourceRepositories?.some((source) => source.id === sourceId && source.buildFailed)
   const view = (status: ConsoleStatus, text: string, extra: Partial<AppView> = {}): AppView => ({
     status,
     label: copy.status[status],
@@ -423,7 +443,7 @@ export function deriveAppView(
     })
   }
   const application = applicationForStack(app.stackId, input)
-  if (application?.status.reason === 'default_branch_unresolved') {
+  if (application?.status.reason) {
     const platform = deriveConsoleApp({ application, stack, publishes: [], componentSummaries: [] })
     return view(platform.status, platform.statusText, { stack, platform })
   }
@@ -461,7 +481,7 @@ export function deriveAppView(
 
 /** Release history of one component, newest first. */
 export function deriveReleaseHistory(
-  overview: ApplicationReleaseOverview | undefined,
+  overview: ReleaseOverview | undefined,
   componentId: string | undefined
 ): ConsoleRelease[] {
   const component = overview?.components.find((item) => item.id === componentId)
@@ -486,7 +506,7 @@ export interface RollbackView {
  * over the digest. A candidate equal to the current target digest is not a
  * "previous" version (release-state keeps it listed after a rollback lands).
  */
-export function deriveRollbackView(state: ComponentReleaseState | undefined): RollbackView {
+export function deriveRollbackView(state: ReleaseState | undefined): RollbackView {
   return {
     ...(state?.targetImageTag ? { currentVersion: state.targetImageTag } : {}),
     inFlight: Boolean(state?.activeTransitionId),

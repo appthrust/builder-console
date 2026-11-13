@@ -1,10 +1,11 @@
 import { ChevronLeft, ChevronRight, ImagePlus, Trash2 } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
 import { isConsoleError, screenshotUrl } from '../../api/console'
-import { type Screenshot } from '../../api/console-unverified'
+import { type Screenshot } from '../../model/contracts/console'
 import { ActionError, Button, ConfirmDialog, Dialog, Field, IconButton, Notice, TextInput } from '../../ui'
 import { text } from './copy'
-import { useRemoveScreenshot, useReorderScreenshots, useUploadScreenshot } from './mutations'
+import { useAppReadBack, useRemoveScreenshot, useReorderScreenshots, useUploadScreenshot } from './mutations'
+import { isUnconfirmedWrite, UnconfirmedNotice, useWriteConfirmation } from './notices'
 
 export const MAX_SCREENSHOTS = 5
 export const MAX_SCREENSHOT_BYTES = 2 * 1024 * 1024
@@ -60,7 +61,9 @@ export function ScreenshotStrip({ appId, screenshots, canEdit }: { appId: string
   const [added, setAdded] = useState(false)
   const remove = useRemoveScreenshot(appId)
   const reorder = useReorderScreenshots(appId)
-  const busy = remove.isPending || reorder.isPending
+  // A change whose answer could not be read may have happened: the app (and its pictures) is read back before another.
+  const confirmation = useWriteConfirmation([remove.error, reorder.error], () => { remove.reset(); reorder.reset() }, useAppReadBack(appId))
+  const busy = remove.isPending || reorder.isPending || confirmation.unconfirmed
   const ids = screenshots.map((shot) => shot.id)
   const room = screenshots.length < MAX_SCREENSHOTS
 
@@ -173,7 +176,7 @@ export function ScreenshotStrip({ appId, screenshots, canEdit }: { appId: string
 
       {canEdit && !room ? <p className="text-xs text-stone-500">{text.screenshots.full}</p> : null}
       {problem ? <Notice tone="error">{problem}</Notice> : null}
-      {reorder.error ? <ActionError error={reorder.error} /> : null}
+      {confirmation.unconfirmed ? <UnconfirmedNotice onConfirm={() => void confirmation.confirm()} confirming={confirmation.confirming} /> : reorder.error ? <ActionError error={reorder.error} /> : null}
       {added ? <p role="status" className="text-sm text-accent-strong">{text.screenshots.added}</p> : null}
 
       {canEdit && picked ? (
@@ -197,7 +200,7 @@ export function ScreenshotStrip({ appId, screenshots, canEdit }: { appId: string
         onOpenChange={(open) => {
           if (!open) {
             setRemoving(undefined)
-            remove.reset()
+            if (!confirmation.unconfirmed) remove.reset()
           }
         }}
         title={text.screenshots.removeTitle}
@@ -213,7 +216,7 @@ export function ScreenshotStrip({ appId, screenshots, canEdit }: { appId: string
         error={remove.error}
         onConfirm={() => {
           if (!removing || remove.isPending) return
-          remove.mutate(removing.id, { onSuccess: () => setRemoving(undefined) })
+          remove.mutate(removing.id, { onSuccess: () => setRemoving(undefined), onError: (error) => { if (isUnconfirmedWrite(error)) setRemoving(undefined) } })
         }}
       />
     </section>
@@ -283,6 +286,7 @@ function ScreenshotUpload({ appId, file, onChooseAgain, onDone, onCancel }: {
 }) {
   const id = useId()
   const upload = useUploadScreenshot(appId)
+  const confirmation = useWriteConfirmation([upload.error], upload.reset, useAppReadBack(appId))
   const [preview, setPreview] = useState<string>()
   const [caption, setCaption] = useState('')
   const captionTooLong = Array.from(caption.trim()).length > MAX_CAPTION_LENGTH
@@ -299,7 +303,7 @@ function ScreenshotUpload({ appId, file, onChooseAgain, onDone, onCancel }: {
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
-    if (captionTooLong || upload.isPending) return
+    if (captionTooLong || upload.isPending || confirmation.unconfirmed) return
     upload.mutate({ file, caption: caption.trim() || undefined }, { onSuccess: onDone })
   }
 
@@ -323,10 +327,10 @@ function ScreenshotUpload({ appId, file, onChooseAgain, onDone, onCancel }: {
           <TextInput id={`${id}-caption`} value={caption} invalid={captionTooLong} onChange={(event) => setCaption(event.target.value)} autoComplete="off" autoFocus />
         </Field>
       </div>
-      {upload.error ? uploadError ? <Notice tone="error">{uploadError}</Notice> : <ActionError error={upload.error} /> : null}
+      {confirmation.unconfirmed ? <UnconfirmedNotice onConfirm={() => void confirmation.confirm()} confirming={confirmation.confirming} /> : upload.error ? uploadError ? <Notice tone="error">{uploadError}</Notice> : <ActionError error={upload.error} /> : null}
       <div className="flex flex-wrap justify-end gap-2">
         <Button onClick={onCancel} disabled={upload.isPending}>{text.screenshots.cancel}</Button>
-        <Button type="submit" tone="primary" loading={upload.isPending} disabled={captionTooLong}>{text.screenshots.upload}</Button>
+        <Button type="submit" tone="primary" loading={upload.isPending} disabled={captionTooLong || confirmation.unconfirmed}>{text.screenshots.upload}</Button>
       </div>
     </form>
   )

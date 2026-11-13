@@ -177,7 +177,13 @@ interface MockStack {
   env: ApplicationBranchComponentConfigEntry[]
 }
 
+/** An opaque config revision that changes with the variables (Go: dto_component.go `revision`, required). */
+function envRevision(env: readonly { key: string; value?: string; updatedAt?: string }[]): string {
+  return `rev-${env.map((entry) => `${entry.key}:${entry.updatedAt ?? ''}`).join('|').length}-${env.length}`
+}
+
 /** `mitsumori-db`'s changes: the first migration applied three days ago, the second waiting for approval. */
+
 function seedDatabaseChanges(databaseId: string): DatabaseChange[] {
   const base = { projectId: MOCK_PROJECT_ID, databaseId, applyMode: 'Automatic' as const, sourceType: 'InlineSQL' as const, requestedBy: 'appthrust-implementation' }
   const init = `${databaseId}-0001-init`
@@ -2546,7 +2552,8 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
     (m) => {
       const stack = state.stacks.get(m[2]!)
       if (!stack) return error(404, 'not_found', 'application not found')
-      return json({ projectId: MOCK_PROJECT_ID, applicationId: stack.appName, branchId: m[3], componentId: m[4], variables: stack.env })
+      // Go writes the revision on every read (platform-api internal/api/dto_component.go:685).
+      return json({ projectId: MOCK_PROJECT_ID, applicationId: stack.appName, branchId: m[3], componentId: m[4], revision: envRevision(stack.env), variables: stack.env })
     },
   ],
   [
@@ -2569,8 +2576,9 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
           updatedAt: stamp(),
         })),
       ]
-      const resource = { projectId: MOCK_PROJECT_ID, applicationId: stack.appName, branchId: m[3]!, componentId: m[4]!, variables: stack.env }
-      return json(mutation('ApplicationBranchComponentConfig', m[4]!, resource))
+      const resource = { projectId: MOCK_PROJECT_ID, applicationId: stack.appName, branchId: m[3]!, componentId: m[4]!, revision: envRevision(stack.env), variables: stack.env }
+      // 202 like platform-api internal/handler/application_branch_config.go:295,301.
+      return json(mutation('ApplicationBranchComponentConfig', m[4]!, resource), 202)
     },
   ],
   [

@@ -1,18 +1,18 @@
 import { expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
-import type { BusinessApp } from '../../api/console-unverified'
+import { businessAppOf } from '../../api/testing/app-domain'
 import type { ComponentLogsQuery } from '../../api/queries/app'
 import { copy } from '../../copy'
 import type { AppView } from '../../model/app'
 import { LogsTab } from './logs-tab'
 
 const person = { id: 'person-1', subject: 'tester', pending: false, email: 'tester@example.test', displayName: 'Tester', avatarVersion: null }
-const app: BusinessApp = {
+const app = businessAppOf({
   id: 'app-1', slug: 'shop', displayName: 'Shop', description: '', icon: '', tags: [], guide: '', capabilities: [], screenshots: [],
   group: { id: 'sales', path: 'sales', name: 'Sales' }, owners: [person],
   stackId: 'shop-stack', appName: 'shop', share: { scope: 'public', groupIds: [], extraPersonIds: [] },
   createdBy: person, createdAt: '2026-10-08T00:00:00Z', updatedAt: '2026-10-08T00:00:00Z',
-}
+})
 const view: AppView = {
   status: 'live', label: '公開中', text: '', second: '', draft: false, url: 'https://shop.example.test/',
   platform: {

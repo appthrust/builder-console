@@ -1,5 +1,4 @@
-import type { ReleasePhase } from '@appthrust/api-schema/platform-api'
-import { skipToken, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   createColumnHelper,
   getCoreRowModel,
@@ -9,15 +8,18 @@ import {
 } from '@tanstack/react-table'
 import { History, RotateCcw } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { client } from '../../api/client'
+import type { OpenValue } from '../../api/boundary'
 import { keys } from '../../api/queries/shared'
-import { releasesQuery, useReleaseState } from '../../api/queries/app'
+import { releasesQuery, releaseStateKey, rollbackComponent, useReleaseState } from '../../api/queries/app'
 import { copy, relativeTime, type ConsoleStatus } from '../../copy'
 import { deriveReleaseHistory, deriveRollbackView, versionLabel, type AppView, type RollbackOption } from '../../model/app'
+import { isOneOf } from '../../model/contracts/build'
+import type { ReleasePhase } from '../../model/contracts/app'
 import { locale } from '../../shell/language'
 import { Button, Card, CardBody, CardHeader, ConfirmDialog, DataTable, EmptyState, LoadFailed, Loading, Notice, StatusPill } from '../../ui'
 import { text } from './copy'
 import { webScope } from './platform'
+import { isUnconfirmedWrite, StaleNotice, UnconfirmedNotice, useWriteConfirmation } from './notices'
 
 /** One line of 更新履歴: a release, or a rollback candidate the release list does not carry. */
 interface ReleaseRow {
@@ -25,7 +27,7 @@ interface ReleaseRow {
   version: string
   rawVersion: string
   at?: string
-  phase?: ReleasePhase
+  phase?: OpenValue<ReleasePhase>
   phaseText?: string
   failureReason?: string
   rollback?: RollbackOption
@@ -39,6 +41,9 @@ const PHASE_STATUS: Record<ReleasePhase, ConsoleStatus> = {
   InProgress: 'deploying',
   WaitingPromotion: 'deploying',
 }
+
+/** A phase this console does not know is neither done nor failed. */
+const phaseStatus = (phase: OpenValue<ReleasePhase>): ConsoleStatus => (phase.kind === 'known' ? PHASE_STATUS[phase.value] : 'unknown')
 
 /** Per-render state the action cell reads; columns stay stable within a mount so cells never remount. */
 interface RollbackMeta {
@@ -102,7 +107,7 @@ const createColumns = () => [
     enableSorting: false,
     cell: ({ row }) =>
       row.original.phase ? (
-        <StatusPill status={PHASE_STATUS[row.original.phase]} label={row.original.phaseText} />
+        <StatusPill status={phaseStatus(row.original.phase)} label={row.original.phaseText} />
       ) : (
         <span className="text-stone-400">{text.releases.unknownPhase}</span>
       ),
@@ -132,10 +137,7 @@ export function ReleasesTab({ projectId, view }: { projectId: string; view: AppV
   const [columns] = useState(createColumns)
   const platform = view.platform
   const scope = webScope(projectId, view)
-  const overview = useQuery({
-    queryKey: platform ? keys.releases(projectId, platform.id, platform.branchId) : ['releases', 'none'],
-    queryFn: platform ? releasesQuery(projectId, platform.id, platform.branchId).queryFn : skipToken,
-  })
+  const overview = useQuery({ ...releasesQuery(projectId, platform?.id ?? '', platform?.branchId ?? ''), enabled: platform !== undefined })
   const releaseState = useReleaseState(scope)
   const rollback = deriveRollbackView(releaseState.data)
   const [pendingTarget, setPendingTarget] = useState<RollbackOption>()
@@ -145,7 +147,11 @@ export function ReleasesTab({ projectId, view }: { projectId: string; view: AppV
   const mutation = useMutation({
     mutationFn: (targetTransitionId: string) => {
       if (!scope) throw new Error('rollback requires a web component')
-      return client.platformApiRollbackApplicationBranchComponent({ params: scope, body: { targetTransitionId } })
+      return rollbackComponent(scope, targetTransitionId)
+    },
+    // An unreadable answer closes the dialog: the panel's notice offers the read-back instead.
+    onError: (error) => {
+      if (isUnconfirmedWrite(error)) setPendingTarget(undefined)
     },
     onSuccess: () => {
       setPendingTarget(undefined)
@@ -155,7 +161,13 @@ export function ReleasesTab({ projectId, view }: { projectId: string; view: AppV
       void queryClient.invalidateQueries({ queryKey: keys.summaries(projectId) })
     },
   })
-  const busy = rollback.inFlight || mutation.isPending
+  // A rollback whose answer could not be read may have started: read the release state back before offering another.
+  const confirmation = useWriteConfirmation([mutation.error], () => { mutation.reset(); setPendingTarget(undefined) }, () => Promise.all([
+    queryClient.refetchQueries({ queryKey: releaseStateKey(scope) }),
+    queryClient.refetchQueries({ queryKey: ['releases'] }),
+  ]))
+  // A rollback needs current evidence: never from a release state that failed to refresh.
+  const busy = rollback.inFlight || mutation.isPending || confirmation.unconfirmed || releaseState.isError
   const resetMutation = mutation.reset
 
   const rows = useMemo<ReleaseRow[]>(() => {
@@ -164,7 +176,7 @@ export function ReleasesTab({ projectId, view }: { projectId: string; view: AppV
     const current = deriveRollbackView(releaseState.data)
     const optionByVersion = new Map(current.options.map((option) => [option.version, option]))
     // A queued duplicate is not evidence of a running release.
-    const runningIndex = history.findIndex((release) => release.phase === 'Succeeded' &&
+    const runningIndex = history.findIndex((release) => isOneOf(release.phase, 'Succeeded') &&
       (current.currentVersion ? release.version === current.currentVersion : view.platform?.facts.webReady))
     const fromHistory = history.map((release, index) => {
       const version = versionLabel(releases, release.id)
@@ -239,17 +251,24 @@ export function ReleasesTab({ projectId, view }: { projectId: string; view: AppV
         }
       />
       <CardBody className="space-y-4">
-        {rollback.inFlight ? (
+        {confirmation.unconfirmed ? (
+          <UnconfirmedNotice onConfirm={() => void confirmation.confirm()} confirming={confirmation.confirming} />
+        ) : rollback.inFlight ? (
           <Notice>{copy.app.releases.rollbackInFlight}</Notice>
         ) : started ? (
           <Notice tone="success">{copy.app.releases.rollbackStarted}</Notice>
         ) : null}
-        {releaseState.isError ? <LoadFailed onRetry={() => void releaseState.refetch()} error={releaseState.error} /> : null}
+        {releaseState.isError ? (
+          releaseState.data
+            ? <StaleNotice updatedAt={releaseState.dataUpdatedAt} refetching={releaseState.isFetching} onRetry={() => void releaseState.refetch()} />
+            : <LoadFailed onRetry={() => void releaseState.refetch()} error={releaseState.error} />
+        ) : null}
 
-        <div data-testid="release-history">
+        <div data-testid="release-history" className="space-y-3">
+          {overview.isError && overview.data ? <StaleNotice updatedAt={overview.dataUpdatedAt} refetching={overview.isFetching} onRetry={() => void overview.refetch()} /> : null}
           {overview.isPending ? (
             <Loading />
-          ) : overview.isError ? (
+          ) : overview.isError && !overview.data ? (
             <LoadFailed onRetry={() => void overview.refetch()} error={overview.error} />
           ) : (
             <DataTable
@@ -281,7 +300,8 @@ export function ReleasesTab({ projectId, view }: { projectId: string; view: AppV
           if (pendingTarget) mutation.mutate(pendingTarget.transitionId)
         }}
         pending={mutation.isPending}
-        error={mutation.error ?? undefined}
+        disabled={confirmation.unconfirmed}
+        error={confirmation.unconfirmed ? undefined : mutation.error ?? undefined}
       />
     </Card>
   )

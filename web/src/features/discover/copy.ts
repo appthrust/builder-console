@@ -74,6 +74,7 @@ export const textJa = {
     inheritedColumn: '継承元',
     you: 'あなた',
     emailMissing: 'メールアドレス未登録',
+    roleUnknown: '役割不明',
   },
   help: {
     lead: 'はじめて使うときに知っておきたいことです。',

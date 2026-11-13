@@ -6,6 +6,7 @@
 import type { ApplicationSourceRepository } from '@appthrust/api-schema/platform-api'
 import { copy } from '../copy'
 import type { AppView } from './app'
+import { isOneOf } from './contracts/build'
 import type { AccessDisplay } from './access'
 import { sharingCopy } from '../copy/sharing'
 
@@ -91,7 +92,7 @@ function checkStep(repository: ApplicationSourceRepository, fullName: string): P
 
 export function deriveCreateProgress({ view, sourceRepository, shareSentence, access }: ProgressInput): ProgressStep[] {
   const facts = view.platform?.facts
-  const fromRepository = sourceRepository !== undefined || view.stack?.sourceKind === 'application-source-repository'
+  const fromRepository = sourceRepository !== undefined || isOneOf(view.stack?.sourceKind, 'application-source-repository')
   const adopted = sourceRepository?.existing
   const check = sourceRepository && adopted ? checkStep(sourceRepository, adopted.repository) : undefined
   const imageStatus = repositoryConditionStatus(sourceRepository, 'ImageReady')

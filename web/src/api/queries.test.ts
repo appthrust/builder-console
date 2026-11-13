@@ -1,13 +1,11 @@
 import { afterEach, expect, mock, test } from 'bun:test'
-import { platformApiRouter } from '@appthrust/api-schema/platform-api-router'
-import { createORPCClient, ORPCError } from '@orpc/client'
-import { OpenAPILink } from '@orpc/openapi-client/fetch'
+import { ORPCError } from '@orpc/client'
 import { QueryClient, skipToken } from '@tanstack/react-query'
-import type { PlatformApiClient } from './client'
 import { ResponseContractError } from './boundary'
 import { ConsoleApiError } from './console'
 import { appQuery, consoleConfigQuery, projectIdQuery, resolveQuery } from './queries/console'
 import { componentLogsQuery } from './queries/app'
+import { createTestGateway } from './testing/gateway'
 import { dataPreconditionReason, isDataForbidden, membershipUnboundReason } from './queries/data'
 import { readRetryDelay, retryDelay, retryQuery, retryReadQuery } from './queries/shared'
 
@@ -88,9 +86,8 @@ test('a 412 database_access_membership_unbound is a data precondition with its m
 
 test('logs send branchId and isolate cached results between branches', async () => {
   const requests: URL[] = []
-  const link = new OpenAPILink(platformApiRouter, {
-    url: 'http://platform.test',
-    fetch: async (request) => {
+  const api = createTestGateway({
+    platformFetch: async (request) => {
       requests.push(new URL(request.url))
       return Response.json({
         clusterId: 'wlc-1', namespace: 'pj-1', service: 'web',
@@ -99,7 +96,6 @@ test('logs send branchId and isolate cached results between branches', async () 
       })
     },
   })
-  const api = createORPCClient<PlatformApiClient>(link)
   const cache = new QueryClient()
   const production = componentLogsQuery('pj-1', 'web', 'production', api)
   const staging = componentLogsQuery('pj-1', 'web', 'staging', api)

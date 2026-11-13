@@ -1,14 +1,15 @@
 import { describe, expect, test } from 'bun:test'
-import type { BusinessApp, DirectoryEntry } from '../../api/console-unverified'
+import type { DirectoryEntry } from '../../model/contracts/console'
+import { businessAppOf } from '../../api/testing/app-domain'
 import { matchesAppSearch, matchesDirectoryEntrySearch } from './search'
 
 const owner = { id: 'owner', subject: 's', pending: false, displayName: 'Storage Proof', email: 'storage@example.com', avatarVersion: null }
-const app: BusinessApp = {
+const app = businessAppOf({
   id: 'inventory', slug: 'inventory', displayName: '備品棚卸', description: '在庫と発注を確認', icon: '', tags: ['備品'],
   group: { id: 'team-a', path: 'sales/team-a', name: '営業1課' }, owners: [owner], createdBy: owner,
   stackId: null, appName: null, share: { scope: 'company', groupIds: [], extraPersonIds: [] }, createdAt: '', updatedAt: '',
   guide: '月末に集計してください', capabilities: ['PDF で一覧を出す', '注文書を作る'], screenshots: [],
-}
+})
 
 describe('matchesAppSearch', () => {
   test('matches owner names without narrowing the authorized list through server q', () => {
