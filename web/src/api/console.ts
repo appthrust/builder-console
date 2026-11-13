@@ -6,7 +6,7 @@
 // The transport returns undecoded bodies (`unknown`): the gateway
 // (gateway.ts) decodes every success against its operation contract. Error
 // bodies are parsed into the safe `ConsoleApiError` envelope, never cast.
-import { z } from 'zod'
+import { error as canonicalError } from './contracts/console/schema/schemas'
 import type { HttpMethod } from './boundary'
 import { copy } from '../copy'
 import { assertSessionActive, checkSessionResponse } from './session-expiry'
@@ -41,10 +41,9 @@ export function isConsoleError(error: unknown, code?: string): error is ConsoleA
   return error instanceof ConsoleApiError && (code === undefined || error.code === code)
 }
 
-const consoleErrorBody = z.object({
-  error: z.string().optional().catch(undefined),
-  message: z.string().optional().catch(undefined),
-  details: z.unknown().optional(),
+const consoleErrorBody = canonicalError.extend({
+  error: canonicalError.shape.error.optional().catch(undefined),
+  message: canonicalError.shape.message.optional().catch(undefined),
 })
 
 const READ_TIMEOUT_MS = 8_000

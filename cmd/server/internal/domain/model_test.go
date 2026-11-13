@@ -371,7 +371,7 @@ func TestDirectoryEntryJSON(t *testing.T) {
 	if err := json.Unmarshal(body, &empty); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"tags", "capabilities", "screenshots"} {
+	for _, key := range []string{"tags", "capabilities", "screenshots", "owners"} {
 		if string(empty[key]) != "[]" {
 			t.Fatalf("empty %s=%s, want []", key, empty[key])
 		}

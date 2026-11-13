@@ -8,6 +8,8 @@ const api = {
   'api/gateway.ts': 'export const apiGateway = {}\n',
   'api/barrel.ts': "export { client } from './client'\nexport * from './gateway'\n",
   'api/wire-barrel.ts': "export type { ApplicationDraft } from '@appthrust/api-schema/platform-api'\n",
+  'api/contracts/console/schema/schemas.ts': 'export const app = {}\nexport type SchemaName = string\n',
+  'api/console-wire-barrel.ts': "export * from './contracts/console/schema/schemas'\n",
 }
 
 function rulesOf(file: string, text: string): Rule[] {
@@ -28,6 +30,9 @@ describe('findViolations', () => {
     ['wire types', "import type { ApplicationDraft } from '@appthrust/api-schema/platform-api'", ['wire-schema-import']],
     ['wire root package', "import { platformApiRouter } from '@appthrust/api-schema'", ['wire-schema-import']],
     ['wire types through a barrel', "import type { ApplicationDraft } from '../../api/wire-barrel'", ['wire-schema-import']],
+    ['Console canonical schema', "import { app } from '../../api/contracts/console/schema/schemas'", ['wire-schema-import']],
+    ['Console schema through a barrel', "import { app } from '../../api/console-wire-barrel'", ['wire-schema-import']],
+    ['Console schema type assertion', "import type { SchemaName } from '../../api/contracts/console/schema/schemas'\nconst name = value as SchemaName", ['wire-cast', 'wire-schema-import']],
     ['dynamic import of the client', "const load = () => import('../../api/client')", ['raw-platform-client']],
     ['fetch', "await fetch('/api/v1/x')", ['direct-fetch']],
     ['window.fetch', "await window.fetch('/api/v1/x')", ['direct-fetch']],

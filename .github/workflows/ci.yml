@@ -41,6 +41,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - run: bun run typecheck
+      - run: bun run check:console-schema
       - run: bun run check:response-boundaries
       - run: bun run typecheck:e2e
       - run: bun run build:image

@@ -1,6 +1,6 @@
 import type { z } from 'zod'
 import { ResponseContractError, type HttpMethod, type ResponseSource } from './error'
-import { ROOT_PATH, safeIssues, type ResponseIssue } from './issues'
+import { ROOT_PATH, safeIssues, safePath, type ResponseIssue } from './issues'
 
 /**
  * How the reader treats a field whose absence an older server version is known
@@ -38,12 +38,22 @@ export type DecodeResult<D> = { ok: true; value: D } | { ok: false; error: Respo
 
 type ContractIdentity = Pick<ResponseContract<unknown>, 'operationId' | 'source' | 'method' | 'routeTemplate' | 'successStatuses'>
 
+// Parser identity survives the Console/Platform factories' shallow contract
+// copies. This metadata is consumed only by the wire-case testing seam.
+const contractReaders = new WeakMap<ResponseContract<unknown>['parse'], z.ZodType>()
+
+/** Test support: whether every segment of a path is declared (or masked) by this reader. */
+export function isDeclaredResponsePath(contract: ResponseContract<unknown>, path: string): boolean {
+  const reader = contractReaders.get(contract.parse)
+  return reader !== undefined && path.startsWith('/') && safePath(reader, path === '/' ? [] : path.slice(1).split('/')) === path
+}
+
 /** A JSON-bodied contract whose reader is a zod schema (wire in, domain value out). */
 export function defineResponseContract<D>(
   spec: ContractIdentity & { reader: z.ZodType<D>; fieldPolicies?: readonly FieldPolicy[] },
 ): ResponseContract<D> {
   const { reader, fieldPolicies = [], ...identity } = spec
-  return {
+  const contract: ResponseContract<D> = {
     ...identity,
     body: 'json',
     fieldPolicies,
@@ -52,6 +62,8 @@ export function defineResponseContract<D>(
       return result.success ? { ok: true, value: result.data } : { ok: false, issues: safeIssues(reader, result.error.issues, wire) }
     },
   }
+  contractReaders.set(contract.parse, reader)
+  return contract
 }
 
 /** A contract whose success carries no body (`204`). */
