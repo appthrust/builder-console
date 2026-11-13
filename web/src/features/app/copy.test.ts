@@ -6,6 +6,7 @@ import { shareSentence } from '../../model/share'
 import { preserveLanguage } from '../../../test/language'
 import { setLanguage } from '../../shell/language'
 import { text } from './copy'
+import { runOf } from '../../api/testing/build-domain'
 
 const platform: ConsoleApp = {
   id: 'app', name: 'App', status: 'deploying', statusText: '', branchId: 'production',
@@ -48,15 +49,15 @@ test('build model sentences use the current language without changing status rul
   const restoreLanguage = preserveLanguage()
   try {
     setLanguage('en')
-    const build = { draftId: 'draft', taskCount: 1, run }
+    const build = { draftId: 'draft', taskCount: 1, run: runOf(run) }
     expect(appSecondLine(platform, [], 0, build)).toBe('Building the “Customers” screen')
-    expect(appSecondLine(platform, [], 0, { ...build, run: { ...run, step: 'pushing' } })).toBe('Saving')
-    expect(appSecondLine(platform, [], 0, { ...build, run: { ...run, status: 'failed' } })).toBe('Stopped')
-    expect(appSecondLine(platform, [], 0, { ...build, run: { ...run, status: 'cancelled' } })).toBe('Stopped')
-    expect(appSecondLine(platform, [], 0, { ...build, run: { ...run, status: 'succeeded' } })).toBe('Stopped')
-    expect(appSecondLine(platform, [], 0, { ...build, run: { ...run, status: 'succeeded', tasks: [{ ...run.tasks[0]!, status: 'done' }] } })).toBe('Getting ready to publish')
-    expect(appSecondLine(platform, [], 0, { ...build, run: { ...run, status: 'succeeded', tasks: [] } })).toBe('No screens built yet')
-    const technical = { ...build, run: { ...run, tasks: [{ ...run.tasks[0]!, title: 'Codex workspace' }] } }
+    expect(appSecondLine(platform, [], 0, { ...build, run: runOf({ ...run, step: 'pushing' }) })).toBe('Saving')
+    expect(appSecondLine(platform, [], 0, { ...build, run: runOf({ ...run, status: 'failed' }) })).toBe('Stopped')
+    expect(appSecondLine(platform, [], 0, { ...build, run: runOf({ ...run, status: 'cancelled' }) })).toBe('Stopped')
+    expect(appSecondLine(platform, [], 0, { ...build, run: runOf({ ...run, status: 'succeeded' }) })).toBe('Stopped')
+    expect(appSecondLine(platform, [], 0, { ...build, run: runOf({ ...run, status: 'succeeded', tasks: [{ ...run.tasks[0]!, status: 'done' }] }) })).toBe('Getting ready to publish')
+    expect(appSecondLine(platform, [], 0, { ...build, run: runOf({ ...run, status: 'succeeded', tasks: [] }) })).toBe('No screens built yet')
+    const technical = { ...build, run: runOf({ ...run, tasks: [{ ...run.tasks[0]!, title: 'Codex workspace' }] }) }
     expect(appSecondLine(platform, [], 0, technical)).toBe('Building the “App” screen')
     setLanguage('ja')
     expect(appSecondLine(platform, [], 0, technical)).toBe('画面「アプリ」を作っています')

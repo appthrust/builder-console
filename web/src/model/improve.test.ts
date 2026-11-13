@@ -1,7 +1,17 @@
 import { describe, expect, test } from 'bun:test'
 import type { ApplicationDraft, ApplicationDraftConversationTurn, ApplicationDraftImplementationRun } from '@appthrust/api-schema/platform-api'
 import { implementationTodoId } from '../features/build/implement/state'
-import { deriveImprove, improveTimeline, improveVersions, improvementFor, pendingProposal } from './improve'
+import { draftOf, readEachFirst, readFirst } from '../api/testing/build-domain'
+import * as model from './improve'
+
+/** The tests vary turns, runs and the plan; the rest of the draft is a fixed valid improvement draft. */
+const full = (draft: object) => ({ id: 'draft-1', projectId: 'project-1', title: '直す', intent: '直す', phase: 'created', kind: 'improvement', specMarkdown: '', ownerUserId: 'u', createdAt: '2026-10-26T00:00:00Z', updatedAt: '2026-10-26T00:00:00Z', ...draft })
+const of = (draft: unknown) => draftOf(full(draft as object))
+const deriveImprove = readFirst(of, model.deriveImprove)
+const improveTimeline = readFirst(of, model.improveTimeline)
+const improveVersions = readFirst(of, model.improveVersions)
+const improvementFor = readEachFirst(of, model.improvementFor)
+const pendingProposal = readFirst(of, model.pendingProposal)
 
 const at = (minute: number) => `2026-10-26T00:${String(minute).padStart(2, '0')}:00Z`
 const turn = (id: string, minute: number, status: ApplicationDraftConversationTurn['status'] = 'succeeded'): ApplicationDraftConversationTurn => ({

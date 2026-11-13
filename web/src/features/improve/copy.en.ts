@@ -2,7 +2,7 @@ import type { textJa } from './copy'
 
 export const textEn: typeof textJa = {
   stageLabels: { ask: 'Discuss', fix: 'Change', check: 'Check' },
-  state: { asking: 'Improving', proposed: 'Change ready', running: 'Improving', failed: 'Stopped' },
+  state: { asking: 'Improving', proposed: 'Change ready', running: 'Improving', failed: 'Stopped', unsupported: 'State unknown' },
   updated: (version?: string) => (version ? `Updated to ${version}` : 'Updated'),
   entry: {
     action: 'Improve with AI',

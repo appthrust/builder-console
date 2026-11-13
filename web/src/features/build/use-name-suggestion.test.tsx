@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, mock, spyOn, test, type Mock } from 'bun
 import type { ApplicationDraft } from '@appthrust/api-schema/platform-api'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act } from 'react'
+import { draftOf } from '../../api/testing/build-domain'
 import { createRoot, type Root } from 'react-dom/client'
 import { ConsoleApiError } from '../../api/console'
 import { consoleApi } from '../../api/console-unverified'
@@ -12,11 +13,12 @@ const draft: ApplicationDraft = {
   id: 'draft-name', projectId: 'project-name', title: 'Contacts', intent: 'Contacts', phase: 'planned',
   ownerUserId: 'owner', specMarkdown: '', architectureMarkdown: '', createdAt: '2026-10-27T00:00:00Z', updatedAt: '2026-10-27T00:00:00Z',
   creationExecutions: [],
-  creationPlan: { summary: 'Contacts', markdown: '', representation: [], toolPlan: [], applicationStackRequest: {
+  // A plan the Platform could answer: the contract rejects an empty markdown or representation and a stack request without its hand-off.
+  creationPlan: { summary: 'Contacts', markdown: '# Contacts', representation: ['ApplicationStack'], toolPlan: [], applicationStackRequest: {
     templateId: 'web', web: { componentName: 'web' }, database: { componentName: 'db' }, connection: { connectionName: 'db' },
     applicationName: 'different-app-name', source: { kind: 'sample-image', imageRef: 'example.test/app:v1' },
     publish: { enabled: true, customDomain: 'project.test', hostnamePattern: 'wildcard', subdomain: 'contacts' },
-  } },
+  }, implementationHandoff: { summary: 'Contacts', workspaceMode: 'application-develop', targetApplicationRef: 'createdApplicationId', sourceRepositoryStrategy: 'created-source-repository', tasks: [{ title: 'Contacts', description: 'List contacts', acceptanceCriteria: ['Contacts are listed'] }] } },
 }
 const failure = classifyBuildFailure('Another publish already uses this URL.', undefined, 'prepare')
 let queryClient: QueryClient
@@ -48,7 +50,7 @@ afterEach(async () => {
 })
 
 function Harness({ conflict = true, current = draft }: { conflict?: boolean; current?: ApplicationDraft }) {
-  const suggestion = useNameSuggestion(current, conflict ? failure : undefined, 'sales/east')
+  const suggestion = useNameSuggestion(draftOf(current), conflict ? failure : undefined, 'sales/east')
   return <span>{suggestion}</span>
 }
 async function render(conflict = true, current = draft) {

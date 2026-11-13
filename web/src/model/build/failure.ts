@@ -1,4 +1,5 @@
-import type { ApplicationDraftImplementationFailureReason } from '@appthrust/api-schema/platform-api'
+import type { OpenValue } from '../../api/boundary'
+import type { ImplementationFailureReason } from '../contracts/build'
 import { aiPolicyCopy, aiPolicyExplanation } from '../../copy/ai-policy'
 import { buildCopy } from './copy'
 import type { BuildFailure } from './types'
@@ -8,8 +9,16 @@ export function isAIQuotaExhausted(text: string): boolean {
   return /you have no credits remaining|\binsufficient_quota\b|exceeded your current quota/i.test(text)
 }
 
+/**
+ * A write that answered 2xx with an answer this console could not read: it may have
+ * happened, so the session reads the draft back instead of offering to send it again.
+ */
+export function unconfirmedFailure(reference?: BuildFailure['reference']): BuildFailure {
+  return { kind: 'unconfirmed', ...buildCopy.failure.unconfirmed, ...(reference ? { reference } : {}) }
+}
+
 /** Raw diagnostics stay in the advanced disclosure; stable console codes do not depend on server wording. */
-export function classifyBuildFailure(text: string, status: number | undefined, context: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish', reference?: BuildFailure['reference'], code?: string, operation?: 'apps.create', failureReason?: ApplicationDraftImplementationFailureReason, details?: Record<string, unknown>): BuildFailure {
+export function classifyBuildFailure(text: string, status: number | undefined, context: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish', reference?: BuildFailure['reference'], code?: string, operation?: 'apps.create', failureReason?: OpenValue<ImplementationFailureReason>, details?: Record<string, unknown>): BuildFailure {
   const copy = buildCopy.failure
   // Admission reasons take precedence over generic status, runtime and provider errors.
   const policy = aiPolicyExplanation(details?.reason, details?.policy)
@@ -18,9 +27,12 @@ export function classifyBuildFailure(text: string, status: number | undefined, c
   // A provider cause is more specific than the runtime's generic TaskFailed/stream reason.
   if (context !== 'prepare' && context !== 'publish' && isAIQuotaExhausted(text)) return { kind: 'quota', ...copy.quota, raw: text }
   if (context === 'implement' && failureReason) {
-    if (failureReason === 'StreamInterrupted' || failureReason === 'RuntimeRestarted') return { kind: 'interrupted', ...copy.resumable, raw: text }
-    if (failureReason === 'RuntimeUnavailable') return { kind: 'unavailable', ...copy.unavailable, raw: text }
-    return { kind: 'failed', title: copy.failed.implement, reason: copy.retry, raw: text }
+    // A reason this console does not know is a stop like any other, never a resumable interruption.
+    switch (failureReason.kind === 'known' ? failureReason.value : undefined) {
+      case 'StreamInterrupted': case 'RuntimeRestarted': return { kind: 'interrupted', ...copy.resumable, raw: text }
+      case 'RuntimeUnavailable': return { kind: 'unavailable', ...copy.unavailable, raw: text }
+      default: return { kind: 'failed', title: copy.failed.implement, reason: copy.retry, raw: text }
+    }
   }
   if (context === 'prepare' && (code === 'PublishURLConflict' || (!code && text === 'Another publish already uses this URL.'))) {
     return { kind: 'name-taken', reasonCode: 'PublishURLConflict', title: copy.urlNameTaken, reason: copy.chooseName, raw: text }

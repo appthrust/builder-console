@@ -1,7 +1,7 @@
-import type { ApplicationDraftCreationPlan } from '@appthrust/api-schema/platform-api'
+import type { CreationPlan } from '../contracts/build'
 
 /** AI plans use the same default public destination as the create wizard. */
-export function withDefaultPublish(plan: ApplicationDraftCreationPlan, { domain, appName }: { domain?: string; appName?: string }): ApplicationDraftCreationPlan {
+export function withDefaultPublish(plan: CreationPlan, { domain, appName }: { domain?: string; appName?: string }): CreationPlan {
   const stack = plan.applicationStackRequest
   const name = appName ?? (stack?.application?.name || stack?.applicationName)
   if (!stack || stack.publish?.enabled || !domain || !name) return plan
@@ -15,7 +15,7 @@ export function withDefaultPublish(plan: ApplicationDraftCreationPlan, { domain,
 }
 
 /** Rename only newly created destinations; adopted sources and tool payload references stay intact. */
-export function renameCreationPlan(plan: ApplicationDraftCreationPlan, name: string, { domain }: { domain?: string } = {}): ApplicationDraftCreationPlan {
+export function renameCreationPlan(plan: CreationPlan, name: string, { domain }: { domain?: string } = {}): CreationPlan {
   const repository = plan.applicationSourceRepositoryRequest
   const stack = plan.applicationStackRequest
   const renamedRepository = repository?.destination ? {

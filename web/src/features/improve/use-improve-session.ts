@@ -1,10 +1,11 @@
-import type { ApplicationDraft, ApplicationDraftConversationTurn } from '@appthrust/api-schema/platform-api'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
+import { isResponseContractError } from '../../api/boundary'
 import * as api from '../../api/build'
 import { buildDraftOptions, buildKeys } from '../../api/queries/build'
 import { platformErrorEnvelope } from '../../api/platform-error'
-import { classifyBuildFailure, type BuildFailure } from '../../model/build'
+import { classifyBuildFailure, unconfirmedFailure, type BuildFailure } from '../../model/build'
+import type { BuildDraft } from '../../model/contracts/build'
 import { deriveImprove } from '../../model/improve'
 import { useImplementation } from '../build/implement'
 import { proposalOptions } from '../../api/queries/proposal'
@@ -15,7 +16,7 @@ import { proposalTerminal, proposalWaiting } from '../proposals/model'
  * puts it into the draft cache; the draft query's polling (three seconds while
  * a turn or run is pending/running) carries the answer and the run's progress.
  */
-export function useImproveSession(projectId: string, draft: ApplicationDraft) {
+export function useImproveSession(projectId: string, draft: BuildDraft) {
   const queryClient = useQueryClient()
   const lock = useRef(false)
   const [sending, setSending] = useState(false)
@@ -43,15 +44,22 @@ export function useImproveSession(projectId: string, draft: ApplicationDraft) {
     setSendFailure(undefined)
     const options = buildDraftOptions(projectId, draft.id)
     try {
-      const accepted: ApplicationDraftConversationTurn = (await api.createTurn(projectId, draft.id, { message })).resource
+      const accepted = await api.createTurn(projectId, draft.id, { message })
       // An older GET must not replace the just-accepted turn.
       await queryClient.cancelQueries({ queryKey: options.queryKey })
-      queryClient.setQueryData<ApplicationDraft>(options.queryKey, (current) => {
+      queryClient.setQueryData<BuildDraft>(options.queryKey, (current) => {
         const previous = current ?? draft
-        return { ...previous, conversationTurns: [...(previous.conversationTurns ?? []).filter((item) => item.id !== accepted.id), accepted] }
+        return { ...previous, conversationTurns: [...previous.conversationTurns.filter((item) => item.id !== accepted.id), accepted] }
       })
       void queryClient.invalidateQueries({ queryKey: buildKeys.drafts(projectId) })
     } catch (error) {
+      // Answered 2xx but unreadably: the turn was most likely accepted. Read the draft back; the
+      // failure offers no resend (an unconfirmed send is never repeated from here).
+      if (isResponseContractError(error)) {
+        void queryClient.invalidateQueries({ queryKey: options.queryKey })
+        setSendFailure({ text: message, failure: unconfirmedFailure({ draftId: draft.id, at: new Date().toISOString() }) })
+        return
+      }
       const envelope = platformErrorEnvelope(error)
       const status = envelope?.status ?? (typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number' ? error.status : undefined)
       // Another tab's turn is running: observe it instead of reporting a failure.
@@ -70,9 +78,14 @@ export function useImproveSession(projectId: string, draft: ApplicationDraft) {
     implementation,
     sending,
     sendFailure: sendFailure?.failure,
-    /** Nothing can be sent while a turn or a run is in flight, or while a send or start request is out. */
+    /** Nothing can be sent while a turn or a run is in flight (or in an unknown state), or while a send or start request is out. */
     locked: state.busy || reviewLocked || sending || implementation.pending,
     send: (text: string) => void send(text),
-    retrySend: () => { if (sendFailure) void send(sendFailure.text) },
+    retrySend: () => { if (sendFailure && sendFailure.failure.kind !== 'unconfirmed') void send(sendFailure.text) },
+    /** After a send whose answer could not be read: reads the draft back (it shows whether the turn arrived); nothing is resent. */
+    confirmSend: () => {
+      setSendFailure(undefined)
+      void queryClient.invalidateQueries({ queryKey: buildDraftOptions(projectId, draft.id).queryKey })
+    },
   }
 }

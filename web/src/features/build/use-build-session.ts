@@ -1,16 +1,17 @@
-import type { ApplicationDraft, ApplicationDraftCreationExecutionStep, ApplicationDraftCreationPlanValidation } from '@appthrust/api-schema/platform-api'
+import { isResponseContractError } from '../../api/boundary'
+import { isOneOf, knownValue, type BuildDraft, type BuildExecutionStep, type CreationPlanValidation } from '../../model/contracts/build'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCreateStore, useSelector } from '@tanstack/react-store'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../../api/build'
-import { buildDraftOptions } from '../../api/queries/build'
+import { buildDraftOptions, readDraft } from '../../api/queries/build'
 import { consoleApi, type BusinessApp } from '../../api/console-unverified'
 import { isConsoleError } from '../../api/console'
 import { type Me } from '../../model/contracts/console'
 import { platformErrorEnvelope } from '../../api/platform-error'
 import { isPublishPreparationPending, publishPreparationRetryDelay } from '../../api/publish-retry'
 import { isSessionExpiredError, sessionExpiryStore } from '../../api/session-expiry'
-import { classifyBuildFailure } from '../../model/build/failure'
+import { classifyBuildFailure, unconfirmedFailure } from '../../model/build/failure'
 import { buildCopy } from '../../model/build/copy'
 import { messagesFromDraft, planProposal } from '../../model/build/messages'
 import { composeBuildIntent, conversationTurns, decomposeBuildIntent, isPrepareTurn, prepareAnswers } from '../../model/build/questions'
@@ -35,8 +36,8 @@ const UNAVAILABLE_RETRY_DELAYS = [10_000, 20_000, 30_000, 60_000]
 const NAME_RETRY_DELAYS = [1_000, 3_000, 10_000, 30_000]
 
 /** Only the stale validation conflict gets one fresh validation; no cleanup or execution is retried here. */
-export async function validatePreparationPlan(projectId: string, draftId: string, validatePlan: (projectId: string, draftId: string) => Promise<ApplicationDraftCreationPlanValidation> = api.validatePlan): Promise<string> {
-  let validation: ApplicationDraftCreationPlanValidation
+export async function validatePreparationPlan(projectId: string, draftId: string, validatePlan: (projectId: string, draftId: string) => Promise<CreationPlanValidation> = api.validatePlan): Promise<string> {
+  let validation: CreationPlanValidation
   try {
     validation = await validatePlan(projectId, draftId)
   } catch (error) {
@@ -54,9 +55,14 @@ export async function validatePreparationPlan(projectId: string, draftId: string
   return validation.creationPlanFingerprint
 }
 
-export function useBuildSession(draft: ApplicationDraft, me: Me, groupId: string, ownerGroupName?: string) {
+export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, ownerGroupName?: string) {
   const { projectId } = me
   const queryClient = useQueryClient()
+  // The session's writes reach the draft cache at once (`receive`), but the page re-renders with them only after
+  // React Query's batched observer notification. The session store changes synchronously (a reply acknowledged, a
+  // request cleared), so a render in between must already read the written draft: with the observed one the write
+  // looks undone and is sent again (the hidden preparation turn was queued twice and answered 409).
+  const draft = queryClient.getQueryData<BuildDraft>(buildDraftOptions(projectId, observed.id).queryKey) ?? observed
   const [initial] = useState(() => {
     const saved = readBuildSession(draft.id)
     return saved?.projectId === projectId && saved.ownerSubject === me.person.subject
@@ -96,11 +102,11 @@ export function useBuildSession(draft: ApplicationDraft, me: Me, groupId: string
   const nextPreparation = preparationInput ? appPreparationProgress(preparationInput, now) : undefined
   if (nextPreparation?.currentActivity !== preparationClock.current.activity) preparationClock.current = { activity: nextPreparation?.currentActivity, since: new Date(now).toISOString() }
   const appProgress = preparationInput ? appPreparationProgress(preparationInput, now, preparationClock.current.since) : sourceBuildFailureProgress(sourceRepository?.build)
-  const generation = draft.creationPlanGenerations?.at(-1)
-  const turn = draft.conversationTurns?.at(-1)
-  const execution = draft.creationExecutions?.at(-1)
+  const generation = draft.creationPlanGenerations.at(-1)
+  const turn = draft.conversationTurns.at(-1)
+  const execution = draft.creationExecutions.at(-1)
   const needsPublishDefault = Boolean(draft.creationPlan?.applicationStackRequest && !draft.creationPlan.applicationStackRequest.publish?.enabled)
-  const connections = useQuery({ ...createConnectionsQuery(projectId), enabled: needsPublishDefault || (draft.phase === 'created' && !appView?.platform?.publish) })
+  const connections = useQuery({ ...createConnectionsQuery(projectId), enabled: needsPublishDefault || (isOneOf(draft.phase, 'created') && !appView?.platform?.publish) })
   const domain = connections.data ? pickCreateEnvironment(connections.data.sources, connections.data.registries, connections.data.domains).domain : undefined
   const creationPlan = draft.creationPlan ? withDefaultPublish(draft.creationPlan, { domain }) : undefined
   const defaultPending = !execution && (creationPlan !== draft.creationPlan || (needsPublishDefault && connections.isPending))
@@ -108,7 +114,7 @@ export function useBuildSession(draft: ApplicationDraft, me: Me, groupId: string
   const published = draftPublished(draft) && session.continuedAfterPublishAt !== draft.publishedAt && session.pending.length === 0
   const implementation = useImplementation({ projectId, draft, handoff: execution?.approval?.implementationHandoff ?? draft.creationPlan?.implementationHandoff, enabled: Boolean(draft.createdApplicationStackId) && !published })
   const implementing = implementation.pending || implementation.state.phase === 'starting-workspace' || implementation.state.phase === 'running' || implementation.state.phase === 'pushing'
-  const running = [generation, turn, execution].some((operation) => operation?.status === 'pending' || operation?.status === 'running')
+  const running = [generation, turn, execution].some(isBuildPending)
   const result = deriveStage({ draft, generation, turn, execution, appProgress, implementation: { phase: implementation.state.phase, done: implementation.state.phase === 'done', implemented: implemented(implementation.state), activityTail: implementation.state.activityTail }, published, lastPlannedIntent: session.lastPlannedIntent, now })
   const { spec } = useMemo(() => parseSpec(draft.specMarkdown), [draft.specMarkdown])
   const preparationDone = Boolean(appView?.platform) && !appProgress
@@ -124,25 +130,39 @@ export function useBuildSession(draft: ApplicationDraft, me: Me, groupId: string
     store.setState((current) => typeof next === 'function' ? next(current) : { ...current, ...next })
     saveBuildSession(draft.id, store.state)
   }
-  function receive(next: ApplicationDraft) {
+  /**
+   * Writes a write's answer into the draft cache. Draft reads still in flight (polls and `readDraft`, which all
+   * run as the draft query) are cancelled first: they started before this answer arrived, so landing afterwards
+   * they would bring back the draft as it was before the write, which then looks undone and is sent again (a
+   * second …/run, a hidden preparation turn answered 409).
+   */
+  async function receive(next: BuildDraft) {
+    const { queryKey } = buildDraftOptions(projectId, draft.id)
+    await queryClient.cancelQueries({ queryKey, exact: true })
     draftRef.current = next
-    queryClient.setQueryData(buildDraftOptions(projectId, draft.id).queryKey, next)
+    queryClient.setQueryData(queryKey, next)
   }
-  function fail(error: unknown, context: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish', at = new Date().toISOString(), failedStep?: ApplicationDraftCreationExecutionStep) {
+  function fail(error: unknown, context: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish', at = new Date().toISOString(), failedStep?: BuildExecutionStep) {
+    const preparationExecution = context === 'prepare' ? draftRef.current.creationExecutions.at(-1) : undefined
+    // Console binding can fail after creation succeeded; keep that execution in the support reference.
+    const reference = { draftId: draft.id, at, ...(preparationExecution ? { executionId: preparationExecution.id } : {}) }
+    // A write that answered 2xx with an answer this console cannot read may have happened: nothing
+    // from it enters the draft cache, the draft is read back, and only `confirm` (a re-read) is offered.
+    const unconfirmed = isResponseContractError(error)
+    if (unconfirmed) void queryClient.invalidateQueries({ queryKey: buildDraftOptions(projectId, draft.id).queryKey })
     const envelope = platformErrorEnvelope(error)
     const status = typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number' ? error.status : envelope?.status
     const raw = envelope?.message ?? (error instanceof Error ? error.message : String(error))
-    const preparationExecution = context === 'prepare' ? draftRef.current.creationExecutions?.at(-1) : undefined
-    // Console binding can fail after creation succeeded; keep that execution in the support reference.
-    const reference = { draftId: draft.id, at, ...(preparationExecution ? { executionId: preparationExecution.id } : {}) }
-    const next = classifyBuildFailure(failedStep?.message ?? raw, status, context, reference, failedStep?.detail?.reason ?? (isConsoleError(error) ? error.code : envelope?.code), error instanceof ConsoleAppCreationError ? 'apps.create' : undefined, undefined, envelope?.details)
+    const next = unconfirmed ? unconfirmedFailure(reference)
+      : classifyBuildFailure(failedStep?.message ?? raw, status, context, reference, failedStep?.detail?.reason ?? (isConsoleError(error) ? error.code : envelope?.code), error instanceof ConsoleAppCreationError ? 'apps.create' : undefined, undefined, envelope?.details)
     retryContext.current = context
     setFailure(next)
     patch((current) => {
       // The same failure repeated (retry, reload) stays one notice.
       const last = current.messages.at(-1)
       const messages = last?.role === 'notice' && last.title === next.title && last.detail === next.reason ? current.messages.slice(0, -1) : current.messages
-      return { ...current, ...(next.kind === 'quota' || next.kind === 'policy' ? { planRequested: false } : {}), messages: [...messages, { role: 'notice', tone: 'error', title: next.title, detail: next.reason, ...(next.kind !== 'policy' ? { retry: context } : {}), at, ...(next.reference ? { reference: next.reference } : {}) }] }
+      const retry = unconfirmed ? 'confirm' as const : next.kind !== 'policy' ? context : undefined
+      return { ...current, ...(next.kind === 'quota' || next.kind === 'policy' ? { planRequested: false } : {}), messages: [...messages, { role: 'notice', tone: unconfirmed ? 'warning' : 'error', title: next.title, detail: next.reason, ...(retry ? { retry } : {}), at, ...(next.reference ? { reference: next.reference } : {}) }] }
     })
   }
   async function perform(context: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish', action: () => Promise<void>) {
@@ -180,7 +200,8 @@ export function useBuildSession(draft: ApplicationDraft, me: Me, groupId: string
 
   function send(text: string) {
     const reply = text.trim()
-    if (!reply || reply.length > 4000) return
+    // A state this console does not know offers no write (stage.ts `unsupported`); reading stays.
+    if (!reply || reply.length > 4000 || result.unsupported) return
     if (result.stage === 'build' || result.stage === 'publish') {
       patch((current) => queueReply({ ...current, continuedAfterPublishAt: draft.publishedAt }, reply, new Date().toISOString()))
       return
@@ -207,7 +228,7 @@ export function useBuildSession(draft: ApplicationDraft, me: Me, groupId: string
     // HTTP failures retain their pending reply and notice across reload; only an explicit retry resumes it.
     const lastMessage = session.messages.at(-1)
     if (lastMessage?.role === 'notice' && (lastMessage.retry === 'turn' || (lastMessage.tone === 'error' && !lastMessage.retry))) return
-    if (!pending || conversing || busy || lock.current || failure || Date.now() < blockedUntil.current) return
+    if (!pending || conversing || busy || lock.current || failure || result.unsupported || Date.now() < blockedUntil.current) return
     // 用意する questions are answered in the conversation, even when the app was made before the answer.
     const asking = preparing || answers.open || isPrepareTurn(pending.text)
     if (draft.createdApplicationStackId && !asking) {
@@ -224,18 +245,24 @@ export function useBuildSession(draft: ApplicationDraft, me: Me, groupId: string
       const replies = conversationTurns(currentDraft.conversationTurns).map((item) => item.userMessage)
       const intent = composeBuildIntent(decomposeBuildIntent(session.baseIntent), [...replies, pending.text])
       // The intent is the plan's input; 用意する answers do not change the plan in use.
-      if (!asking) receive(await api.updateDraft(projectId, draft.id, { intent }))
+      if (!asking) await receive(await api.updateDraft(projectId, draft.id, { intent }))
       try {
         const created = await api.createTurn(projectId, draft.id, { message: pending.text })
         const latest = draftRef.current
-        receive({ ...latest, conversationTurns: [...(latest.conversationTurns ?? []), created] })
+        await receive({ ...latest, conversationTurns: [...latest.conversationTurns, created] })
         patch((current) => acknowledgeReply(current, pending.at))
       } catch (error) {
+        // The turn was answered 2xx, so it was most likely accepted: the reply leaves the queue
+        // (no resend); the draft read back shows it, and `fail` reports the unreadable answer.
+        if (isResponseContractError(error)) {
+          patch((current) => acknowledgeReply(current, pending.at))
+          throw error
+        }
         const envelope = platformErrorEnvelope(error)
         const status = typeof error === 'object' && error !== null && 'status' in error ? error.status : envelope?.status
         if (status === 409) {
           blockedUntil.current = Date.now() + 3000
-          receive(await api.getDraft(projectId, draft.id))
+          draftRef.current = await readDraft(queryClient, projectId, draft.id)
           return
         }
         const policyDenied = classifyBuildFailure(envelope?.message ?? (error instanceof Error ? error.message : ''), typeof status === 'number' ? status : undefined, 'turn', undefined, envelope?.code, undefined, undefined, envelope?.details).kind === 'policy'
@@ -248,45 +275,47 @@ export function useBuildSession(draft: ApplicationDraft, me: Me, groupId: string
         throw error
       }
     })
-  }, [session.pending, session.messages, conversing, preparing, answers.open, busy, failure, now, implementation.pending, implementation.state.failure])
+  }, [session.pending, session.messages, conversing, preparing, answers.open, busy, failure, result.unsupported, now, implementation.pending, implementation.state.failure])
 
   async function generate() {
-    const previousGenerationId = draftRef.current.creationPlanGenerations?.at(-1)?.id
-    // A reload/another tab may have already accepted this handoff. Read before writing.
-    const current = await api.getDraft(projectId, draft.id)
-    receive(current)
-    const latestGeneration = current.creationPlanGenerations?.at(-1)
-    if (current.createdApplicationStackId || current.creationExecutions?.length
+    const previousGenerationId = draftRef.current.creationPlanGenerations.at(-1)?.id
+    // A reload/another tab may have already accepted this handoff. Read before writing (as the draft query, which a
+    // write's answer cancels: an implementation start or cancel landing meanwhile is never overwritten by this read).
+    const current = await readDraft(queryClient, projectId, draft.id)
+    draftRef.current = current
+    const latestGeneration = current.creationPlanGenerations.at(-1)
+    if (current.createdApplicationStackId || current.creationExecutions.length
       || latestGeneration?.id !== previousGenerationId
       || !needsPlanRefresh(current, store.state.lastPlannedIntent)) {
       patch({ planRequested: false })
       return
     }
-    if ([latestGeneration, current.conversationTurns?.at(-1)].some(isBuildPending)) return
+    if ([latestGeneration, current.conversationTurns.at(-1)].some(isBuildPending)) return
     const intent = composeBuildIntent(decomposeBuildIntent(session.baseIntent), conversationTurns(current.conversationTurns).map((item) => item.userMessage), true)
     const updated = current.intent === intent ? current : await api.updateDraft(projectId, draft.id, { intent })
-    receive(updated)
-    const attemptKey = `build-plan-${draft.id}-${current.conversationTurns?.at(-1)?.id ?? 'initial'}-${previousGenerationId ?? 'initial'}`
+    await receive(updated)
+    const attemptKey = `build-plan-${draft.id}-${current.conversationTurns.at(-1)?.id ?? 'initial'}-${previousGenerationId ?? 'initial'}`
     const created = await api.createGeneration(projectId, draft.id, {}, attemptKey)
     patch({ lastPlannedIntent: intent, planRequested: false, reusePlan: false })
-    receive({ ...draftRef.current, creationPlanGenerations: [...(draftRef.current.creationPlanGenerations ?? []), created] })
+    await receive({ ...draftRef.current, creationPlanGenerations: [...draftRef.current.creationPlanGenerations, created] })
   }
 
   useEffect(() => {
     // Plan replacement is forbidden after an execution exists.
-    if (execution || generation?.status !== 'succeeded' || !creationPlan || creationPlan === draft.creationPlan || running || busy || lock.current || failure) return
+    if (execution || !isOneOf(generation?.status, 'succeeded') || !creationPlan || creationPlan === draft.creationPlan || running || busy || lock.current || failure) return
     void perform('plan', async () => {
       const current = draftRef.current
-      if (current.creationExecutions?.length || !current.creationPlan) return
+      if (current.creationExecutions.length || !current.creationPlan) return
       const plan = withDefaultPublish(current.creationPlan, { domain })
-      if (plan !== current.creationPlan) receive(await api.updateDraft(projectId, draft.id, { creationPlan: plan }))
+      if (plan !== current.creationPlan) await receive(await api.updateDraft(projectId, draft.id, { creationPlan: plan }))
     })
-  }, [draft.creationPlan, generation?.status, execution, domain, running, busy, failure])
+  }, [draft.creationPlan, knownValue(generation?.status), execution, domain, running, busy, failure])
 
   useEffect(() => {
-    if (running || busy || lock.current || session.pending.length || failure || draft.createdApplicationStackId) return
-    if ([generation, turn, execution].some((operation) => operation?.status === 'failed' && !observedFailures.current.has(operation.id))) return
-    if ((turn?.status === 'succeeded' && (session.planRequested || hasUnplannedKickoff(draft))) || (session.prepareRequested && !session.reusePlan && needsPlanRefresh(draft, session.lastPlannedIntent))) {
+    // A phase or job state this console does not know starts nothing on its own (stage.ts `unsupported`).
+    if (running || busy || lock.current || session.pending.length || failure || draft.createdApplicationStackId || result.unsupported) return
+    if ([generation, turn, execution].some((operation) => isOneOf(operation?.status, 'failed') && !observedFailures.current.has(operation!.id))) return
+    if ((isOneOf(turn?.status, 'succeeded') && (session.planRequested || hasUnplannedKickoff(draft))) || (session.prepareRequested && !session.reusePlan && needsPlanRefresh(draft, session.lastPlannedIntent))) {
       void perform('plan', generate)
       return
     }
@@ -296,33 +325,33 @@ export function useBuildSession(draft: ApplicationDraft, me: Me, groupId: string
       const clientRequestId = store.state.executionRequestId ?? crypto.randomUUID()
       patch({ executionRequestId: clientRequestId })
       const begun = await api.createExecution(projectId, draft.id, { clientRequestId, creationPlanFingerprint })
-      receive(begun)
-      const created = begun.creationExecutions?.at(-1)
+      await receive(begun)
+      const created = begun.creationExecutions.at(-1)
       if (!created) throw new Error(text.session.missingExecution)
       patch({ prepareRequested: false })
-      receive(await api.runExecution(projectId, draft.id, created.id))
+      await receive(await api.runExecution(projectId, draft.id, created.id))
     })
   }, [draft, session.prepareRequested, session.planRequested, session.pending.length, running, busy, failure, defaultPending])
 
   useEffect(() => {
     // A reload between begin and run resumes the existing execution, never begins a second one.
-    if (!execution || execution.status !== 'running' || execution.runStartedAt || busy || lock.current || failure) return
-    void perform('prepare', async () => { receive(await api.runExecution(projectId, draft.id, execution.id)) })
+    if (!execution || !isOneOf(execution.status, 'running') || execution.runStartedAt || busy || lock.current || failure) return
+    void perform('prepare', async () => { await receive(await api.runExecution(projectId, draft.id, execution.id)) })
   }, [execution, busy, failure])
 
   useEffect(() => {
     for (const [context, operation] of [['turn', turn], ['plan', generation], ['prepare', execution]] as const) {
-      if (!operation || operation.status !== 'failed' || observedFailures.current.has(operation.id)) continue
+      if (!operation || !isOneOf(operation.status, 'failed') || observedFailures.current.has(operation.id)) continue
       observedFailures.current.add(operation.id)
       const kind = classifyBuildFailure(operation.error ?? '', undefined, context).kind
       if (context === 'plan' && session.planRetries === 0 && kind !== 'quota' && kind !== 'policy') {
         patch((current) => ({ ...current, planRetries: 1, planRequested: true, messages: [...current.messages, { role: 'notice', tone: 'info', title: text.session.retryPlan, at: new Date().toISOString() }] }))
-      } else fail(new Error(operation.error ?? text.session.operationFailed), context, operation.finishedAt, context === 'prepare' ? execution?.steps.find((step) => step.status === 'failed') : undefined)
+      } else fail(new Error(operation.error ?? text.session.operationFailed), context, operation.finishedAt, context === 'prepare' ? execution?.steps.find((step) => isOneOf(step.status, 'failed')) : undefined)
     }
   }, [turn, generation, execution])
 
   useEffect(() => {
-    if (!draft.createdApplicationStackId || (draft.phase !== 'created' && execution?.status !== 'succeeded') || app?.stackId || busy || lock.current || bindingFailed.current) return
+    if (!draft.createdApplicationStackId || (!isOneOf(draft.phase, 'created') && !isOneOf(execution?.status, 'succeeded')) || app?.stackId || busy || lock.current || bindingFailed.current) return
     void perform('prepare', async () => {
       try {
         // A previously selected department stays fixed; repair only old empty sessions.
@@ -338,11 +367,11 @@ export function useBuildSession(draft: ApplicationDraft, me: Me, groupId: string
         await queryClient.invalidateQueries({ queryKey: ['console', 'apps'] })
       } catch (error) { bindingFailed.current = true; throw error }
     })
-  }, [draft.createdApplicationStackId, draft.phase, execution?.status, app?.stackId, busy, groupId])
+  }, [draft.createdApplicationStackId, knownValue(draft.phase), knownValue(execution?.status), app?.stackId, busy, groupId])
 
   useEffect(() => {
     const platform = appView?.platform
-    if (draft.phase !== 'created' || appViews.loading || appViews.failed || !platform?.webComponentId || !domain || busy || lock.current || failure) return
+    if (!isOneOf(draft.phase, 'created') || appViews.loading || appViews.failed || !platform?.webComponentId || !domain || busy || lock.current || failure) return
     const hasPublish = appViews.input.publishes.some((publish) => publish.applicationId === platform.id && publish.branchId === platform.branchId && publish.componentId === platform.webComponentId)
       || (platform.publish?.branchId === platform.branchId && platform.publish.componentId === platform.webComponentId)
     if (hasPublish) {
@@ -373,7 +402,7 @@ export function useBuildSession(draft: ApplicationDraft, me: Me, groupId: string
       publishRetries.current = 0
       appViews.refetch()
     })
-  }, [draft.phase, appView?.platform, appViews.loading, appViews.failed, domain, busy, failure, publishRetryAt])
+  }, [knownValue(draft.phase), appView?.platform, appViews.loading, appViews.failed, domain, busy, failure, publishRetryAt])
 
   // Draft preferences are authoritative across tabs. During implementation only the
   // preferences/title are writable; specification alignment waits for its lock.
@@ -387,7 +416,7 @@ export function useBuildSession(draft: ApplicationDraft, me: Me, groupId: string
     void perform('prepare', async () => {
       const current = parseSpec(draftRef.current.specMarkdown)
       try {
-        receive(await api.updateDraft(projectId, draft.id, {
+        await receive(await api.updateDraft(projectId, draft.id, {
           ...(preferencesChanged ? { publishPreferences: preferences } : {}),
           ...(titleChanged ? { title: name } : {}),
           ...(specChanged ? { specMarkdown: serializeSpec({ ...current.spec, name }, current.body) } : {}),
@@ -410,27 +439,29 @@ export function useBuildSession(draft: ApplicationDraft, me: Me, groupId: string
 
   async function markPublished() {
     await perform('publish', async () => {
-      receive(await api.updateDraft(projectId, draft.id, { markPublished: true }))
+      await receive(await api.updateDraft(projectId, draft.id, { markPublished: true }))
       patch({ continuedAfterPublishAt: undefined })
       setFailure(undefined)
     })
   }
 
-  function retry(context?: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish') {
+  function retry(context?: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish' | 'confirm') {
     const last = session.messages.at(-1)
     context ??= last?.role === 'notice' && last.retry ? last.retry : retryContext.current
     setFailure(undefined)
     bindingFailed.current = false
     patch((current) => ({ ...current, messages: current.messages.filter((message) => message.role !== 'notice' || !message.retry) }))
-    if (context === 'publish') void markPublished()
+    // After an unreadable write answer only the draft is read again; the write itself is never resent from here.
+    if (context === 'confirm') void queryClient.invalidateQueries({ queryKey: buildDraftOptions(projectId, draft.id).queryKey })
+    else if (context === 'publish') void markPublished()
     else if (context === 'implement') implementation.retry()
     else if (context === 'plan') patch({ planRequested: true })
     else if (context === 'prepare' && !draft.createdApplicationStackId) {
       void perform('prepare', async () => {
-        receive(await api.cleanupCreation(projectId, draft.id))
+        await receive(await api.cleanupCreation(projectId, draft.id))
         patch({ prepareRequested: true, reusePlan: true, executionRequestId: undefined })
       })
-    } else if (context === 'turn' && !store.state.pending.length && turn?.status === 'failed') send(turn.userMessage)
+    } else if (context === 'turn' && !store.state.pending.length && isOneOf(turn?.status, 'failed')) send(turn!.userMessage)
   }
   return {
     session, spec, app, implementation, failure, busy, result, proposal, domain,

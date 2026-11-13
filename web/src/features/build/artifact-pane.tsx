@@ -1,4 +1,4 @@
-import type { ApplicationDraft, ApplicationDraftSourceSummary, UiDesign } from '@appthrust/api-schema/platform-api'
+import type { BuildDraft, DraftExcelAnalysis, DraftSource, DraftUiDesign } from '../../model/contracts/build'
 import { Circle, PanelRightClose } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { buildCopy } from '../../model/build/copy'
@@ -22,7 +22,7 @@ function Rows({ rows }: { rows: [string, ReactNode][] }) {
  * Only decided rows are shown; what is still open collapses into one 「これから決めること」 line.
  * An uploaded workbook answers 「元のデータ」 itself, whatever the front-matter says.
  */
-export function SpecCard({ spec, title, proposal, source, uiDesign, excelAnalysis }: { spec: BuildSpec; title: string; proposal?: BuildProposal; source?: ApplicationDraftSourceSummary; uiDesign?: UiDesign; excelAnalysis?: ApplicationDraft['excelAnalysis'] }) {
+export function SpecCard({ spec, title, proposal, source, uiDesign, excelAnalysis }: { spec: BuildSpec; title: string; proposal?: BuildProposal; source?: DraftSource; uiDesign?: DraftUiDesign; excelAnalysis?: DraftExcelAnalysis }) {
   const about: [string, ReactNode][] = []
   const open: string[] = []
   const add = (label: string, value: ReactNode | undefined) => { if (value) about.push([label, value]); else open.push(label) }
@@ -66,7 +66,7 @@ export function ProgressCard({ progress, failure }: { progress: Progress; failur
     {reference ? <p className="mt-3 break-all text-xs text-stone-600">{reference}</p> : null}
     {progress.activity ? <ActivityLog lines={progress.activity} label={buildCopy.progress.observe.activity} className="mt-3 max-h-48 p-3" /> : null}
     {progress.steps ? <ol aria-label={progress.staged ? text.artifact.preparation : undefined} className="mt-4 space-y-3">{progress.steps.map((step, index) => <li key={`${step.label}-${index}`} aria-current={step.state === 'doing' ? 'step' : undefined} className="flex gap-3 text-sm">
-      <span aria-label={text.artifact.states[step.state]} className={step.state === 'failed' ? 'text-bad-ink' : step.state === 'todo' ? 'text-stone-400' : 'text-accent-strong'}>{progress.staged ? ({ todo: '○', doing: '●', done: '✔', failed: '!' })[step.state] : text.artifact.states[step.state]}</span>
+      <span aria-label={text.artifact.states[step.state]} className={step.state === 'failed' ? 'text-bad-ink' : step.state === 'todo' || step.state === 'unknown' ? 'text-stone-400' : 'text-accent-strong'}>{progress.staged ? ({ todo: '○', doing: '●', done: '✔', failed: '!', unknown: '?' })[step.state] : text.artifact.states[step.state]}</span>
       <div className="min-w-0 flex-1"><div className="flex flex-wrap justify-between gap-2"><span className={step.state === 'doing' ? 'font-semibold' : undefined}>{step.label}</span>{step.elapsedLabel ? <span className="tabular-nums text-stone-500">{step.elapsedLabel}</span> : null}</div>{step.expectation ? <span className="block text-xs text-stone-500">{step.expectation}</span> : null}{step.detail && step.detail !== progress.hint ? <span className="block text-xs text-stone-500">{step.detail}</span> : null}</div>
     </li>)}</ol> : null}
     {progress.currentActivity ? <p aria-label={buildCopy.progress.observe.activity} className="mt-4 text-sm text-stone-600"><span className="font-medium">{buildCopy.progress.observe.activity}: </span>{progress.currentActivity}{progress.buildUrl ? <a href={progress.buildUrl} target="_blank" rel="noopener noreferrer" className="mt-1 block text-accent-strong underline">{buildCopy.progress.observe.buildLink}</a> : null}</p> : null}
@@ -83,8 +83,8 @@ export function PublishCard({ url, shareText, published = false }: { url: string
   </CardBody></Card></section>
 }
 
-export function ArtifactPane({ draft, spec, proposal, stage, progress, implementation, failure, url, shareText, shareStep, databaseChanges, previewDatabaseReset, onOpenPreview, onRetry, onSkipTask, onCollapse }: {
-  draft: ApplicationDraft
+export function ArtifactPane({ draft, spec, proposal, stage, progress, implementation, failure, url, shareText, shareStep, databaseChanges, previewDatabaseReset, onOpenPreview, onRetry, onSkipTask, onConfirm, onCollapse }: {
+  draft: BuildDraft
   spec: BuildSpec
   proposal?: BuildProposal
   stage: BuildStage
@@ -101,6 +101,8 @@ export function ArtifactPane({ draft, spec, proposal, stage, progress, implement
   onOpenPreview(): void
   onRetry(): void
   onSkipTask(id: string): void
+  /** Reads the draft back after an implementation start whose answer could not be read. */
+  onConfirm?(): void
   /** From md the pane folds to a strip; the control lives in its heading so it leaves with the pane. */
   onCollapse(): void
 }) {
@@ -116,7 +118,7 @@ export function ArtifactPane({ draft, spec, proposal, stage, progress, implement
     : undefined
   const implementing = previewDatabaseReset.busy || implementation.phase === 'starting-workspace' || implementation.phase === 'running' || implementation.phase === 'pushing'
   const previewDatabase = databaseStatus && databaseStatus !== 'none'
-    ? { status: databaseStatus, excel: Boolean(draft.source), busy: implementing, pending: previewDatabaseReset.pending, error: previewDatabaseReset.error, onReset: previewDatabaseReset.reset }
+    ? { status: databaseStatus, excel: Boolean(draft.source), busy: implementing, pending: previewDatabaseReset.pending, error: previewDatabaseReset.error, onReset: previewDatabaseReset.reset, onConfirm: previewDatabaseReset.confirm }
     : undefined
   const progressFailure = !built && failure && progress?.title === failure.title ? failure : undefined
   const showFailureNotice = failure && failure.kind !== 'name-taken' && (built ? !implementation.failure : !progressFailure)
@@ -130,13 +132,13 @@ export function ArtifactPane({ draft, spec, proposal, stage, progress, implement
     {built ? null : specCard}
     {!built && progress ? <ProgressCard progress={progress} failure={progressFailure} /> : null}
     {!built && proposal?.tasks.length ? <TasksPreview proposal={proposal} /> : null}
-    {showFailureNotice ? <Notice tone="error" title={failure.title}>
+    {showFailureNotice ? <Notice tone={failure.kind === 'unconfirmed' ? 'warning' : 'error'} title={failure.title}>
       <p>{failure.reason}</p>
       {reference ? <p className="mt-3 break-all text-xs">{reference}</p> : null}
     </Notice> : null}
     {shareStep}
     {stage === 'publish' && url ? <PublishCard url={url} shareText={shareText} published /> : null}
-    {built ? <ImplementPanel state={implementation} preparation={progress} released={Boolean(url)} previewNotice={previewNotice} previewDatabase={previewDatabase} onOpenPreview={onOpenPreview} onRetry={onRetry} onSkipTask={onSkipTask} /> : null}
+    {built ? <ImplementPanel state={implementation} preparation={progress} released={Boolean(url)} previewNotice={previewNotice} previewDatabase={previewDatabase} onOpenPreview={onOpenPreview} onRetry={onRetry} onSkipTask={onSkipTask} onConfirm={onConfirm} /> : null}
     {built ? databaseChanges : null}
     {stage === 'build' && url ? <PublishCard url={url} shareText={shareText} /> : null}
     {built && !url ? <p className="text-xs text-stone-500">{text.artifact.waitingForApp}</p> : null}

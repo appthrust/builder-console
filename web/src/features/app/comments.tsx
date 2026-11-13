@@ -115,8 +115,9 @@ function CommentThread({ appId, owners, canDeleteAny }: CommentsProps) {
             </div>
           )}
         >
-          {(list) => list.length === 0 ? <p className="py-6 text-sm text-stone-500">{text.comments.empty}</p> : (
+          {(list, stale) => list.length === 0 ? <>{stale}<p className="py-6 text-sm text-stone-500">{text.comments.empty}</p></> : (
             <>
+              {stale ? <div className="mb-3">{stale}</div> : null}
               <ul className="divide-y divide-stone-100">
                 {list.map((comment) => {
                   const authorDepartment = comment.author.id === me.person.id ? department : undefined

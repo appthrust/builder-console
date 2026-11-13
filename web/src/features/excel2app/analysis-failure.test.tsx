@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { preserveLanguage } from '../../../test/language'
+import { turnOf } from '../../api/testing/build-domain'
 import { buildCopy } from '../../model/build/copy'
 import { aiPolicyExplanation } from '../../copy/ai-policy'
 import { classifyBuildFailure } from '../../model/build/failure'
@@ -49,10 +50,10 @@ test('ordinary analysis failure retains the existing Excel recovery', () => {
 test('failed-stage progress retains completed and reused files for a continue retry', () => {
   const workbooks = ['April.xlsx', 'May.xlsx', 'Customers.xlsx'].map((fileName, index) => ({ id: `wb-${String(index + 1).padStart(12, '0')}`, fileName, sheetCount: 1, rowCount: 3, bytes: 100, digest: 'a'.repeat(64), truncated: false, addedAt: '2026-11-01T00:00:00Z' }))
   const turn = {
-    id: 'turn-1', kind: 'excel-analysis' as const, userMessage: '', status: 'failed' as const, startedAt: '2026-11-01T00:01:00Z', devWorkspaceId: 'ws-1',
+    id: 'turn-1', kind: 'excel-analysis' as const, userMessage: 'Analyze workbooks', status: 'failed' as const, startedAt: '2026-11-01T00:01:00Z', devWorkspaceId: 'ws-1',
     excelProgress: { stage: 'reading' as const, workbooks: workbooks.map((workbook, index) => ({ workbookId: workbook.id, state: (['reused', 'read', 'failed'] as const)[index]! })) },
   }
-  const html = renderToStaticMarkup(<AnalysingStep workbooks={workbooks} turn={turn} problem="failed" error="Reading stopped" codexAvailable canContinueOffline={false} onRetry={() => {}} onOffline={() => {}} />)
+  const html = renderToStaticMarkup(<AnalysingStep workbooks={workbooks} turn={turnOf(turn)} problem="failed" error="Reading stopped" codexAvailable canContinueOffline={false} onRetry={() => {}} onOffline={() => {}} />)
   for (const state of ['reused', 'read', 'failed']) expect(html).toContain(`data-state="${state}"`)
   expect(html).toContain('data-stage="reading"')
   expect(html).toContain('excel2app-analysis-retry')
@@ -60,8 +61,8 @@ test('failed-stage progress retains completed and reused files for a continue re
 })
 
 test('designing comes from persisted progress and a 412 never silently offers offline when AI is available', () => {
-  const turn = { id: 'turn-1', kind: 'excel-analysis' as const, userMessage: '', status: 'running' as const, startedAt: '2026-11-01T00:01:00Z', devWorkspaceId: 'ws-1', excelProgress: { stage: 'designing' as const, workbooks: [] } }
-  expect(renderToStaticMarkup(<AnalysingStep turn={turn} codexAvailable canContinueOffline={false} onRetry={() => {}} onOffline={() => {}} />)).toContain('data-stage="designing"')
+  const turn = { id: 'turn-1', kind: 'excel-analysis' as const, userMessage: 'Analyze workbooks', status: 'running' as const, startedAt: '2026-11-01T00:01:00Z', devWorkspaceId: 'ws-1', excelProgress: { stage: 'designing' as const, workbooks: [] } }
+  expect(renderToStaticMarkup(<AnalysingStep turn={turnOf(turn)} codexAvailable canContinueOffline={false} onRetry={() => {}} onOffline={() => {}} />)).toContain('data-stage="designing"')
   const html = renderToStaticMarkup(<AnalysingStep problem="unavailable" codexAvailable canContinueOffline onRetry={() => {}} onOffline={() => {}} />)
   expect(html).toContain('excel2app-analysis-retry')
   expect(html).not.toContain('excel2app-offline')

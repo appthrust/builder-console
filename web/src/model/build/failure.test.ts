@@ -71,7 +71,7 @@ test('unrelated console conflicts still use the preparation failure and its succ
 })
 
 test.each(['StreamInterrupted', 'RuntimeRestarted', 'RuntimeUnavailable', 'TaskFailed', 'TaskCancelled', 'InputRequired'] as const)('implementation reason %s wins over conflicting legacy text', (reason) => {
-  const failure = classifyBuildFailure('forbidden network workspace AI task stream failed', 503, 'implement', undefined, undefined, undefined, reason)
+  const failure = classifyBuildFailure('forbidden network workspace AI task stream failed', 503, 'implement', undefined, undefined, undefined, { kind: 'known', value: reason })
   expect(failure).toMatchObject(reason === 'StreamInterrupted' || reason === 'RuntimeRestarted'
     ? { kind: 'interrupted', ...buildCopy.failure.resumable }
     : reason === 'RuntimeUnavailable'
@@ -93,7 +93,7 @@ test.each([
     expect(classifyBuildFailure(message, 429, context)).toEqual({ kind: 'quota', ...buildCopy.failure.quota, raw: message })
   }
   for (const reason of ['TaskFailed', 'StreamInterrupted', 'RuntimeUnavailable'] as const) {
-    expect(classifyBuildFailure(message, 503, 'implement', undefined, undefined, undefined, reason)).toEqual({ kind: 'quota', ...buildCopy.failure.quota, raw: message })
+    expect(classifyBuildFailure(message, 503, 'implement', undefined, undefined, undefined, { kind: 'known', value: reason })).toEqual({ kind: 'quota', ...buildCopy.failure.quota, raw: message })
   }
   expect(buildCopy.failure.quota).toEqual({
     title: 'AI の利用枠が切れています',
@@ -126,7 +126,7 @@ test.each([
 ] as const)('structured %s takes precedence over runtime, quota, status and legacy reasons', (reason, explanation) => {
   const raw = 'ai_model_denied: forbidden workspace insufficient_quota'
   for (const context of ['turn', 'plan', 'prepare', 'implement', 'publish'] as const) {
-    const failure = classifyBuildFailure(raw, 412, context, undefined, 'failed_precondition', undefined, 'RuntimeUnavailable', { reason, policy: 'default' })
+    const failure = classifyBuildFailure(raw, 412, context, undefined, 'failed_precondition', undefined, { kind: 'known', value: 'RuntimeUnavailable' }, { reason, policy: 'default' })
     expect(failure).toMatchObject({ kind: 'policy', raw, reason: aiPolicyExplanation(reason, 'default') })
     expect(failure.reason).toContain('「default」')
     expect(failure.reason).toContain(explanation)

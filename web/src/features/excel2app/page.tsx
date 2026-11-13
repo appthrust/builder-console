@@ -1,6 +1,7 @@
 // Collect a workbook set, review its integrated business design, then hand the
 // same draft and screen decisions to the build flow.
-import type { ApplicationDraftConversationTurn, ApplicationDraftCreationToolRegistryResponse, ApplicationDraftWorkbookEntry, ApplicationDraftWorkbookSummary, ExcelAnalysis, UiDesign } from '@appthrust/api-schema/platform-api'
+import type { ApplicationDraftCreationToolRegistryResponse, ApplicationDraftWorkbookEntry, ApplicationDraftWorkbookSummary, ExcelAnalysis, UiDesign } from '@appthrust/api-schema/platform-api'
+import { isOneOf, type BuildTurn } from '../../model/contracts/build'
 import { useNavigate } from '@tanstack/react-router'
 import { ArrowRight, Calculator, CalendarClock, Check, ClipboardList, Database, Download, Eye, FileSpreadsheet, GitBranch, ListChecks, Loader2, Pencil, PieChart, RotateCcw, Search, Sparkles, Table2, Upload } from 'lucide-react'
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
@@ -415,7 +416,7 @@ function PickStep({ busy, error, files, budget, hint, onHint, onFiles, onSample,
 /** Progress is persisted by the staged turn, never inferred from elapsed time. */
 export function AnalysingStep({ workbooks = [], turn, problem, error, failure, codexAvailable, codexUnavailableReason, codexPolicy, canContinueOffline, onRetry, onOffline }: {
   workbooks?: ApplicationDraftWorkbookSummary[]
-  turn?: ApplicationDraftConversationTurn
+  turn?: BuildTurn
   problem?: AnalysisProblem
   error?: string
   failure?: BuildFailure
@@ -426,7 +427,7 @@ export function AnalysingStep({ workbooks = [], turn, problem, error, failure, c
   onRetry: () => void
   onOffline: () => void
 }) {
-  const running = turn?.status === 'pending' || turn?.status === 'running'
+  const running = isOneOf(turn?.status, 'pending', 'running')
   const progress = turn?.excelProgress
   const log = activityLines(turn?.activityTail).at(-1)
   const offline = canContinueOffline && !codexAvailable ? <Button type="button" tone="secondary" size="sm" data-testid="excel2app-offline" onClick={onOffline}>{text.analysis.offline}</Button> : null

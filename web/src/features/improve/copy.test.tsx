@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test'
+import { draftOf } from '../../api/testing/build-domain'
 import type { ApplicationDraft } from '@appthrust/api-schema/platform-api'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { preserveLanguage } from '../../../test/language'
@@ -6,8 +7,10 @@ import { isProductLanguage } from '../../model/build/wording'
 import { deriveImprove } from '../../model/improve'
 import { setLanguage } from '../../shell/language'
 import { buildCopy } from '../../model/build/copy'
+import { unconfirmedFailure } from '../../model/build/failure'
+import { text as buildText } from '../build/copy'
 import { implementationTodoId } from '../build/implement/state'
-import { ImproveConversation } from './conversation'
+import { ImproveConversation, type ImproveConversationProps } from './conversation'
 import { improveStateWord, text, textJa } from './copy'
 import { textEn } from './copy.en'
 
@@ -55,9 +58,19 @@ const draft: ApplicationDraft = {
   conversationTurns: [{ id: 't1', kind: 'conversation', status: 'succeeded', startedAt: at, finishedAt: at, devWorkspaceId: 'ws', userMessage: '状態で絞り込みたい', assistantMessage: '## 要約\nまとめました。\n## 次の質問\nこの内容で直せます。', suggestedReplies: ['この内容で直して'] }],
 }
 
-function render(value: ApplicationDraft, appUrl?: string) {
-  return renderToStaticMarkup(<ImproveConversation draft={value} state={deriveImprove(value)} appUrl={appUrl} locked={deriveImprove(value).busy} starting={false} onSend={() => {}} onRetrySend={() => {}} onStart={() => {}} />)
+function render(wire: ApplicationDraft, appUrl?: string, failures: Pick<ImproveConversationProps, 'sendFailure' | 'startFailure'> = {}) {
+  const value = draftOf(wire)
+  return renderToStaticMarkup(<ImproveConversation draft={value} state={deriveImprove(value)} appUrl={appUrl} locked={deriveImprove(value).busy} starting={false} onSend={() => {}} onRetrySend={() => {}} onStart={() => {}} onConfirmSend={() => {}} onConfirmStart={() => {}} {...failures} />)
 }
+
+test('an unreadable send or start answer offers only 「最新の状態を確認する」, never a resend', () => {
+  const failure = unconfirmedFailure({ draftId: draft.id, at })
+  const html = render(draft, undefined, { sendFailure: failure, startFailure: failure })
+  expect(html.split(`${buildCopy.failure.confirm}</button>`)).toHaveLength(3)
+  expect(html).not.toContain(`${buildText.conversation.retry}</button>`)
+  // The proposal's own start stays closed until the read-back shows what happened.
+  expect(html).toMatch(/<button[^>]*disabled=""[^>]*>[^<]*この内容で直す<\/button>/)
+})
 
 test('the proposal carries 「この内容で直す」 and the reply chips; a finished run shows its version and the app', () => {
   const proposed = render(draft)

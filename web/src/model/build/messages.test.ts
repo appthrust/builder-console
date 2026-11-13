@@ -1,10 +1,18 @@
 import { describe, expect, test } from 'bun:test'
 import type { ApplicationDraft, ApplicationDraftConversationTurn, ApplicationDraftCreationPlan } from '@appthrust/api-schema/platform-api'
-import { assistantMessage, assistantParts, messagesFromDraft, parseAssistantMessage, planProposal } from './messages'
+import { draftOf, readEachFirst, readFirst, turnOf } from '../../api/testing/build-domain'
+import * as model from './messages'
+import * as questions from './questions'
+
+const { assistantParts, parseAssistantMessage } = model
+const assistantMessage = readFirst(turnOf, model.assistantMessage)
+const messagesFromDraft = readFirst(draftOf, model.messagesFromDraft)
+const planProposal = readFirst(draftOf, model.planProposal)
+const prepareAnswers = readEachFirst(turnOf, questions.prepareAnswers)
+const { replyOptions } = questions
 import { buildCopy } from './copy'
 import { buildFailureReference, classifyBuildFailure } from './failure'
 import { serializeSpec } from './spec'
-import { prepareAnswers, replyOptions } from './questions'
 import type { BuildMessage } from './types'
 
 const turn: ApplicationDraftConversationTurn = {
@@ -120,7 +128,11 @@ describe('plan proposal', () => {
   const tasks = Array.from({ length: 8 }, (_, index) => ({ title: `作業 ${index + 1}`, description: '一覧を作る。並べ替えもできる。', acceptanceCriteria: ['できる'] }))
   const plan: ApplicationDraftCreationPlan = {
     summary: '在庫を品目ごとに管理するアプリです。', representation: ['ApplicationStack', 'Publish'], markdown: '# zaiko\n- web: Next.js',
-    applicationStackRequest: { templateId: 'nextjs-postgres', application: { name: 'zaiko' }, publish: { enabled: true, customDomain: 'apps.example.test', hostnamePattern: 'wildcard', subdomain: 'zaiko' } } as ApplicationDraftCreationPlan['applicationStackRequest'],
+    applicationStackRequest: {
+      templateId: 'nextjs-postgres', application: { name: 'zaiko' }, source: { kind: 'application-source-repository', sourceRepositoryId: 'zaiko-src' },
+      web: { componentName: 'web' }, database: { componentName: 'db' }, connection: { connectionName: 'database' },
+      publish: { enabled: true, customDomain: 'apps.example.test', hostnamePattern: 'wildcard', subdomain: 'zaiko' },
+    },
     implementationHandoff: {
       summary: '在庫アプリを作る', workspaceMode: 'application-develop', targetApplicationRef: 'createdApplicationId', sourceRepositoryStrategy: 'created-source-repository',
       tasks: [{ title: '在庫一覧の画面', description: '品目と数量を一覧で見る。保管場所で絞り込む。', acceptanceCriteria: ['一覧が出る'] }, { title: 'repository を整える', description: 'branch を作る', acceptanceCriteria: ['x'] }, ...tasks],
@@ -155,7 +167,7 @@ describe('plan proposal', () => {
     for (const [description, detail] of descriptions) {
       const proposal = planProposal({
         ...planned,
-        creationPlan: { ...plan, implementationHandoff: { ...plan.implementationHandoff!, tasks: [{ title: '在庫一覧', description, acceptanceCriteria: [] }] } },
+        creationPlan: { ...plan, implementationHandoff: { ...plan.implementationHandoff!, tasks: [{ title: '在庫一覧', description, acceptanceCriteria: ['できる'] }] } },
       })
       expect(proposal?.tasks).toEqual([{ title: '在庫一覧', detail }])
       expect(proposal?.screens[0]?.purpose).toBe(detail)

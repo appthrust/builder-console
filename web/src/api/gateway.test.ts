@@ -26,12 +26,18 @@ describe('Platform reference vertical: ApplicationDraft read', () => {
       { name: 'APT-748: creationExecutions omitted reads as []', variant: 'absent', path: '/creationExecutions', wire: wireDraft, expect: { accept: true, check: (draft) => expect(draft.creationExecutions).toEqual([]) } },
       { name: 'creationExecutions null is a failure, not empty', variant: 'null', path: '/creationExecutions', wire: { ...wireDraft, creationExecutions: null }, expect: { accept: false, issues: [{ path: '/creationExecutions', code: 'invalid_type' }] } },
       { name: 'creationExecutions empty', variant: 'empty', path: '/creationExecutions', wire: { ...wireDraft, creationExecutions: [] }, expect: { accept: true, check: (draft) => expect(draft.creationExecutions).toEqual([]) } },
-      { name: 'creationExecutions present', variant: 'present', path: '/creationExecutions', wire: { ...wireDraft, creationExecutions: [execution] }, expect: { accept: true, check: (draft) => expect(draft.creationExecutions[0]?.steps[0]?.status).toBe('running') } },
+      { name: 'creationExecutions present', variant: 'present', path: '/creationExecutions', wire: { ...wireDraft, creationExecutions: [execution] }, expect: { accept: true, check: (draft) => expect(draft.creationExecutions[0]?.steps[0]?.status).toEqual({ kind: 'known', value: 'running' }) } },
       { name: 'an execution without steps cannot be guessed', variant: 'absent', path: '/creationExecutions', wire: { ...wireDraft, creationExecutions: [{ ...execution, steps: undefined }] }, expect: { accept: false, issues: [{ path: '/creationExecutions/*/steps', code: 'missing' }] } },
-      { name: 'other optional collections stay optional', variant: 'absent', path: '/conversationTurns', wire: wireDraft, expect: { accept: true, check: (draft) => expect(draft.conversationTurns).toBeUndefined() } },
+      ...(['/creationPlanGenerations', '/conversationTurns', '/implementationRuns', '/createdSourceRepositories'] as const).flatMap((path) => [
+        { name: `${path} omitted (Go omitempty) reads as []`, variant: 'absent' as const, path, wire: wireDraft, expect: { accept: true as const, check: (draft: Record<string, unknown>) => expect(draft[path.slice(1)]).toEqual([]) } },
+        { name: `${path} null is a failure, not empty`, variant: 'null' as const, path, wire: { ...wireDraft, [path.slice(1)]: null }, expect: { accept: false as const, issues: [{ path, code: 'invalid_type' as const }] } },
+      ]),
+      { name: 'APT-748: a run without tasks cannot be guessed', variant: 'absent', path: '/implementationRuns', wire: { ...wireDraft, implementationRuns: [{ id: 'run-1', status: 'running', startedAt: at, devWorkspaceId: 'ws-1', taskIds: [] }] }, expect: { accept: false, issues: [{ path: '/implementationRuns/*/tasks', code: 'missing' }] } },
+      { name: 'APT-748: a verification without criteria is broken', variant: 'absent', path: '/implementationRuns', wire: { ...wireDraft, implementationRuns: [{ id: 'run-1', status: 'running', startedAt: at, devWorkspaceId: 'ws-1', taskIds: ['t'], tasks: [{ id: 't', title: '一覧', status: 'done', verification: { reportedAt: at, repairAttempts: 0 } }] }] }, expect: { accept: false, issues: [{ path: '/implementationRuns/*/tasks/*/verification/criteria', code: 'missing' }] } },
       { name: 'unknown field is dropped', variant: 'unknown', path: '/', wire: { ...wireDraft, reviewers: [{ email: SECRET }] }, expect: { accept: true, check: (draft) => expect(draft).not.toHaveProperty('reviewers') } },
-      { name: 'unknown phase is a failure while draft enums are closed', variant: 'unknown', path: '/phase', wire: { ...wireDraft, phase: SECRET }, expect: { accept: false, issues: [{ path: '/phase', code: 'invalid_value' }] } },
-      { name: 'unknown execution status is a failure while draft enums are closed', variant: 'unknown', path: '/creationExecutions', wire: { ...wireDraft, creationExecutions: [{ ...execution, status: SECRET }] }, expect: { accept: false, issues: [{ path: '/creationExecutions/*/status', code: 'invalid_value' }] } },
+      { name: 'an unknown phase is the explicit unknown variant (the value is not kept)', variant: 'unknown', path: '/phase', wire: { ...wireDraft, phase: SECRET }, expect: { accept: true, check: (draft) => expect(draft.phase).toEqual({ kind: 'unknown' }) } },
+      { name: 'an unknown execution status is the explicit unknown variant', variant: 'unknown', path: '/creationExecutions', wire: { ...wireDraft, creationExecutions: [{ ...execution, status: SECRET }] }, expect: { accept: true, check: (draft) => expect(draft.creationExecutions[0]?.status).toEqual({ kind: 'unknown' }) } },
+      { name: 'a phase that is not a string is broken, not unknown', variant: 'unknown', path: '/phase', wire: { ...wireDraft, phase: 7 }, expect: { accept: false, issues: [{ path: '/phase', code: 'invalid_type' }] } },
       { name: 'required id absent', variant: 'absent', path: '/id', wire: { ...wireDraft, id: undefined }, expect: { accept: false, issues: [{ path: '/id', code: 'missing' }] } },
       { name: 'required title broken', variant: 'unknown', path: '/title', wire: { ...wireDraft, title: { text: SECRET } }, expect: { accept: false, issues: [{ path: '/title', code: 'invalid_type' }] } },
     ])
@@ -41,13 +47,13 @@ describe('Platform reference vertical: ApplicationDraft read', () => {
     const gateway = createTestGateway({ platformFetch: async () => draftJson(wireDraft)() })
     const draft = await gateway.platform(getApplicationDraftContract, { projectId: 'project-1', id: 'draft-1' })
     expect(draft.creationExecutions).toEqual([])
-    expect(draft.phase).toBe('planned')
+    expect(draft.phase).toEqual({ kind: 'known', value: 'planned' })
   })
 
   test('success status, body format and parse failures are typed contract failures, reported once with safe metadata', async () => {
     const reports: ContractFailureReport[] = []
     const answers: Array<() => Response> = [
-      draftJson({ ...wireDraft, phase: SECRET }),
+      draftJson({ ...wireDraft, title: { leaked: SECRET } }),
       draftJson(wireDraft, 202),
       () => new Response(`{"id": "${SECRET}"`, { headers: { 'Content-Type': 'application/json' } }),
     ]
@@ -56,14 +62,14 @@ describe('Platform reference vertical: ApplicationDraft read', () => {
     const errors = [await read(), await read(), await read()]
     for (const error of errors) expect(error).toBeInstanceOf(ResponseContractError)
     expect(errors.map((error) => (error as ResponseContractError).issues)).toEqual([
-      [{ path: '/phase', code: 'invalid_value' }],
+      [{ path: '/title', code: 'invalid_type' }],
       [{ path: '/', code: 'unexpected_status' }],
       [{ path: '/', code: 'invalid_json' }],
     ])
     expect(reports).toHaveLength(3)
     expect(reports[0]).toEqual({
       code: 'response_contract_invalid', source: 'platform', operationId: 'platformApiGetApplicationDraft', method: 'GET',
-      routeTemplate: '/api/v1/projects/{projectId}/application-drafts/{id}', issues: [{ path: '/phase', code: 'invalid_value' }], outcome: 'read_failed',
+      routeTemplate: '/api/v1/projects/{projectId}/application-drafts/{id}', issues: [{ path: '/title', code: 'invalid_type' }], outcome: 'read_failed',
     })
     expect(JSON.stringify(reports)).not.toContain(SECRET)
     expect(JSON.stringify(reports)).not.toContain('draft-1')

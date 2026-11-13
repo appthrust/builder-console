@@ -6,7 +6,7 @@ import { textEn } from './copy.en'
 export const textJa = {
   stageLabels: { ask: '聞く', fix: '直す', check: '確認' } satisfies Record<ImproveStage, string>,
   /** The session's state in one word (header pill, 作りかけ list); `done` is `updated(version)`. */
-  state: { asking: '直しています', proposed: '変更案があります', running: '直しています', failed: '止まっています' } satisfies Record<Exclude<ImprovePhase, 'done'>, string>,
+  state: { asking: '直しています', proposed: '変更案があります', running: '直しています', failed: '止まっています', unsupported: '状態を確認できません' } satisfies Record<Exclude<ImprovePhase, 'done'>, string>,
   updated: (version?: string) => (version ? `${version} に更新しました` : '更新しました'),
   entry: {
     action: 'AIで直す',

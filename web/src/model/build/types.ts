@@ -37,7 +37,8 @@ export type BuildMessage =
    * message's content was made (the collapsed Excel → app line opens its analysis and screens).
    */
   | { role: 'assistant'; text: string; summary?: string; changed?: string[]; question?: string; options?: string[]; proposal?: BuildProposal; link?: { kind: 'excel2app'; draftId: string }; at: string; turnId?: string }
-  | { role: 'notice'; tone: 'info' | 'warning' | 'error'; title: string; detail?: string; at: string; retry?: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish'; reference?: BuildFailure['reference'] }
+  /** `retry: 'confirm'` re-reads the draft after a write whose answer could not be read; it never resends that write. */
+  | { role: 'notice'; tone: 'info' | 'warning' | 'error'; title: string; detail?: string; at: string; retry?: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish' | 'confirm'; reference?: BuildFailure['reference'] }
 export interface ProgressCard {
   kind: 'workspace' | 'turn' | 'plan' | 'prepare' | 'implement' | 'publish'
   title: string
@@ -46,7 +47,8 @@ export interface ProgressCard {
   /** The last few lines of what the AI is doing right now; proves a long step is alive. */
   activity?: string[]
   interrupted: boolean
-  steps?: { label: string; state: 'todo' | 'doing' | 'done' | 'failed'; detail?: string; elapsedLabel?: string; expectation?: string; activity?: string; taskId?: string; status?: string }[]
+  /** `unknown`: the server reported a state this console version does not know; never shown as done or failed. */
+  steps?: { label: string; state: 'todo' | 'doing' | 'done' | 'failed' | 'unknown'; detail?: string; elapsedLabel?: string; expectation?: string; activity?: string; taskId?: string; status?: string }[]
   /** Structured preparation phases, absent for older APIs. */
   staged?: boolean
   currentActivity?: string
@@ -60,7 +62,8 @@ export interface BuildPrimary {
   enabled: boolean
 }
 export interface BuildFailure {
-  kind: 'workspace' | 'unavailable' | 'policy' | 'quota' | 'limit' | 'forbidden' | 'timeout' | 'failed' | 'name-taken' | 'interrupted' | 'platform' | 'group'
+  /** `unconfirmed`: a write answered 2xx with an answer this console could not read; it may have happened. */
+  kind: 'workspace' | 'unavailable' | 'policy' | 'quota' | 'limit' | 'forbidden' | 'timeout' | 'failed' | 'name-taken' | 'interrupted' | 'platform' | 'group' | 'unconfirmed'
   title: string
   reason: string
   suggestedName?: string

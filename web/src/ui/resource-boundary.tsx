@@ -1,7 +1,8 @@
 // Panel/card-level boundary for one server resource (design §7). It turns a
 // query snapshot into exactly one of: loading, first-load failure, the
-// content, or the content with a stale warning; and contains a render crash
-// of the content to this panel. Siblings (composers, other panels) stay usable.
+// content, or the content with a stale warning (handed to the content to place
+// with its other notices); and contains a render crash of the content to this
+// panel. Siblings (composers, other panels) stay usable.
 // It never shows an error's text or any payload: a contract failure always
 // reads as the fixed "could not load" message with a retry.
 import { RotateCw } from 'lucide-react'
@@ -37,7 +38,11 @@ export function ResourceBoundary<T>({
    * (e.g. a coded 4xx). Contract failures and sign-in failures never reach it.
    */
   failure?: (error: unknown, retry: () => void) => ReactNode
-  children: (data: T) => ReactNode
+  /**
+   * The content. `stale` is the fixed "could not update" notice while a refetch of shown data failed (else
+   * null): the content places it where its other notices go, so a page keeps one notice style and position.
+   */
+  children: (data: T, stale: ReactNode) => ReactNode
 }) {
   const retry = () => void query.refetch()
   const { data, error } = query
@@ -47,21 +52,18 @@ export function ResourceBoundary<T>({
     if (!error) return loading ?? <Loading />
     return failure && !isResponseContractError(error) ? failure(error, retry) : <LoadFailed error={error} onRetry={retry} />
   }
+  const stale = error ? (
+    <Notice
+      tone="warning"
+      actions={<Button size="sm" icon={<RotateCw />} loading={query.isFetching} onClick={retry}>{copy.common.retry}</Button>}
+    >
+      {copy.common.refreshFailed(relativeTime(new Date(query.dataUpdatedAt).toISOString()) ?? '')}
+    </Notice>
+  ) : null
   return (
-    <>
-      {error ? (
-        <Notice
-          tone="warning"
-          className="mb-3"
-          actions={<Button size="sm" icon={<RotateCw />} loading={query.isFetching} onClick={retry}>{copy.common.retry}</Button>}
-        >
-          {copy.common.refreshFailed(relativeTime(new Date(query.dataUpdatedAt).toISOString()) ?? '')}
-        </Notice>
-      ) : null}
-      <RenderBoundary resetKey={resetKey} onRetry={retry}>
-        <Deferred render={() => children(data)} />
-      </RenderBoundary>
-    </>
+    <RenderBoundary resetKey={resetKey} onRetry={retry}>
+      <Deferred render={() => children(data, stale)} />
+    </RenderBoundary>
   )
 }
 

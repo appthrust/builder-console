@@ -1,12 +1,19 @@
 import { describe, expect, test } from 'bun:test'
 import type { ApplicationDraft, ApplicationDraftConversationTurn, UiDesign } from '@appthrust/api-schema/platform-api'
+import { draftOf, readEachFirst, readFirst, turnOf } from '../../api/testing/build-domain'
 import { serializeSpec } from '../../model/build/spec'
 import { textJa } from './copy'
 import { fromDraftWorkbook, planApp, toDraftWorkbook } from './model'
 import { designFromReadings } from './design'
 import { SAMPLE_SETS } from './samples'
 import { defaultUiDesign } from './ui-design'
-import { analysisTitle, classifyStoreError, currentTurns, designMessages, designStack, fileStem, handOffPatch, isApplicationCreated, latestSaver, resumeStep, specParts, undoMessage, UI_DESIGN_INIT } from './use-excel2app-draft'
+import { analysisTitle as domainAnalysisTitle, classifyStoreError, currentTurns as domainCurrentTurns, designMessages as domainDesignMessages, designStack as domainDesignStack, fileStem, handOffPatch, isApplicationCreated, latestSaver, resumeStep as domainResumeStep, specParts, undoMessage, UI_DESIGN_INIT } from './use-excel2app-draft'
+
+const currentTurns = readFirst(draftOf, domainCurrentTurns)
+const resumeStep = readFirst(draftOf, domainResumeStep)
+const designMessages = readEachFirst(turnOf, domainDesignMessages)
+const designStack = readEachFirst(turnOf, domainDesignStack)
+const analysisTitle = (draft: ApplicationDraft, turn: ApplicationDraftConversationTurn | undefined) => domainAnalysisTitle(draftOf(draft), turn === undefined ? undefined : turnOf(turn))
 
 const workbook = SAMPLE_SETS[0]!.workbooks[0]!
 const summary = { id: 'wb-000000000001', fileName: workbook.fileName, sheetCount: 3, rowCount: 28, truncated: false, bytes: 100, digest: 'a'.repeat(64), addedAt: '2026-10-26T00:01:00Z' }
@@ -50,7 +57,7 @@ describe('resume', () => {
   test('resumes at the step the draft state implies', () => {
     expect(resumeStep(draft, false)).toBe(0)
     expect(resumeStep({ ...draft, source }, false)).toBe(0)
-    expect(resumeStep({ ...draft, source, conversationTurns: [turn('t-analysis', '', 1, { kind: 'excel-analysis', status: 'running' })] }, false)).toBe(1)
+    expect(resumeStep({ ...draft, source, conversationTurns: [turn('t-analysis', 'Analyze workbooks', 1, { kind: 'excel-analysis', status: 'running' })] }, false)).toBe(1)
     expect(resumeStep({ ...draft, source }, true)).toBe(2)
     expect(resumeStep({ ...draft, source, conversationTurns: [turn('t-init', UI_DESIGN_INIT, 2, { status: 'running' })] }, true)).toBe(3)
     expect(resumeStep({ ...draft, source, uiDesign: design }, true)).toBe(3)
@@ -61,7 +68,7 @@ describe('resume', () => {
     expect(currentTurns(replaced).map((item) => item.id)).toEqual(['t-new'])
     expect(resumeStep({ ...draft, source, conversationTurns: [old] }, true)).toBe(2)
     expect(resumeStep({ ...draft, source, conversationTurns: [{ ...old, kind: 'excel-analysis' }] }, false)).toBe(0)
-    expect(currentTurns({ ...draft, source, conversationTurns: [turn('boundary', '', 1)] }).map((item) => item.id)).toEqual(['boundary'])
+    expect(currentTurns({ ...draft, source, conversationTurns: [turn('boundary', 'Analyze workbooks', 1)] }).map((item) => item.id)).toEqual(['boundary'])
   })
 })
 
@@ -145,7 +152,7 @@ describe('screen design turns', () => {
 
 describe('naming and hand-off', () => {
   const named = serializeSpec({ name: '不具合・改善管理', users: [], screens: [], records: [], rules: [] }, '# 仕様書\n')
-  const analysis = turn('t-analysis', '', 1, { kind: 'excel-analysis' })
+  const analysis = turn('t-analysis', 'Analyze workbooks', 1, { kind: 'excel-analysis' })
   const analysed = { ...draft, source, specMarkdown: named, conversationTurns: [analysis] }
 
   test('the title follows the name the analysis wrote, only after it succeeded and while no app is being made', () => {
@@ -155,7 +162,7 @@ describe('naming and hand-off', () => {
     expect(analysisTitle(analysed, undefined)).toBeUndefined()
     expect(analysisTitle({ ...analysed, specMarkdown: '# 前置きなし' }, analysis)).toBeUndefined()
     expect(analysisTitle({ ...analysed, createdApplicationStackId: 'stack-1' }, analysis)).toBeUndefined()
-    expect(analysisTitle({ ...analysed, creationExecutions: [{ id: 'exec-1', status: 'running' } as NonNullable<ApplicationDraft['creationExecutions']>[number]] }, analysis)).toBeUndefined()
+    expect(analysisTitle({ ...analysed, creationExecutions: [{ id: 'exec-1', attempt: 1, status: 'running', startedAt: '2026-10-26T00:01:00Z', steps: [] }] }, analysis)).toBeUndefined()
   })
 
   test('the publish preferences travel with title and specification name alignment, never session storage', () => {

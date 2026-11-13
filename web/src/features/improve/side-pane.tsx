@@ -3,6 +3,7 @@ import { relativeTime } from '../../copy'
 import { buildCopy } from '../../model/build/copy'
 import { activityLines, formatElapsed } from '../../model/build/progress'
 import { isProductLanguage } from '../../model/build/wording'
+import { knownValue, type ImplementationTask } from '../../model/contracts/build'
 import type { ImproveState, ImproveVersion } from '../../model/improve'
 import { ActivityLog, Card, CardBody, LinkButton } from '../../ui'
 import { text as buildText } from '../build/copy'
@@ -11,7 +12,17 @@ import { text } from './copy'
 import { useClock } from './use-clock'
 import { text as proposalText } from '../proposals/copy'
 
-const MARK = { todo: '○', doing: '●', done: '✔', failed: '✖' } as const
+const MARK = { todo: '○', doing: '●', done: '✔', failed: '✖', unknown: '?' } as const
+
+function taskMark(task: ImplementationTask): keyof typeof MARK {
+  switch (knownValue(task.status)) {
+    case 'running': return 'doing'
+    case 'failed': return 'failed'
+    case 'pending': return 'todo'
+    case 'done': case 'skipped': return 'done'
+    case undefined: return 'unknown'
+  }
+}
 
 /**
  * 「いま直しているもの」: the proposal before it is made, the run's tasks while
@@ -26,7 +37,8 @@ export function ImproveSidePane({ state, implementation, versions, appUrl, propo
   proposalPending?: boolean
   onCollapse(): void
 }) {
-  const showRun = state.phase === 'running' || state.phase === 'failed' || state.phase === 'done'
+  // An unsupported run still shows the tasks this console can read.
+  const showRun = state.phase === 'running' || state.phase === 'failed' || state.phase === 'done' || state.phase === 'unsupported'
   return <section aria-label={text.pane.title} className="mx-auto w-full max-w-4xl min-w-0 space-y-4 p-4 sm:p-5">
     <div className="hidden items-center justify-between md:flex">
       <h2 className="text-sm font-semibold text-stone-500">{text.pane.title}</h2>
@@ -66,22 +78,24 @@ function RunProgress({ state, implementation, appUrl, proposalPending }: { state
   const copy = buildCopy.progress.task
   const tasks = implementation.tasks.filter((task) => run.taskIds.includes(task.id))
   // The tail belongs to the task in progress; between tasks it would describe the finished one.
-  const activity = running && tasks.some((task) => task.status === 'running') ? activityLines(implementation.activityTail).filter(isProductLanguage) : []
-  const step = implementation.step === 'working' ? copy.working(Boolean(implementation.activityTail?.trim())) : implementation.step ? copy[implementation.step] : undefined
+  const activity = running && tasks.some((task) => knownValue(task.status) === 'running') ? activityLines(implementation.activityTail).filter(isProductLanguage) : []
+  const runStep = knownValue(implementation.step)
+  const step = runStep === 'working' ? copy.working(Boolean(implementation.activityTail?.trim())) : runStep ? copy[runStep] : undefined
   const previewReady = Boolean(implementation.previewUrl) && implementation.previewStatus === 'ready'
-  const title = state.phase === 'done' ? proposalPending ? proposalText.sent : text.updated(state.version) : running ? text.run.running : implementation.failure?.title ?? text.run.running
+  const title = state.phase === 'unsupported' ? buildCopy.unsupported.title
+    : state.phase === 'done' ? proposalPending ? proposalText.sent : text.updated(state.version) : running ? text.run.running : implementation.failure?.title ?? text.run.running
   return <section aria-label={text.pane.progress} aria-live="polite"><Card><CardBody>
     <h3 className="font-semibold text-stone-900">{title}</h3>
     <ol aria-label={text.pane.progress} className="mt-4 space-y-3 text-sm">
       {tasks.map((task) => {
-        const mark = task.status === 'running' ? 'doing' : task.status === 'failed' ? 'failed' : task.status === 'pending' ? 'todo' : 'done'
-        const active = task.status === 'running' && task.id === implementation.currentTaskId
+        const mark = taskMark(task)
+        const active = mark === 'doing' && task.id === implementation.currentTaskId
         const since = Date.parse(implementation.startedAt ?? '')
         return <li key={task.id} aria-current={active ? 'step' : undefined} className="flex gap-3">
           <span aria-label={buildText.artifact.states[mark]} className={mark === 'failed' ? 'text-bad-ink' : mark === 'doing' ? 'text-accent' : 'text-stone-400'}>{MARK[mark]}</span>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap justify-between gap-2"><span className={active ? 'font-semibold' : undefined}>{isProductLanguage(task.title) ? task.title : copy.fallback}</span>{active && Number.isFinite(since) ? <span aria-label={buildText.implement.elapsed} className="tabular-nums text-stone-500">{formatElapsed(now - since)}</span> : null}</div>
-            <span className="block text-xs text-stone-500">{copy.status[task.status]}{task.versionLabel && isProductLanguage(task.versionLabel) ? ` · ${task.versionLabel}` : ''}</span>
+            <span className="block text-xs text-stone-500">{copy.status[knownValue(task.status) ?? 'unknown']}{task.versionLabel && isProductLanguage(task.versionLabel) ? ` · ${task.versionLabel}` : ''}</span>
             {active && step ? <span className="block text-xs text-stone-600">{step}</span> : null}
           </div>
         </li>

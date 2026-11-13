@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type JSX } from 'react'
 import { buildProgress } from '../../../model/build/progress'
 import { buildCopy } from '../../../model/build/copy'
 import { buildFailureReference } from '../../../model/build/failure'
+import { isOneOf } from '../../../model/contracts/build'
 import type { ProgressCard } from '../../../model/build/types'
 import { Button, Card, CardBody, CardHeader, CopyButton, Notice } from '../../../ui'
 import { implementationCopy as copy } from './copy'
@@ -10,7 +11,7 @@ import { implemented, type ImplementationState } from './state'
 import { text } from '../copy'
 
 
-export function ImplementPanel({ state, preparation, released, previewNotice, previewDatabase, onOpenPreview, onRetry, onSkipTask }: {
+export function ImplementPanel({ state, preparation, released, previewNotice, previewDatabase, onOpenPreview, onRetry, onSkipTask, onConfirm }: {
   state: ImplementationState
   preparation?: ProgressCard
   released: boolean
@@ -20,23 +21,25 @@ export function ImplementPanel({ state, preparation, released, previewNotice, pr
   onOpenPreview(): void
   onRetry?(): void
   onSkipTask?(id: string): void
+  /** Reads the draft back after a start whose answer could not be read (the only action then offered). */
+  onConfirm?(): void
 }): JSX.Element {
   const preview = useRef<HTMLIFrameElement>(null)
   const [previewRevision, setPreviewRevision] = useState(0)
   const [now, setNow] = useState(Date.now)
-  const ticking = state.startedAt !== undefined && state.tasks.some((task) => task.status === 'running')
+  const ticking = state.startedAt !== undefined && state.tasks.some((task) => isOneOf(task.status, 'running'))
   // The elapsed time on the running task is the user's only proof that something is happening.
   useEffect(() => {
     if (!ticking) return
     const timer = setInterval(() => setNow(Date.now()), 1_000)
     return () => clearInterval(timer)
   }, [ticking])
-  const failedTask = state.tasks.find((task) => task.id === state.currentTaskId && task.status === 'failed')
+  const failedTask = state.tasks.find((task) => task.id === state.currentTaskId && isOneOf(task.status, 'failed'))
   const reference = state.failure?.reference ? buildFailureReference(state.failure.reference) : undefined
   const nothingImplemented = state.phase === 'done' && !implemented(state)
   const progress = buildProgress(preparation, state, now, released)
   const previewReady = Boolean(state.previewUrl) && state.previewStatus === 'ready'
-  const taskStarted = state.tasks.some((task) => task.status === 'running' || task.status === 'done' || task.status === 'failed')
+  const taskStarted = state.tasks.some((task) => isOneOf(task.status, 'running', 'done', 'failed'))
   // The preview first appears with the first task. A new run (retry, skip, change)
   // starts with every task pending; a preview already shown stays mounted then,
   // instead of tearing down the iframe and reloading the app when a task starts.
@@ -85,7 +88,7 @@ export function ImplementPanel({ state, preparation, released, previewNotice, pr
           {progress.steps?.map((step, index) => {
             const unmet = state.tasks.find((task) => task.id === step.taskId)?.verification?.criteria.filter((criterion) => !criterion.met) ?? []
             return <li key={step.taskId ?? index} aria-current={step.state === 'doing' ? 'step' : undefined} className="flex gap-3">
-            <span aria-label={text.artifact.states[step.state]} className={step.state === 'failed' ? 'text-bad-ink' : step.state === 'doing' ? 'text-accent' : 'text-stone-400'}>{{ todo: '○', doing: '●', done: '✔', failed: '✖' }[step.state]}</span>
+            <span aria-label={text.artifact.states[step.state]} className={step.state === 'failed' ? 'text-bad-ink' : step.state === 'doing' ? 'text-accent' : 'text-stone-400'}>{{ todo: '○', doing: '●', done: '✔', failed: '✖', unknown: '?' }[step.state]}</span>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap justify-between gap-2"><span className={step.state === 'doing' ? 'font-semibold' : undefined}>{step.label}</span>{step.elapsedLabel ? <span aria-label={text.implement.elapsed} className="tabular-nums text-stone-500">{step.elapsedLabel}</span> : null}</div>
               {step.status ? <span className="block text-xs text-stone-500">{step.status}</span> : null}
@@ -102,11 +105,16 @@ export function ImplementPanel({ state, preparation, released, previewNotice, pr
         {progress.buildUrl && !progress.buildFailed ? <a href={progress.buildUrl} target="_blank" rel="noopener noreferrer" className="mt-3 block text-xs text-accent-strong underline">{text.implement.buildLink}</a> : null}
         {progress.delayHint ? <p role="status" className="mt-3 text-sm text-bad-ink">{progress.delayHint}</p> : null}
       </CardBody></Card></section>
+      {state.phase === 'unsupported' ? (
+        <Notice tone="warning" title={buildCopy.unsupported.title}><p>{buildCopy.unsupported.detail}</p></Notice>
+      ) : null}
       {state.failure ? (
-        <Notice tone="error" title={state.failure.title} actions={(
+        // A write whose answer could not be read may have happened: the draft is read back instead of offering to send it again.
+        <Notice tone={state.failure.kind === 'unconfirmed' ? 'warning' : 'error'} title={state.failure.title} actions={(
           <>
-            {onRetry && state.failure.kind !== 'policy' ? <Button size="sm" loading={state.retryPending} disabled={state.retryPending} onClick={onRetry}>{state.retryPending ? copy.retryPending : copy.retry}</Button> : null}
-            {state.failure.kind !== 'policy' && state.failure.kind !== 'quota' && failedTask && onSkipTask ? <Button size="sm" tone="ghost" disabled={state.retryPending} onClick={() => onSkipTask(failedTask.id)}>{copy.skip}</Button> : null}
+            {onRetry && state.failure.kind !== 'policy' && state.failure.kind !== 'unconfirmed' ? <Button size="sm" loading={state.retryPending} disabled={state.retryPending} onClick={onRetry}>{state.retryPending ? copy.retryPending : copy.retry}</Button> : null}
+            {state.failure.kind !== 'policy' && state.failure.kind !== 'quota' && state.failure.kind !== 'unconfirmed' && failedTask && onSkipTask ? <Button size="sm" tone="ghost" disabled={state.retryPending} onClick={() => onSkipTask(failedTask.id)}>{copy.skip}</Button> : null}
+            {state.failure.kind === 'unconfirmed' && onConfirm ? <Button size="sm" onClick={onConfirm}>{buildCopy.failure.confirm}</Button> : null}
           </>
         )}>
           <p>{state.failure.reason}</p>

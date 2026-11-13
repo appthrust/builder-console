@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { previewStatus } from '../../../api/workspace'
 
 export const PREVIEW_POLL_MS = 4_000
 export const PREVIEW_SLOW_POLL_MS = 15_000
@@ -42,17 +43,8 @@ export function usePreviewReadiness(url: string | undefined): PreviewReadiness {
       request = new AbortController()
       // Bound individual requests too: a hung response must not stall readiness or its deadline.
       requestTimer = window.setTimeout(() => request?.abort(), PREVIEW_POLL_MS)
-      let status: number | undefined
-      try {
-        const response = await fetch(url!, { method: 'GET', cache: 'no-store', signal: request.signal })
-        status = response.status
-        // Only headers are needed; do not retain or render a proxy's error body.
-        void response.body?.cancel().catch(() => {})
-      } catch {
-        // Network failures and request timeouts mean "not yet", just like a gateway 503.
-      } finally {
-        window.clearTimeout(requestTimer)
-      }
+      const status = await previewStatus(url!, request.signal)
+      window.clearTimeout(requestTimer)
       if (stopped) return
       const elapsedMs = Date.now() - startedAt
       const next = previewReadiness(status, elapsedMs)

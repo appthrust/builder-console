@@ -23,7 +23,7 @@ export const textJa = {
     listSeparator: '・',
     progress: '進行状況',
     preparation: 'アプリの準備',
-    states: { todo: 'これから', doing: '進行中', done: '完了', failed: '失敗' },
+    states: { todo: 'これから', doing: '進行中', done: '完了', failed: '失敗', unknown: '確認できない状態' },
     publishedApp: '公開したアプリ',
     published: '公開しました',
     openResult: 'できた画面を開く',

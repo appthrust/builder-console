@@ -5,6 +5,7 @@ import { ImplementPanel, type ImplementationState } from './implement'
 import { buildCopy } from '../../model/build/copy'
 import { StageRail, stateWord } from './session-header'
 import { implementationCopy } from './implement/copy'
+import { runOf, taskOf } from '../../api/testing/build-domain'
 
 test('staged preparation renders an accessible ladder, elapsed time, activity and safe external build link', () => {
   const html = renderToStaticMarkup(<ProgressCard progress={{ kind: 'prepare', title: 'アプリを用意しています', interrupted: false, staged: true, steps: [{ label: '置き場', state: 'done' }, { label: '設計図を反映', state: 'done' }, { label: '最初の版をビルド', state: 'doing', elapsedLabel: '3:02', expectation: '目安 3–5 分' }, { label: '起動', state: 'todo' }, { label: 'URL', state: 'todo' }], currentActivity: 'GitHub で最初のビルドを実行中', buildUrl: 'https://github.com/acme/app/actions', delayHint: 'いつもより時間がかかっています（基盤の担当者に確認してください）' }} />)
@@ -27,12 +28,12 @@ test('legacy preparation keeps its generic steps and hint', () => {
 })
 
 test('the merged build renders one ladder, and a ready preview starts with the first task', () => {
-  const state = { phase: 'idle' as const, tasks: [{ id: 'one', title: '顧客一覧', status: 'pending' as const }], previewUrl: '/preview', previewStatus: 'ready' as const }
+  const state = { phase: 'idle' as const, tasks: [taskOf({ id: 'one', title: '顧客一覧', status: 'pending' })], previewUrl: '/preview', previewStatus: 'ready' as const }
   const pending = renderToStaticMarkup(<ImplementPanel state={state} released={false} onOpenPreview={() => {}} />)
   expect(pending.match(/<ol /g)).toHaveLength(1)
   expect(pending).toContain('アプリを作っています')
   expect(pending).not.toContain('<iframe')
-  const running = renderToStaticMarkup(<ImplementPanel state={{ ...state, phase: 'running', currentTaskId: 'one', step: 'working', activityTail: '画面を作っています\n', tasks: [{ ...state.tasks[0]!, status: 'running' }] }} released={false} onOpenPreview={() => {}} />)
+  const running = renderToStaticMarkup(<ImplementPanel state={{ ...state, phase: 'running', currentTaskId: 'one', step: runOf({ id: 'r', status: 'running', startedAt: '2026-10-27T00:00:00Z', devWorkspaceId: 'ws', taskIds: [], tasks: [], step: 'working' }).step, activityTail: '画面を作っています\n', tasks: [taskOf({ id: 'one', title: '顧客一覧', status: 'running' })] }} released={false} onOpenPreview={() => {}} />)
   expect(running).toContain('<iframe')
   expect(running.indexOf('<iframe')).toBeLessThan(running.indexOf('<ol'))
   expect(running.match(/<ol /g)).toHaveLength(1)
@@ -53,7 +54,7 @@ test('the rail has four stages and uses one building state word', () => {
 
 test('failed source builds render a cross and product wording, not an endless active step', () => {
   const html = renderToStaticMarkup(<ImplementPanel
-    state={{ phase: 'done', tasks: [{ id: 'one', title: '一覧', status: 'done' }] }}
+    state={{ phase: 'done', tasks: [taskOf({ id: 'one', title: '一覧', status: 'done' })] }}
     preparation={{ kind: 'prepare', title: buildCopy.progress.prepare.title, interrupted: false, buildFailed: true, buildUrl: 'https://github.com/acme/app/actions/runs/12', steps: [{ label: '下地を起動', state: 'failed', detail: 'アプリのビルドに失敗しています' }] }}
     released={false} onOpenPreview={() => {}}
   />)
@@ -67,10 +68,10 @@ test('failed source builds render a cross and product wording, not an endless ac
 test('only unmet verification criteria appear under their task, including repair notes', () => {
   const state: ImplementationState = {
     phase: 'done',
-    tasks: [{ id: 'dashboard', title: '月次集計', status: 'done', verification: {
+    tasks: [taskOf({ id: 'dashboard', title: '月次集計', status: 'done', verification: {
       reportedAt: '2026-10-27T00:00:00Z', repairAttempts: 1,
       criteria: [{ criterion: '件数が見える', met: true }, { criterion: '担当者別の金額が見える', met: false, note: '集計カードをまだ表示できません' }],
-    } }],
+    } })],
   }
   const render = (value: ImplementationState) => renderToStaticMarkup(<ImplementPanel state={value} released={false} onOpenPreview={() => {}} />)
   const html = render(state)
@@ -84,7 +85,7 @@ test('only unmet verification criteria appear under their task, including repair
 
 test('a retry waiting for its inputs or response is visibly pending and disabled', () => {
   const html = renderToStaticMarkup(<ImplementPanel state={{
-    phase: 'failed', tasks: [{ id: 'one', title: '一覧', status: 'failed' }], retryPending: true,
+    phase: 'failed', tasks: [taskOf({ id: 'one', title: '一覧', status: 'failed' })], retryPending: true,
     failure: { kind: 'interrupted', ...buildCopy.failure.resumable },
   }} released={false} onOpenPreview={() => {}} onRetry={() => {}} />)
   const container = document.createElement('div')

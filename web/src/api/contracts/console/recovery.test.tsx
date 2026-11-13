@@ -34,7 +34,7 @@ for (const [name, schema, base] of [
     async function render() {
       await act(async () => { root.render(<>
         <aside>Independent sibling</aside><textarea aria-label="Unsent message" defaultValue="Draft" />
-        <ResourceBoundary query={observer.getCurrentResult()} resetKey={name}>{() => <p>Validated resource</p>}</ResourceBoundary>
+        <ResourceBoundary query={observer.getCurrentResult()} resetKey={name}>{(_data, stale) => <>{stale}<p>Validated resource</p></>}</ResourceBoundary>
       </>) })
     }
     try {

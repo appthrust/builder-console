@@ -1,3 +1,4 @@
+import { taskOf } from '../../../api/testing/build-domain'
 import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 'bun:test'
 import { ORPCError } from '@orpc/client'
 import { act } from 'react'
@@ -14,7 +15,7 @@ import { PREVIEW_POLL_MS, PREVIEW_SLOW_POLL_MS, PREVIEW_TIMEOUT_MS, previewReadi
 
 const state: ImplementationState = {
   phase: 'running',
-  tasks: [{ id: 'screen', title: '顧客一覧', status: 'running' }],
+  tasks: [taskOf({ id: 'screen', title: '顧客一覧', status: 'running' })],
   previewUrl: '/api/v1/projects/p1/dev-workspaces/ws-1/proxy/preview/',
 }
 

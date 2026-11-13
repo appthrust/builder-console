@@ -1,10 +1,11 @@
 // One draft owns the workbook set, staged analysis, specification and screen design.
 // Files are parsed and stored sequentially; only an explicit start submits analysis.
-import type { ApplicationDraft, ApplicationDraftConversationTurn, ApplicationDraftConversationTurnKind, ApplicationDraftPublishPreferences, ApplicationDraftWorkbookAddResponse, ApplicationDraftWorkbookSummary, ExcelAnalysis, UiDesign, UpdateApplicationDraftRequest } from '@appthrust/api-schema/platform-api'
+import type { ApplicationDraftPublishPreferences, ApplicationDraftWorkbookSummary, ExcelAnalysis, UiDesign, UpdateApplicationDraftRequest } from '@appthrust/api-schema/platform-api'
+import { isOneOf, jobState, knownValue, type BuildDraft, type BuildTurn, type TurnKind } from '../../model/contracts/build'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../../api/build'
-import { buildDraftOptions, draftWorkbookGridOptions, draftWorkbooksOptions } from '../../api/queries/build'
+import { buildDraftOptions, draftWorkbookGridOptions, draftWorkbooksOptions, readDraft } from '../../api/queries/build'
 import { platformErrorEnvelope } from '../../api/platform-error'
 import { useCreationTools } from '../../api/queries/catalog'
 import { classifyBuildFailure } from '../../model/build/failure'
@@ -94,13 +95,13 @@ export function fileStem(fileName: string): string {
 }
 
 /** Turns belonging to the current membership revision, including its boundary. */
-export function currentTurns(draft: ApplicationDraft): ApplicationDraftConversationTurn[] {
+export function currentTurns(draft: BuildDraft): BuildTurn[] {
   const revision = draft.source?.revision
-  const turns = draft.conversationTurns ?? []
+  const turns = draft.conversationTurns
   return revision ? turns.filter((turn) => Date.parse(turn.startedAt) >= Date.parse(revision)) : turns
 }
 
-const turnsOf = (turns: ApplicationDraftConversationTurn[], kind: ApplicationDraftConversationTurnKind) => turns.filter((turn) => turn.kind === kind)
+const turnsOf = (turns: BuildTurn[], kind: TurnKind) => turns.filter((turn) => isOneOf(turn.kind, kind))
 
 export const isUndoMessage = (message: string) => message.startsWith(textJa.preview.undoRequest) || message.startsWith(textEn.preview.undoRequest)
 
@@ -109,10 +110,10 @@ export function undoMessage(previous: UiDesign): string {
 }
 
 /** Designs the ui-design turns produced, as an undo stack: each change pushes, each undo pops. */
-export function designStack(turns: ApplicationDraftConversationTurn[]): UiDesign[] {
+export function designStack(turns: BuildTurn[]): UiDesign[] {
   const stack: UiDesign[] = []
   for (const turn of turns) {
-    if (turn.status !== 'succeeded' || !turn.uiDesign) continue
+    if (!isOneOf(turn.status, 'succeeded') || !turn.uiDesign) continue
     if (isUndoMessage(turn.userMessage) && stack.length > 1) stack.pop()
     else stack.push(turn.uiDesign)
   }
@@ -120,13 +121,13 @@ export function designStack(turns: ApplicationDraftConversationTurn[]): UiDesign
 }
 
 /** The chat the ui-design turns make: the instruction, then the reply's summary (or its error). */
-export function designMessages(turns: ApplicationDraftConversationTurn[]): UiPreviewChatMessage[] {
+export function designMessages(turns: BuildTurn[]): UiPreviewChatMessage[] {
   const messages: UiPreviewChatMessage[] = []
   for (const turn of turns) {
     const pending = isBuildPending(turn)
     if (turn.userMessage !== UI_DESIGN_INIT) messages.push({ role: 'user', text: isUndoMessage(turn.userMessage) ? text.preview.undoMessage : turn.userMessage, ...(pending ? { pending: true } : {}) })
-    if (turn.status === 'failed') messages.push({ role: 'assistant', text: turn.error || text.preview.turnFailed, failed: true })
-    else if (turn.status === 'succeeded' && turn.assistantMessage) {
+    if (isOneOf(turn.status, 'failed')) messages.push({ role: 'assistant', text: turn.error || text.preview.turnFailed, failed: true })
+    else if (isOneOf(turn.status, 'succeeded') && turn.assistantMessage) {
       const parts = parseAssistantMessage(turn.assistantMessage)
       messages.push({ role: 'assistant', text: parts.summary || parts.question || turn.assistantMessage })
     }
@@ -135,7 +136,7 @@ export function designMessages(turns: ApplicationDraftConversationTurn[]): UiPre
 }
 
 /** A collected set stays on step 0 until analysis has explicitly started. */
-export function resumeStep(draft: ApplicationDraft, analysed: boolean): Excel2AppStep {
+export function resumeStep(draft: BuildDraft, analysed: boolean): Excel2AppStep {
   if (!draft.source) return 0
   if (!analysed) return turnsOf(currentTurns(draft), 'excel-analysis').length > 0 ? 1 : 0
   if (!draft.uiDesign && turnsOf(currentTurns(draft), 'ui-design').length === 0) return 2
@@ -175,8 +176,9 @@ export function latestSaver(save: (value: string) => Promise<boolean>, latest: (
  * draft's title (the file name until now) should follow it: the turn succeeded and no app
  * exists or is being made. Original file names stay in the source membership.
  */
-export function analysisTitle(draft: ApplicationDraft, turn: ApplicationDraftConversationTurn | undefined): string | undefined {
-  if (turn?.status !== 'succeeded' || draft.createdApplicationStackId || draft.createdApplicationId || isBuildPending(draft.creationExecutions?.at(-1))) return undefined
+export function analysisTitle(draft: BuildDraft, turn: BuildTurn | undefined): string | undefined {
+  // An execution in a state this console does not know may be making the app: the title is not rewritten then.
+  if (!isOneOf(turn?.status, 'succeeded') || draft.createdApplicationStackId || draft.createdApplicationId || jobState(draft.creationExecutions.at(-1)) !== 'settled') return undefined
   const name = parseSpec(draft.specMarkdown).spec.name?.trim()
   return name && name !== draft.title ? name : undefined
 }
@@ -185,7 +187,7 @@ export function analysisTitle(draft: ApplicationDraft, turn: ApplicationDraftCon
 export type PublishChoice = Required<ApplicationDraftPublishPreferences>
 
 /** Align the title/spec name and replace the draft's publish preferences in the same PATCH. */
-export function handOffPatch(draft: Pick<ApplicationDraft, 'title' | 'specMarkdown'>, specMarkdown: string, publish: PublishChoice): UpdateApplicationDraftRequest {
+export function handOffPatch(draft: Pick<BuildDraft, 'title' | 'specMarkdown'>, specMarkdown: string, publish: PublishChoice): UpdateApplicationDraftRequest {
   const { name } = publish
   const { spec, body } = parseSpec(specMarkdown)
   // A document without readable front-matter keeps its text as is; the title still carries the name.
@@ -216,7 +218,7 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
   /** `false` only when the project answered that AI is unavailable; unknown counts as available. */
   const codexAvailable = tools.data?.codexAvailable !== false
   const draftQuery = useQuery({ ...buildDraftOptions(projectId, draftId ?? ''), enabled: Boolean(draftId) })
-  const [storedDraft, setStoredDraft] = useState<ApplicationDraft>()
+  const [storedDraft, setStoredDraft] = useState<BuildDraft>()
   const draft = draftQuery.data ?? (storedDraft?.projectId === projectId && (!draftId || storedDraft.id === draftId) ? storedDraft : undefined)
   const members = draft?.source?.workbooks ?? EMPTY_MEMBERS
   const [previewRequested, setPreviewRequested] = useState(false)
@@ -233,7 +235,7 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
   const draftRef = useRef(draft)
   draftRef.current = draft
   /** A new draft whose failed workbook upload could not be cleaned up; reuse it across renders. */
-  const pendingWorkbookDraft = useRef<ApplicationDraft>(undefined)
+  const pendingWorkbookDraft = useRef<BuildDraft>(undefined)
   const [files, setFiles] = useState<CollectedWorkbook[]>([])
   const [collecting, setCollecting] = useState(false)
   const [starting, setStarting] = useState(false)
@@ -245,9 +247,10 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
   const analysisTurn = turnsOf(turns, 'excel-analysis').at(-1)
   const designTurns = useMemo(() => turnsOf(turns, 'ui-design'), [turns])
   const latestDesignTurn = designTurns.at(-1)
-  const turnRunning = turns.some(isBuildPending)
+  // A turn in a state this console does not know may still run: nothing new is sent over it.
+  const turnRunning = turns.some((turn) => jobState(turn) !== 'settled')
 
-  const version = `${draft?.source?.revision ?? ''}:${analysisTurn?.id ?? ''}:${analysisTurn?.status ?? ''}`
+  const version = `${draft?.source?.revision ?? ''}:${analysisTurn?.id ?? ''}:${analysisTurn ? knownValue(analysisTurn.status) ?? 'unknown' : ''}`
   const workbooksQuery = useQuery({ ...draftWorkbooksOptions(projectId, draft?.id ?? '', version), enabled: Boolean(draft?.source) })
   const gridQueries = useQueries({
     queries: members.map((member) => ({
@@ -270,20 +273,31 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
   const entries = useMemo(() => offline && gridsReady ? inputs.map((input) => ({ workbook: input.summary, reading: readingOf(input) })) : workbooksQuery.data?.data ?? [], [offline, gridsReady, inputs, workbooksQuery.data])
   const usingOffline = offline && !draft?.excelAnalysis
 
-  function receive(next: ApplicationDraft) {
+  /**
+   * Writes a write's answer into the draft cache after cancelling draft reads still in flight (polls and
+   * `refetchDraft`, which run as the draft query): they started before this answer arrived, and landing
+   * afterwards they would put back the draft as it was before the write.
+   */
+  async function receive(next: BuildDraft) {
+    const { queryKey } = buildDraftOptions(projectId, next.id)
+    await queryClient.cancelQueries({ queryKey, exact: true })
     draftRef.current = next
     setStoredDraft(next)
-    queryClient.setQueryData(buildDraftOptions(projectId, next.id).queryKey, next)
+    queryClient.setQueryData(queryKey, next)
   }
 
-  function appendTurn(turn: ApplicationDraftConversationTurn) {
+  async function appendTurn(turn: BuildTurn) {
     const latest = draftRef.current
-    if (latest) receive({ ...latest, conversationTurns: [...(latest.conversationTurns ?? []), turn] })
+    if (latest) await receive({ ...latest, conversationTurns: [...latest.conversationTurns, turn] })
   }
 
+  /** Re-reads the draft as the draft query (never a bare GET), so a later write's answer cancels it instead of being overwritten. */
   async function refetchDraft() {
     const id = draftRef.current?.id
-    if (id) receive(await api.getDraft(projectId, id))
+    if (!id) return
+    const read = await readDraft(queryClient, projectId, id)
+    draftRef.current = read
+    setStoredDraft(read)
   }
 
   function isReadOnly() {
@@ -326,7 +340,7 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
     let target = current
     try {
       target ??= await api.createDraft(projectId, { title: fileStem(grid.fileName), intent: text.pick.draftIntent(grid.fileName) })
-      let result: ApplicationDraftWorkbookAddResponse
+      let result: api.WorkbookAdded
       try {
         result = await api.addWorkbook(projectId, target.id, payload, key)
       } catch (error) {
@@ -338,7 +352,7 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
       }
       pendingWorkbookDraft.current = undefined
       queryClient.setQueryData(draftWorkbookGridOptions(projectId, result.draft.id, result.workbook.id).queryKey, payload)
-      receive(result.draft)
+      await receive(result.draft)
       resetAnalysis(result.draft.id)
       setFiles((rows) => rows.map((row) => row.key === key ? { ...row, state: 'stored', workbookId: result.workbook.id } : row))
       uploads.current.delete(key)
@@ -413,7 +427,7 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
     try {
       const current = draftRef.current
       if (workbookId && current) {
-        receive(await api.removeWorkbook(projectId, current.id, workbookId))
+        await receive(await api.removeWorkbook(projectId, current.id, workbookId))
         resetAnalysis(current.id)
       }
       uploads.current.delete(key)
@@ -426,15 +440,15 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
 
   async function analyse(message = hint) {
     const current = draftRef.current
-    if (!current?.source || isReadOnly() || currentTurns(current).some(isBuildPending)) return
+    if (!current?.source || isReadOnly() || currentTurns(current).some((turn) => jobState(turn) !== 'settled')) return
     setAnalysisProblem(undefined)
     setStarting(true)
     try {
       await exclusive(async () => {
         try {
           const first = current.source!.workbooks[0]!
-          receive(await api.updateDraft(projectId, current.id, { title: fileStem(first.fileName), intent: text.pick.setIntent(first.fileName, current.source!.workbooks.length) }))
-          appendTurn(await api.createTurn(projectId, current.id, { kind: 'excel-analysis', message: message.trim() }))
+          await receive(await api.updateDraft(projectId, current.id, { title: fileStem(first.fileName), intent: text.pick.setIntent(first.fileName, current.source!.workbooks.length) }))
+          await appendTurn(await api.createTurn(projectId, current.id, { kind: 'excel-analysis', message: message.trim() }))
         } catch (error) {
           if (isApplicationCreated(error)) return markCreated(current.id)
           const status = errorStatus(error)
@@ -469,7 +483,7 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
     const localPlan = planApp(local, current.title)
     await exclusive(async () => {
       try {
-        receive(await api.updateDraft(projectId, current.id, { specMarkdown: excelSpecMarkdown(local, localPlan, members) }))
+        await receive(await api.updateDraft(projectId, current.id, { specMarkdown: excelSpecMarkdown(local, localPlan, members) }))
         saveOffline(current.id)
         setOffline(true)
         setAnalysisProblem(undefined)
@@ -491,7 +505,7 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
     }
     setSpecSave({ state: 'saving' })
     try {
-      receive(await api.updateDraft(projectId, current.id, { specMarkdown: `${frontMatter}${body}` }))
+      await receive(await api.updateDraft(projectId, current.id, { specMarkdown: `${frontMatter}${body}` }))
       setSpecSave({ state: 'saved' })
       return true
     } catch {
@@ -507,7 +521,7 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
       setSendProblem(undefined)
       setSending(message)
       try {
-        appendTurn(await api.createTurn(projectId, current.id, { kind: 'ui-design', message }))
+        await appendTurn(await api.createTurn(projectId, current.id, { kind: 'ui-design', message }))
       } catch (error) {
         if (isApplicationCreated(error)) return markCreated(current.id)
         const status = errorStatus(error)
@@ -574,7 +588,7 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
   /** Re-sends what failed: the local send error first, else the last ui-design turn when it failed. */
   function retryDesign() {
     if (sendProblem) return void sendDesignTurn(sendProblem.instruction)
-    if (latestDesignTurn?.status === 'failed') void sendDesignTurn(latestDesignTurn.userMessage)
+    if (isOneOf(latestDesignTurn?.status, 'failed')) void sendDesignTurn(latestDesignTurn!.userMessage)
   }
 
   const messages = useMemo<UiPreviewChatMessage[]>(() => {
@@ -591,7 +605,7 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
   const designBusy = usingOffline ? false : Boolean(sending) || isBuildPending(latestDesignTurn)
   const suggestions = usingOffline
     ? (offlineDesign && plan ? suggestedInstructions(offlineDesign.design, plan) : [])
-    : latestDesignTurn?.status === 'succeeded' ? (latestDesignTurn.suggestedReplies ?? []) : []
+    : isOneOf(latestDesignTurn?.status, 'succeeded') ? (latestDesignTurn!.suggestedReplies ?? []) : []
 
   /** Persist the fallback's screen decisions, aligned name and publish preferences before opening the build. */
   async function handOff(publish: PublishChoice): Promise<boolean> {
@@ -600,7 +614,7 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
     const specMarkdown = usingOffline && offlineDesign ? withUiDecisions(current.specMarkdown, offlineDesign.design) : current.specMarkdown
     const patch = handOffPatch(current, specMarkdown, publish)
     try {
-      receive(await api.updateDraft(projectId, current.id, patch))
+      await receive(await api.updateDraft(projectId, current.id, patch))
     } catch {
       return false
     }
@@ -638,9 +652,9 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
     analysis: {
       turn: analysisTurn,
       running: starting || isBuildPending(analysisTurn),
-      problem: analysisProblem?.kind ?? (analysisTurn?.status === 'failed' && !draft?.excelAnalysis ? ('failed' as const) : undefined),
+      problem: analysisProblem?.kind ?? (isOneOf(analysisTurn?.status, 'failed') && !draft?.excelAnalysis ? ('failed' as const) : undefined),
       failure: analysisProblem?.failure,
-      error: analysisTurn?.status === 'failed' ? analysisTurn.error : undefined,
+      error: isOneOf(analysisTurn?.status, 'failed') ? analysisTurn!.error : undefined,
       retry: () => void analyse(analysisTurn?.userMessage ?? hint),
       continueOffline,
     },

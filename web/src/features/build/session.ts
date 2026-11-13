@@ -1,4 +1,4 @@
-import type { ApplicationDraft } from '@appthrust/api-schema/platform-api'
+import { jobState, type BuildDraft } from '../../model/contracts/build'
 import { z } from 'zod'
 import { isBuildPending } from '../../model/build/progress'
 import { buildCopy } from '../../model/build/copy'
@@ -11,7 +11,7 @@ import { textEn } from './copy.en'
 const messageSchema = z.discriminatedUnion('role', [
   z.object({ role: z.literal('user'), text: z.string(), at: z.string() }),
   z.object({ role: z.literal('assistant'), text: z.string(), at: z.string(), summary: z.string().optional(), changed: z.array(z.string()).optional(), question: z.string().optional(), options: z.array(z.string()).optional(), turnId: z.string().optional() }),
-  z.object({ role: z.literal('notice'), tone: z.enum(['info', 'warning', 'error']), title: z.string(), detail: z.string().optional(), at: z.string(), retry: z.enum(['turn', 'plan', 'prepare', 'implement', 'publish']).optional(), reference: z.object({ draftId: z.string(), executionId: z.string().optional(), at: z.iso.datetime() }).optional() }),
+  z.object({ role: z.literal('notice'), tone: z.enum(['info', 'warning', 'error']), title: z.string(), detail: z.string().optional(), at: z.string(), retry: z.enum(['turn', 'plan', 'prepare', 'implement', 'publish', 'confirm']).optional(), reference: z.object({ draftId: z.string(), executionId: z.string().optional(), at: z.iso.datetime() }).optional() }),
 ])
 const sessionSchema = z.object({
   baseIntent: z.string(),
@@ -58,16 +58,18 @@ export function forgetBuildSession(draftId: string, storage?: Pick<Storage, 'rem
 }
 
 /** Persist the reservation with the queued first turn before starting its request. */
-export function startConversation(session: BuildSession, draft: Pick<ApplicationDraft, 'conversationTurns' | 'creationPlan' | 'creationExecutions' | 'phase'>, at: string): BuildSession {
-  if (session.kickoffSent || session.pending.length || draft.conversationTurns?.length || draft.creationPlan || draft.creationExecutions?.length || draft.phase === 'created') return session
+export function startConversation(session: BuildSession, draft: Pick<BuildDraft, 'conversationTurns' | 'creationPlan' | 'creationExecutions' | 'phase'>, at: string): BuildSession {
+  // Only a draft known to be before creation opens the conversation; an unknown phase starts nothing.
+  if (session.kickoffSent || session.pending.length || draft.conversationTurns.length || draft.creationPlan || draft.creationExecutions.length || draft.phase.kind !== 'known' || draft.phase.value === 'created') return session
   return queueReply({ ...session, kickoffSent: true }, buildCopy.questions.firstTurn, at)
 }
 
 /** While 用意する runs and the AI is idle, queue the hidden preparation turn once. */
-export function startPrepareConversation(session: BuildSession, draft: Pick<ApplicationDraft, 'conversationTurns' | 'creationPlanGenerations' | 'creationExecutions' | 'publishPreferences'>, at: string): BuildSession {
-  const turns = draft.conversationTurns ?? []
-  if ((draft.publishPreferences?.name && draft.publishPreferences.shareScope) || session.pending.length || session.messages.some((message) => message.role === 'user' && isPrepareTurn(message.text)) || !isBuildPending(draft.creationExecutions?.at(-1))) return session
-  if (turns.some((turn) => isPrepareTurn(turn.userMessage) || isBuildPending(turn)) || isBuildPending(draft.creationPlanGenerations?.at(-1))) return session
+export function startPrepareConversation(session: BuildSession, draft: Pick<BuildDraft, 'conversationTurns' | 'creationPlanGenerations' | 'creationExecutions' | 'publishPreferences'>, at: string): BuildSession {
+  const turns = draft.conversationTurns
+  if ((draft.publishPreferences?.name && draft.publishPreferences.shareScope) || session.pending.length || session.messages.some((message) => message.role === 'user' && isPrepareTurn(message.text)) || !isBuildPending(draft.creationExecutions.at(-1))) return session
+  // The AI must be known to be idle: a turn or generation in a state this console does not know may still run.
+  if (turns.some((turn) => isPrepareTurn(turn.userMessage) || jobState(turn) !== 'settled') || jobState(draft.creationPlanGenerations.at(-1)) !== 'settled') return session
   return queueReply(session, buildCopy.questions.prepareTurn, at)
 }
 

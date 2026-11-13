@@ -1,4 +1,4 @@
-import type { ApplicationDraft, ApplicationDraftConversationTurn } from '@appthrust/api-schema/platform-api'
+import { isOneOf, type BuildDraft, type BuildTurn } from '../contracts/build'
 import { summarizeCreationPlan } from '../create'
 import { buildCopy } from './copy'
 import { classifyBuildFailure } from './failure'
@@ -84,13 +84,14 @@ export function assistantParts(message: AssistantBuildMessage): AssistantParts {
   return { ...parsed, changed: message.changed?.length ? message.changed : parsed.changed }
 }
 
-export function assistantMessage(turn: ApplicationDraftConversationTurn, draftId: string): BuildMessage {
-  if (turn.status === 'failed') {
+export function assistantMessage(turn: BuildTurn, draftId: string): BuildMessage {
+  if (turn.status.kind === 'unknown') return { role: 'notice', tone: 'warning', title: buildCopy.unsupported.title, detail: buildCopy.unsupported.detail, at: turn.finishedAt ?? turn.startedAt }
+  if (turn.status.value === 'failed') {
     const at = turn.finishedAt ?? turn.startedAt
     const failure = classifyBuildFailure(turn.error ?? '', undefined, 'turn', { draftId, at })
     return { role: 'notice', tone: 'error', title: failure.title, detail: failure.reason, at, ...(failure.kind !== 'policy' ? { retry: 'turn' as const } : {}), ...(failure.reference ? { reference: failure.reference } : {}) }
   }
-  if (turn.status !== 'succeeded') return { role: 'notice', tone: 'info', title: buildCopy.progress.turn.title, at: turn.startedAt }
+  if (turn.status.value !== 'succeeded') return { role: 'notice', tone: 'info', title: buildCopy.progress.turn.title, at: turn.startedAt }
   const text = turn.assistantMessage ?? ''
   const parts = parseAssistantMessage(text)
   const changed = turn.changed?.length ? turn.changed : parts.changed
@@ -107,7 +108,7 @@ export function assistantMessage(turn: ApplicationDraftConversationTurn, draftId
  * plus the planned address (plain text, not a live URL) and what the AI will build.
  * Infrastructure wording stays in 「詳しい人向け」.
  */
-export function planProposal(draft: ApplicationDraft, lastPlannedIntent?: string): BuildProposal | undefined {
+export function planProposal(draft: BuildDraft, lastPlannedIntent?: string): BuildProposal | undefined {
   const plan = draft.creationPlan
   if (!plan) return undefined
   const { spec } = parseSpec(draft.specMarkdown)
@@ -136,29 +137,30 @@ export function planProposal(draft: ApplicationDraft, lastPlannedIntent?: string
 }
 
 /** The proposal sits in the conversation where the plan finished, as the AI's own message. */
-function proposalMessage(draft: ApplicationDraft, lastPlannedIntent?: string): BuildMessage | undefined {
+function proposalMessage(draft: BuildDraft, lastPlannedIntent?: string): BuildMessage | undefined {
   const proposal = planProposal(draft, lastPlannedIntent)
   if (!proposal) return undefined
-  const generation = [...(draft.creationPlanGenerations ?? [])].reverse().find((item) => item.status === 'succeeded')
+  const generation = [...draft.creationPlanGenerations].reverse().find((item) => isOneOf(item.status, 'succeeded'))
   const at = generation?.finishedAt ?? generation?.startedAt ?? draft.updatedAt
   return { role: 'assistant', text: proposal.lead ?? proposal.name, proposal, at, turnId: `proposal:${generation?.id ?? draft.id}` }
 }
 
-export function messagesFromDraft(draft: ApplicationDraft, extra: BuildMessage[], options: { lastPlannedIntent?: string; preparationDone?: boolean } = {}): BuildMessage[] {
+export function messagesFromDraft(draft: BuildDraft, extra: BuildMessage[], options: { lastPlannedIntent?: string; preparationDone?: boolean } = {}): BuildMessage[] {
   const messages: BuildMessage[] = []
-  const all = [...(draft.conversationTurns ?? [])].sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt))
+  const all = [...draft.conversationTurns].sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt))
   // Excel → app's analysis and screen-design turns read as one line before the conversation,
   // linked back to Excel → app; 「この内容で提案して」 is offered right away, since the
   // specification is already written.
-  const excel = all.filter((turn) => turn.kind === 'excel-analysis' || turn.kind === 'ui-design')
-  if (excel.some((turn) => turn.status === 'succeeded')) {
+  const excel = all.filter((turn) => isOneOf(turn.kind, 'excel-analysis', 'ui-design'))
+  if (excel.some((turn) => isOneOf(turn.status, 'succeeded'))) {
     const text = buildCopy.questions.excelReady
     messages.push({ role: 'assistant', text, summary: text, at: excel[0]!.startedAt, turnId: `excel:${draft.id}`, options: [buildCopy.questions.kickoffReply], link: { kind: 'excel2app', draftId: draft.id } })
   }
   const turns = conversationTurns(all)
   for (const turn of turns) {
     messages.push({ role: 'user', text: turn.userMessage, at: turn.startedAt })
-    if (turn.status === 'succeeded' || turn.status === 'failed') messages.push(assistantMessage(turn, draft.id))
+    // A reply in a state this console does not know reads as that, never as an answer or a failure.
+    if (turn.status.kind === 'unknown' || isOneOf(turn.status, 'succeeded', 'failed')) messages.push(assistantMessage(turn, draft.id))
   }
   const proposal = proposalMessage(draft, options.lastPlannedIntent)
   if (proposal) messages.push(proposal)
@@ -174,9 +176,9 @@ export function messagesFromDraft(draft: ApplicationDraft, extra: BuildMessage[]
   }
   // Only observed template startup earns the completion line; execution success
   // alone merely proves that the application's resources were created.
-  const execution = draft.creationExecutions?.at(-1)
+  const execution = draft.creationExecutions.at(-1)
   const exchange = prepareAnswers(turns)
-  if (execution?.status === 'succeeded' && options.preparationDone && !exchange.open) {
+  if (execution && isOneOf(execution.status, 'succeeded') && options.preparationDone && !exchange.open) {
     const text = buildCopy.prepareConversation.ready
     // The exchange can end on an unrelated request. Never backdate readiness above
     // that request (or a queued local message); inserting last also breaks timestamp ties.

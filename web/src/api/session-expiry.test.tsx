@@ -2,6 +2,8 @@ import { afterEach, beforeEach, expect, mock, test } from 'bun:test'
 import type { ApplicationDraft } from '@appthrust/api-schema/platform-api'
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { act } from 'react'
+import { draftOf } from './testing/build-domain'
+import type { BuildDraft } from '../model/contracts/build'
 import { createRoot } from 'react-dom/client'
 import { copy } from '../copy'
 import { SessionExpiryBoundary } from '../ui/session-expired'
@@ -74,7 +76,8 @@ test('cached running draft becomes a visible sign-in notice, removes polling obs
   const draft: ApplicationDraft = { id: 'draft', projectId: 'project', title: 'App', intent: 'Build app', phase: 'specifying', specMarkdown: '', architectureMarkdown: '', creationExecutions: [], ownerUserId: 'owner', createdAt: at, updatedAt: at, conversationTurns: [{ id: 'kickoff', kind: 'conversation', userMessage: 'この内容で提案して', status: 'running', startedAt: at, devWorkspaceId: 'workspace' }] }
   const options = buildDraftOptions('project', 'draft')
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } })
-  client.setQueryData(options.queryKey, draft)
+  const cached = draftOf(draft)
+  client.setQueryData(options.queryKey, cached)
   const fetch = mock(async () => new Response(null, { status: 302 }))
   globalThis.fetch = fetch as unknown as typeof globalThis.fetch
   const container = document.createElement('div')
@@ -92,7 +95,8 @@ test('cached running draft becomes a visible sign-in notice, removes polling obs
     expect(container.querySelector('button')?.textContent).toBe(copy.common.signInAgain)
     expect(container.textContent).not.toContain('Thinking')
     expect(client.getQueryCache().find({ queryKey: options.queryKey })?.getObserversCount()).toBe(0)
-    expect(client.getQueryData<ApplicationDraft>(options.queryKey)).toEqual(draft)
+    // The cache holds the domain draft the reader made; the expired poll leaves that very value in place.
+    expect(client.getQueryData<BuildDraft>(options.queryKey)).toBe(cached)
     await client.refetchQueries({ queryKey: options.queryKey, type: 'active' })
     expect(fetch).toHaveBeenCalledTimes(1)
   } finally {

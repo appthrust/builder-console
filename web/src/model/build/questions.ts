@@ -1,4 +1,5 @@
-import type { ApplicationDraftConversationTurn, ApplicationDraftConversationTurnKind, ApplicationDraftPublishPreferences, ExcelAnalysis } from '@appthrust/api-schema/platform-api'
+import type { OpenValue } from '../../api/boundary'
+import { isOneOf, type BuildTurn, type DraftExcelAnalysis, type PublishPreferences, type TurnKind } from '../contracts/build'
 import { shareScopeLabel, type DraftShareScope } from '../access'
 import { apps } from '../../copy/apps'
 import { appsEn } from '../../copy/apps.en'
@@ -11,8 +12,9 @@ import type { BuildMessage } from './types'
  * run on the same draft but are not replies: they never enter the intent or the chat.
  * A turn without `kind` predates the field and is a conversation turn.
  */
-export function conversationTurns<T extends { kind?: ApplicationDraftConversationTurnKind }>(turns: readonly T[] = []): T[] {
-  return turns.filter((turn) => turn.kind === undefined || turn.kind === 'conversation')
+export function conversationTurns<T extends { kind: OpenValue<TurnKind> }>(turns: readonly T[] = []): T[] {
+  // A turn kind this console does not know is not a conversation reply either.
+  return turns.filter((turn) => isOneOf(turn.kind, 'conversation'))
 }
 
 /** Recognize saved prompts in either language, even after the console switches language. */
@@ -66,7 +68,7 @@ export function decomposeBuildIntent(intent: string): string {
 }
 
 /** Integrated entities already exclude headers, reports and merged duplicates. */
-export function importedRowCount(analysis: Pick<ExcelAnalysis, 'entities'> | undefined): number | undefined {
+export function importedRowCount(analysis: Pick<DraftExcelAnalysis, 'entities'> | undefined): number | undefined {
   return analysis?.entities.reduce((sum, entity) => sum + entity.importRows, 0)
 }
 
@@ -125,7 +127,7 @@ export interface PrepareAnswers {
   /** The AI is still asking (its latest turn belongs to the exchange): replies go to it, even once the app is made. */
   open: boolean
 }
-type PrepareTurn = Pick<ApplicationDraftConversationTurn, 'id' | 'status' | 'startedAt' | 'userMessage' | 'suggestedReplies'> & { kind?: ApplicationDraftConversationTurnKind }
+type PrepareTurn = Pick<BuildTurn, 'id' | 'kind' | 'status' | 'startedAt' | 'userMessage' | 'suggestedReplies'>
 
 /**
  * Read only the contiguous exchange after the latest preparation prompt, ignoring failed turns.
@@ -134,7 +136,7 @@ type PrepareTurn = Pick<ApplicationDraftConversationTurn, 'id' | 'status' | 'sta
  * This semantic boundary replaces a reply-count limit: later spec requests never rejoin it.
  * Explicit Excel hand-off answers supersede the exchange without inventing conversation turns.
  */
-export function prepareAnswers(turns: readonly PrepareTurn[] = [], preferences?: ApplicationDraftPublishPreferences, ownerGroupName?: string): PrepareAnswers {
+export function prepareAnswers(turns: readonly PrepareTurn[] = [], preferences?: PublishPreferences, ownerGroupName?: string): PrepareAnswers {
   const answered = { ...(preferences?.name ? { name: preferences.name } : {}), ...(preferences?.shareScope ? { shareChoice: preferences.shareScope } : {}) }
   const ordered = conversationTurns(turns).sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt))
   let start = ordered.length - 1
@@ -142,7 +144,8 @@ export function prepareAnswers(turns: readonly PrepareTurn[] = [], preferences?:
   const opening = ordered[start]
   if (!opening) return { ...answered, turnIds: [], open: false }
   const result: PrepareAnswers = { turnIds: [opening.id], open: false }
-  const replies = ordered.slice(start + 1).filter((turn) => turn.status !== 'failed')
+  // Only a turn known to have failed is dropped; a reply in an unknown state was still said.
+  const replies = ordered.slice(start + 1).filter((turn) => !isOneOf(turn.status, 'failed'))
   for (const turn of replies) {
     const reply = turn.userMessage.trim()
     const share = prepareShareScope(reply, ownerGroupName)
@@ -157,7 +160,7 @@ export function prepareAnswers(turns: readonly PrepareTurn[] = [], preferences?:
     if (answer.name) result.name = answer.name
     result.turnIds.push(turn.id)
   }
-  const last = ordered.filter((turn) => turn.status !== 'failed').at(-1)
-  result.open = opening.status !== 'failed' && !result.shareChoice && last !== undefined && result.turnIds.includes(last.id)
+  const last = ordered.filter((turn) => !isOneOf(turn.status, 'failed')).at(-1)
+  result.open = !isOneOf(opening.status, 'failed') && !result.shareChoice && last !== undefined && result.turnIds.includes(last.id)
   return { ...result, ...answered, open: preferences?.name && preferences.shareScope ? false : result.open }
 }

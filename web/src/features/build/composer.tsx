@@ -16,6 +16,8 @@ export interface ComposerProps {
   /** The opening question's title; undefined for plain suggestions. */
   chipsTitle?: string
   disabled: boolean
+  /** Why nothing can be sent right now, shown above the input while it is disabled (e.g. a state this console does not know). */
+  disabledReason?: string
   placeholder: string
   /** Trimmed, non-empty, at most `MAX_LENGTH` characters. */
   onSubmit(text: string): void
@@ -26,7 +28,7 @@ export const MAX_LENGTH = 4000
 const MIN_ROWS = 3
 const MAX_ROWS = 8
 
-export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function Composer({ chips, chipsTitle, disabled, placeholder, onSubmit, onChip }, ref) {
+export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function Composer({ chips, chipsTitle, disabled, disabledReason, placeholder, onSubmit, onChip }, ref) {
   const textarea = useRef<HTMLTextAreaElement>(null)
   useImperativeHandle(ref, () => textarea.current as HTMLTextAreaElement)
   const [text, setText] = useState('')
@@ -59,7 +61,9 @@ export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function 
     submit()
   }
 
+  const reason = disabled ? disabledReason : undefined
   return <div className="shrink-0 border-t border-stone-200 pt-3">
+    {reason ? <p id="build-reply-disabled" className="mb-2 text-xs leading-relaxed text-stone-500">{reason}</p> : null}
     {chips?.length ? <div className="mb-2" role="group" aria-label={chipsTitle ?? uiText.composer.suggestions}>
       {chipsTitle ? <p className="mb-1.5 text-sm font-medium text-stone-800">{chipsTitle}</p> : null}
       <div className="flex flex-wrap gap-1.5">
@@ -76,7 +80,7 @@ export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function 
         maxLength={MAX_LENGTH}
         disabled={disabled}
         placeholder={placeholder}
-        aria-describedby="build-reply-keys"
+        aria-describedby={reason ? 'build-reply-disabled build-reply-keys' : 'build-reply-keys'}
         onChange={(event) => setText(event.target.value)}
         onKeyDown={onKeyDown}
         className="block w-full resize-none rounded-lg bg-transparent py-3 pr-14 pl-4 text-sm leading-6 text-stone-900 placeholder:text-stone-400 focus:outline-none disabled:cursor-not-allowed disabled:text-stone-500"

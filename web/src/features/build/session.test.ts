@@ -4,7 +4,16 @@ import type { ApplicationDraftCreationPlanValidation } from '@appthrust/api-sche
 import { buildCopy } from '../../model/build/copy'
 import { preserveLanguage } from '../../../test/language'
 import { setLanguage } from '../../shell/language'
-import { acknowledgeReply, forgetBuildSession, initialSession, queueReply, readBuildSession, saveBuildSession, startConversation, startPrepareConversation, titleFromIntent } from './session'
+import { draftOf } from '../../api/testing/build-domain'
+import * as model from './session'
+
+const { acknowledgeReply, forgetBuildSession, initialSession, queueReply, readBuildSession, saveBuildSession, titleFromIntent } = model
+const startConversation = (session: model.BuildSession, draft: object, at: string) => model.startConversation(session, draftOf(withDraftBase(draft)), at)
+const startPrepareConversation = (session: model.BuildSession, draft: object, at: string) => model.startPrepareConversation(session, draftOf(withDraftBase(draft)), at)
+/** The session tests vary only the job collections; the rest of the draft is a fixed valid one. */
+function withDraftBase(draft: object) {
+  return { id: 'draft-1', projectId: 'project-1', title: '見積', intent: '見積', phase: 'specifying', specMarkdown: '', ownerUserId: 'u', createdAt: '2026-10-08T00:00:00Z', updatedAt: '2026-10-08T00:00:00Z', ...draft }
+}
 import { validatePreparationPlan } from './use-build-session'
 
 // Language tests must leave the Dashboard's shared browser preference alone.
@@ -47,17 +56,19 @@ describe('build session persistence', () => {
   })
   test('existing, failed or running turns and existing plans never start another opening', () => {
     for (const status of ['pending', 'running', 'succeeded', 'failed'] as const) {
-      const draft = { phase: 'specifying' as const, conversationTurns: [{ id: 't1', kind: 'conversation' as const, status, startedAt: 'now', userMessage: buildCopy.questions.firstTurn, devWorkspaceId: 'ws-1' }], creationExecutions: [] }
+      const draft = { phase: 'specifying' as const, conversationTurns: [{ id: 't1', kind: 'conversation' as const, status, startedAt: '2026-10-08T00:02:00Z', userMessage: buildCopy.questions.firstTurn, devWorkspaceId: 'ws-1' }], creationExecutions: [] }
       expect(startConversation(initial, draft, 'later')).toBe(initial)
     }
-    expect(startConversation(initial, { phase: 'planned', creationPlan: { summary: '', markdown: '', representation: [] }, creationExecutions: [] }, 'later')).toBe(initial)
+    expect(startConversation(initial, { phase: 'planned', creationPlan: { summary: 'x', markdown: 'x', representation: ['Application'] }, creationExecutions: [] }, 'later')).toBe(initial)
+    // A phase this console does not know never opens the conversation on its own.
+    expect(startConversation(initial, { phase: 'legal-review', creationExecutions: [] }, 'later')).toBe(initial)
     expect(startConversation(initial, { phase: 'created', creationExecutions: [] }, 'later')).toBe(initial)
     const queued = queueReply(initial, '人事の一覧', 'now')
     expect(startConversation(queued, { phase: 'specifying', creationExecutions: [] }, 'later')).toBe(queued)
   })
   test('用意する asks once: the preparation turn is queued when the execution runs and the AI is idle', () => {
-    const execution = { id: 'e1', attempt: 1, status: 'running' as const, startedAt: 'now', steps: [] }
-    const opening = { id: 't1', kind: 'conversation' as const, status: 'succeeded' as const, startedAt: 'before', userMessage: buildCopy.questions.firstTurn, devWorkspaceId: 'ws-1' }
+    const execution = { id: 'e1', attempt: 1, status: 'running' as const, startedAt: '2026-10-08T00:02:00Z', steps: [] }
+    const opening = { id: 't1', kind: 'conversation' as const, status: 'succeeded' as const, startedAt: '2026-10-08T00:01:00Z', userMessage: buildCopy.questions.firstTurn, devWorkspaceId: 'ws-1' }
     const preparing = { conversationTurns: [opening], creationExecutions: [execution] }
     const started = startPrepareConversation(initial, preparing, 'now')
     expect(started.pending).toEqual([{ text: buildCopy.questions.prepareTurn, at: 'now' }])
@@ -74,7 +85,9 @@ describe('build session persistence', () => {
     }
     expect(startPrepareConversation(initial, { conversationTurns: [opening], creationExecutions: [] }, 'later')).toBe(initial)
     expect(startPrepareConversation(initial, { ...preparing, conversationTurns: [{ ...opening, status: 'running' }] }, 'later')).toBe(initial)
-    expect(startPrepareConversation(initial, { ...preparing, creationPlanGenerations: [{ id: 'g1', status: 'running', startedAt: 'now', devWorkspaceId: 'ws-1' }] }, 'later')).toBe(initial)
+    expect(startPrepareConversation(initial, { ...preparing, creationPlanGenerations: [{ id: 'g1', status: 'running', startedAt: '2026-10-08T00:02:00Z', devWorkspaceId: 'ws-1' }] }, 'later')).toBe(initial)
+    // A turn in a state this console does not know may still be running: no preparation turn over it.
+    expect(startPrepareConversation(initial, { ...preparing, conversationTurns: [{ ...opening, status: 'thinking-harder' }] }, 'later')).toBe(initial)
     expect(startPrepareConversation(initial, { ...preparing, conversationTurns: [opening, { ...opening, id: 't2', userMessage: buildCopy.questions.prepareTurn }] }, 'later')).toBe(initial)
     const queued = queueReply(initial, '一覧に検索', 'now')
     expect(startPrepareConversation(queued, preparing, 'later')).toBe(queued)
@@ -86,8 +99,8 @@ describe('build session persistence', () => {
     expect(reloaded).toEqual(initial)
     const draft = {
       phase: 'planned' as const,
-      creationPlan: { summary: '', markdown: '', representation: [] },
-      creationExecutions: [{ id: 'e1', attempt: 1, status: 'running' as const, startedAt: 'now', steps: [] }],
+      creationPlan: { summary: 'x', markdown: 'x', representation: ['Application'] },
+      creationExecutions: [{ id: 'e1', attempt: 1, status: 'running' as const, startedAt: '2026-10-08T00:02:00Z', steps: [] }],
       publishPreferences: { name: '不具合管理', shareScope: 'group' as const },
     }
     expect(startConversation(reloaded, draft, 'now')).toBe(reloaded)
@@ -169,11 +182,11 @@ describe('build session persistence', () => {
       expect(opening.pending[0]?.text).toBe(buildCopy.questions.firstTurn)
       expect(opening.pending[0]?.text).not.toMatch(/[ぁ-んァ-ヶ一-龠]/)
       expect(titleFromIntent('')).toBe('New app')
-      const preparing = { creationExecutions: [{ id: 'e1', attempt: 1, status: 'running' as const, startedAt: 'now', steps: [] }] }
+      const preparing = { creationExecutions: [{ id: 'e1', attempt: 1, status: 'running' as const, startedAt: '2026-10-08T00:02:00Z', steps: [] }] }
       const started = startPrepareConversation(initial, preparing, 'now')
       expect(started.pending[0]?.text).toBe(buildCopy.questions.prepareTurn)
       expect(started.pending[0]?.text).not.toBe(japanesePrepareTurn)
-      const persisted = { ...preparing, conversationTurns: [{ id: 't1', kind: 'conversation' as const, status: 'succeeded' as const, startedAt: 'before', userMessage: japanesePrepareTurn, devWorkspaceId: 'ws-1' }] }
+      const persisted = { ...preparing, conversationTurns: [{ id: 't1', kind: 'conversation' as const, status: 'succeeded' as const, startedAt: '2026-10-08T00:01:00Z', userMessage: japanesePrepareTurn, devWorkspaceId: 'ws-1' }] }
       expect(startPrepareConversation(initial, persisted, 'later')).toBe(initial)
     } finally {
       restoreLanguage()

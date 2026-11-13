@@ -1,7 +1,10 @@
 import { expect, test } from 'bun:test'
-import { deriveImprove } from '../model/improve'
+import { draftOf, readFirst } from '../api/testing/build-domain'
+import { deriveImprove as deriveDomain } from '../model/improve'
 import { platformRoutes } from './mock-platform'
 
+/** The mock answers wire drafts; the page derives from what the draft reader makes of them. */
+const deriveImprove = readFirst(draftOf, deriveDomain)
 const project = '/api/v1/projects/commerce'
 async function call(method: string, path: string, body?: unknown) {
   const url = new URL(path, 'http://mock.test')
