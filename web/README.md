@@ -332,8 +332,11 @@ every test it automatically:
 The failure lists each problem with its URL, method and status or message
 (never request or response bodies); the `browser-problems` attachment keeps the
 same list plus counts of console warnings and of GETs the page ended itself.
-Two such endings are not transport failures, although Chromium reports both as
-`net::ERR_ABORTED`: the Vite dev server runs React StrictMode, which mounts every
+Three such endings are not transport failures, although Chromium reports them as
+`net::ERR_ABORTED`: a read the page aborts through its own request signal with no
+timeout (a query cancelled when its last observer unmounted, such as `/launcher`
+when the shell re-renders, or before a cache write) is the page deciding it no
+longer needs the answer; the Vite dev server runs React StrictMode, which mounts every
 effect twice, so the first `/launcher` read or preview probe of a page is aborted
 in the same task that started it and sent again; and the preview probe cancels
 the body after reading the status (the status itself is still judged). A
@@ -342,7 +345,7 @@ navigation scope covers each test-driven `page.goto`, `reload`, `goBack`,
 followed link (until the new document commits): a GET/HEAD the replaced document
 started before the navigation landed may be cut off during it. A GET of an iframe
 the page removed while it loaded is not a failure either. A probe aborted by its
-timer, a read timeout, a read cancelled when its component unmounted, an aborted
+timer, a read timeout, an aborted
 write, a failed document load and any other `net::ERR_ABORTED` is a problem
 unless declared.
 
