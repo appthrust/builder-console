@@ -1,10 +1,10 @@
-import type { BuildFailure } from '@appthrust/api-schema/platform-api'
+import type { DraftBuildFailure } from '../../model/contracts/build'
 import { Notice } from '../../ui'
 import { ImproveButton } from '../improve/entry'
 
 /** The same current-build cause and one-click repair entry on app and build pages. */
 export function BuildFailureNotice({ failure, projectId, stackId, title, canEdit }: {
-  failure: BuildFailure | undefined
+  failure: Pick<DraftBuildFailure, 'lines'> | undefined
   projectId: string
   stackId: string | undefined
   title: string

@@ -84,48 +84,18 @@
     "raw-console-api": 1,
     "wire-schema-import": 1
   },
-  "features/build/artifact-pane.tsx": {
-    "wire-schema-import": 1
-  },
   "features/build/bind-created-console-app.ts": {
     "raw-console-api": 1
   },
-  "features/build/build-failure-notice.tsx": {
-    "wire-schema-import": 1
-  },
-  "features/build/build-page.tsx": {
-    "wire-schema-import": 1
-  },
-  "features/build/discard.tsx": {
-    "wire-schema-import": 1
-  },
-  "features/build/implement/runtime.ts": {
-    "wire-schema-import": 1
-  },
-  "features/build/implement/state.ts": {
-    "wire-schema-import": 1
-  },
-  "features/build/implement/use-implementation.ts": {
-    "wire-schema-import": 1
-  },
-  "features/build/implement/use-preview-readiness.ts": {
-    "direct-fetch": 1
-  },
   "features/build/publish-step.tsx": {
-    "raw-console-api": 1,
-    "wire-schema-import": 1
-  },
-  "features/build/session.ts": {
-    "wire-schema-import": 1
+    "raw-console-api": 1
   },
   "features/build/use-build-session.ts": {
-    "raw-console-api": 1,
-    "wire-schema-import": 1
+    "raw-console-api": 1
   },
   "features/build/use-name-suggestion.ts": {
     "raw-console-api": 1,
-    "raw-platform-client": 1,
-    "wire-schema-import": 1
+    "raw-platform-client": 1
   },
   "features/create/access.ts": {
     "raw-console-api": 1,
@@ -214,17 +184,8 @@
   "features/excel2app/use-excel2app-draft.ts": {
     "wire-schema-import": 1
   },
-  "features/improve/conversation.tsx": {
-    "wire-schema-import": 1
-  },
   "features/improve/entry.tsx": {
     "raw-console-api": 1
-  },
-  "features/improve/improve-page.tsx": {
-    "wire-schema-import": 1
-  },
-  "features/improve/use-improve-session.ts": {
-    "wire-schema-import": 1
   },
   "features/proposals/copy.ts": {
     "wire-schema-import": 1
@@ -246,30 +207,6 @@
     "raw-console-api": 1,
     "wire-schema-import": 1
   },
-  "model/build/discard.ts": {
-    "wire-schema-import": 1
-  },
-  "model/build/failure.ts": {
-    "wire-schema-import": 1
-  },
-  "model/build/messages.ts": {
-    "wire-schema-import": 1
-  },
-  "model/build/plan.ts": {
-    "wire-schema-import": 1
-  },
-  "model/build/progress.ts": {
-    "wire-schema-import": 1
-  },
-  "model/build/questions.ts": {
-    "wire-schema-import": 1
-  },
-  "model/build/resume.ts": {
-    "wire-schema-import": 1
-  },
-  "model/build/stage.ts": {
-    "wire-schema-import": 1
-  },
   "model/create.ts": {
     "wire-schema-import": 1
   },
@@ -278,9 +215,6 @@
   },
   "model/directory.ts": {
     "raw-console-api": 1
-  },
-  "model/improve.ts": {
-    "wire-schema-import": 1
   },
   "model/progress.ts": {
     "wire-schema-import": 1

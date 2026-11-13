@@ -31,7 +31,7 @@ test('loading, contract failure, panel-specific HTTP failure, stale data with a 
     await render(<ResourceBoundary query={query<string>({})} resetKey="a">{(data) => data}</ResourceBoundary>),
     await render(<ResourceBoundary query={query<string>({ error: contractError })} resetKey="a" failure={() => 'panel failure'}>{(data) => data}</ResourceBoundary>),
     await render(<ResourceBoundary query={query<string>({ error: new ConsoleApiError(429, { error: 'too_many_requests' }) })} resetKey="a" failure={() => 'panel failure'}>{(data) => data}</ResourceBoundary>),
-    await render(<ResourceBoundary query={query<string>({ data: 'last good', error: contractError })} resetKey="a">{(data) => data}</ResourceBoundary>),
+    await render(<ResourceBoundary query={query<string>({ data: 'last good', error: contractError })} resetKey="a">{(data, stale) => <>{stale}{data}</>}</ResourceBoundary>),
   ]
   try {
     expect(views[0]!.text()).toContain(copy.common.loading)

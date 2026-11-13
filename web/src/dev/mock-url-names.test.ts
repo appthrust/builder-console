@@ -21,7 +21,8 @@ async function execute(path: string, clientRequestId: string) {
   const validation = await call('POST', `${path}/creation-plan-validations`)
   expect(validation.body.resource.valid).toBe(true)
   const begun = await call('POST', `${path}/creation-executions`, { clientRequestId, creationPlanFingerprint: validation.body.resource.creationPlanFingerprint })
-  expect(begun.status).toBe(201)
+  // Like the Platform: 202 for a new execution (200 only for a replay of its clientRequestId).
+  expect(begun.status).toBe(202)
   const execution = begun.body.resource.creationExecutions.at(-1)
   await call('POST', `${path}/creation-executions/${execution.id}/run`)
   for (let i = 0; i < 2; i++) await call('POST', '/api/v1/__mock/advance')

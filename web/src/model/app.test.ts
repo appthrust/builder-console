@@ -10,6 +10,7 @@ import type {
   ReleasePhase,
 } from '@appthrust/api-schema/platform-api'
 import { copy } from '../copy'
+import { runOf, taskOf } from '../api/testing/build-domain'
 import {
   draftState,
   versionLabel,
@@ -126,7 +127,11 @@ function sources(overrides: Partial<ConsoleAppSources> = {}): ConsoleAppSources 
 describe('AI build URL gate', () => {
   const template = release('Succeeded')
   const next = release('Succeeded', { id: 'screen-release', createdAt: '2026-10-05T00:10:00.000Z' })
-  const build = { draftId: 'draft', initialReleaseId: template.id, taskCount: 3, tasks: [{ status: 'done' as const }, { status: 'running' as const }, { status: 'pending' as const }] }
+  const build = { draftId: 'draft', initialReleaseId: template.id, taskCount: 3, tasks: [
+    taskOf({ id: 'one', title: '顧客一覧', status: 'done' }),
+    taskOf({ id: 'two', title: '見積の編集', status: 'running' }),
+    taskOf({ id: 'three', title: 'PDF', status: 'pending' }),
+  ] }
   const app = { stackId: stack.id, createdAt: '2026-10-05T00:00:00Z' }
   const input: ConsoleAppsInput = { applications: [application], stacks: [stack], publishes: [succeededPublish], componentSummaries: readyComponents, releasesByApplication: { shop: overview(template) } }
 
@@ -141,7 +146,7 @@ describe('AI build URL gate', () => {
   test('a later successful web release and an actually pushed task are both required', () => {
     const platform = deriveConsoleApp(sources({ releases: overview(next) }))
     expect(implementedReleaseReady(platform, [template, next], build)).toBe(true)
-    expect(implementedReleaseReady(platform, [template, next], { ...build, tasks: [{ status: 'skipped' }] })).toBe(false)
+    expect(implementedReleaseReady(platform, [template, next], { ...build, tasks: [taskOf({ id: 'one', title: '顧客一覧', status: 'skipped' })] })).toBe(false)
     expect(implementedReleaseReady({ ...platform, lastRelease: { ...platform.lastRelease!, phase: 'InProgress' } }, [template, next], build)).toBe(false)
     const ready = deriveAppView(app, { ...input, releasesByApplication: { shop: overview(next) } }, Date.now(), undefined, build)
     expect(ready.url).toBe(succeededPublish.publicUrl)
@@ -172,20 +177,54 @@ describe('AI build URL gate', () => {
       ['failed', 'working', '止まっています'],
       ['cancelled', 'working', '止まっています'],
     ] as const) {
-      const progress = { ...build, run: { ...run, status, step }, tasks: run.tasks }
+      const progress = { ...build, run: runOf({ ...run, status, step }), tasks: run.tasks.map(taskOf) }
       expect(deriveAppView(app, readyInput, Date.now(), undefined, progress)).toMatchObject({
         second: text, url: succeededPublish.publicUrl, build: { draftId: 'draft', phase: 'implementing' },
       })
     }
     const tasks = run.tasks.map((task) => ({ ...task, status: 'done' as const }))
-    expect(deriveAppView(app, readyInput, Date.now(), undefined, { ...build, tasks, run: { ...run, tasks, status: 'succeeded' } })).toMatchObject({
+    expect(deriveAppView(app, readyInput, Date.now(), undefined, { ...build, tasks: tasks.map(taskOf), run: runOf({ ...run, tasks, status: 'succeeded' }) })).toMatchObject({
       label: '公開中', build: { draftId: 'draft', phase: 'done' },
     })
-    expect(deriveAppView(app, readyInput, Date.now(), undefined, { ...build, run: { ...run, tasks: [{ ...run.tasks[1]!, title: 'Codex workspace' }] } }).second).toBe('画面「アプリ」を作っています')
+    expect(deriveAppView(app, readyInput, Date.now(), undefined, { ...build, run: runOf({ ...run, tasks: [{ ...run.tasks[1]!, title: 'Codex workspace' }] }) }).second).toBe('画面「アプリ」を作っています')
     const remaining = [{ ...run.tasks[0]!, status: 'done' as const }, { ...run.tasks[1]!, status: 'pending' as const }]
-    expect(deriveAppView(app, readyInput, Date.now(), undefined, { ...build, tasks: remaining, run: { ...run, status: 'succeeded', tasks: remaining } })).toMatchObject({
+    expect(deriveAppView(app, readyInput, Date.now(), undefined, { ...build, tasks: remaining.map(taskOf), run: runOf({ ...run, status: 'succeeded', tasks: remaining }) })).toMatchObject({
       second: '止まっています', build: { draftId: 'draft', phase: 'implementing' },
     })
+  })
+
+  test('unknown run and task statuses stay building, never stopped, saving or finished', () => {
+    const readyInput = { ...input, releasesByApplication: { shop: overview(next) } }
+    for (const [status, taskStatus] of [['future-run-status', 'running'], ['succeeded', 'future-task-status']]) {
+      const run = runOf({
+        id: 'future-run', status, step: 'pushing', devWorkspaceId: 'workspace', startedAt: template.createdAt!, taskIds: ['screen'],
+        tasks: [{ id: 'screen', title: '顧客一覧', status: taskStatus }],
+      })
+      const progress = { ...build, taskCount: 1, tasks: run.tasks, run }
+      expect(appSecondLine(deriveConsoleApp(sources({ releases: overview(next) })), [template, next], Date.now(), progress)).toBe(copy.statusText.building(1, 1))
+      expect(deriveAppView(app, readyInput, Date.now(), undefined, progress)).toMatchObject({
+        label: '作っています', second: copy.statusText.building(1, 1),
+        build: { draftId: 'draft', phase: 'implementing' },
+      })
+    }
+  })
+
+  test('known persisted completion and a live later release suffice despite an unknown run status', () => {
+    const platform = deriveConsoleApp(sources({ releases: overview(next) }))
+    const now = Date.parse(next.createdAt!)
+    const wire = {
+      id: 'future-run', status: 'future-run-status', devWorkspaceId: 'workspace', startedAt: template.createdAt!,
+      taskIds: ['one', 'two'],
+      tasks: [{ id: 'one', title: '顧客一覧', status: 'done' }, { id: 'two', title: '見積', status: 'skipped' }],
+    }
+    const run = runOf(wire)
+    const progress = { ...build, taskCount: 2, tasks: run.tasks, run }
+    expect(platform).toMatchObject({ status: 'live', url: succeededPublish.publicUrl })
+    expect(appSecondLine(platform, [template, next], now, progress)).toBe(appSecondLine(platform, [template, next], now))
+    expect(appSecondLine(platform, [template, next], now, progress)).toContain('v2')
+
+    const unknownTaskRun = runOf({ ...wire, tasks: [wire.tasks[0], { ...wire.tasks[1], status: 'future-task-status' }] })
+    expect(appSecondLine(platform, [template, next], now, { ...progress, tasks: unknownTaskRun.tasks, run: unknownTaskRun })).toBe(copy.statusText.building(2, 2))
   })
 })
 
@@ -677,7 +716,7 @@ describe('source build status on app details and mine rows', () => {
     sourceRepositories: [repository],
   }
   test('an observed failure overrides AI 作っています and an older Ready image', () => {
-    const result = deriveAppView(app, input, Date.now(), undefined, { draftId: 'draft', taskCount: 1, tasks: [{ status: 'running' }] })
+    const result = deriveAppView(app, input, Date.now(), undefined, { draftId: 'draft', taskCount: 1, tasks: [taskOf({ id: 'screen', title: '顧客一覧', status: 'running' })] })
     expect(result).toMatchObject({ status: 'failed', label: 'ビルドに失敗しています', text: 'ビルドに失敗しています', second: 'ビルドに失敗しています', platform: { status: 'failed', statusText: 'ビルドに失敗しています' } })
     expect(result.build?.draftId).toBe('draft')
     expect(deriveAppView(app, { ...input, applications: [] }).second).toBe('ビルドに失敗しています')

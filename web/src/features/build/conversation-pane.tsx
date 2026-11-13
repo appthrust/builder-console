@@ -17,10 +17,12 @@ type Assistant = Extract<BuildMessage, { role: 'assistant' }>
 /** Pixels from the bottom that still count as "reading the newest message". */
 const STICK = 96
 
-export function ConversationPane({ messages, stage, answering, thinking: turnPending, waitingForAi, planning, proposalAction, queued, progress, prepareOpen, ownerGroupName, failure, onSend, onRetry, onUseName }: {
+export function ConversationPane({ messages, stage, answering, unsupported = false, thinking: turnPending, waitingForAi, planning, proposalAction, queued, progress, prepareOpen, ownerGroupName, failure, onSend, onRetry, onUseName }: {
   messages: BuildMessage[]
   stage: BuildStage
   answering: boolean
+  /** The draft is in a state this console does not know: nothing can be sent until it is known (reading stays). */
+  unsupported?: boolean
   /** A conversation turn is in flight; `progress` then describes it. */
   thinking: boolean
   /** The AI gate is temporarily refusing (412) and the reply is retried automatically. */
@@ -45,7 +47,7 @@ export function ConversationPane({ messages, stage, answering, thinking: turnPen
   const content = useRef<HTMLDivElement>(null)
   const following = useRef(true)
   const submit = (text: string) => {
-    if (answering) return
+    if (answering || unsupported) return
     following.current = true
     onSend(text)
   }
@@ -90,7 +92,8 @@ export function ConversationPane({ messages, stage, answering, thinking: turnPen
           if (message.role === 'notice') {
             // Retrying a prepare with the same name can only fail again: the only way forward is a different name.
             const nameTaken = message.retry === 'prepare' && failure?.kind === 'name-taken' && message.title === failure.title
-            const actions = nameTaken ? <NameChoice suggestion={failure.suggestedName} onUse={onUseName} /> : message.retry ? <Button size="sm" onClick={() => onRetry(message.retry!)}>{uiText.conversation.retry}</Button> : undefined
+            // After an unreadable write answer the action only reads the draft back: it is never labelled as a retry.
+            const actions = nameTaken ? <NameChoice suggestion={failure.suggestedName} onUse={onUseName} /> : message.retry ? <Button size="sm" onClick={() => onRetry(message.retry!)}>{message.retry === 'confirm' ? buildCopy.failure.confirm : uiText.conversation.retry}</Button> : undefined
             const reference = message.reference ? buildFailureReference(message.reference) : undefined
             return <Notice key={key} tone={message.tone} title={message.title} actions={actions}>
               {message.detail}
@@ -112,7 +115,7 @@ export function ConversationPane({ messages, stage, answering, thinking: turnPen
       </div>
     </div>
     <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pb-4 sm:px-6">
-      <Composer ref={input} chips={chips} disabled={answering} placeholder={placeholder} onSubmit={submit} onChip={submit} />
+      <Composer ref={input} chips={chips} disabled={answering || unsupported} disabledReason={unsupported ? buildCopy.unsupported.detail : undefined} placeholder={placeholder} onSubmit={submit} onChip={submit} />
     </div>
   </section>
 }

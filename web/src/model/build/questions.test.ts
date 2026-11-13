@@ -1,16 +1,18 @@
 import { describe, expect, test } from 'bun:test'
-import type { ApplicationDraftConversationTurn, ExcelAnalysisEntity } from '@appthrust/api-schema/platform-api'
+import type { ExcelAnalysisEntity } from '@appthrust/api-schema/platform-api'
+import { turnOf } from '../../api/testing/build-domain'
 import { buildCopy, textJa } from './copy'
 import { textEn } from './copy.en'
 import { currentLanguage, setLanguage } from '../../shell/language'
 import { shareScopeLabel } from '../access'
 import { conversationTurns, importedRowCount, isFirstTurn, isKickoffReply, isPrepareTurn, prepareAnswers, prepareShareLabel, replyOptions } from './questions'
 
-const turn = (id: string, userMessage: string, minute: number, extra: Partial<ApplicationDraftConversationTurn> = {}): ApplicationDraftConversationTurn => ({
+const turn = (id: string, userMessage: string, minute: number, extra: Record<string, unknown> = {}) => turnOf({
   kind: 'conversation',
   id, userMessage, status: 'succeeded', startedAt: `2026-10-10T00:0${minute}:00Z`, devWorkspaceId: 'ws-1', ...extra,
 })
-const opening = turn('t-prepare', buildCopy.questions.prepareTurn, 1, { suggestedReplies: ['見積作成', '見積作成アプリ', 'みんなの見積作成'] })
+const openingReplies = ['見積作成', '見積作成アプリ', 'みんなの見積作成']
+const opening = turn('t-prepare', buildCopy.questions.prepareTurn, 1, { suggestedReplies: openingReplies })
 
 describe('用意する answers', () => {
   test('maps the name and each offered share choice to the publish scope', () => {
@@ -21,7 +23,9 @@ describe('用意する answers', () => {
   test('stays open while the AI is still asking, including a pending reply', () => {
     expect(prepareAnswers([opening]).open).toBe(true)
     expect(prepareAnswers([opening, turn('t-name', '見積作成', 2, { status: 'running' })])).toEqual({ name: '見積作成', turnIds: ['t-prepare', 't-name'], open: true })
-    expect(prepareAnswers([{ ...opening, status: 'failed' }]).open).toBe(false)
+    expect(prepareAnswers([turn('t-prepare', buildCopy.questions.prepareTurn, 1, { suggestedReplies: openingReplies, status: 'failed' })]).open).toBe(false)
+    // A reply in a state this console does not know was still said: it is not dropped like a failed one.
+    expect(prepareAnswers([opening, turn('t-name', '見積作成', 2, { status: 'reviewing' })])).toEqual({ name: '見積作成', turnIds: ['t-prepare', 't-name'], open: true })
   })
   test('accepts written answers, ignores failed turns and earlier conversation', () => {
     const earlier = turn('t-old', '人事担当者のみ', 0)
@@ -133,8 +137,10 @@ describe('用意する answers', () => {
     const analysis = turn('t-excel', 'この Excel を読み取ってください', 2, { kind: 'excel-analysis' })
     const design = turn('t-ui', '__init__', 3, { kind: 'ui-design' })
     expect(conversationTurns([opening, analysis, design]).map((item) => item.id)).toEqual(['t-prepare'])
-    const legacy: { id: string; kind?: ApplicationDraftConversationTurn['kind'] } = { id: 'legacy' }
-    expect(conversationTurns([legacy])).toEqual([legacy])
+    // A turn stored before `kind` existed reads as a conversation turn; a kind this console does not know is not one.
+    const legacy = turnOf({ id: 'legacy', status: 'succeeded', startedAt: '2026-10-10T00:04:00Z', devWorkspaceId: 'ws-1', userMessage: '昔の返事' })
+    expect(conversationTurns([legacy]).map((item) => item.id)).toEqual(['legacy'])
+    expect(conversationTurns([turn('t-new', '新しい種類', 5, { kind: 'voice-note' })])).toEqual([])
     expect(prepareAnswers([opening, analysis, design]).open).toBe(true)
   })
   test('Excel hand-off answers skip name and audience without manufacturing conversation turns', () => {

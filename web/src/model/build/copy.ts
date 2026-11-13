@@ -37,7 +37,7 @@ export const textJa = {
       working: (hasOutput: boolean): string => hasOutput ? 'AI が作業しています（出力あり）' : 'AI が作業しています',
       pushing: 'できたところを保存しています',
       label: (name: string) => `画面「${name}」`,
-      status: { pending: 'これから', running: '作業中', done: 'できました', failed: '止まっています', skipped: '飛ばしました' },
+      status: { pending: 'これから', running: '作業中', done: 'できました', failed: '止まっています', skipped: '飛ばしました', unknown: '確認できない状態' },
     },
     interrupted: { title: '基盤の更新で中断しました。自動で再開します。', hint: '最大 15 分ほどお待ちください。画面はこのままで大丈夫です。' },
     steps: { check: '内容を確認する', source: '作ったものの置き場', release: '最初の版', url: 'URL', ready: 'アプリの準備を確認する', records: '記録する内容を整える' },
@@ -93,7 +93,12 @@ export const textJa = {
     urlNameTaken: 'URL の名前が別のアプリで使われています',
     suggestName: (name: string) => `「${name}」に変えて、もう一度作りますか？`,
     chooseName: '別の名前に変えて、もう一度作ってください。',
+    /** A write answered 2xx but its answer could not be read: it may have happened. Never resent automatically. */
+    unconfirmed: { title: '処理結果を確認できませんでした', reason: '送った操作は届いているかもしれません。最新の状態を確かめてから続けてください。自動ではくり返しません。' },
+    confirm: '最新の状態を確認する',
   },
+  /** A state this console version does not know: the known parts stay visible, only what depends on it stops. */
+  unsupported: { title: 'この状態はいまの画面では扱えません', detail: 'ほかの内容はそのまま見られます。この状態に関わる操作は、状態がわかるまで止めています。' },
   artifact: { title: 'いま作っているもの', collapse: '作っているものをたたむ', expand: '作っているものを広げる' },
   discard: {
     action: '削除',

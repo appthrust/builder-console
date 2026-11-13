@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, useLayoutEffect } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import * as api from '../../api/build'
+import { draftOf, turnOf } from '../../api/testing/build-domain'
+import type { BuildDraft } from '../../model/contracts/build'
 import { buildKeys } from '../../api/queries/build'
 import { keys } from '../../api/queries/shared'
 import type { BuildFailure } from '../../model/build/types'
@@ -25,14 +27,9 @@ const summary: ApplicationDraftWorkbookSummary = { id: 'wb-000000000001', fileNa
 const error = (status: number, reason: string, details: Record<string, unknown> = {}) => new ORPCError(status === 400 ? 'BAD_REQUEST' : 'CONFLICT', {
   status, data: { body: { error: { code: 'invalid_argument', message: reason, details: { reason, ...details } } } },
 })
-const operation = (id: string, type: string) => ({
-  id: 'operation-1', type, state: 'accepted' as const, writeChannel: 'A' as const,
-  resource: { kind: 'ApplicationDraft', id, projectId }, createdAt: at, links: { self: '/api/v1/operations/operation-1' },
-})
-const response = (resource: ApplicationDraft) => ({ ...resource, resource, operation: operation(resource.id, 'application-draft.update') })
 
 interface FlowUnderTest {
-  draft?: ApplicationDraft
+  draft?: BuildDraft
   files: CollectedWorkbook[]
   collecting: boolean
   readOnly: boolean
@@ -74,7 +71,7 @@ async function render(draftId?: string) {
 }
 function seedDraft(value: ApplicationDraft) {
   drafts.set(value.id, value)
-  client.setQueryData(buildKeys.draft(projectId, value.id), value)
+  client.setQueryData(buildKeys.draft(projectId, value.id), draftOf(value))
 }
 
 beforeEach(() => {
@@ -90,12 +87,12 @@ beforeEach(() => {
   create = spyOn(api, 'createDraft').mockImplementation(async (_projectId, payload) => {
     const next = { ...draft, ...payload, id: `draft-${++nextId}` }
     drafts.set(next.id, next)
-    return response(next)
+    return draftOf(next)
   })
   update = spyOn(api, 'updateDraft').mockImplementation(async (_projectId, id, payload) => {
     const next = { ...drafts.get(id)!, ...payload }
     drafts.set(id, next)
-    return response(next)
+    return draftOf(next)
   })
   add = spyOn(api, 'addWorkbook').mockImplementation(async (_projectId, id, payload) => {
     const member = { ...summary, id: `wb-${String(++nextWorkbook).padStart(12, '0')}`, fileName: payload.fileName }
@@ -103,11 +100,11 @@ beforeEach(() => {
     const current = drafts.get(id)!
     const next: ApplicationDraft = { ...current, source: { kind: 'excel', revision: at, workbooks: [...(current.source?.workbooks ?? []), member] }, excelAnalysis: undefined, uiDesign: undefined }
     drafts.set(id, next)
-    return { draft: next, workbook: member }
+    return { draft: draftOf(next), workbook: member }
   })
   removeDraft = spyOn(api, 'deleteDraft').mockImplementation(async (_projectId, id) => {
     drafts.delete(id)
-    return { deleted: true, id, operation: operation(id, 'application-draft.delete') }
+    return { deleted: true, id }
   })
   removeWorkbook = spyOn(api, 'removeWorkbook').mockImplementation(async (_projectId, id, workbookId) => {
     const current = drafts.get(id)!
@@ -115,18 +112,18 @@ beforeEach(() => {
     const next: ApplicationDraft = { ...current, source: members.length ? { kind: 'excel', revision: at, workbooks: members } : undefined, excelAnalysis: undefined, uiDesign: undefined }
     drafts.set(id, next)
     grids.delete(workbookId)
-    return next
+    return draftOf(next)
   })
-  get = spyOn(api, 'getDraft').mockImplementation(async (_projectId, id) => drafts.get(id)!)
+  get = spyOn(api, 'getDraft').mockImplementation(async (_projectId, id) => draftOf(drafts.get(id)!))
   list = spyOn(api, 'listWorkbooks').mockImplementation(async (_projectId, id) => {
     const data = (drafts.get(id)?.source?.workbooks ?? []).map((workbook) => ({ workbook }))
     return { data, meta: { total: data.length } }
   })
   grid = spyOn(api, 'getWorkbook').mockImplementation(async (_projectId, _id, workbookId) => grids.get(workbookId)!)
   turn = spyOn(api, 'createTurn').mockImplementation(async (_projectId, id, request) => {
-    const result = { id: 'turn-1', kind: request.kind ?? 'conversation', userMessage: request.message, status: 'pending' as const, startedAt: at, devWorkspaceId: 'ws-1' }
+    const result = { id: 'turn-1', kind: request.kind ?? 'conversation', userMessage: request.message || 'Analyze workbooks', status: 'pending' as const, startedAt: at, devWorkspaceId: 'ws-1' }
     drafts.set(id, { ...drafts.get(id)!, conversationTurns: [result] })
-    return { ...result, operation: operation(id, 'application-draft.conversation-turn'), resource: result }
+    return turnOf(result)
   })
   parse = spyOn(xlsx, 'readXlsx').mockImplementation(async (file) => ({ ...workbook, fileName: file.name }))
   // The shared DOM preload has no window.confirm; install a stub instead of spying on a missing property.

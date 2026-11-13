@@ -1,4 +1,5 @@
-import type { ApplicationDraftCreationExecution, ApplicationSourceRepository } from '@appthrust/api-schema/platform-api'
+import type { OpenValue } from '../../api/boundary'
+import { jobState, knownValue, type BuildExecution, type RunStep, type TaskStatus } from '../contracts/build'
 import { buildCopy } from './copy'
 import { classifyBuildFailure } from './failure'
 import type { ProgressCard } from './types'
@@ -10,20 +11,34 @@ export function formatElapsed(ms: number): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
 }
 
-export function isBuildPending(operation: { status: string } | undefined): boolean {
-  return operation?.status === 'pending' || operation?.status === 'running'
+/** The job is known to be pending or running; an unknown status is not (see `jobState`). */
+export function isBuildPending(operation: { status: OpenValue<string> } | undefined): boolean {
+  return jobState(operation) === 'active'
 }
 
-export function executionSteps(execution: ApplicationDraftCreationExecution): NonNullable<ProgressCard['steps']> {
+type StepState = NonNullable<ProgressCard['steps']>[number]['state']
+
+export function executionSteps(execution: BuildExecution): NonNullable<ProgressCard['steps']> {
   const copy = buildCopy.progress.steps
   return execution.steps.map((step) => ({
     label: step.tool.endsWith('.validate') ? copy.check
       : step.tool.startsWith('appthrust.applicationSourceRepository.') ? copy.source
         : step.tool === 'appthrust.applicationStack.create' ? copy.release
           : step.tool === 'appthrust.applicationStack.observe' ? execution.approval?.applicationStackRequest?.publish ? copy.url : copy.ready : copy.records,
-    state: step.status === 'done' || step.status === 'skipped' ? 'done' : step.status === 'running' ? 'doing' : step.status === 'failed' ? 'failed' : 'todo',
-    ...(step.status === 'failed' ? { detail: classifyBuildFailure(step.message ?? execution.error ?? '', undefined, 'prepare').reason } : {}),
+    state: stepState(knownValue(step.status)),
+    ...(knownValue(step.status) === 'failed' ? { detail: classifyBuildFailure(step.message ?? execution.error ?? '', undefined, 'prepare').reason } : {}),
   }))
+}
+
+/** A step or task status on the progress ladder; a status this client does not know stays `unknown`. */
+function stepState(status: 'pending' | 'running' | 'done' | 'failed' | 'skipped' | undefined): StepState {
+  switch (status) {
+    case 'done': case 'skipped': return 'done'
+    case 'running': return 'doing'
+    case 'failed': return 'failed'
+    case 'pending': return 'todo'
+    case undefined: return 'unknown'
+  }
 }
 
 type PreparationPhase = 'syncing' | 'building' | 'starting'
@@ -55,9 +70,9 @@ function stagedProgress(phase: PreparationPhase, now: number, since?: string, re
   }
 }
 
-function observeProgress(execution: ApplicationDraftCreationExecution, now: number): Partial<ProgressCard> | undefined {
+function observeProgress(execution: BuildExecution, now: number): Partial<ProgressCard> | undefined {
   const observe = execution.steps.find((step) => step.tool === 'appthrust.applicationStack.observe')
-  if (observe?.phase === 'syncing') return { ...stagedProgress('syncing', now, observe.detail?.since, observe.detail?.reason, observe.title), hint: undefined }
+  if (observe && knownValue(observe.phase) === 'syncing') return { ...stagedProgress('syncing', now, observe.detail?.since, observe.detail?.reason, observe.title), hint: undefined }
   const steps = executionSteps(execution)
   const sourceDone = steps.some((step) => step.label === buildCopy.progress.steps.source && step.state === 'done')
   return {
@@ -71,7 +86,7 @@ function observeProgress(execution: ApplicationDraftCreationExecution, now: numb
 }
 
 /** A source build can fail before the stack or console app binding exists. */
-export function sourceBuildFailureProgress(build: ApplicationSourceRepository['build']): ProgressCard | undefined {
+export function sourceBuildFailureProgress(build: { state: string; runUrl?: string } | undefined): ProgressCard | undefined {
   if (build?.state !== 'failed') return undefined
   return {
     kind: 'prepare', title: buildCopy.progress.prepare.title, interrupted: false, staged: true, buildFailed: true,
@@ -101,9 +116,9 @@ export function appPreparationProgress(input: ProgressInput, now: number, since?
 
 /** Neutral run projection: no workspace, transport, phase, or browser storage dependency. */
 export interface ImplementationProgressInput {
-  tasks: readonly { id: string; title: string; status: 'pending' | 'running' | 'done' | 'failed' | 'skipped'; versionLabel?: string }[]
+  tasks: readonly { id: string; title: string; status: OpenValue<TaskStatus>; versionLabel?: string }[]
   currentTaskId?: string
-  step?: 'request' | 'working' | 'pushing'
+  step?: OpenValue<RunStep>
   startedAt?: string
   activityTail?: string
 }
@@ -111,15 +126,17 @@ export interface ImplementationProgressInput {
 export function implementationProgress(input: ImplementationProgressInput, now: number): NonNullable<ProgressCard['steps']> {
   const copy = buildCopy.progress.task
   return input.tasks.map((task) => {
-    const active = task.id === input.currentTaskId && task.status === 'running'
+    const status = knownValue(task.status)
+    const active = task.id === input.currentTaskId && status === 'running'
     const since = Date.parse(input.startedAt ?? '')
-    const activity = input.step === 'working' ? copy.working(Boolean(input.activityTail?.trim()))
-      : input.step ? copy[input.step] : undefined
+    const step = knownValue(input.step)
+    const activity = step === 'working' ? copy.working(Boolean(input.activityTail?.trim()))
+      : step ? copy[step] : undefined
     return {
       taskId: task.id,
       label: copy.label(isProductLanguage(task.title) ? task.title : copy.fallback),
-      state: task.status === 'running' ? 'doing' : task.status === 'pending' ? 'todo' : task.status === 'failed' ? 'failed' : 'done',
-      status: `${copy.status[task.status]}${task.versionLabel && isProductLanguage(task.versionLabel) ? ` · ${task.versionLabel}` : ''}`,
+      state: stepState(status),
+      status: `${copy.status[status ?? 'unknown']}${task.versionLabel && isProductLanguage(task.versionLabel) ? ` · ${task.versionLabel}` : ''}`,
       ...(active && Number.isFinite(since) ? { elapsedLabel: formatElapsed(now - since) } : {}),
       ...(active && activity ? { activity } : {}),
     }
@@ -129,7 +146,7 @@ export function implementationProgress(input: ImplementationProgressInput, now: 
 /** One ladder, including the retained preparation rungs and final publication readiness. */
 export function buildProgress(preparation: ProgressCard | undefined, input: ImplementationProgressInput, now: number, released: boolean): ProgressCard {
   const tasks = implementationProgress(input, now)
-  const complete = input.tasks.length > 0 && input.tasks.every((task) => task.status === 'done' || task.status === 'skipped')
+  const complete = input.tasks.length > 0 && input.tasks.every((task) => knownValue(task.status) === 'done' || knownValue(task.status) === 'skipped')
   return {
     ...preparation,
     kind: 'prepare', title: buildCopy.progress.prepare.title, staged: true,
@@ -139,7 +156,7 @@ export function buildProgress(preparation: ProgressCard | undefined, input: Impl
     steps: [
       ...(preparation?.steps ?? [buildCopy.progress.observe.source, buildCopy.progress.observe.phases.syncing.label, buildCopy.progress.observe.phases.starting.label].map((label) => ({ label, state: 'done' as const }))),
       ...tasks,
-      { label: buildCopy.progress.publishReady, state: preparation?.buildFailed ? 'todo' : complete && released ? 'done' : complete && input.tasks.some((task) => task.status === 'done') ? 'doing' : 'todo' },
+      { label: buildCopy.progress.publishReady, state: preparation?.buildFailed ? 'todo' : complete && released ? 'done' : complete && input.tasks.some((task) => knownValue(task.status) === 'done') ? 'doing' : 'todo' },
     ],
   }
 }
@@ -153,28 +170,33 @@ export function activityLines(text: string | undefined): string[] {
 export function progressCard(input: {
   kind: ProgressCard['kind']
   now: number
-  operation?: { status: string; startedAt: string; finishedAt?: string; runLeaseExpiresAt?: string; stage?: string; error?: string; activityTail?: string }
-  execution?: ApplicationDraftCreationExecution
+  operation?: { status: OpenValue<string>; startedAt: string; finishedAt?: string; runLeaseExpiresAt?: string; stage?: OpenValue<string>; error?: string; activityTail?: string }
+  execution?: BuildExecution
   phase?: string
   activityTail?: string
 }): ProgressCard {
   const { kind, now, operation, execution, phase } = input
   const copy = buildCopy.progress
   const active = isBuildPending(operation)
+  const status = knownValue(operation?.status)
+  const stage = knownValue(operation?.stage)
+  // A status this client does not know is neither running, interrupted nor failed.
+  const unsupported = jobState(operation) === 'unknown'
   const activity = active || phase ? activityLines(input.activityTail ?? operation?.activityTail) : []
   const started = operation ? Date.parse(operation.startedAt) : Number.NaN
   const end = !active && operation?.finishedAt ? Date.parse(operation.finishedAt) : now
   const elapsedLabel = Number.isFinite(started) && Number.isFinite(end) ? formatElapsed(end - started) : undefined
   const lease = operation?.runLeaseExpiresAt ? Date.parse(operation.runLeaseExpiresAt) : Number.NaN
-  const interrupted = operation?.status === 'running' && lease < now
-  const effectiveKind = active && operation?.stage === 'workspace' || phase === 'starting-workspace' ? 'workspace' : kind
-  const failure = operation?.status === 'failed'
-    ? classifyBuildFailure(operation.error ?? '', undefined, kind === 'turn' || kind === 'plan' || kind === 'implement' ? kind : 'prepare')
+  const interrupted = status === 'running' && lease < now
+  const effectiveKind = active && stage === 'workspace' || phase === 'starting-workspace' ? 'workspace' : kind
+  const failure = status === 'failed'
+    ? classifyBuildFailure(operation?.error ?? '', undefined, kind === 'turn' || kind === 'plan' || kind === 'implement' ? kind : 'prepare')
     : undefined
-  const content = interrupted ? copy.interrupted
+  const content = unsupported ? { title: buildCopy.unsupported.title, hint: buildCopy.unsupported.detail }
+    : interrupted ? copy.interrupted
     : failure ? { title: failure.title, hint: failure.reason }
-      : active && kind === 'plan' && operation?.stage === 'prepare' ? copy.planPrepare
-        : active && kind === 'plan' && operation?.stage === 'read' ? copy.read
+      : active && kind === 'plan' && stage === 'prepare' ? copy.planPrepare
+        : active && kind === 'plan' && stage === 'read' ? copy.read
           : phase === 'syncing' ? copy.implementationSync
             : phase === 'pushing' ? copy.implementationPush : copy[effectiveKind]
   return {
@@ -182,6 +204,6 @@ export function progressCard(input: {
     ...(elapsedLabel ? { elapsedLabel } : {}),
     ...(activity.length ? { activity } : {}),
     ...(execution ? { steps: executionSteps(execution) } : failure ? { steps: [{ label: failure.title, state: 'failed' as const, detail: failure.reason }] } : {}),
-    ...(kind === 'prepare' && execution && !interrupted && !failure ? observeProgress(execution, now) : {}),
+    ...(kind === 'prepare' && execution && !interrupted && !failure && !unsupported ? observeProgress(execution, now) : {}),
   }
 }

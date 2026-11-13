@@ -19,7 +19,7 @@ export const textEn: typeof textJa = {
     listSeparator: ', ',
     progress: 'Progress',
     preparation: 'App preparation',
-    states: { todo: 'Up next', doing: 'In progress', done: 'Done', failed: 'Failed' },
+    states: { todo: 'Up next', doing: 'In progress', done: 'Done', failed: 'Failed', unknown: 'State not shown here' },
     publishedApp: 'Published app',
     published: 'Your app is published',
     openResult: 'Open your app',

@@ -7,6 +7,7 @@ import { useApplicationReleases, useProjectReadModels } from '../../api/queries/
 import { useSourceRepositories } from '../../api/queries/catalog'
 import { draftsOptions } from '../../api/queries/build'
 import { applicationForStack, deriveAppView, stackForApplication, type AppView, type ConsoleAppsInput } from '../../model/app'
+import { jobState } from '../../model/contracts/build'
 import { isImprovementDraft } from '../../model/improve'
 import { readCreateSession } from '../create/persistence'
 import { readBuildSession } from '../build/session'
@@ -79,10 +80,9 @@ export function useAppViews(projectId: string): AppViews {
       } : undefined
       return deriveAppView(app, input, Date.now(), {
         observed: drafts.isSuccess,
-        // The server omits empty arrays (`omitempty`); the schema's `.default([])` only applies when parsed.
+        // A job in a state this console does not know may still run: it counts as in progress, never as finished.
         inProgress: drafts.data?.data.some((item) =>
-          !item.proposalId && [...(item.creationPlanGenerations ?? []), ...(item.creationExecutions ?? [])]
-            .some((operation) => operation.status === 'pending' || operation.status === 'running')
+          !item.proposalId && [...item.creationPlanGenerations, ...item.creationExecutions].some((operation) => jobState(operation) !== 'settled')
         ),
         progress: session?.progress,
         reason: session?.failure?.message,

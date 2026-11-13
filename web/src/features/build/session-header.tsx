@@ -8,8 +8,9 @@ import { localized } from '../../shell/language'
 import { text, textJa } from './copy'
 import { textEn } from './copy.en'
 
-export function StageRail({ stage }: { stage: BuildStage }) {
-  return <Stepper compact step={buildStages.indexOf(stage)} labels={buildStages.map((item) => stageLabels[item])} />
+/** `unsupported`: the draft is in a state this console does not know, so no step is marked as the current one. */
+export function StageRail({ stage, unsupported = false }: { stage: BuildStage; unsupported?: boolean }) {
+  return <Stepper compact step={unsupported ? -1 : buildStages.indexOf(stage)} labels={buildStages.map((item) => stageLabels[item])} />
 }
 
 export const stateWord: Record<BuildStage, string> = localized({ ja: textJa.header.stateWord, en: textEn.header.stateWord })
@@ -29,7 +30,7 @@ export function StageAction({ stage, primary, progress, onPrimary }: { stage: Bu
  * One row from lg: back · name · state · rail · stage action. When the width runs
  * out (390px) the rail and the action wrap to a second row, action right-aligned.
  */
-export function SessionHeader({ name, stage, action, released = false }: { name: string; stage: BuildStage; action?: ReactNode; released?: boolean }) {
+export function SessionHeader({ name, stage, action, released = false, unsupported = false }: { name: string; stage: BuildStage; action?: ReactNode; released?: boolean; unsupported?: boolean }) {
   const back = stage === 'publish' ? { href: paths.mine(), label: text.header.myApps } : { href: paths.drafts(), label: text.header.drafts }
   return <header className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1.5 border-b border-line bg-white px-3 py-2 sm:px-5">
     <div className="flex min-w-0 flex-[1_1_14rem] items-center gap-1">
@@ -38,7 +39,7 @@ export function SessionHeader({ name, stage, action, released = false }: { name:
       <span className="ml-2 shrink-0"><StatusPill status={stage === 'publish' && released ? 'live' : stage === 'build' || stage === 'publish' ? 'deploying' : 'unfinished'} label={stage === 'publish' && !released ? stateWord.build : stateWord[stage]} /></span>
     </div>
     <div className="flex flex-[1_1_auto] flex-wrap items-center justify-between gap-x-3 gap-y-1.5 sm:gap-x-4 lg:flex-none">
-      <StageRail stage={stage} />
+      <StageRail stage={stage} unsupported={unsupported} />
       {action ? <div className="ml-auto shrink-0">{action}</div> : null}
     </div>
   </header>

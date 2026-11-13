@@ -2,7 +2,7 @@
 // before instead of opening another one: /new keeps the typed intent across
 // visits, so a second press (back button, reload, retry) otherwise multiplies
 // 作りかけ. A draft whose app was already created is a different thing.
-import type { ApplicationDraft } from '@appthrust/api-schema/platform-api'
+import type { BuildDraft } from '../contracts/build'
 import { textJa } from './copy'
 import { textEn } from './copy.en'
 
@@ -17,10 +17,11 @@ function baseIntent(intent: string): string {
   return base.trim()
 }
 
-export function findResumableDraft(drafts: readonly ApplicationDraft[], intent: string): ApplicationDraft | undefined {
+export function findResumableDraft(drafts: readonly BuildDraft[], intent: string): BuildDraft | undefined {
   const wanted = intent.trim()
   if (!wanted) return undefined
   return drafts
-    .filter((draft) => baseIntent(draft.intent) === wanted && draft.phase !== 'created' && draft.phase !== 'archived' && !draft.createdApplicationStackId)
+    // A phase this console does not know may already be past creation: never resume into it.
+    .filter((draft) => baseIntent(draft.intent) === wanted && draft.phase.kind === 'known' && draft.phase.value !== 'created' && draft.phase.value !== 'archived' && !draft.createdApplicationStackId)
     .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0]
 }

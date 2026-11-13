@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 import type { ApplicationDraft } from '@appthrust/api-schema/platform-api'
-import { findResumableDraft } from './resume'
+import { draftOf } from '../../api/testing/build-domain'
+import * as model from './resume'
+
+/** The fixture the production reader resumed (fixtures carry distinct ids per call). */
+const findResumableDraft = <T extends { id: string }>(drafts: readonly T[], intent: string) => {
+  const found = model.findResumableDraft(drafts.map(draftOf), intent)
+  return found && drafts.find((draft) => draft.id === found.id)
+}
 import { textJa } from './copy'
 import { textEn } from './copy.en'
 import { currentLanguage, setLanguage } from '../../shell/language'

@@ -3,7 +3,6 @@
 // (component statusKey/reasonKey, publish phase, release phase).
 import type {
   Application,
-  ApplicationDraftImplementationRun,
   ApplicationRelease,
   ApplicationReleaseOverview,
   ApplicationSourceRepository,
@@ -19,6 +18,7 @@ import { copy, relativeTime, reasonHelp, reasonText, type ConsoleStatus } from '
 import { text as appText } from '../features/app/copy'
 import { buildCopy } from './build/copy'
 import { isProductLanguage } from './build/wording'
+import { isOneOf, type ImplementationRun, type ImplementationTask } from './contracts/build'
 
 export type { ConsoleStatus }
 
@@ -106,8 +106,8 @@ export interface AppBuildProgress {
   draftId: string
   initialReleaseId?: string
   taskCount: number
-  tasks?: readonly { status: 'pending' | 'running' | 'done' | 'failed' | 'skipped' }[]
-  run?: ApplicationDraftImplementationRun
+  tasks?: readonly Pick<ImplementationTask, 'status'>[]
+  run?: ImplementationRun
 }
 
 export function implementedReleaseReady(platform: ConsoleApp | undefined, releases: readonly Pick<ApplicationRelease, 'id' | 'componentId' | 'branchId'>[], build: AppBuildProgress): boolean {
@@ -116,31 +116,32 @@ export function implementedReleaseReady(platform: ConsoleApp | undefined, releas
   const laterRelease = build.initialReleaseId
     ? platform.lastRelease.id !== build.initialReleaseId
     : history.length >= 2 && history.some((release) => release.id === platform.lastRelease?.id)
-  const pushed = build.tasks?.some((task) => task.status === 'done') === true
+  const pushed = build.tasks?.some((task) => isOneOf(task.status, 'done')) === true
   return pushed && laterRelease
 }
 
+/** A run or task status this console does not know is never read as stopped, saved or finished: it stays "building". */
 function buildStatusText(build: AppBuildProgress): string {
   if (build.run) {
     const run = build.run
-    if (run.status === 'failed' || run.status === 'cancelled') return appText.build.stopped
-    if (run.step === 'pushing' && run.status === 'running') return appText.build.saving
+    if (isOneOf(run.status, 'failed', 'cancelled')) return appText.build.stopped
+    if (isOneOf(run.step, 'pushing') && isOneOf(run.status, 'running')) return appText.build.saving
     const task = run.tasks.find((item) => item.id === run.currentTaskId)
-    if (task && (run.status === 'pending' || run.status === 'running')) {
+    if (task && isOneOf(run.status, 'pending', 'running')) {
       return appText.build.screen(isProductLanguage(task.title) ? task.title : appText.build.screenFallback)
     }
-    if (run.status === 'succeeded') {
-      if (run.tasks.some((item) => item.status !== 'done' && item.status !== 'skipped')) return appText.build.stopped
-      return run.tasks.some((item) => item.status === 'done') ? appText.build.preparing : appText.build.noScreens
+    if (isOneOf(run.status, 'succeeded') && !run.tasks.some((item) => item.status.kind === 'unknown')) {
+      if (run.tasks.some((item) => !isOneOf(item.status, 'done', 'skipped'))) return appText.build.stopped
+      return run.tasks.some((item) => isOneOf(item.status, 'done')) ? appText.build.preparing : appText.build.noScreens
     }
   }
-  const current = build.tasks?.findIndex((task) => task.status !== 'done' && task.status !== 'skipped') ?? -1
-  const screen = build.tasks ? current < 0 ? build.tasks.filter((task) => task.status === 'done').length : current + 1 : 0
+  const current = build.tasks?.findIndex((task) => !isOneOf(task.status, 'done', 'skipped')) ?? -1
+  const screen = build.tasks ? current < 0 ? build.tasks.filter((task) => isOneOf(task.status, 'done')).length : current + 1 : 0
   return copy.statusText.building(screen, build.taskCount)
 }
 
 export function appSecondLine(platform: ConsoleApp, releases: readonly ApplicationRelease[], now = Date.now(), build?: AppBuildProgress): string {
-  if (build && (!build.tasks?.length || build.tasks.some((task) => task.status !== 'done' && task.status !== 'skipped') || !implementedReleaseReady(platform, releases, build))) return buildStatusText(build)
+  if (build && (!build.tasks?.length || build.tasks.some((task) => !isOneOf(task.status, 'done', 'skipped')) || !implementedReleaseReady(platform, releases, build))) return buildStatusText(build)
   if (platform.status !== 'live' || !platform.url) return platform.statusText
   const version = versionLabel(releases, platform.lastRelease?.id)
   if (!version) return copy.statusText.live
@@ -438,11 +439,11 @@ export function deriveAppView(
   const releases = input.releasesByApplication[application.id]?.components.flatMap((component) => component.releases) ?? []
   if (build) {
     const released = implementedReleaseReady(platform, releases, build)
-    const complete = build.run?.status === 'succeeded' && build.run.tasks.every((task) => task.status === 'done' || task.status === 'skipped')
+    const complete = isOneOf(build.run?.status, 'succeeded') && build.run!.tasks.every((task) => isOneOf(task.status, 'done', 'skipped'))
     if (!complete || !released) {
       const text = buildStatusText(build)
       return view('deploying', text, {
-        label: build.run?.status === 'failed' || build.run?.status === 'cancelled' ? appText.build.stopped : appText.build.building,
+        label: isOneOf(build.run?.status, 'failed', 'cancelled') ? appText.build.stopped : appText.build.building,
         build: { draftId: build.draftId, phase: 'implementing' }, stack,
         platform: released ? platform : { ...platform, status: 'deploying', statusText: text, url: undefined },
         ...(released && platform.url ? { url: platform.url } : {}),

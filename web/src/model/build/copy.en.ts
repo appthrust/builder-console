@@ -35,7 +35,7 @@ export const textEn: typeof textJa = {
       working: (hasOutput: boolean) => hasOutput ? 'AI is working (updates available)' : 'AI is working',
       pushing: 'Saving completed work',
       label: (name: string) => `Screen “${name}”`,
-      status: { pending: 'Up next', running: 'In progress', done: 'Done', failed: 'Stopped', skipped: 'Skipped' },
+      status: { pending: 'Up next', running: 'In progress', done: 'Done', failed: 'Stopped', skipped: 'Skipped', unknown: 'State not shown here' },
     },
     interrupted: { title: 'Paused for an update; work will resume automatically.', hint: 'This may take up to 15 minutes; you can leave this page open.' },
     steps: { check: 'Check the details', source: 'Saved app files', release: 'First version', url: 'URL', ready: 'Check app readiness', records: 'Set up records' },
@@ -90,7 +90,12 @@ export const textEn: typeof textJa = {
     urlNameTaken: 'This URL name is used by another app',
     suggestName: (name: string) => `Change the name to “${name}” and try again?`,
     chooseName: 'Choose a different name and try building again.',
+    /** A write answered 2xx but its answer could not be read: it may have happened. Never resent automatically. */
+    unconfirmed: { title: 'We could not confirm the result', reason: 'What you sent may have gone through. Check the latest state before doing it again; nothing is resent automatically.' },
+    confirm: 'Check the latest state',
   },
+  /** A state this console version does not know: the known parts stay visible, only what depends on it stops. */
+  unsupported: { title: 'This state cannot be shown on this screen', detail: 'Everything else stays available. Actions that depend on this state are paused until it is known.' },
   artifact: { title: 'What we are building', collapse: 'Collapse app details', expand: 'Expand app details' },
   discard: {
     action: 'Delete',

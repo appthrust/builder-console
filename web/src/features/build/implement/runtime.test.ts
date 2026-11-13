@@ -1,6 +1,10 @@
 import { expect, test } from 'bun:test'
 import type { ApplicationDraftImplementationTask, DevWorkspaceRead } from '@appthrust/api-schema/platform-api'
-import { implementationPreviewUrl, previewDatabaseStatus } from './runtime'
+import { taskOf, workspaceOf } from '../../../api/testing/build-domain'
+import * as model from './runtime'
+
+const implementationPreviewUrl = (workspace: unknown) => model.implementationPreviewUrl(workspaceOf(workspace))
+const previewDatabaseStatus = (workspace: unknown, tasks: readonly unknown[]) => model.previewDatabaseStatus(workspaceOf(workspace), tasks.map(taskOf))
 
 test('only Ready workspaces expose a same-origin preview', () => {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'window')

@@ -4,6 +4,7 @@ import type { ApplicationDraft } from '@appthrust/api-schema/platform-api'
 import type { ComponentProps } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { isPlatformNotFound } from '../../api/platform-error'
+import { draftOf, runOf, taskOf } from '../../api/testing/build-domain'
 import { buildCopy } from '../../model/build/copy'
 import { buildFailureReference, classifyBuildFailure } from '../../model/build/failure'
 import type { BuildProposal, BuildSpec } from '../../model/build/types'
@@ -150,7 +151,7 @@ test('English progress and preview expose translated accessible labels', () => {
   expect(progress).toContain('aria-label="App preparation"')
   expect(progress).toContain('aria-label="In progress"')
   const preview = renderToStaticMarkup(<ImplementPanel
-    state={{ phase: 'running', tasks: [{ id: 'one', title: 'Contacts', status: 'running' }], previewUrl: '/preview', previewStatus: 'ready', currentTaskId: 'one', step: 'working' }}
+    state={{ phase: 'running', tasks: [taskOf({ id: 'one', title: 'Contacts', status: 'running' })], previewUrl: '/preview', previewStatus: 'ready', currentTaskId: 'one', step: { kind: 'known', value: 'working' } }}
     released={false} onOpenPreview={() => {}}
   />)
   expect(preview).toContain('title="App preview"')
@@ -176,7 +177,7 @@ test.each(['ja', 'en'] as const)('platform failure has a copyable support refere
     onSend={() => {}} onRetry={() => {}} onUseName={() => {}}
   />)
   const artifact = renderToStaticMarkup(<ArtifactPane
-    draft={draft} spec={{ users: [], screens: [], records: [], rules: [] }} stage="decide"
+    draft={draftOf(draft)} spec={{ users: [], screens: [], records: [], rules: [] }} stage="decide"
     implementation={{ phase: 'idle', tasks: [] }} failure={failure} shareText=""
     previewDatabaseReset={noReset} onOpenPreview={() => {}} onRetry={() => {}} onSkipTask={() => {}} onCollapse={() => {}}
   />)
@@ -193,7 +194,7 @@ test.each(['ja', 'en'] as const)('platform failure has a copyable support refere
   expect(artifact.match(/role="alert"/g)).toHaveLength(1)
   const progress = { kind: 'prepare' as const, title: failure.title, hint: failure.reason, interrupted: false, steps: [{ label: '最初の版', state: 'failed' as const, detail: failure.reason }] }
   const progressed = renderToStaticMarkup(<ArtifactPane
-    draft={draft} spec={{ users: [], screens: [], records: [], rules: [] }} stage="decide" progress={progress}
+    draft={draftOf(draft)} spec={{ users: [], screens: [], records: [], rules: [] }} stage="decide" progress={progress}
     implementation={{ phase: 'idle', tasks: [] }} failure={failure} shareText=""
     previewDatabaseReset={noReset} onOpenPreview={() => {}} onRetry={() => {}} onSkipTask={() => {}} onCollapse={() => {}}
   />)
@@ -208,7 +209,7 @@ test.each(['ja', 'en'] as const)('platform failure has a copyable support refere
   expect(alertSection).toContain(`aria-label="${text.artifact.progress}"`)
   expect(alertSection).not.toContain('hidden')
   const built = renderToStaticMarkup(<ArtifactPane
-    draft={draft} spec={{ users: [], screens: [], records: [], rules: [] }} stage="build" progress={progress}
+    draft={draftOf(draft)} spec={{ users: [], screens: [], records: [], rules: [] }} stage="build" progress={progress}
     implementation={{ phase: 'failed', tasks: [], failure }} failure={failure} shareText=""
     previewDatabaseReset={noReset} onOpenPreview={() => {}} onRetry={() => {}} onSkipTask={() => {}} onCollapse={() => {}}
   />)
@@ -241,10 +242,10 @@ test('platform name collisions still render the rename prompt instead of a gener
 test.each(['ja', 'en'] as const)('implementation platform failures render the failed run reference in %s', (language) => {
   setLanguage(language)
   const at = new Date(2026, 9, 17, 9, 9).toISOString()
-  const state = projectImplementation({ id: 'draft-ae97efbc', updatedAt: at }, {
+  const state = projectImplementation({ id: 'draft-ae97efbc', updatedAt: at }, runOf({
     id: 'impl-123', status: 'failed', startedAt: at, finishedAt: at, devWorkspaceId: 'ws-1', taskIds: [], tasks: [],
     error: 'gitops: policy rejected: deployment preflight failed',
-  })
+  }))
   const html = renderToStaticMarkup(<ImplementPanel state={state} released={false} onOpenPreview={() => {}} onRetry={() => {}} />)
   expect(html).toContain(buildCopy.failure.platform.title)
   expect(html).toContain(buildCopy.failure.platform.reason)
@@ -258,11 +259,11 @@ test.each(['ja', 'en'] as const)('implementation account exhaustion offers retry
   setLanguage(language)
   const at = '2026-10-27T00:00:00Z'
   const error = 'Codex task failed: insufficient_quota'
-  const state = projectImplementation({ id: 'draft-quota', updatedAt: at }, {
+  const state = projectImplementation({ id: 'draft-quota', updatedAt: at }, runOf({
     id: 'impl-quota', status: 'failed', startedAt: at, finishedAt: at, devWorkspaceId: 'ws-1',
     taskIds: ['task-1'], currentTaskId: 'task-1', failureReason: 'TaskFailed', error,
     tasks: [{ id: 'task-1', title: '一覧を作る', status: 'failed', failureReason: 'TaskFailed', error }],
-  })
+  }))
   const html = renderToStaticMarkup(<ImplementPanel state={state} released={false} onOpenPreview={() => {}} onRetry={() => {}} onSkipTask={() => {}} />)
   expect(html).toContain(buildCopy.failure.quota.title)
   expect(html).toContain(buildCopy.failure.quota.reason)
@@ -301,7 +302,8 @@ function previewDraft(excel: boolean, database: boolean): ApplicationDraft {
     specMarkdown: '', architectureMarkdown: '', creationExecutions: [], ownerUserId: 'owner', createdAt: at, updatedAt: at,
     ...(excel ? { source: { kind: 'excel', revision: at, workbooks: [{ id: 'wb-0123456789ab', fileName: '点検.xlsx', sheetCount: 1, rowCount: 2, truncated: false, bytes: 64, digest: 'a'.repeat(64), addedAt: at }] } } : {}),
     creationPlan: {
-      summary: '', markdown: '', representation: ['ApplicationStack'],
+      summary: '点検を管理する', markdown: '# 点検', representation: ['ApplicationStack'],
+      implementationHandoff: { summary: '点検一覧を作る', workspaceMode: 'application-develop', targetApplicationRef: 'createdApplicationId', sourceRepositoryStrategy: 'created-source-repository', tasks: [{ title: '点検一覧', description: '点検を表示する', acceptanceCriteria: ['点検が見える'] }] },
       ...(database ? { applicationStackRequest: {
         templateId: 'app-template', application: { name: 'inspections' },
         source: { kind: 'sample-image' as const, imageRef: 'example.test/inspections:latest' }, web: { componentName: 'web' },
@@ -312,8 +314,8 @@ function previewDraft(excel: boolean, database: boolean): ApplicationDraft {
 }
 
 function renderPreview(draft: ApplicationDraft, stage: 'build' | 'publish', implementation: Partial<ImplementationState>, reset = noReset) {
-  return renderToStaticMarkup(<ArtifactPane draft={draft} spec={{ users: [], screens: [], records: [], rules: [] }}
-    stage={stage} implementation={{ phase: 'done', tasks: [{ id: 'list', title: '点検一覧', status: 'done' }], previewUrl: '/preview', previewStatus: 'ready', ...implementation }}
+  return renderToStaticMarkup(<ArtifactPane draft={draftOf(draft)} spec={{ users: [], screens: [], records: [], rules: [] }}
+    stage={stage} implementation={{ phase: 'done', tasks: [taskOf({ id: 'list', title: '点検一覧', status: 'done' })], previewUrl: '/preview', previewStatus: 'ready', ...implementation }}
     shareText="" previewDatabaseReset={reset} onOpenPreview={() => {}} onRetry={() => {}} onSkipTask={() => {}} onCollapse={() => {}}
   />)
 }
@@ -390,7 +392,7 @@ test.each([
 })
 
 test.each(['starting-workspace', 'running', 'pushing'] as const)('recreating the database waits for the AI (%s)', (phase) => {
-  const html = renderPreview(previewDraft(true, true), 'build', { phase, tasks: [{ id: 'list', title: '点検一覧', status: 'running' }], previewDatabaseStatus: 'ready-verified' })
+  const html = renderPreview(previewDraft(true, true), 'build', { phase, tasks: [taskOf({ id: 'list', title: '点検一覧', status: 'running' })], previewDatabaseStatus: 'ready-verified' })
   const button = html.match(new RegExp(`<button\\b[^>]*>(?:(?!</button>)[\\s\\S])*${implementationCopy.databaseReset}</button>`))?.[0]
   expect(button).toContain('disabled=""')
   expect(button).toContain(`title="${implementationCopy.databaseResetRunning}"`)

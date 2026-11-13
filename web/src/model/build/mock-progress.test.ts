@@ -2,6 +2,7 @@ import { expect, spyOn, test } from 'bun:test'
 import { platformRoutes } from '../../dev/mock-platform'
 import { ApplicationDraft, ApplicationDraftImplementationRun, UpdateApplicationDraftRequest } from '@appthrust/api-schema/platform-api'
 import { draftPublished } from './stage'
+import { draftOf } from '../../api/testing/build-domain'
 
 const project = '/api/v1/projects/commerce'
 async function call(method: string, path: string, body?: unknown) {
@@ -70,7 +71,7 @@ test('mock publication stamps server time, rejects active work and invalidates o
     const first = await call('PATCH', path, { markPublished: true })
     expect(first.status).toBe(200)
     expect(first.body.resource.publishedAt).toBe(now)
-    expect(draftPublished(ApplicationDraft.parse((await call('GET', path)).body))).toBe(true)
+    expect(draftPublished(draftOf((await call('GET', path)).body))).toBe(true)
     now = '2026-10-29T00:01:00.000Z'
     const run = ApplicationDraftImplementationRun.parse((await call('POST', `${path}/implementation-runs`)).body.run)
     expect(run.startedAt).toBe(now)
@@ -78,18 +79,18 @@ test('mock publication stamps server time, rejects active work and invalidates o
       const before = ApplicationDraft.parse((await call('GET', path)).body)
       expect(before.implementationRuns?.at(-1)?.status).toBe(status)
       expect(before.implementationRuns?.at(-1)?.startedAt).toBe(run.startedAt)
-      expect(draftPublished(before)).toBe(false)
+      expect(draftPublished(draftOf(before))).toBe(false)
       expect(await call('PATCH', path, { markPublished: true })).toMatchObject({ status: 409, body: { error: { code: 'conflict' } } })
       expect(ApplicationDraft.parse((await call('GET', path)).body)).toEqual(before)
       if (status === 'pending') await call('POST', '/api/v1/__mock/advance')
     }
     for (let n = 0; n < 12; n++) await call('POST', '/api/v1/__mock/advance')
-    expect(draftPublished(ApplicationDraft.parse((await call('GET', path)).body))).toBe(false)
+    expect(draftPublished(draftOf((await call('GET', path)).body))).toBe(false)
     now = '2026-10-29T00:02:00.000Z'
     const republished = await call('PATCH', path, { markPublished: true })
     expect(republished.status).toBe(200)
     expect(republished.body.resource.publishedAt).toBe(now)
-    expect(draftPublished(ApplicationDraft.parse((await call('GET', path)).body))).toBe(true)
+    expect(draftPublished(draftOf((await call('GET', path)).body))).toBe(true)
   } finally {
     clock.mockRestore()
     await call('POST', '/api/v1/__mock/reset')

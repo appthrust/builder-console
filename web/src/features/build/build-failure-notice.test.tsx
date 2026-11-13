@@ -3,6 +3,7 @@ import type { ApplicationDraft, BuildFailure } from '@appthrust/api-schema/platf
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from '@tanstack/react-router'
 import { act } from 'react'
+import { draftOf, turnOf } from '../../api/testing/build-domain'
 import { createRoot } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
 import * as api from '../../api/build'
@@ -11,9 +12,6 @@ import { BuildFailureNotice } from './build-failure-notice'
 const at = '2026-11-01T00:00:00Z'
 const failure: BuildFailure = { lines: ['./lib/fourm-seed.ts', "Module not found: '[workspace]' <script>"], kind: 'module-not-found', observedAt: at, buildRef: 'https://github.com/acme/app/actions/runs/1' }
 const draft: ApplicationDraft = { id: 'repair-draft', projectId: 'pj-demo', title: '台帳', kind: 'improvement', intent: failure.lines.join('\n'), phase: 'specifying', specMarkdown: '', architectureMarkdown: '', creationExecutions: [], ownerUserId: 'owner', createdAt: at, updatedAt: at }
-function envelope<T extends { id: string }>(resource: T) {
-  return { ...resource, resource, operation: { id: 'operation', type: 'applicationDraft.create', state: 'accepted' as const, writeChannel: 'W' as const, resource: { kind: 'ApplicationDraft', id: resource.id, projectId: 'pj-demo' }, createdAt: at, links: { self: '/api/v1/operations/operation' } } }
-}
 
 test('cause is plain escaped text; viewers and successful builds have no repair button', () => {
   const html = renderToStaticMarkup(<BuildFailureNotice failure={failure} projectId="pj-demo" stackId="stack-web" title="台帳" canEdit={false} />)
@@ -25,8 +23,8 @@ test('cause is plain escaped text; viewers and successful builds have no repair 
 })
 
 test('one click creates an improvement draft and sends exactly the cause lines as its first turn', async () => {
-  const create = spyOn(api, 'createDraft').mockResolvedValue(envelope(draft))
-  const turn = spyOn(api, 'createTurn').mockImplementation(async (_projectId, _draftId, payload) => envelope({ id: 'turn-1', kind: 'conversation' as const, userMessage: payload.message, status: 'pending' as const, startedAt: at, devWorkspaceId: 'workspace' }))
+  const create = spyOn(api, 'createDraft').mockResolvedValue(draftOf(draft))
+  const turn = spyOn(api, 'createTurn').mockImplementation(async (_projectId, _draftId, payload) => turnOf({ id: 'turn-1', kind: 'conversation', userMessage: payload.message, status: 'pending', startedAt: at, devWorkspaceId: 'workspace' }))
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   const container = document.createElement('div')
   document.body.append(container)

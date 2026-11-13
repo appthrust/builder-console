@@ -1,4 +1,4 @@
-import type { ApplicationDraftPublishPreferences } from '@appthrust/api-schema/platform-api'
+import type { PublishPreferences } from '../../model/contracts/build'
 import { useStore } from '@tanstack/react-form'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
@@ -14,7 +14,7 @@ import { ShareStep } from '../create/steps/share-step'
 import { text } from './copy'
 
 /** The saved draft determines defaults even in a new tab, before console metadata catches up. */
-export function PublishStep({ app, publishId, publishPreferences, onPublished, onCancel }: { app: BusinessApp; publishId?: string; publishPreferences?: ApplicationDraftPublishPreferences; onPublished(app: BusinessApp): void; onCancel(): void }) {
+export function PublishStep({ app, publishId, publishPreferences, onPublished, onCancel }: { app: BusinessApp; publishId?: string; publishPreferences?: PublishPreferences; onPublished(app: BusinessApp): void; onCancel(): void }) {
   const me = useMe().data
   const groups = useGroups().data
   const queryClient = useQueryClient()

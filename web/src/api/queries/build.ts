@@ -1,29 +1,30 @@
-import type { ApplicationDraft } from '@appthrust/api-schema/platform-api'
-import { queryOptions, skipToken, useQuery } from '@tanstack/react-query'
-import { isBuildPending } from '../../model/build/progress'
-import { creationTools, getDraft, getExecution, getGeneration, getTurn, getWorkbook, listDrafts, listWorkbooks } from '../build'
-import { readRetryDelay, retryReadQuery } from './shared'
+import { isCancelledError, queryOptions, skipToken, useQuery, type QueryClient } from '@tanstack/react-query'
+import { jobState, type BuildDraft } from '../../model/contracts/build'
+import { getDraft, getWorkbook, listDrafts, listWorkbooks } from '../build'
+import { POLL_INTERVAL_MS, readRetryDelay, retryReadQuery } from './shared'
 
 export const BUILD_POLL_MS = 3_000
 export const buildKeys = {
   all: ['build'] as const,
   draft: (projectId: string, draftId: string) => ['build', draftId, projectId, 'draft'] as const,
-  turn: (projectId: string, draftId: string, turnId?: string) => ['build', draftId, projectId, 'turn', turnId] as const,
-  generation: (projectId: string, draftId: string, generationId?: string) => ['build', draftId, projectId, 'generation', generationId] as const,
-  execution: (projectId: string, draftId: string, executionId?: string) => ['build', draftId, projectId, 'execution', executionId] as const,
+  workspace: (projectId: string, draftId: string, workspaceId: string | undefined) => ['build', draftId, projectId, 'workspace', workspaceId] as const,
   workbooks: (projectId: string, draftId: string, version: string) => ['build', draftId, projectId, 'workbooks', version] as const,
   workbook: (projectId: string, draftId: string, workbookId: string) => ['build', draftId, projectId, 'workbook', workbookId] as const,
   drafts: (projectId: string) => ['build', 'drafts', projectId] as const,
-  tools: (projectId: string) => ['build', 'tools', projectId] as const,
 }
 
-function draftPending(draft: ApplicationDraft | undefined): boolean {
-  return !!draft && (
-    (draft.conversationTurns ?? []).some(isBuildPending) ||
-    (draft.creationPlanGenerations ?? []).some(isBuildPending) ||
-    (draft.creationExecutions ?? []).some(isBuildPending) ||
-    isBuildPending(draft.implementationRuns?.at(-1))
-  )
+/**
+ * How often a draft is re-read: every three seconds while one of its jobs
+ * runs; at the normal interval while its phase or the state of one of its
+ * jobs is a value this client does not know (it can neither call that
+ * finished nor running, and must notice when it becomes known); otherwise
+ * not at all.
+ */
+export function draftPollInterval(draft: BuildDraft | undefined): number | false {
+  if (!draft) return false
+  const states = [...draft.conversationTurns, ...draft.creationPlanGenerations, ...draft.creationExecutions, draft.implementationRuns.at(-1)].map(jobState)
+  if (states.includes('active')) return BUILD_POLL_MS
+  return draft.phase.kind === 'unknown' || states.includes('unknown') ? POLL_INTERVAL_MS : false
 }
 
 export function buildDraftOptions(projectId: string, draftId: string) {
@@ -34,8 +35,24 @@ export function buildDraftOptions(projectId: string, draftId: string) {
     retryDelay: readRetryDelay,
     // This page drives the turn → plan handoff; hiding its tab must not suspend that writer.
     refetchIntervalInBackground: true,
-    refetchInterval: (query) => draftPending(query.state.data) ? BUILD_POLL_MS : false,
+    refetchInterval: (query) => draftPollInterval(query.state.data),
   })
+}
+
+/**
+ * A read of the draft that a write in flight can still overrule: it runs as the draft query (never a bare
+ * GET), so a write's answer cancels it like any poll and it cannot land afterwards with the older draft. A
+ * cancelled read resolves with the cached draft, which is then that newer answer.
+ */
+export async function readDraft(client: QueryClient, projectId: string, draftId: string): Promise<BuildDraft> {
+  const options = buildDraftOptions(projectId, draftId)
+  try {
+    return await client.fetchQuery({ ...options, staleTime: 0 })
+  } catch (error) {
+    const cached = isCancelledError(error) ? client.getQueryData<BuildDraft>(options.queryKey) : undefined
+    if (cached) return cached
+    throw error
+  }
 }
 
 /** Membership and readings change with the set revision and analysis turn. */
@@ -66,54 +83,13 @@ export function draftsOptions(projectId: string) {
     queryFn: projectId ? () => listDrafts(projectId) : skipToken,
     retry: retryReadQuery,
     retryDelay: readRetryDelay,
-    refetchInterval: (query) => query.state.data?.data.some(draftPending) ? BUILD_POLL_MS : false,
-  })
-}
-
-export function buildTurnOptions(projectId: string, draftId: string, turnId?: string) {
-  return queryOptions({
-    queryKey: buildKeys.turn(projectId, draftId, turnId),
-    queryFn: projectId && draftId && turnId ? () => getTurn(projectId, draftId, turnId) : skipToken,
-    refetchInterval: (query) => isBuildPending(query.state.data) ? BUILD_POLL_MS : false,
-  })
-}
-
-export function buildGenerationOptions(projectId: string, draftId: string, generationId?: string) {
-  return queryOptions({
-    queryKey: buildKeys.generation(projectId, draftId, generationId),
-    queryFn: projectId && draftId && generationId ? () => getGeneration(projectId, draftId, generationId) : skipToken,
-    refetchInterval: (query) => isBuildPending(query.state.data) ? BUILD_POLL_MS : false,
-  })
-}
-
-export function buildExecutionOptions(projectId: string, draftId: string, executionId?: string) {
-  return queryOptions({
-    queryKey: buildKeys.execution(projectId, draftId, executionId),
-    queryFn: projectId && draftId && executionId ? () => getExecution(projectId, draftId, executionId) : skipToken,
-    refetchInterval: (query) => isBuildPending(query.state.data) ? BUILD_POLL_MS : false,
-  })
-}
-
-export function buildToolsOptions(projectId: string) {
-  return queryOptions({
-    queryKey: buildKeys.tools(projectId),
-    queryFn: projectId ? () => creationTools(projectId) : skipToken,
-    refetchInterval: false,
+    refetchInterval: (query) => {
+      const intervals = (query.state.data?.data ?? []).map(draftPollInterval).filter((interval) => interval !== false)
+      return intervals.length ? Math.min(...intervals) : false
+    },
   })
 }
 
 export function useBuildDraft(projectId: string, draftId: string, enabled = true) {
   return useQuery({ ...buildDraftOptions(projectId, draftId), enabled })
-}
-
-export function useBuildTurn(projectId: string, draftId: string, turnId?: string, enabled = true) {
-  return useQuery({ ...buildTurnOptions(projectId, draftId, turnId), enabled })
-}
-
-export function useBuildGeneration(projectId: string, draftId: string, generationId?: string, enabled = true) {
-  return useQuery({ ...buildGenerationOptions(projectId, draftId, generationId), enabled })
-}
-
-export function useBuildExecution(projectId: string, draftId: string, executionId?: string, enabled = true) {
-  return useQuery({ ...buildExecutionOptions(projectId, draftId, executionId), enabled })
 }

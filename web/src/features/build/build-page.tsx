@@ -16,11 +16,11 @@
 //   with the send button inside it. No footer; the keyboard hint is a description.
 // - From md the side pane folds to a strip (toggle in its heading; the strip keeps
 //   the ◔ progress mark and reopens it). The choice persists (shell store).
-import type { ApplicationDraft } from '@appthrust/api-schema/platform-api'
+import type { BuildDraft } from '../../model/contracts/build'
 import { useQueryClient } from '@tanstack/react-query'
 import { useSelector } from '@tanstack/react-store'
 import { PanelRightOpen, Users } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { cleanupCreation, updateDraft } from '../../api/build'
 import { buildKeys, useBuildDraft } from '../../api/queries/build'
 import { useGroups } from '../../api/queries/console'
@@ -34,7 +34,7 @@ import { isBuildPending } from '../../model/build/progress'
 import { paths } from '../../routes/paths'
 import { setArtifactCollapsed, shellStore } from '../../shell/store'
 import { useShell } from '../../shell/use-shell'
-import { ActionError, Button, cn, EmptyState, focusHeading, LinkButton, Loading, LoadFailed, useDocumentTitle } from '../../ui'
+import { ActionError, Button, cn, EmptyState, focusHeading, LinkButton, Loading, Notice, ResourceBoundary, useDocumentTitle } from '../../ui'
 import { DatabaseChanges } from '../app/database-changes'
 import { canEditApp } from '../app/permissions'
 import { useAppViews } from '../app/use-app-views'
@@ -53,12 +53,14 @@ export function BuildPage({ draftId }: { draftId: string }) {
   const groupId = resolveBuildGroup(me, groups, currentGroup)
   const query = useBuildDraft(me.projectId, draftId, Boolean(groupId))
   if (!groupId) return <EmptyState icon={<Users />} heading="h1" title={text.page.noGroup.title} body={text.page.noGroup.body} action={<LinkButton href={paths.directory}>{text.page.noGroup.directory}</LinkButton>} />
-  if (query.isPending) return <Loading className="px-5" />
-  if (query.isLoadingError) return <div className="p-5"><LoadFailed onRetry={() => void query.refetch()} error={query.error} /></div>
-  return <Session key={draftId} draft={query.data} groupId={groupId} />
+  // The route loader read the draft once; a later unreadable poll keeps the last good draft (and the
+  // composer, preview and progress built on it) under a fixed "could not update" notice among the page's notices.
+  return <ResourceBoundary query={query} resetKey={draftId} loading={<Loading className="px-5" />}>
+    {(draft, stale) => <Session key={draftId} draft={draft} groupId={groupId} stale={stale} />}
+  </ResourceBoundary>
 }
 
-function Session({ draft, groupId }: { draft: ApplicationDraft; groupId: string }) {
+function Session({ draft, groupId, stale }: { draft: BuildDraft; groupId: string; stale: ReactNode }) {
   const { me } = useShell()
   const groups = useGroups().data
   const ownerGroupName = groups.find((group) => group.id === groupId)?.name
@@ -85,7 +87,7 @@ function Session({ draft, groupId }: { draft: ApplicationDraft; groupId: string 
   })
   const url = released ? appView?.platform?.publish?.publicUrl ?? appView?.platform?.publish?.tailnetUrl : undefined
   const shareText = build.app ? deriveAccess(appView?.platform?.publish?.access, build.app, groups, creationAccess.error instanceof AccessForbiddenError ? 'forbidden' : creationAccess.error ? 'failed' : undefined).label : shareScopeLabel('private')
-  const planPending = isBuildPending(draft.creationPlanGenerations?.at(-1))
+  const planPending = isBuildPending(draft.creationPlanGenerations.at(-1))
   const updatingPlan = build.session.prepareRequested && planPending
   const primary = { ...build.result.primary, enabled: build.result.primary.enabled && !build.busy && !sharing && !updatingPlan }
   // 決める: the prepare action is attached to the AI's proposal, labelled by what pressing it will do.
@@ -113,16 +115,21 @@ function Session({ draft, groupId }: { draft: ApplicationDraft; groupId: string 
       const updated = await updateDraft(me.projectId, draft.id, publishConflict
         ? { renameApplication: { name: next } }
         : { creationPlan: renameCreationPlan(draft.creationPlan!, next, { domain: build.domain }) })
-      build.receive(updated)
+      await build.receive(updated)
       // The collision is resolved by the new name: its notice must not linger as a stale retry.
       build.patch((current) => ({ ...current, lastPlannedIntent: updated.intent, reusePlan: true, executionRequestId: undefined, messages: current.messages.filter((message) => message.role !== 'notice' || message.retry !== 'prepare') }))
       build.prepare()
     })
   }
   return <div className="flex min-h-0 flex-1 flex-col" data-testid="build-session" data-stage={stage}>
-    <SessionHeader name={name} stage={stage} released={released} action={<StageAction stage={stage} primary={primary} progress={progress} onPrimary={onPrimary} />} />
-    <BuildFailureNotice failure={draft.buildFailure} projectId={me.projectId} stackId={draft.createdApplicationStackId} title={name} canEdit={build.app ? canEditApp(build.app, me) : draft.ownerUserId === me.person.subject} />
-    {creationAccess.error ? <ActionError error={creationAccess.error} /> : null}
+    <SessionHeader name={name} stage={stage} released={released} unsupported={build.result.unsupported} action={<StageAction stage={stage} primary={primary} progress={progress} onPrimary={onPrimary} />} />
+    {/* Page-level notices share one inset place under the header, whatever raised them. */}
+    {stale || build.result.unsupported || draft.buildFailure || creationAccess.error ? <div className="mx-5 mt-3 space-y-3">
+      {stale}
+      {build.result.unsupported ? <Notice tone="warning" title={buildCopy.unsupported.title}>{buildCopy.unsupported.detail}</Notice> : null}
+      <BuildFailureNotice failure={draft.buildFailure} projectId={me.projectId} stackId={draft.createdApplicationStackId} title={name} canEdit={build.app ? canEditApp(build.app, me) : draft.ownerUserId === me.person.subject} />
+      {creationAccess.error ? <ActionError error={creationAccess.error} /> : null}
+    </div> : null}
     {build.waitingForPublish || creationAccess.waitingForPublish ? <p role="status" className="px-5 py-2 text-xs text-stone-500">{text.page.waitingForPublish}</p> : null}
     <div role="tablist" aria-label={text.page.tabs} className="flex shrink-0 border-b border-line bg-white md:hidden">
       {(['conversation', 'artifact'] as const).map((value) => <button key={value} id={`build-tab-${value}`} type="button" role="tab" aria-selected={tab === value} aria-controls={`build-${value}`} tabIndex={tab === value ? 0 : -1} className={cn('min-h-11 flex-1 border-b-2 px-3 text-sm', tab === value ? 'border-accent font-semibold text-stone-900' : 'border-transparent text-stone-500')} onClick={() => setTab(value)} onKeyDown={(event) => {
@@ -131,10 +138,10 @@ function Session({ draft, groupId }: { draft: ApplicationDraft; groupId: string 
     </div>
     <div className={cn('flex min-h-0 flex-1 md:grid md:grid-rows-[minmax(0,1fr)]', artifactCollapsed ? 'md:grid-cols-[minmax(0,1fr)_2.75rem]' : 'md:grid-cols-[minmax(0,1fr)_minmax(18rem,22rem)] lg:grid-cols-[minmax(0,1fr)_26rem] xl:grid-cols-[minmax(0,1fr)_28rem]')}>
       <div id="build-conversation" role="tabpanel" aria-labelledby="build-tab-conversation" className={cn('min-h-0 min-w-0 flex-1 flex-col md:flex md:border-r md:border-line', tab === 'conversation' ? 'flex' : 'hidden')}>
-        <ConversationPane messages={build.messages} stage={stage} answering={build.busy} thinking={isBuildPending(draft.conversationTurns?.at(-1))} waitingForAi={build.waitingForAi} planning={planning} proposalAction={proposalAction} queued={build.queued} progress={progress} prepareOpen={build.prepareOpen} ownerGroupName={ownerGroupName} failure={failure} onSend={build.send} onRetry={build.retry} onUseName={useName} />
+        <ConversationPane messages={build.messages} stage={stage} answering={build.busy} unsupported={build.result.unsupported} thinking={isBuildPending(draft.conversationTurns.at(-1))} waitingForAi={build.waitingForAi} planning={planning} proposalAction={proposalAction} queued={build.queued} progress={progress} prepareOpen={build.prepareOpen} ownerGroupName={ownerGroupName} failure={failure} onSend={build.send} onRetry={build.retry} onUseName={useName} />
       </div>
       <div id="build-artifact" role="tabpanel" aria-labelledby="build-tab-artifact" className={cn('relative min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain', tab === 'artifact' ? 'block' : 'hidden', artifactCollapsed ? 'md:hidden' : 'md:block')}>
-        <ArtifactPane draft={draft} spec={build.spec} proposal={build.proposal} stage={stage} progress={progress} implementation={build.implementation.state} failure={build.failure} url={url} shareText={shareText} previewDatabaseReset={build.implementation.previewDatabaseReset} onOpenPreview={openPreview} onRetry={build.implementation.retry} onSkipTask={build.implementation.skipTask} onCollapse={() => setArtifactCollapsed(true)} databaseChanges={<DatabaseChanges projectId={me.projectId} databaseId={build.app && canEditApp(build.app, me) ? appView?.stack?.databaseComponentId : undefined} />} shareStep={sharing && build.app ? <PublishStep app={build.app} publishId={appView?.platform?.publish?.id} publishPreferences={draft.publishPreferences} onPublished={(updated) => { build.published(updated); setSharing(false) }} onCancel={() => setSharing(false)} /> : undefined} />
+        <ArtifactPane draft={draft} spec={build.spec} proposal={build.proposal} stage={stage} progress={progress} implementation={build.implementation.state} failure={build.failure} url={url} shareText={shareText} previewDatabaseReset={build.implementation.previewDatabaseReset} onOpenPreview={openPreview} onRetry={build.implementation.retry} onSkipTask={build.implementation.skipTask} onConfirm={build.implementation.confirm} onCollapse={() => setArtifactCollapsed(true)} databaseChanges={<DatabaseChanges projectId={me.projectId} databaseId={build.app && canEditApp(build.app, me) ? appView?.stack?.databaseComponentId : undefined} />} shareStep={sharing && build.app ? <PublishStep app={build.app} publishId={appView?.platform?.publish?.id} publishPreferences={draft.publishPreferences} onPublished={(updated) => { build.published(updated); setSharing(false) }} onCancel={() => setSharing(false)} /> : undefined} />
       </div>
       {artifactCollapsed ? (
         <div className="hidden min-h-0 flex-col items-center gap-2 bg-white py-2 md:flex">

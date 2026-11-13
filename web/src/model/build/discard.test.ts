@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import type { ApplicationDraft, ApplicationDraftCreationExecution } from '@appthrust/api-schema/platform-api'
-import { hasCreationResources, isDraftBusy } from './discard'
+import { draftOf, readFirst } from '../../api/testing/build-domain'
+import * as model from './discard'
+
+const hasCreationResources = readFirst(draftOf, model.hasCreationResources)
+const isDraftBusy = readFirst(draftOf, model.isDraftBusy)
 
 const at = '2026-10-08T00:00:00Z'
 const draft: ApplicationDraft = {

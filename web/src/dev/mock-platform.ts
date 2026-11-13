@@ -2291,7 +2291,9 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
       if (!body.clientRequestId || body.creationPlanFingerprint !== draft.validatedCreationPlanFingerprint) {
         return error(409, 'conflict', 'the creation plan changed since it was validated')
       }
-      if (!draft.creationExecutions.some((item) => item.clientRequestId === body.clientRequestId)) {
+      // Like platform-api handler/application_draft.go:1246-1250: 202 for a new execution, 200 for a replay of its clientRequestId.
+      const replay = draft.creationExecutions.some((item) => item.clientRequestId === body.clientRequestId)
+      if (!replay) {
         const tools = creationTools().sequences[0]!.tools.filter((tool) => draft.creationPlan?.applicationSourceRepositoryRequest || !tool.startsWith('appthrust.applicationSourceRepository.'))
         const steps = tools.map((tool, index) => ({
           id: `step-${index + 1}`,
@@ -2315,7 +2317,7 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
         })
         draft.phase = 'creating'
       }
-      return json(mutation('ApplicationDraft', draft.id, draft), 201)
+      return json(mutation('ApplicationDraft', draft.id, draft), replay ? 200 : 202)
     },
   ],
   [

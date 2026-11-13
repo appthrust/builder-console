@@ -7,7 +7,8 @@
 //   - AI improvement sessions (kind `improvement`, bound to a live app from
 //     the start): listed under the app's name with the session's state word.
 //   - Wizard apps: the caller's console apps that never got a platform binding.
-import type { ApplicationDraft, SourceChangeProposal } from '@appthrust/api-schema/platform-api'
+import type { SourceChangeProposal } from '@appthrust/api-schema/platform-api'
+import { isOneOf, type BuildDraft } from '../../model/contracts/build'
 import { useQuery } from '@tanstack/react-query'
 import { PencilLine } from 'lucide-react'
 import { draftsOptions } from '../../api/queries/build'
@@ -35,12 +36,12 @@ import { ProposalStatus } from '../proposals/proposal-ui'
 import { text as proposalText } from '../proposals/copy'
 
 export type UnfinishedItem =
-  | { kind: 'build'; id: string; name: string; stage: BuildStage; at: string; draft: ApplicationDraft }
-  | { kind: 'improve'; id: string; name: string; state: string; working: boolean; at: string; draft: ApplicationDraft }
+  | { kind: 'build'; id: string; name: string; stage: BuildStage; at: string; draft: BuildDraft }
+  | { kind: 'improve'; id: string; name: string; state: string; working: boolean; at: string; draft: BuildDraft }
   | { kind: 'app'; id: string; name: string; at: string; app: BusinessApp }
   | { kind: 'sent-proposal' | 'review-proposal'; id: string; name: string; at: string; proposal: SourceChangeProposal }
 
-function buildStage(draft: ApplicationDraft): BuildStage {
+function buildStage(draft: BuildDraft): BuildStage {
   const session = readBuildSession(draft.id)
   return deriveStage({ draft, published: draftPublished(draft), lastPlannedIntent: session?.lastPlannedIntent, now: Date.now() }).stage
 }
@@ -55,7 +56,8 @@ export function useUnfinished(me: Me, { poll = true }: { poll?: boolean } = {}) 
   const sent = useQuery({ ...proposalsOptions(me.projectId, { proposer: 'me' }), ...(poll ? {} : { refetchInterval: false as const }) })
   const incoming = useQuery({ ...proposalsOptions(me.projectId, { reviewer: 'me', phase: 'Proposed' }), ...(poll ? {} : { refetchInterval: false as const }) })
   const bound = (apps.data ?? []).filter((app) => app.stackId)
-  const open = (drafts.data?.data ?? []).filter((draft) => draft.phase !== 'archived' && !draft.proposalId)
+  // A phase this console does not know is not archived: the draft stays listed rather than disappearing.
+  const open = (drafts.data?.data ?? []).filter((draft) => !isOneOf(draft.phase, 'archived') && !draft.proposalId)
   const builds = open.filter((draft) => !isImprovementDraft(draft) && !bound.some((app) => app.stackId === draft.createdApplicationStackId))
   // An AI session's own app is briefly unbound before binding; it is listed once, as the session.
   const sessionApps = new Set(builds.map((draft) => readBuildSession(draft.id)?.createdAppId).filter(Boolean))

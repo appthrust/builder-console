@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, useLayoutEffect, useSyncExternalStore } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import * as api from '../../api/build'
+import { draftOf, turnOf, generationOf } from '../../api/testing/build-domain'
+import type { BuildDraft } from '../../model/contracts/build'
 import { buildKeys } from '../../api/queries/build'
 import { consoleKeys } from '../../api/queries/console'
 import { type BusinessApp } from '../../api/console-unverified'
@@ -66,25 +68,15 @@ function implementationFixture() {
   return {
     state: { ...state, previewUrl: undefined, previewStatus: 'preparing' as const, retryPending: false }, pending: false, requestFailure: undefined,
     previewDatabaseReset: { busy: false, pending: false, error: undefined, reset: mock(async () => true) },
-    start: mock(), startPending: mock(), retry: mock(), skipTask: mock(), requestChange: mock(async () => true),
+    start: mock(), confirm: mock(), startPending: mock(), retry: mock(), skipTask: mock(), requestChange: mock(async () => true),
   }
 }
 
-function mutationResponse<T extends { id: string }>(resource: T, kind: string, type: string) {
-  return {
-    ...resource, resource,
-    operation: {
-      id: 'operation-1', type, state: 'accepted' as const, writeChannel: 'A' as const,
-      resource: { kind, id: resource.id, projectId: me.projectId }, createdAt: at,
-      links: { self: '/api/v1/operations/operation-1' },
-    },
-  }
-}
 
 function Harness({ capture }: { capture(value: typeof build): void }) {
   const current = useSyncExternalStore(
     (listener) => client.getQueryCache().subscribe(listener),
-    () => client.getQueryData<ApplicationDraft>(queryKey)!,
+    () => client.getQueryData<BuildDraft>(queryKey)!,
   )
   const session = useBuildSession(current, me, 'sales')
   useLayoutEffect(() => { capture(session) }, [capture, session])
@@ -95,7 +87,7 @@ async function render() {
 }
 async function mount(current = draft, session: BuildSession = initial) {
   saveBuildSession(current.id, session)
-  client.setQueryData(queryKey, current)
+  client.setQueryData(queryKey, draftOf(current))
   await render()
 }
 async function fireRetry() {
@@ -123,11 +115,14 @@ beforeEach(() => {
     loading: false, failed: false, error: undefined, refetch: mock(),
     viewFor: () => ({ status: 'deploying', label: '', text: '', second: '', draft: false }),
   })
-  update = spyOn(api, 'updateDraft').mockImplementation(async (_projectId, _draftId, payload) =>
-    mutationResponse({ ...client.getQueryData<ApplicationDraft>(queryKey)!, ...payload }, 'ApplicationDraft', 'application-draft.update'))
+  update = spyOn(api, 'updateDraft').mockImplementation(async (_projectId, _draftId, payload) => {
+    const current = client.getQueryData<BuildDraft>(queryKey)!
+    const patch = draftOf({ ...draft, title: current.title, intent: current.intent, specMarkdown: current.specMarkdown, publishPreferences: current.publishPreferences, ...payload })
+    return { ...current, title: patch.title, intent: patch.intent, specMarkdown: patch.specMarkdown, publishPreferences: patch.publishPreferences }
+  })
   createTurn = spyOn(api, 'createTurn').mockImplementation(async (_projectId, _draftId, payload) =>
-    mutationResponse(turn('share', payload.message, 2), 'ApplicationDraftConversationTurn', 'application-draft-conversation-turn.create'))
-  const getDraft = spyOn(api, 'getDraft').mockImplementation(async () => client.getQueryData<ApplicationDraft>(queryKey)!)
+    turnOf(turn('share', payload.message, 2)))
+  const getDraft = spyOn(api, 'getDraft').mockImplementation(async () => client.getQueryData<BuildDraft>(queryKey)!)
   timers = new Map()
   let nextTimer = 0
   const timeoutSpy = spyOn(window, 'setTimeout').mockImplementation(((handler: TimerHandler, delay?: number) => {
@@ -156,7 +151,7 @@ describe('kickoff to plan handoff', () => {
 
   function mockGeneration() {
     const generation = spyOn(api, 'createGeneration').mockImplementation(async () =>
-      mutationResponse({ id: 'plan-1', status: 'pending' as const, startedAt: '2026-10-26T00:05:00Z', devWorkspaceId: 'workspace-1' }, 'ApplicationDraftCreationPlanGeneration', 'application-draft-creation-plan-generation.create'))
+      generationOf({ id: 'plan-1', status: 'pending', startedAt: '2026-10-26T00:05:00Z', devWorkspaceId: 'workspace-1' }))
     restore.push(() => generation.mockRestore())
     return generation
   }
@@ -164,13 +159,13 @@ describe('kickoff to plan handoff', () => {
   test('accepted kickoff waits for succeeded, then requests exactly one generation without a lease', async () => {
     const generation = mockGeneration()
     createTurn.mockImplementation(async (_projectId, _draftId, payload) =>
-      mutationResponse({ ...kickoff, userMessage: payload.message, status: 'pending' as const }, 'ApplicationDraftConversationTurn', 'application-draft-conversation-turn.create'))
+      turnOf({ ...kickoff, userMessage: payload.message, status: 'pending' }))
     await mount({ ...unplanned, conversationTurns: [turn('opening', buildCopy.questions.firstTurn, 0)] })
     await act(async () => { build.send(buildCopy.questions.kickoffReply) })
     expect(createTurn).toHaveBeenCalledTimes(1)
     expect(build.session).toMatchObject({ pending: [], planRequested: true })
     expect(generation).not.toHaveBeenCalled()
-    await act(async () => { client.setQueryData(queryKey, { ...client.getQueryData<ApplicationDraft>(queryKey)!, conversationTurns: [kickoff] }) })
+    await act(async () => { client.setQueryData(queryKey, draftOf({ ...unplanned, conversationTurns: [kickoff] })) })
     expect(generation).toHaveBeenCalledTimes(1)
     expect(build.session.planRequested).toBe(false)
     await render()
@@ -182,7 +177,7 @@ describe('kickoff to plan handoff', () => {
     if (storage === 'saved') saveBuildSession(draft.id, initial)
     else if (storage === 'invalid') sessionStorage.setItem(`builder-console:build:${draft.id}`, '{')
     else forgetBuildSession(draft.id)
-    client.setQueryData(queryKey, unplanned)
+    client.setQueryData(queryKey, draftOf(unplanned))
     await render()
     expect(generation).toHaveBeenCalledTimes(1)
     expect(createTurn).not.toHaveBeenCalled()
@@ -191,21 +186,12 @@ describe('kickoff to plan handoff', () => {
     expect(generation).toHaveBeenCalledTimes(1)
   })
 
-  test('a draft the API returns without creationExecutions still requests its plan', async () => {
-    const generation = mockGeneration()
-    // The Platform API omits an empty creationExecutions array from the draft JSON.
-    const { creationExecutions: _omitted, ...neverExecuted } = unplanned
-    client.setQueryData(queryKey, neverExecuted)
-    await render()
-    expect(generation).toHaveBeenCalledTimes(1)
-    expect(build.failure).toBeUndefined()
-  })
 
   test.each(['pending', 'succeeded'] as const)('reload observes an existing %s generation instead of sending another', async (status) => {
     const generation = mockGeneration()
     const current: ApplicationDraft = {
       ...unplanned, phase: status === 'succeeded' ? 'planned' : 'specifying',
-      creationPlan: status === 'succeeded' ? { summary: '', markdown: '', representation: [] } : undefined,
+      creationPlan: status === 'succeeded' ? { summary: '見積を管理する', markdown: '# 見積', representation: ['ApplicationStack'] } : undefined,
       creationPlanGenerations: [{ id: 'existing', status, startedAt: '2026-10-26T00:05:00Z', devWorkspaceId: 'workspace-1' }],
     }
     await mount(current, { ...initial, planRequested: true })
@@ -214,9 +200,9 @@ describe('kickoff to plan handoff', () => {
 
   test('a generation accepted before reload is read back instead of duplicated', async () => {
     const generation = mockGeneration()
-    const getDraft = spyOn(api, 'getDraft').mockResolvedValue({
+    const getDraft = spyOn(api, 'getDraft').mockResolvedValue(draftOf({
       ...unplanned, creationPlanGenerations: [{ id: 'already-accepted', status: 'pending', startedAt: '2026-10-26T00:05:00Z', devWorkspaceId: 'workspace-1' }],
-    })
+    }))
     restore.push(() => getDraft.mockRestore())
     await mount(unplanned, { ...initial, planRequested: true })
     expect(generation).not.toHaveBeenCalled()
@@ -316,7 +302,7 @@ describe('preparation name synchronization', () => {
     }
     await mount(current)
     expect(update).not.toHaveBeenCalled()
-    expect(client.getQueryData<ApplicationDraft>(queryKey)).toEqual(current)
+    expect(client.getQueryData<BuildDraft>(queryKey)).toEqual(draftOf(current))
   })
   test.each([
     [true, 'idle'], [false, 'starting-workspace'], [false, 'running'], [false, 'pushing'],
@@ -417,11 +403,37 @@ test.each(['private', 'group', 'company'] as const)('an Excel hand-off skips Q&A
   expect(createTurn).not.toHaveBeenCalled()
   expect(update).not.toHaveBeenCalled()
   await act(async () => {
-    client.setQueryData(queryKey, { ...excel, creationExecutions: [{ ...excel.creationExecutions[0]!, status: 'succeeded' }] })
+    client.setQueryData(queryKey, draftOf({ ...excel, creationExecutions: [{ ...excel.creationExecutions[0]!, status: 'succeeded' }] }))
   })
   expect(build.prepareOpen).toBe(false)
   expect(createTurn).not.toHaveBeenCalled()
   expect(update).not.toHaveBeenCalled()
+})
+
+// Browser stories saw an intermittent 409 on conversation-turns: a draft poll that started before the hidden 用意する
+// turn was sent answered after it, put back the draft without that turn, and the turn was queued and sent again.
+test('a draft read in flight when the hidden preparation turn is answered cannot overwrite it: the turn is sent once', async () => {
+  const preparing: ApplicationDraft = {
+    ...draft, phase: 'creating', conversationTurns: [turn('opening', buildCopy.questions.firstTurn, 0)],
+    creationExecutions: [{ id: 'execution-1', attempt: 1, status: 'running', startedAt: at, runStartedAt: at, steps: [] }],
+  }
+  const before = draftOf(preparing)
+  saveBuildSession(draft.id, initial)
+  client.setQueryData(queryKey, before)
+  // The poll read the draft before the turn existed; its answer arrives only after the turn's.
+  const poll = Promise.withResolvers<BuildDraft>()
+  const polled = client.fetchQuery({ queryKey, queryFn: () => poll.promise, staleTime: 0 }).catch(() => undefined)
+  await render()
+  expect(createTurn).toHaveBeenCalledTimes(1)
+  expect(createTurn.mock.calls[0]?.[2]).toEqual({ message: buildCopy.questions.prepareTurn })
+  await act(async () => {
+    poll.resolve(before)
+    await polled
+  })
+  await render()
+  expect(client.getQueryData<BuildDraft>(queryKey)?.conversationTurns.map((item) => item.userMessage)).toContain(buildCopy.questions.prepareTurn)
+  expect(build.session.pending).toEqual([])
+  expect(createTurn).toHaveBeenCalledTimes(1)
 })
 
 test('a saved implementation can retry before the console app binding loads', async () => {
@@ -460,7 +472,7 @@ test.each(['turn', 'plan'] as const)('a recorded %s quota failure resumes only o
   const error = 'Codex task failed: Codex error: stream disconnected before completion: You have no credits remaining. Add credits to continue using the API at <REDACTED>'
   const operation = { id: 'quota-failed', status: 'failed' as const, startedAt: at, finishedAt: at, devWorkspaceId: 'workspace-1', error }
   const generation = spyOn(api, 'createGeneration').mockImplementation(async () =>
-    mutationResponse({ id: 'resumed-plan', status: 'pending' as const, startedAt: at, devWorkspaceId: 'workspace-1' }, 'ApplicationDraftCreationPlanGeneration', 'application-draft-creation-plan-generation.create'))
+    generationOf({ id: 'resumed-plan', status: 'pending', startedAt: at, devWorkspaceId: 'workspace-1' }))
   restore.push(() => generation.mockRestore())
   await mount({
     ...draft, conversationTurns: context === 'turn' ? [{ ...turn('quota-failed', '一覧を作る', 0), ...operation }] : [turn('kickoff', buildCopy.questions.kickoffReply, 0)],
@@ -553,7 +565,7 @@ test('continuing affects only this published version and a newer publication is 
   expect(implementationEnabled).toBe(true)
   expect(implementation.start).toHaveBeenCalledTimes(1)
   expect(readBuildSession(draft.id)?.continuedAfterPublishAt).toBe(publishedAt)
-  await act(async () => { client.setQueryData(queryKey, { ...publishedDraft, publishedAt: '2026-10-26T00:04:00Z' }) })
+  await act(async () => { client.setQueryData(queryKey, draftOf({ ...publishedDraft, publishedAt: '2026-10-26T00:04:00Z' })) })
   expect(build.result).toMatchObject({ stage: 'publish', primary: { action: 'continue' } })
   expect(implementationEnabled).toBe(false)
 })
@@ -565,10 +577,10 @@ test('pending replies and later runs prevent the published stage', async () => {
   expect(implementationEnabled).toBe(true)
   await act(async () => {
     build.patch({ pending: [] })
-    client.setQueryData(queryKey, {
+    client.setQueryData(queryKey, draftOf({
       ...publishedDraft,
       implementationRuns: [{ id: 'impl-later', status: 'succeeded', startedAt: '2026-10-26T00:04:00Z', devWorkspaceId: 'ws-1', taskIds: [], tasks: [] }],
-    })
+    }))
   })
   expect(build.result.stage).toBe('build')
   expect(implementationEnabled).toBe(true)
@@ -595,7 +607,7 @@ test('publication persists after app updates and failed persistence retries only
   expect(build.session.continuedAfterPublishAt).toBe(publishedAt)
   expect(build.failure).toBeDefined()
   expect(build.session.messages.at(-1)).toMatchObject({ role: 'notice', retry: 'publish' })
-  update.mockImplementation(async () => mutationResponse({ ...publishedDraft, publishedAt: '2026-10-26T00:04:00Z' }, 'ApplicationDraft', 'application-draft.update'))
+  update.mockImplementation(async () => draftOf({ ...publishedDraft, publishedAt: '2026-10-26T00:04:00Z' }))
   await act(async () => { build.retry() })
   expect(update.mock.calls.map((call) => call[2])).toEqual([{ markPublished: true }, { markPublished: true }])
   expect(build.failure).toBeUndefined()
@@ -615,14 +627,14 @@ test('the drafts list uses server publication, regardless of a tab continuation 
   }
   saveBuildSession(draft.id, { ...initial, continuedAfterPublishAt: publishedAt, pending: [{ text: '検索を追加', at }] })
   client.setQueryData(consoleKeys.apps({ scope: 'mine' }), [])
-  client.setQueryData(buildKeys.drafts(me.projectId), { data: [publishedDraft] })
+  client.setQueryData(buildKeys.drafts(me.projectId), { data: [draftOf(publishedDraft)] })
   await act(async () => { root.render(<QueryClientProvider client={client}><DraftListHarness /></QueryClientProvider>) })
   expect(items).toMatchObject([{ kind: 'build', stage: 'publish' }])
   await act(async () => {
-    client.setQueryData(buildKeys.drafts(me.projectId), { data: [{
+    client.setQueryData(buildKeys.drafts(me.projectId), { data: [draftOf({
       ...publishedDraft,
       implementationRuns: [{ id: 'impl-later', status: 'running', startedAt: '2026-10-26T00:04:00Z', devWorkspaceId: 'ws-1', taskIds: [], tasks: [] }],
-    }] })
+    })] })
     root.render(<QueryClientProvider client={client}><DraftListHarness /></QueryClientProvider>)
   })
   expect(items).toMatchObject([{ kind: 'build', stage: 'build' }])
