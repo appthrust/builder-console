@@ -1,5 +1,5 @@
 // Improvement runs produce owner-reviewed proposals; only Applied is a live update.
-import type { BuildDraft } from '../../model/contracts/build'
+import { isOneOf, type BuildDraft } from '../../model/contracts/build'
 import { buildCopy } from '../../model/build/copy'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSelector } from '@tanstack/react-store'
@@ -88,11 +88,11 @@ function Session({ draft, stale }: { draft: BuildDraft; stale: ReactNode }) {
     </div>
     <div className={cn('flex min-h-0 flex-1 md:grid md:grid-rows-[minmax(0,1fr)]', collapsed ? 'md:grid-cols-[minmax(0,1fr)_2.75rem]' : 'md:grid-cols-[minmax(0,1fr)_minmax(18rem,22rem)] lg:grid-cols-[minmax(0,1fr)_26rem] xl:grid-cols-[minmax(0,1fr)_28rem]')}>
       <div id="build-conversation" role="tabpanel" aria-labelledby="build-tab-conversation" className={cn('min-h-0 min-w-0 flex-1 flex-col md:flex md:border-r md:border-line', tab === 'conversation' ? 'flex' : 'hidden')}>
-        <ImproveConversation ref={composer} draft={draft} state={state} appUrl={appUrl} locked={session.locked} waitingForReview={!!session.proposal.data && proposalWaiting(session.proposal.data.phase)} outcome={session.proposal.data && session.proposal.data.phase !== 'Drafting' ? <ProposalOutcome proposal={session.proposal.data} version={state.version} /> : undefined} starting={implementation.pending} sendFailure={session.sendFailure} startFailure={implementation.requestFailure} onSend={session.send} onRetrySend={session.retrySend} onStart={implementation.startPending} onConfirmSend={session.confirmSend} onConfirmStart={implementation.confirm} />
+        <ImproveConversation ref={composer} draft={draft} state={state} appUrl={appUrl} locked={session.locked} waitingForReview={!!session.proposal.data && proposalWaiting(session.proposal.data.phase)} outcome={session.proposal.data && !isOneOf(session.proposal.data.phase, 'Drafting') ? <ProposalOutcome proposal={session.proposal.data} version={state.version} /> : undefined} starting={implementation.pending} sendFailure={session.sendFailure} startFailure={implementation.requestFailure} onSend={session.send} onRetrySend={session.retrySend} onStart={implementation.startPending} onConfirmSend={session.confirmSend} onConfirmStart={implementation.confirm} />
         {session.proposal.error ? <LoadFailed error={session.proposal.error} onRetry={() => void session.proposal.refetch()} /> : null}
       </div>
       <div id="build-artifact" role="tabpanel" aria-labelledby="build-tab-artifact" className={cn('relative min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain', tab === 'artifact' ? 'block' : 'hidden', collapsed ? 'md:hidden' : 'md:block')}>
-        <ImproveSidePane state={state} implementation={implementation.state} versions={improveVersions(draft).filter((version) => !draft.proposalId || !!version.version)} appUrl={session.proposal.data?.phase === 'Applied' || !draft.proposalId ? appUrl : undefined} proposalPending={!!draft.proposalId && session.proposal.data?.phase !== 'Applied'} onCollapse={() => setArtifactCollapsed(true)} />
+        <ImproveSidePane state={state} implementation={implementation.state} versions={improveVersions(draft).filter((version) => !draft.proposalId || !!version.version)} appUrl={isOneOf(session.proposal.data?.phase, 'Applied') || !draft.proposalId ? appUrl : undefined} proposalPending={!!draft.proposalId && !isOneOf(session.proposal.data?.phase, 'Applied')} onCollapse={() => setArtifactCollapsed(true)} />
       </div>
       {collapsed ? (
         <div className="hidden min-h-0 flex-col items-center gap-2 bg-white py-2 md:flex">

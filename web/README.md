@@ -541,6 +541,22 @@ non-engineers, with engineering words only under 「詳しい人向け」
   `/-/drafts` separates sent proposals from reviews waiting for the caller;
   proposal-backed drafts never count as unfinished builds. `/-/build/{id}` and
   `/-/improve/{id}` still redirect to each other by kind.
+  Every proposal answer passes the response boundary once
+  (`src/api/contracts/platform/proposal.ts`, domain types in
+  `src/model/contracts/proposal.ts`): list, get, diff and the decision. Reviewers,
+  tasks and decisions are required arrays (the Go converter always writes them);
+  the phase and each decision kind are open values, and the base/head revision
+  and head reference are open unions. An unknown phase, decision kind or revision
+  kind keeps the known parts on screen, reads as 「状態不明」 rather than a known
+  phase, locks an improvement session, and shows the decisions disabled with a
+  fixed explanation. A subject the Directory does not answer for reads as
+  「不明な利用者」. A failed proposal refresh keeps the last good proposal under
+  「更新できませんでした」 and disables the decisions until a current answer
+  arrives. A decision answered 2xx unreadably is not cached or resent; the only
+  action is 「最新の状態を確認する」. Tests:
+  `src/api/contracts/platform/proposal.test.ts`,
+  `src/features/proposals/proposal-page-wire.test.tsx` and
+  `e2e/stories/proposal-review.mock.spec.ts`.
   The mock answers improvement turns after ~2 s and advances runs every ~1.5 s.
   Accept goes through Accepted and Applying to Applied after one second (or two
   manual advances), then creates one release and adds task version labels.
