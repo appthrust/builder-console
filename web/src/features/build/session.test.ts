@@ -14,7 +14,7 @@ const startPrepareConversation = (session: model.BuildSession, draft: object, at
 function withDraftBase(draft: object) {
   return { id: 'draft-1', projectId: 'project-1', title: '見積', intent: '見積', phase: 'specifying', specMarkdown: '', ownerUserId: 'u', createdAt: '2026-10-08T00:00:00Z', updatedAt: '2026-10-08T00:00:00Z', ...draft }
 }
-import { validatePreparationPlan } from './use-build-session'
+import { validatePreparationPlan } from './use-draft-creation'
 
 // Language tests must leave the Dashboard's shared browser preference alone.
 const originalCookie = document.cookie
