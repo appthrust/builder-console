@@ -42,6 +42,8 @@ test.describe('app screens with an unreadable answer @app-malformed-response', (
     const history = page.getByTestId('release-history')
     const table = history.getByRole('table', { name: '更新履歴（新しい順）' })
     await expect(table.getByRole('row')).toHaveCount(5)
+    // The rollback actions come from a second read (release state); the rows are settled once they are offered.
+    await expect(table.getByRole('button', { name: 'この版に戻す' })).toHaveCount(2)
     const rows = await table.getByRole('row').allTextContents()
     const notice = page.getByText(REFRESH_FAILED)
     await expect(notice).toHaveCount(0)
