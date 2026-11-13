@@ -314,6 +314,8 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
       else send(buildCopy.questions.kickoffReply)
     },
     prepare: creationEffects.prepare,
+    /** The shared name-collision recovery (use-draft-creation `rename`). */
+    rename: creationEffects.rename,
     // PublishStep has written the answered app into its cache entry.
     published: () => creationEffects.markPublished(),
   }

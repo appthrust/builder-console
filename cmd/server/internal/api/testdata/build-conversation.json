@@ -1184,5 +1184,89 @@
       "accept": false,
       "path": "/plan/specRevision"
     }
+  },
+  {
+    "name": "session-publish-absent",
+    "schema": "BuildSession",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000001\",\"kind\":\"new-app\",\"engine\":\"console-v1\",\"version\":1,\"lifecycle\":\"created\",\"groupId\":\"directory/group-opaque\",\"locale\":\"ja\",\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"specification\":{\"revision\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"},\"projection\":{\"state\":\"not_requested\",\"appliedRevision\":0},\"capabilities\":{\"canConverse\":false,\"canRequestPlan\":false},\"nextAction\":\"none\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "session-publish-pending",
+    "schema": "BuildSession",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000001\",\"kind\":\"new-app\",\"engine\":\"console-v1\",\"version\":1,\"lifecycle\":\"created\",\"groupId\":\"directory/group-opaque\",\"locale\":\"ja\",\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"specification\":{\"revision\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"},\"projection\":{\"state\":\"not_requested\",\"appliedRevision\":0},\"capabilities\":{\"canConverse\":false,\"canRequestPlan\":false},\"nextAction\":\"none\",\"publish\":{\"desired\":{\"name\":\"申請ノート\",\"shareScope\":\"group\"},\"sync\":{\"state\":\"pending\"}}}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "session-publish-syncing",
+    "schema": "BuildSession",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000001\",\"kind\":\"new-app\",\"engine\":\"console-v1\",\"version\":1,\"lifecycle\":\"created\",\"groupId\":\"directory/group-opaque\",\"locale\":\"ja\",\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"specification\":{\"revision\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"},\"projection\":{\"state\":\"not_requested\",\"appliedRevision\":0},\"capabilities\":{\"canConverse\":false,\"canRequestPlan\":false},\"nextAction\":\"none\",\"publish\":{\"desired\":{\"name\":\"申請ノート\",\"shareScope\":\"group\"},\"sync\":{\"state\":\"syncing\"}}}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "session-publish-applied",
+    "schema": "BuildSession",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000001\",\"kind\":\"new-app\",\"engine\":\"console-v1\",\"version\":1,\"lifecycle\":\"created\",\"groupId\":\"directory/group-opaque\",\"locale\":\"ja\",\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"specification\":{\"revision\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"},\"projection\":{\"state\":\"not_requested\",\"appliedRevision\":0},\"capabilities\":{\"canConverse\":false,\"canRequestPlan\":false},\"nextAction\":\"none\",\"publish\":{\"desired\":{\"name\":\"申請ノート\",\"shareScope\":\"group\"},\"sync\":{\"state\":\"applied\"}}}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "session-publish-failed",
+    "schema": "BuildSession",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000001\",\"kind\":\"new-app\",\"engine\":\"console-v1\",\"version\":1,\"lifecycle\":\"created\",\"groupId\":\"directory/group-opaque\",\"locale\":\"ja\",\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"specification\":{\"revision\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"},\"projection\":{\"state\":\"not_requested\",\"appliedRevision\":0},\"capabilities\":{\"canConverse\":false,\"canRequestPlan\":false},\"nextAction\":\"none\",\"publish\":{\"desired\":{\"name\":\"申請ノート\",\"shareScope\":\"group\"},\"sync\":{\"state\":\"failed\",\"failure\":{\"error\":\"draft_spec_conflict\",\"message\":\"The draft changed before publication preferences were synchronized\",\"details\":{\"reason\":\"DraftVersionChanged\"}}}}}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "session-publish-public-rejected",
+    "schema": "BuildSession",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000001\",\"kind\":\"new-app\",\"engine\":\"console-v1\",\"version\":1,\"lifecycle\":\"created\",\"groupId\":\"directory/group-opaque\",\"locale\":\"ja\",\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"specification\":{\"revision\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"},\"projection\":{\"state\":\"not_requested\",\"appliedRevision\":0},\"capabilities\":{\"canConverse\":false,\"canRequestPlan\":false},\"nextAction\":\"none\",\"publish\":{\"desired\":{\"name\":\"申請ノート\",\"shareScope\":\"public\"},\"sync\":{\"state\":\"pending\"}}}",
+    "expected": {
+      "accept": false,
+      "path": "/publish/desired/shareScope"
+    }
+  },
+  {
+    "name": "session-publish-public-reader-rejected",
+    "schema": "BuildSessionRead",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000001\",\"kind\":\"new-app\",\"engine\":\"console-v1\",\"version\":1,\"lifecycle\":\"created\",\"groupId\":\"directory/group-opaque\",\"locale\":\"ja\",\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"specification\":{\"revision\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"},\"projection\":{\"state\":\"not_requested\",\"appliedRevision\":0},\"capabilities\":{\"canConverse\":false,\"canRequestPlan\":false},\"nextAction\":\"none\",\"publish\":{\"desired\":{\"name\":\"申請ノート\",\"shareScope\":\"public\"},\"sync\":{\"state\":\"pending\"}}}",
+    "expected": {
+      "accept": false,
+      "path": "/publish/desired/shareScope"
+    }
+  },
+  {
+    "name": "session-publish-future-reader",
+    "schema": "BuildSessionRead",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000001\",\"kind\":\"new-app\",\"engine\":\"console-v1\",\"version\":1,\"lifecycle\":\"created\",\"groupId\":\"directory/group-opaque\",\"locale\":\"ja\",\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"specification\":{\"revision\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"},\"projection\":{\"state\":\"not_requested\",\"appliedRevision\":0},\"capabilities\":{\"canConverse\":false,\"canRequestPlan\":false},\"nextAction\":\"none\",\"publish\":{\"desired\":{\"name\":\"申請ノート\",\"shareScope\":\"private\"},\"sync\":{\"state\":\"future\",\"failure\":{\"error\":\"future_error\",\"message\":\"A future publication failure\"}}}}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "session-publish-future-writer-rejected",
+    "schema": "BuildSession",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000001\",\"kind\":\"new-app\",\"engine\":\"console-v1\",\"version\":1,\"lifecycle\":\"created\",\"groupId\":\"directory/group-opaque\",\"locale\":\"ja\",\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"specification\":{\"revision\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"},\"projection\":{\"state\":\"not_requested\",\"appliedRevision\":0},\"capabilities\":{\"canConverse\":false,\"canRequestPlan\":false},\"nextAction\":\"none\",\"publish\":{\"desired\":{\"name\":\"申請ノート\",\"shareScope\":\"private\"},\"sync\":{\"state\":\"future\"}}}",
+    "expected": {
+      "accept": false,
+      "path": "/publish/sync/state"
+    }
+  },
+  {
+    "name": "session-publish-null-rejected",
+    "schema": "BuildSession",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000001\",\"kind\":\"new-app\",\"engine\":\"console-v1\",\"version\":1,\"lifecycle\":\"created\",\"groupId\":\"directory/group-opaque\",\"locale\":\"ja\",\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"specification\":{\"revision\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"},\"projection\":{\"state\":\"not_requested\",\"appliedRevision\":0},\"capabilities\":{\"canConverse\":false,\"canRequestPlan\":false},\"nextAction\":\"none\",\"publish\":null}",
+    "expected": {
+      "accept": false,
+      "path": "/publish"
+    }
   }
 ]

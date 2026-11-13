@@ -120,6 +120,15 @@ describe('a session that stops before its draft exists', () => {
     expect(mock.count('POST', CREATE)).toBe(1)
     expect((await sessions())[0]!.draftId).toBe(id)
   })
+  test('a 503 with Retry-After during the wait is waited out as asked (bounded to 60 s), then the start goes on', async () => {
+    mock.rewrites.push({ method: 'POST', path: /\/advance$/, once: true, body: stopped({ nextAction: 'observe' }) })
+    await mock.fetch('/api/console/__mock/build-session-unavailable', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reads: 1, retryAfterSeconds: 600 }) })
+    const { id } = await startConsoleBuild(INTENT, 'g-team-a', deps())
+    expect(sleeps).toContain(60_000)
+    expect(Math.max(...sleeps)).toBe(60_000)
+    expect((await sessions())[0]!.draftId).toBe(id)
+    expect(mock.count('POST', CREATE)).toBe(1)
+  })
 })
 
 describe('the new-session engine (server flag) at beginBuild', () => {

@@ -6,7 +6,7 @@ import { isResponseContractError, type ResponseContractError } from './boundary'
 import { createBuildSessionsApi, intentKeys, isVersionConflict, mintIdempotencyKey, sessionETag, type BuildSessionsApi } from './build-sessions'
 import { buildCreateHeaders, buildETag, buildMutationHeaders, buildSchemas } from './contracts/console/schema/build-sessions'
 import { buildSessionOperations } from './contracts/console/schema/build-session-operations'
-import { createConsoleMockFetch, resetMocks, type ConsoleMockFetch } from './testing/console-mock-fetch'
+import { createConsoleMockFetch, createSessionApp, resetMocks, type ConsoleMockFetch } from './testing/console-mock-fetch'
 import { createTestGateway } from './testing/gateway'
 
 type Fixture = { name: string; schema: string; raw: string; expected: { accept: boolean } }
@@ -86,13 +86,16 @@ describe('the twelve operations', () => {
     current = await api.get(session.id)
     const revision = await api.specRevision(session.id, current.specification.revision)
     expect(revision.revision).toBe(1)
-    const publish = await api.setPublishPreferences(session.id, { name: '経費ノート', shareScope: 'group' }, { key: mintIdempotencyKey(), version: current.version })
-    // The mock writes the typed preference to the session's Platform draft, as the server does.
-    expect(publish.sync.state).toEqual({ kind: 'known', value: 'applied' })
+    // Publish preferences are a created session's (design §12): commit first, then the advance writes the draft.
+    const made = await createSessionApp(api, mock, session.id)
+    const publish = await api.setPublishPreferences(session.id, { name: '経費ノート', shareScope: 'group' }, { key: mintIdempotencyKey(), version: made.version })
+    expect(publish.sync.state).toEqual({ kind: 'known', value: 'pending' })
+    const synced = await api.advance(session.id, { key: intentKeys.advance(session.id, publish.sessionVersion), version: publish.sessionVersion })
+    expect(synced.publish).toEqual({ desired: { name: '経費ノート', shareScope: 'group' }, sync: { state: { kind: 'known', value: 'applied' } } })
     await api.list()
     expect((await api.listTurns(session.id)).items.length).toBeGreaterThan(0)
     expect(await api.resolve(current.draftId!)).toEqual({ engine: 'console-v1', sessionId: session.id })
-    const archived = await api.archive(session.id, { key: intentKeys.archive(session.id, publish.sessionVersion), version: publish.sessionVersion })
+    const archived = await api.archive(session.id, { key: intentKeys.archive(session.id, synced.version), version: synced.version })
     expect(archived.lifecycle).toEqual({ kind: 'known', value: 'archived' })
 
     expect(mock.requests.some((item) => item.status === 428)).toBe(false)
@@ -163,7 +166,10 @@ describe('unreadable 2xx answers to writes', () => {
       const current = await api.get(session.id)
       return api.resolveTurn(session.id, turn.id, { decision: 'keep_spec' }, { key: intentKeys.resolution(session.id, current.version, turn.id, 'keep_spec'), version: current.version })
     } },
-    { name: 'publishPreferences', method: 'PATCH', path: /\/publish-preferences$/, run: (session) => api.setPublishPreferences(session.id, { name: '名前', shareScope: 'private' }, { key: mintIdempotencyKey(), version: session.version }) },
+    { name: 'publishPreferences', method: 'PATCH', path: /\/publish-preferences$/, run: async (session) => {
+      const made = await createSessionApp(api, mock, session.id)
+      return api.setPublishPreferences(session.id, { name: '名前', shareScope: 'private' }, { key: mintIdempotencyKey(), version: made.version })
+    } },
     { name: 'archive', method: 'POST', path: /\/archive$/, run: (session) => api.archive(session.id, { key: intentKeys.archive(session.id, session.version), version: session.version }) },
   ]
   for (const family of families) {

@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/appthrust/appserver-go/appserver/httpx"
 	"github.com/appthrust/appserver-go/appserver/identity"
 	"github.com/appthrust/appserver-go/appserver/pgstore/testutil"
 	platform "github.com/appthrust/appserver-go/appserver/platformclient"
@@ -27,17 +29,20 @@ func buildBearer(subject string) string {
 }
 
 type buildHTTPFixture struct {
-	api          *API
-	service      *buildsession.Service
-	directory    *fakeDirectory
-	bearer       string
-	methods      []string
-	created      bool
-	missingETag  bool
-	accessDenied bool
-	draft        buildsession.Draft
-	turns        map[string]buildsession.AgentTurn
-	artifacts    map[string]buildsession.Artifact
+	api             *API
+	service         *buildsession.Service
+	directory       *fakeDirectory
+	bearer          string
+	methods         []string
+	created         bool
+	missingETag     bool
+	accessDenied    bool
+	publishConflict bool
+	retryStatus     int
+	retryAfter      string
+	draft           buildsession.Draft
+	turns           map[string]buildsession.AgentTurn
+	artifacts       map[string]buildsession.Artifact
 }
 
 func buildHTTPHarness(t *testing.T) *buildHTTPFixture {
@@ -60,6 +65,11 @@ func buildHTTPHarness(t *testing.T) *buildHTTPFixture {
 		case path == "/application-drafts/missing":
 			write(404, map[string]any{"error": map[string]string{"code": "not_found", "message": "Absent draft"}})
 		case path == "/application-drafts/legacy":
+			if f.retryStatus != 0 {
+				w.Header().Set("Retry-After", f.retryAfter)
+				write(f.retryStatus, map[string]any{"error": map[string]string{"code": "artifact_uploads_busy"}})
+				return
+			}
 			write(200, buildsession.Draft{ID: "legacy"})
 		case path == "/access":
 			actions := []string{"project.compute.read", "project.compute.write", "project.workload.read"}
@@ -87,6 +97,10 @@ func buildHTTPHarness(t *testing.T) *buildHTTPFixture {
 			require.Equal(t, f.draft.ETag, r.Header.Get("If-Match"))
 			var input buildsession.DraftPatch
 			require.NoError(t, json.NewDecoder(r.Body).Decode(&input))
+			if input.PublishPreferences != nil && f.publishConflict {
+				write(412, map[string]any{"error": map[string]any{"code": "failed_precondition", "details": map[string]string{"reason": "DraftVersionChanged"}}})
+				return
+			}
 			if input.SpecMarkdown != nil {
 				f.draft.SpecMarkdown = *input.SpecMarkdown
 			}
@@ -216,6 +230,8 @@ func TestBuildHandlersEveryOperationAndSchema(t *testing.T) {
 	const base = "/api/console/v1/build-sessions"
 	created := f.call(t, "POST", base, "create", "", `{"kind":"new-app","groupId":"group-builders","intent":"Track requests","locale":"en"}`, "BuildSession", 202)
 	initial := sessionBody(t, created)
+	require.Nil(t, initial.Publish)
+	require.NotContains(t, created.Body.String(), `"publish"`)
 	path := base + "/" + initial.ID
 	replay := f.call(t, "POST", base, "create", "", `{"locale":"en","intent":"Track requests","groupId":"group-builders","kind":"new-app"}`, "BuildSession", 202)
 	require.JSONEq(t, created.Body.String(), replay.Body.String())
@@ -272,9 +288,50 @@ func TestBuildHandlersEveryOperationAndSchema(t *testing.T) {
 	require.True(t, s.Plan.Stale, "external stale-plan creation must remain visible")
 	advance("delete-conversation-workspace")
 	s = get()
-	f.call(t, "PATCH", path+"/publish-preferences", "publish", fmt.Sprintf(`"bs-%d"`, s.Version), `{"name":"Requests","shareScope":"group"}`, "BuildPublishResult", 202)
+	require.Nil(t, s.Publish)
+	version := fmt.Sprintf(`"bs-%d"`, s.Version)
+	f.call(t, "PATCH", path+"/publish-preferences", "public", version, `{"name":"Requests","shareScope":"public"}`, "BuildError", 400)
+	require.Equal(t, s.Version, get().Version)
+	require.Nil(t, get().Publish)
+
+	// Preferences are durable before synchronization. A lost dispatch must not
+	// hide the accepted desired values when another tab reloads the session.
+	f.service.Boundary = func(point string) error {
+		if point == "set_publish_preferences.before_claim" {
+			return errors.New("interrupted before publication dispatch")
+		}
+		return nil
+	}
+	f.call(t, "PATCH", path+"/publish-preferences", "publish", version, `{"name":"Requests","shareScope":"group"}`, "BuildError", 503)
 	s = get()
-	f.call(t, "POST", path+"/archive", "archive", fmt.Sprintf(`"bs-%d"`, s.Version), `{}`, "BuildSession", 202)
+	require.Equal(t, &BuildPublishObservation{Desired: BuildPublishInput{Name: "Requests", ShareScope: "group"}, Sync: BuildPublishSync{State: "pending"}}, s.Publish)
+	var page BuildPage[BuildSession]
+	require.NoError(t, json.Unmarshal(f.call(t, "GET", base, "", "", "", "BuildSessionList", 200).Body.Bytes(), &page))
+	require.Len(t, page.Items, 1)
+	require.Equal(t, s.Publish, page.Items[0].Publish)
+
+	f.service.Boundary = nil
+	f.publishConflict = true
+	advance("publish-failure")
+	s = get()
+	require.Equal(t, BuildPublishInput{Name: "Requests", ShareScope: "group"}, s.Publish.Desired)
+	require.Equal(t, "failed", s.Publish.Sync.State)
+	require.Equal(t, "draft_spec_conflict", s.Publish.Sync.Failure.Error)
+	require.Equal(t, "DraftVersionChanged", *s.Publish.Sync.Failure.Details.Reason)
+	// A replay is the original accepted snapshot, not a new write or a
+	// replacement for the current observation returned by GET.
+	var accepted BuildPublishResult
+	require.NoError(t, json.Unmarshal(f.call(t, "PATCH", path+"/publish-preferences", "publish", version, `{"name":"Requests","shareScope":"group"}`, "BuildPublishResult", 202).Body.Bytes(), &accepted))
+	require.Equal(t, "pending", accepted.Sync.State)
+	require.Equal(t, s.Publish, get().Publish)
+
+	f.publishConflict = false
+	f.call(t, "PATCH", path+"/publish-preferences", "publish-retry", fmt.Sprintf(`"bs-%d"`, s.Version), `{"name":"Revised Requests","shareScope":"company"}`, "BuildPublishResult", 202)
+	s = get()
+	require.Equal(t, &BuildPublishObservation{Desired: BuildPublishInput{Name: "Revised Requests", ShareScope: "company"}, Sync: BuildPublishSync{State: "applied"}}, s.Publish)
+	archived := sessionBody(t, f.call(t, "POST", path+"/archive", "archive", fmt.Sprintf(`"bs-%d"`, s.Version), `{}`, "BuildSession", 202))
+	require.Equal(t, s.Publish, archived.Publish)
+	require.Equal(t, s.Publish, get().Publish)
 	f.call(t, "POST", path+"/cancel", "cancel", `"bs-1"`, `{}`, "BuildError", 404)
 }
 func TestBuildHandlerPreconditionsAndFreshAuthorization(t *testing.T) {
@@ -317,4 +374,72 @@ func TestBuildConfigOfferClosesWithoutChangingResolver(t *testing.T) {
 		require.NotContains(t, call, "dev-workspaces")
 		require.NotContains(t, call, "DELETE")
 	}
+}
+
+func TestBuildErrorsHaveBoundedRetryAfter(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"busy", &buildsession.Failure{Status: 503, Code: "artifact_uploads_busy", RetryAfter: "7"}, "7"},
+		{"rate limit", &buildsession.Failure{Status: 429, Code: "service_unavailable", RetryAfter: "300"}, "300"},
+		{"bounded", &buildsession.Failure{Status: 503, Code: "service_unavailable", RetryAfter: "301"}, "300"},
+		{"zero", &buildsession.Failure{Status: 429, Code: "service_unavailable", RetryAfter: "0"}, "1"},
+		{"negative", &buildsession.Failure{Status: 503, Code: "service_unavailable", RetryAfter: "-10"}, "1"},
+		{"absent", &buildsession.Failure{Status: 503, Code: "artifact_uploads_busy"}, "2"},
+		{"overflow", &buildsession.Failure{Status: 503, Code: "service_unavailable", RetryAfter: "9999999999999999999999999999999999"}, "2"},
+		{"fraction", &buildsession.Failure{Status: 429, Code: "service_unavailable", RetryAfter: "1.5"}, "2"},
+		{"date", &buildsession.Failure{Status: 503, Code: "service_unavailable", RetryAfter: "Wed, 21 Oct 2015 07:28:00 GMT"}, "2"},
+		{"unsafe", &buildsession.Failure{Status: 503, Code: "service_unavailable", RetryAfter: "7\r\nPrivate: value"}, "2"},
+		{"shared unavailable", &httpx.Error{Status: 503, Code: "store_unavailable", Message: "Unavailable"}, "2"},
+		{"shared rate limit", &httpx.Error{Status: 429, Code: "rate_limited", Message: "Busy"}, "2"},
+		{"internal unavailable", errors.New("database unavailable"), "2"},
+		{"permanent failure", &buildsession.Failure{Status: 503, Code: "artifact_store_unsupported", Details: &buildsession.FailureDetails{Retryable: new(bool)}}, "2"},
+		{"other status", &buildsession.Failure{Status: 409, Code: "conflict", RetryAfter: "7"}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			writeBuildError(w, tc.err)
+			require.Equal(t, tc.want, w.Header().Get("Retry-After"))
+			if tc.name == "permanent failure" {
+				var body BuildError
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+				require.NotNil(t, body.Details.Retryable)
+				require.False(t, *body.Details.Retryable)
+			}
+		})
+	}
+}
+
+func TestBuildHandlerPreservesUpstreamRetryDelay(t *testing.T) {
+	f := buildHTTPHarness(t)
+	for _, status := range []int{429, 503} {
+		f.retryStatus, f.retryAfter = status, "120"
+		w := f.call(t, "GET", "/api/console/v1/build-sessions/resolve?draftId=legacy", "", "", "", "BuildError", status)
+		require.Equal(t, "120", w.Header().Get("Retry-After"))
+	}
+}
+
+func TestBuildUnavailableStoreRetainsV1ErrorContract(t *testing.T) {
+	handler := Unavailable()
+	for _, path := range []string{
+		"/api/console/v1/build-sessions",
+		"/api/console/v1/build-sessions/resolve?draftId=legacy",
+		"/api/console/v1/build-sessions/89c00000-0000-4000-8000-000000000001/turns",
+	} {
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		require.Equal(t, http.StatusServiceUnavailable, w.Code)
+		require.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+		require.Equal(t, "2", w.Header().Get("Retry-After"))
+		value, err := jsonschema.UnmarshalJSON(bytes.NewReader(w.Body.Bytes()))
+		require.NoError(t, err)
+		require.NoError(t, writerSchemas(t)["BuildError"].Validate(value))
+		require.JSONEq(t, `{"error":"service_unavailable","message":"The console database is not available"}`, w.Body.String())
+	}
+	legacy := httptest.NewRecorder()
+	handler.ServeHTTP(legacy, httptest.NewRequest(http.MethodGet, "/api/console/me", nil))
+	require.Empty(t, legacy.Header().Get("Retry-After"))
+	require.JSONEq(t, `{"error":"console_store_unavailable","message":"The console database is not available"}`, legacy.Body.String())
 }

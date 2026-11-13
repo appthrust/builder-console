@@ -3,10 +3,11 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test'
 import { QueryClient } from '@tanstack/react-query'
 import { createBuildSessionsApi, intentKeys, mintIdempotencyKey, type BuildSessionsApi } from '../build-sessions'
-import { createConsoleMockFetch, resetMocks, type ConsoleMockFetch } from '../testing/console-mock-fetch'
+import { ConsoleApiError, parseRetryAfter } from '../console'
+import { createConsoleMockFetch, createSessionApp, resetMocks, type ConsoleMockFetch } from '../testing/console-mock-fetch'
 import { createTestGateway } from '../testing/gateway'
 import type { BuildSession } from '../../model/contracts/console'
-import { buildPollDelay, buildSessionKeys, buildSessionOptions, buildTurnsOptions, HIDDEN_POLL_MS, receiveSession, receiveTurn, type PollInput } from './build-sessions'
+import { buildPollDelay, buildSessionKeys, buildSessionOptions, buildTurnsOptions, HIDDEN_POLL_MS, receiveSession, receiveTurn, RETRY_AFTER_MAX_MS, type PollInput } from './build-sessions'
 
 const observe = { kind: 'known', value: 'observe' } as const
 const base: PollInput = { nextAction: observe, phaseElapsedMs: 0, hidden: false, consecutiveErrors: 0, random: () => 0.5 }
@@ -26,6 +27,22 @@ describe('§13 poll delay', () => {
   })
   test('failed reads back off 2/4/8/15/30 s, capped at 30 s', () => {
     expect([1, 2, 3, 4, 5, 9].map((consecutiveErrors) => buildPollDelay({ ...base, consecutiveErrors }))).toEqual([2_000, 4_000, 8_000, 15_000, 30_000, 30_000])
+  })
+  test('a failed read\'s Retry-After only lengthens the backoff, up to 60 s', () => {
+    expect(buildPollDelay({ ...base, consecutiveErrors: 1, retryAfterMs: 20_000 })).toBe(20_000)
+    expect(buildPollDelay({ ...base, consecutiveErrors: 3, retryAfterMs: 1_000 })).toBe(8_000)
+    expect(buildPollDelay({ ...base, consecutiveErrors: 1, retryAfterMs: 0 })).toBe(2_000)
+    expect(buildPollDelay({ ...base, consecutiveErrors: 1, retryAfterMs: 3_600_000 })).toBe(RETRY_AFTER_MAX_MS)
+    // Only a failed read waits for it.
+    expect(buildPollDelay({ ...base, retryAfterMs: 20_000 })).toBe(2_000)
+  })
+  test('Retry-After is delta seconds or an HTTP date', () => {
+    const now = Date.parse('2026-11-13T00:00:00Z')
+    expect(parseRetryAfter('12', now)).toBe(12_000)
+    expect(parseRetryAfter('Fri, 13 Nov 2026 00:00:30 GMT', now)).toBe(30_000)
+    expect(parseRetryAfter('Thu, 12 Nov 2026 00:00:00 GMT', now)).toBe(0)
+    expect(parseRetryAfter('soon', now)).toBeUndefined()
+    expect(parseRetryAfter(null, now)).toBeUndefined()
   })
   test('none, confirm and resume stop polling; an unknown next action keeps observing', () => {
     for (const value of ['none', 'confirm', 'resume'] as const) expect(buildPollDelay({ ...base, nextAction: { kind: 'known', value } })).toBe(false)
@@ -57,9 +74,50 @@ async function initialized() {
   return api.advance(created.id, { key: intentKeys.advance(created.id, created.version), version: created.version })
 }
 
+/** A created session: the opening turn answered, a plan made and the creation begun on its draft. */
+async function created() {
+  const session = await initialized()
+  for (let step = 0; step < 3; step++) await api.getTurn(session.id, session.activeTurnId!)
+  return createSessionApp(api, mock, session.id)
+}
+
+describe('Retry-After from the server (mock 503)', () => {
+  test('the session poll waits as long as the server asked, never shorter than its own backoff, never longer than 60 s', async () => {
+    const session = await initialized()
+    const options = buildSessionOptions(session.id, api)
+    // The session poll runs while the session itself is observed (no active turn); a failed read keeps this data.
+    client.setQueryData(options.queryKey, { ...session, activeTurnId: undefined, nextAction: { kind: 'known', value: 'observe' } })
+    const interval = options.refetchInterval as (query: unknown) => number | false
+    const query = () => client.getQueryCache().find({ queryKey: options.queryKey, exact: true })!
+    const read = () => client.fetchQuery({ ...options, staleTime: 0 }).catch(() => undefined)
+    const unavailable = (retryAfterSeconds: number) => mock.fetch('/api/console/__mock/build-session-unavailable', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reads: 1, retryAfterSeconds }) })
+    expect(interval(query())).toBeLessThanOrEqual(2_400)
+
+    await unavailable(20)
+    await read()
+    const failed = query().state.error
+    expect(failed).toBeInstanceOf(ConsoleApiError)
+    expect(failed).toMatchObject({ status: 503, code: 'service_unavailable', retryAfterMs: 20_000 })
+    expect(interval(query())).toBe(20_000)
+
+    await unavailable(600)
+    await read()
+    expect(query().state.error).toMatchObject({ retryAfterMs: 600_000 })
+    expect(interval(query())).toBe(RETRY_AFTER_MAX_MS)
+
+    await unavailable(1)
+    await read()
+    // The third failure's own backoff (8 s) is longer than the 1 s asked for.
+    expect(interval(query())).toBe(8_000)
+
+    await read()
+    expect(query().state.status).toBe('success')
+  })
+})
+
 describe('newer answers win', () => {
   test('a session read that started before a write and lands after it does not bring the old session back', async () => {
-    const before = await initialized()
+    const before = await created()
     let started!: () => void
     const readStarted = new Promise<void>((resolve) => { started = resolve })
     let release!: () => void
@@ -79,7 +137,7 @@ describe('newer answers win', () => {
   })
 
   test('the session cache keeps the higher version even when an older read is not cancelled', async () => {
-    const before = await initialized()
+    const before = await created()
     const newer = await api.setPublishPreferences(before.id, { name: '備品貸出', shareScope: 'group' }, { key: mintIdempotencyKey(), version: before.version }).then(() => api.get(before.id))
     const options = buildSessionOptions(before.id, { ...api, get: async () => before })
     client.setQueryData(options.queryKey, newer)

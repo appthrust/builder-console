@@ -458,6 +458,10 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
       setStartingBuild(false)
     }
   }
+  // The start's failure is shown under the whole form; bring it into view where the action was pressed.
+  useEffect(() => {
+    if (buildError) document.getElementById('build-start-failure')?.scrollIntoView?.({ block: 'nearest' })
+  }, [buildError])
   const autoStarted = useRef(false)
   useEffect(() => {
     if (!search.intent?.trim() || autoStarted.current || !entryReady('ai')) return
@@ -651,7 +655,7 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
           </form>
         </CardBody>
       </Card>
-      {buildError ? <BuildStartFailure className="mt-4" error={buildError.error} busy={startingBuild} onRetry={() => { const request = buildRequest.current; if (request) void startBuild(request.intent) }} /> : null}
+      {buildError ? <div id="build-start-failure" className="mt-4"><BuildStartFailure error={buildError.error} busy={startingBuild} onRetry={() => { const request = buildRequest.current; if (request) void startBuild(request.intent) }} /></div> : null}
     </div>
   )
 }

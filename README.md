@@ -134,17 +134,17 @@ feature/model imports of the canonical schema directory, including type-only
 imports, barrels, and assertions. PostgreSQL handler contract tests use the same
 opt-in DSN and isolated-schema cleanup as the other server integration tests.
 
-### NEW-APP conversation contracts (APT-753 / S4-0)
+### NEW-APP conversation contracts (APT-753 / S4)
 
 The same canonical schema directory now owns `build-sessions.ts` and
 `build-session-operations.ts`. `api/contracts/console/build-sessions.ts` exposes
 response boundaries and inferred input/domain types; `model/contracts/console.ts`
-exports the domain types. Features must not import raw schemas. These are
-declarations only: no v1 handlers, client, database, prompts or UI are registered.
+exports the domain types. Features must not import raw schemas. The server and
+SPA consume these contracts for the v1 conversation flow.
 
 The existing generator also emits `cmd/server/internal/domain/build-reply.schema.json`
 (JSON Schema 2020-12, `urn:appthrust:builder-console:reply:1`, at most 8 KiB).
-Go embeds it through `domain.BuildReplySchema()` for the later AgentTurn input. Both
+Go embeds it through `domain.BuildReplySchema()` for the AgentTurn input. Both
 artifacts are covered by `check:console-schema`. The served `openapi.json` is
 unchanged. This deliberately replaces the design's proposed independent
 `contracts/conversation` package and public-document edits with the established
@@ -181,7 +181,20 @@ Session/Turn resource responses and PublishResult return the session `ETag`;
 Turn creation also returns `Location`. Turns always include `sessionVersion`,
 so resolution returns the updated version without introducing a wrapper.
 PublishResult is `{desired:{name,shareScope},sessionVersion,sync:{state,failure?}}`.
+Session exposes optional `publish:{desired:{name,shareScope},sync:{state,failure?}}`
+using the same desired/sync shapes. It is absent until preferences are accepted;
+thereafter GET/list retain the last accepted values, including pending or failed
+synchronization. `shareScope` remains `private/group/company`; SPA sync states and
+failure codes are open observations. The existing `publish_preferences` column
+already stores these values and failures, so no migration is required.
 There is no cancel operation and no public share scope in this flow.
+Every v1 operation declares `Retry-After` on 429 and 503 error responses, including
+`artifact_uploads_busy` and temporary service/store failures (design §13).
+The server emits integer seconds only: default 2 for an absent/invalid upstream
+value, clamped to 1–300 otherwise. Other statuses and successes do not emit it.
+This delay never overrides `details.retryable=false` (for example
+`artifact_store_unsupported` or `PlatformCapabilityMissing`); those require
+intervention rather than automatic retry.
 
 Contract choices where the design left a shape or bound implicit:
 
@@ -263,6 +276,8 @@ Tokens and payloads are not logged or persisted. GET can observe and import a
 result, but never dispatches, repairs, wakes, starts a plan, or deletes artifacts.
 Those writes require the next authenticated `advance` request.
 
+### Operations: capability floor, rollback and retention
+
 `BUILDER_CONSOLE_NEW_APP_CONVERSATION=off|allowlist|on` defaults to `off`.
 `BUILDER_CONSOLE_NEW_APP_CONVERSATION_ALLOWLIST` is a JSON array of
 `{"issuer":"…","subject":"…"}` entries, not email addresses.
@@ -273,14 +288,57 @@ the singleton `builder-console/<configured Project>`. Keep it stable across upgr
 Prompt registration records `BUILDER_CONSOLE_RELEASE_VERSION`, or `development`
 for an unversioned local server; that local label is not release evidence.
 
-Operators must enable the flag only after deploying Platform P1–P3. Platform
-does not serve a capability/OpenAPI endpoint, so a pre-offer capability probe is
-not possible. Missing strong draft ETags or a missing/mismatched plan input digest
-fail closed with reason `PlatformCapabilityMissing`, and suppress new offers for
-two minutes. An incompatible create retains its attributable empty draft on an
-archived session with a failure; it creates no workspace and does not delete the
-draft. Its resolver remains console-v1. This is an intentional deviation from a
-pre-offer deployment proof, not a claim that a response proves every P1 guarantee.
+Keep `BUILDER_CONSOLE_NEW_APP_CONVERSATION=off` until the estate's Platform
+contains the draft contracts from [Platform PR #6723](https://github.com/appthrust/platform/pull/6723):
+P1 durable draft-create idempotency, P2 strong ETag/conditional draft update, and
+P3 pinned plan input with `expectedSpecSha256`/`inputSpecSha256`.
+
+The Platform `ApplicationStackDefinition` schema supports
+`spec.requiredCapabilities` for installed platform components (for example
+`appthrust-core`) and `spec.versions[].minPlatformVersion` for the oldest supported
+developer contract. `requirements[].satisfiedBy` concerns resolved credential
+slots/Ready app links, not Platform API revisions; `provides`/`consumes` are
+app-to-app capabilities. None names the draft contracts, and #6723 has no
+released Platform version to use as its minimum yet. `catalog/entry.yaml`
+therefore keeps its existing fields: no invented capability or version.
+**Release-time requirement:** the Console release that first enables this flow
+must set `spec.versions[].minPlatformVersion` on its new version entry in
+`catalog/entry.yaml` to the first Platform release containing #6723, once that
+version exists. Until that prerequisite is known and deployed, keep the flag off;
+a catalog declaration alone is not runtime deployment evidence.
+
+Platform does not serve a capability/OpenAPI endpoint, so a pre-offer capability
+probe is not possible. If the flag is enabled too early, a missing strong draft
+ETag or missing/mismatched plan input digest fails closed with typed
+`service_unavailable`, `details.reason=PlatformCapabilityMissing`,
+`details.retryable=false`. The process-local negative verdict cache suppresses
+new offers for two minutes after the last missing-capability observation.
+The first observation outside that window logs:
+`NEW_APP_CONVERSATION flag is enabled but Platform lacks the draft contract`.
+An incompatible create retains its attributable empty draft on an archived
+session with that failure; it creates no workspace and does not delete the draft.
+Its resolver remains console-v1. This is an intentional deviation from a pre-offer
+deployment proof, not a claim that a response proves every P1 guarantee.
+
+Normal rollback turns the flag off for **new sessions only**. Existing console-v1
+sessions remain readable/observable/resumable and keep their resolver binding;
+they must not fall back to the legacy engine. Once any console-v1 session exists,
+do not roll the binary back below the first release that can read console-v1
+sessions (v0.5.5 and earlier cannot). Keep the additive database tables and
+specification revisions. A Platform rollback removing P1–P3 also requires stopping
+new Console writes, not merely changing the new-session flag.
+
+Retention is an explicit store policy, not an environment variable or background
+scheduler: `store.BuildRetention` passed to `Tx.RetainBuildSessions` defaults via
+`DefaultBuildRetention()` to `Content=90 days`, `Audit=180 days`,
+`FailedOutput=7 days`, `BatchLimit=100` rows per table/window (allowed 1–1000).
+**These proposed durations await operator/product approval.** Only ended sessions
+without an active turn are eligible. Content expiry clears conversation/attempt
+payloads and historical specification bodies, not the current specification or
+application metadata; audit expiry removes receipts, attempts and terminal
+effects. Outstanding cleanup intents survive. No scheduler is wired, so these
+defaults do not promise automatic deletion at those ages. Remote cleanup still
+needs a fresh user bearer; backup/etcd retention follows the estate's policy.
 
 External intents and exact prepared AgentTurn requests commit before HTTP.
 Replays retain their original keys, bodies, and first HTTP response snapshot.
@@ -307,8 +365,10 @@ request is not fenced by Console; strict admission would require another
 Platform input-hash contract. The legacy proxy also does not consult Console
 draft bindings: Platform remains responsible for authorization on that route.
 The v1 resolver never falls back to legacy for an inaccessible Console binding.
-Non-v1 handlers retain the existing 60-second Directory view cache; v1 requests
-use a fresh view and recheck current Platform actions.
+Legacy non-v1 handlers retain the existing 60-second Directory authorization
+view cache: membership changes, including revocation, can remain stale for up to
+60 seconds there. V1 handlers read fresh Directory groups per request and recheck
+current Platform actions. This integration does not change the legacy cache.
 
 If creation is observed after an AgentTurn POST answer was lost and no operation
 ID was recorded, deleting the runtime cannot be proved safe. A terminal cleanup

@@ -5,13 +5,15 @@
 // Polling follows the conversation design §13: an observed session or turn is
 // re-read 2 s after an answer, 3 s once its phase has lasted 10 s and 5 s after
 // 30 s (±20 % jitter); a longer `pollAfterMs` wins; a hidden tab waits 15 s;
-// failed reads back off 2/4/8/15/30 s; `none`, `confirm` and `resume` stop it.
+// failed reads back off 2/4/8/15/30 s, and a failed read's longer `Retry-After`
+// (429/503) wins up to 60 s; `none`, `confirm` and `resume` stop it.
 // A read never overwrites a newer answer: the caches keep the value with the
 // higher session version, so a poll that started before a write cannot bring
 // back the state the write replaced.
 import { queryOptions, replaceEqualDeep, skipToken, type Query, type QueryClient } from '@tanstack/react-query'
 import type { OpenValue } from '../boundary'
 import { buildSessionsApi, type BuildSessionsApi } from '../build-sessions'
+import { ConsoleApiError } from '../console'
 import { sessionExpiryStore } from '../session-expiry'
 import type { BuildSession, BuildTurn } from '../../model/contracts/console'
 
@@ -27,8 +29,11 @@ export const buildSessionKeys = {
 type NextAction = BuildSession['nextAction']
 
 const OBSERVE_STEPS = [{ after: 30_000, every: 5_000 }, { after: 10_000, every: 3_000 }, { after: 0, every: 2_000 }] as const
-const ERROR_BACKOFF_MS = [2_000, 4_000, 8_000, 15_000, 30_000] as const
+/** Failed reads wait 2/4/8/15/30 s; the first step is the shortest a failed read is retried. */
+export const ERROR_BACKOFF_MS = [2_000, 4_000, 8_000, 15_000, 30_000] as const
 export const HIDDEN_POLL_MS = 15_000
+/** The longest a server's `Retry-After` may hold the next read back; a longer one is read again at this pace. */
+export const RETRY_AFTER_MAX_MS = 60_000
 
 export interface PollInput {
   nextAction: NextAction
@@ -38,8 +43,15 @@ export interface PollInput {
   hidden: boolean
   /** Reads that failed since the last good answer. */
   consecutiveErrors: number
+  /** The last failed read's `Retry-After`; it only lengthens the backoff, within `RETRY_AFTER_MAX_MS`. */
+  retryAfterMs?: number
   /** [0, 1); jitter source. */
   random: () => number
+}
+
+/** A server's `Retry-After`, bounded: never sooner than `floorMs` (the client's own wait), never later than `RETRY_AFTER_MAX_MS`. */
+export function boundedRetryAfter(retryAfterMs: number | undefined, floorMs: number): number {
+  return retryAfterMs === undefined ? floorMs : Math.max(floorMs, Math.min(retryAfterMs, RETRY_AFTER_MAX_MS))
 }
 
 /** Whether this next action is something to keep observing (an unknown one is: it must be noticed when it becomes known). */
@@ -52,7 +64,7 @@ export function buildPollDelay(input: PollInput): number | false {
   if (!isObserving(input.nextAction)) return false
   const jitter = 0.8 + 0.4 * input.random()
   const delay = input.consecutiveErrors > 0
-    ? ERROR_BACKOFF_MS[Math.min(input.consecutiveErrors, ERROR_BACKOFF_MS.length) - 1]!
+    ? boundedRetryAfter(input.retryAfterMs, ERROR_BACKOFF_MS[Math.min(input.consecutiveErrors, ERROR_BACKOFF_MS.length) - 1]!)
     : Math.round(OBSERVE_STEPS.find((step) => input.phaseElapsedMs >= step.after)!.every * jitter)
   const server = Math.max(delay, input.pollAfterMs ?? 0)
   return input.hidden ? Math.max(server, HIDDEN_POLL_MS) : server
@@ -64,7 +76,7 @@ const tracks = new WeakMap<object, PollTrack>()
 /** `refetchInterval` for a query whose data says what to observe next. */
 function pollInterval<T>(observe: (data: T) => { nextAction: NextAction; pollAfterMs?: number; phase: string } | undefined) {
   return (query: Query<T, Error, T, readonly unknown[]>): number | false => {
-    const { data, dataUpdatedAt, errorUpdateCount } = query.state
+    const { data, dataUpdatedAt, errorUpdateCount, error } = query.state
     const target = data === undefined ? undefined : observe(data)
     // Sign-in expired: every read would fail before the network; the full-page sign-in starts over.
     if (!target || sessionExpiryStore.state) return false
@@ -74,9 +86,12 @@ function pollInterval<T>(observe: (data: T) => { nextAction: NextAction; pollAft
       ? { phase: target.phase, since: now, dataUpdatedAt, errorsAtData: errorUpdateCount }
       : previous.dataUpdatedAt !== dataUpdatedAt ? { ...previous, dataUpdatedAt, errorsAtData: errorUpdateCount } : previous
     tracks.set(query, track)
+    const consecutiveErrors = errorUpdateCount - track.errorsAtData
     return buildPollDelay({
       nextAction: target.nextAction, pollAfterMs: target.pollAfterMs, phaseElapsedMs: now - track.since,
-      hidden: typeof document !== 'undefined' && document.visibilityState === 'hidden', consecutiveErrors: errorUpdateCount - track.errorsAtData, random: Math.random,
+      hidden: typeof document !== 'undefined' && document.visibilityState === 'hidden', consecutiveErrors,
+      ...(consecutiveErrors > 0 && error instanceof ConsoleApiError && error.retryAfterMs !== undefined ? { retryAfterMs: error.retryAfterMs } : {}),
+      random: Math.random,
     })
   }
 }

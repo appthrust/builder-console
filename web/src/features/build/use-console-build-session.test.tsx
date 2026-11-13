@@ -8,7 +8,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { buildSessionsApi, intentKeys, mintIdempotencyKey } from '../../api/build-sessions'
 import { sessionExpiryStore } from '../../api/session-expiry'
-import { createConsoleMockFetch, resetMocks, type ConsoleMockFetch } from '../../api/testing/console-mock-fetch'
+import { createConsoleMockFetch, createSessionApp, resetMocks, type ConsoleMockFetch } from '../../api/testing/console-mock-fetch'
 import { buildCopy } from '../../model/build/copy'
 import type { BuildSession } from '../../model/contracts/console'
 import { useConsoleBuildSession, type ConsoleBuildSession } from './use-console-build-session'
@@ -170,7 +170,8 @@ describe('an unreadable 2xx answer to a write', () => {
   const families: { name: string; method: string; path: RegExp; setup: () => Promise<BuildSession>; act: (build: ConsoleBuildSession, session: BuildSession) => void }[] = [
     { name: 'turn', method: 'POST', path: /\/turns$/, setup: idleSession, act: (build) => { build.actions.send('質問です') } },
     { name: 'resolution', method: 'POST', path: /\/resolution$/, setup: async () => (await confirmingSession()).session, act: (build, session) => { build.actions.resolve(session.activeTurnId ?? build.view!.confirmation!.id, 'accept_spec') } },
-    { name: 'publish', method: 'PATCH', path: /\/publish-preferences$/, setup: idleSession, act: (build) => { build.actions.setPublishPreferences({ name: '点検ノート', shareScope: 'group' }) } },
+    // Publish preferences are a created session's (design §12).
+    { name: 'publish', method: 'PATCH', path: /\/publish-preferences$/, setup: async () => createSessionApp(api, mock, (await idleSession()).id), act: (build) => { build.actions.setPublishPreferences({ name: '点検ノート', shareScope: 'group' }) } },
     { name: 'archive', method: 'POST', path: /\/archive$/, setup: idleSession, act: (build) => { build.actions.archive() } },
     // advance is sent by the hook itself when the server says `advance`.
     { name: 'advance', method: 'POST', path: /\/advance$/, setup: () => api.create({ kind: 'new-app', groupId: 'g-team-a', intent: '初期化中のアプリ', locale: 'ja' }, mintIdempotencyKey()), act: () => {} },

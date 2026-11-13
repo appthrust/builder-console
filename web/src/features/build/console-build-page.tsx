@@ -75,15 +75,15 @@ function ConsoleLayout({ view, actions, stale, stages, draftError, openArtifact 
   }, [openArtifact])
   const lifecycle = session.lifecycle.kind === 'known' ? session.lifecycle.value : undefined
   const archived = lifecycle === 'archived'
-  const writable = !view.unsupported && !archived && !stages?.closed
   const planTurn = view.activeTurn?.kind === 'request_plan' ? view.activeTurn : undefined
   const planWaiting = planTurn ? planPhase(planTurn) : undefined
   const stalePlan = session.plan?.stale === true
   // While a plan request runs the header says so; once building started it is the draft's stage action;
-  // otherwise the typed plan action (never message text), while there is no current plan to build from.
+  // otherwise the typed plan action (never message text), while there is no current plan to build from. A stale
+  // plan's re-plan sits on the plan's proposal with its reason once the draft is read, so it is not repeated here.
   const action = planWaiting
     ? <p role="status" className="flex h-9 items-center gap-2 text-sm whitespace-nowrap text-stone-600 max-sm:text-xs"><Loader2 aria-hidden className="size-4 animate-spin text-accent" />{text.console.progress.waiting[planWaiting.kind === 'working' ? planWaiting.waiting : 'planning']}</p>
-    : stages?.headerAction ?? ((lifecycle === 'specifying' || (lifecycle === 'planned' && stalePlan) || view.unsupported)
+    : stages?.headerAction ?? ((lifecycle === 'specifying' || (lifecycle === 'planned' && stalePlan && !stages) || view.unsupported)
       ? <Button tone="primary" className="max-sm:px-2.5 max-sm:text-xs" disabled={!view.canRequestPlan} onClick={() => actions.requestPlan()}>{stalePlan ? text.console.plan.replan : buildCopy.questions.kickoffReply}</Button>
       : undefined)
   const busy = Boolean(planWaiting) || stages?.stage === 'build'
@@ -106,7 +106,7 @@ function ConsoleLayout({ view, actions, stale, stages, draftError, openArtifact 
         <ConsoleConversation view={view} actions={actions} restore={restore} end={stages?.conversationEnd} closedReason={stages?.closed ? text.console.created : undefined} />
       </div>
       <div id="build-artifact" role="tabpanel" aria-labelledby="build-tab-artifact" className={cn('relative min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain', tab === 'artifact' ? 'block' : 'hidden', stages?.artifact && artifactCollapsed ? 'md:hidden' : 'md:block')}>
-        {stages?.artifact ?? <ConsoleSpecPane view={view} actions={actions} writable={writable} />}
+        {stages?.artifact ?? <ConsoleSpecPane view={view} />}
       </div>
       {stages?.artifact && artifactCollapsed ? <div className="hidden min-h-0 flex-col items-center gap-2 bg-white py-2 md:flex">
         <button type="button" aria-label={buildCopy.artifact.expand} aria-expanded={false} aria-controls="build-artifact" title={buildCopy.artifact.expand} onClick={() => setArtifactCollapsed(false)} className="flex size-9 items-center justify-center rounded-md text-stone-500 hover:bg-stone-100 hover:text-stone-900">

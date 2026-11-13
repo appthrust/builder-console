@@ -201,6 +201,11 @@ export const textEn: typeof textJa = {
     resume: { title: 'A check is needed to continue', action: 'Continue' },
     archived: 'This session has ended. You can read it, but you can’t continue it.',
     created: 'Building has started, so the conversation about the app details is over.',
+    createdFromEarlier: {
+      title: 'Built from an earlier version of the specification',
+      reason: 'Changes confirmed after the plan was made are not in this app. Add them with “Improve with AI”.',
+      waiting: 'Changes confirmed after the plan was made are not in this app. Once it is built, add them with “Improve with AI”.',
+    },
     publish: {
       title: 'Published name and audience',
       name: 'Published name',
@@ -214,6 +219,7 @@ export const textEn: typeof textJa = {
       save: 'Save',
       saved: (name: string) => `Saved as “${name}”. Not published yet.`,
       sync: { pending: 'Waiting to update the platform.', syncing: 'Updating the platform.', applied: 'The platform is updated.', failed: 'The platform couldn’t be updated.', unknown: 'The platform update status can’t be checked.' },
+      required: 'Before publishing, enter and save the published name and who can see it.',
     },
     start: {
       unconfirmed: { title: 'We couldn’t confirm whether building started', reason: 'Checking never creates the same app twice.' },

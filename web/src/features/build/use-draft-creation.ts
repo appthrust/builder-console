@@ -21,7 +21,7 @@ import { appQuery, writeAppCache } from '../../api/queries/console'
 import { platformErrorEnvelope } from '../../api/platform-error'
 import { isPublishPreparationPending, publishPreparationRetryDelay } from '../../api/publish-retry'
 import { classifyBuildFailure, unconfirmedFailure } from '../../model/build/failure'
-import { withDefaultPublish } from '../../model/build/plan'
+import { renameCreationPlan, withDefaultPublish } from '../../model/build/plan'
 import { appPreparationProgress, sourceBuildFailureProgress } from '../../model/build/progress'
 import { draftPublished } from '../../model/build/stage'
 import type { BuildFailure } from '../../model/build/types'
@@ -299,11 +299,33 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
     })
   }
 
+  /** 「この内容で作る」: request the preparation (the preparation effect starts it once nothing holds it). */
+  function prepare() { bindingFailed.current = false; host.clearFailure(); host.patch({ prepareRequested: true }) }
+
   return {
     waitingForPublish: publishRetries.current >= 4,
     markPublished,
-    /** 「この内容で作る」: request the preparation (the effect above starts it once nothing holds it). */
-    prepare: () => { bindingFailed.current = false; host.clearFailure(); host.patch({ prepareRequested: true }) },
+    prepare,
+    /**
+     * The name collision's recovery (NameChoice), then the preparation again with the new name. A URL taken by
+     * another app renames the application on the stored plan (never a schema-defaulted client copy, no cleanup);
+     * a repository/package name collision cleans the failed creation up and renames the plan. `onRenamed` lets
+     * the host drop what it showed about the collision.
+     */
+    rename(name: string, failure: BuildFailure | undefined, onRenamed: (updated: BuildDraft) => void) {
+      if (!draft.creationPlan) return
+      void host.perform('prepare', async () => {
+        const publishConflict = failure?.reasonCode === 'PublishURLConflict'
+        if (!publishConflict) await api.cleanupCreation(projectId, draft.id)
+        const updated = await api.updateDraft(projectId, draft.id, publishConflict
+          ? { renameApplication: { name } }
+          : { creationPlan: renameCreationPlan(draft.creationPlan!, name, { domain }) })
+        await host.receive(updated)
+        host.patch({ reusePlan: true, executionRequestId: undefined })
+        onRenamed(updated)
+        prepare()
+      })
+    },
     /** A retry may bind again after a failed binding. */
     resetBinding: () => { bindingFailed.current = false },
     /** The creation's retries: 公開済み again, the implementation run, or a clean preparation after a failed one. */

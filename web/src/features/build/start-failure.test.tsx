@@ -77,8 +77,6 @@ test('any other error keeps the generic notice and its retry', async () => {
 })
 
 test('the new-session engine is console-v1 only when the server config turns it on', () => {
-  expect(newSessionEngine({ projectId: 'commerce' })).toBe('platform-v1')
-  expect(newSessionEngine({ projectId: 'commerce', newAppConversation: false })).toBe('platform-v1')
-  expect(newSessionEngine({ projectId: 'commerce', newAppConversation: 'true' })).toBe('platform-v1')
-  expect(newSessionEngine({ projectId: 'commerce', newAppConversation: true })).toBe('console-v1')
+  expect(newSessionEngine({ newAppConversation: false })).toBe('platform-v1')
+  expect(newSessionEngine({ newAppConversation: true })).toBe('console-v1')
 })

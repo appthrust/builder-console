@@ -129,9 +129,6 @@ func writeBuildError(w http.ResponseWriter, err error) {
 				body.Details.CurrentVersion = &d.CurrentVersion
 			}
 		}
-		if upstream.RetryAfter != "" {
-			w.Header().Set("Retry-After", upstream.RetryAfter)
-		}
 	case errors.As(err, &rejected):
 		body.Error = rejected.Code
 		body.Message = rejected.Message
@@ -173,8 +170,25 @@ func writeBuildError(w http.ResponseWriter, err error) {
 			body.Error = "service_unavailable"
 		}
 	}
+	if status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable {
+		retryAfter := ""
+		if upstream != nil {
+			retryAfter = upstream.RetryAfter
+		}
+		w.Header().Set("Retry-After", buildRetryAfter(retryAfter))
+	}
 	httpx.WriteJSON(w, status, body)
 }
+
+// v1 publishes delta-seconds only, never arbitrary upstream header text.
+func buildRetryAfter(value string) string {
+	seconds, err := strconv.Atoi(value)
+	if err != nil {
+		return "2"
+	}
+	return strconv.Itoa(max(1, min(seconds, 300)))
+}
+
 func optionalString(value string) *string {
 	if value == "" {
 		return nil
@@ -208,6 +222,12 @@ func (a *API) buildSessionWire(ctx context.Context, c buildsession.Caller, aggre
 	wire := BuildSession{ID: s.ID, Kind: "new-app", Engine: "console-v1", Version: s.Version, Lifecycle: s.Lifecycle, GroupID: s.Scope.GroupID, Locale: s.Locale, CreatedAt: timestamp(s.CreatedAt), UpdatedAt: timestamp(s.UpdatedAt), DraftID: optionalString(s.DraftID), Specification: wireSpecification(aggregate.Specification), ActiveTurnID: optionalString(s.ActiveTurnID), Projection: BuildProjection{State: s.Projection.State, AppliedRevision: s.Projection.AppliedRevision}, Capabilities: BuildCapabilities{CanConverse: s.CanConverse(), CanRequestPlan: s.CanRequestPlan()}, NextAction: action, Failure: wireFailure(s.Failure)}
 	if s.PlannedSpecRevision != nil {
 		wire.Plan = &BuildPlanObservation{SpecRevision: *s.PlannedSpecRevision, Stale: s.CurrentSpecRevision != *s.PlannedSpecRevision}
+	}
+	if s.Publish != nil {
+		wire.Publish = &BuildPublishObservation{
+			Desired: BuildPublishInput{Name: s.Publish.Name, ShareScope: s.Publish.ShareScope},
+			Sync:    BuildPublishSync{State: s.Publish.State, Failure: wireFailure(s.Publish.Failure)},
+		}
 	}
 	if s.ArchivedAt != nil {
 		value := timestamp(*s.ArchivedAt)

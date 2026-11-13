@@ -71,7 +71,9 @@ export function ConsoleConversation({ view, actions, restore, end, closedReason 
       </div>
     </div>
     <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pb-4 sm:px-6">
-      <Composer chips={chips} disabled={!view.canSend} disabledReason={closedReason} placeholder={text.conversation.replyPlaceholder} restore={restore} onSubmit={send} onChip={send} />
+      {/* Closed for good (building started): the reason alone, not an input that only looks usable. */}
+      {closedReason ? <p className="border-t border-stone-200 pt-3 text-xs leading-relaxed text-stone-500">{closedReason}</p>
+        : <Composer chips={chips} disabled={!view.canSend} placeholder={text.conversation.replyPlaceholder} restore={restore} onSubmit={send} onChip={send} />}
     </div>
   </section>
 }

@@ -1,7 +1,8 @@
 import { isResponseContractError } from '../../api/boundary'
 import { createDraft, listDrafts } from '../../api/build'
 import { buildSessionsApi, intentKeys, isVersionConflict, mintIdempotencyKey, type BuildSessionsApi } from '../../api/build-sessions'
-import { buildPollDelay } from '../../api/queries/build-sessions'
+import { ConsoleApiError } from '../../api/console'
+import { boundedRetryAfter, buildPollDelay, ERROR_BACKOFF_MS } from '../../api/queries/build-sessions'
 import { membershipRoots, type BuildError, type BuildSession, type Group, type Me } from '../../model/contracts/console'
 import { findResumableDraft } from '../../model/build/resume'
 import { currentLanguage } from '../../shell/language'
@@ -127,6 +128,11 @@ export async function startConsoleBuild(intent: string, groupId: string, deps: P
       if (isResponseContractError(error)) throw new BuildStartError('unconfirmed', { sessionId: session.id })
       // Another tab moved this session on: read it and continue from what the server has.
       if (isVersionConflict(error)) { session = await api.get(session.id); continue }
+      // The server asked to come back later (429/503 with `Retry-After`): wait as asked, bounded, within the start wait.
+      if (error instanceof ConsoleApiError && (error.status === 429 || error.status === 503) && error.retryAfterMs !== undefined) {
+        await sleep(Math.min(boundedRetryAfter(error.retryAfterMs, ERROR_BACKOFF_MS[0]), Math.max(0, START_WAIT_MS - (now() - began))))
+        continue
+      }
       throw error
     }
   }

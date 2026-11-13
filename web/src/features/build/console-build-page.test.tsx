@@ -2,7 +2,8 @@
 // queries, gateway and S4-0 contracts against the in-memory v1 mock: every
 // turn's answer stands on its own, candidates are concrete and selectable,
 // unresolved items stay out of the specification, the revision changes only
-// after 反映する, publish values come only from the typed inputs, progress is
+// after 反映する, publish values are asked only once created and come only from
+// the typed inputs (and back from the session after a reload), progress is
 // the server's, double clicks send once, and unreadable 2xx / 412 / unknown
 // values behave per the wire-boundary rules. Only the answer under test is
 // rewritten on its way back.
@@ -18,7 +19,7 @@ import { buildSessionKeys, isObserving } from '../../api/queries/build-sessions'
 import { consoleKeys } from '../../api/queries/console'
 import { queryClient as appQueryClient } from '../../api/queries/shared'
 import { sessionExpiryStore } from '../../api/session-expiry'
-import { createConsoleMockFetch, resetMocks, type ConsoleMockFetch } from '../../api/testing/console-mock-fetch'
+import { createConsoleMockFetch, createSessionApp, resetMocks, type ConsoleMockFetch } from '../../api/testing/console-mock-fetch'
 import { createTestGateway } from '../../api/testing/gateway'
 import { platformRoutes } from '../../dev/mock-platform'
 import { buildCopy } from '../../model/build/copy'
@@ -318,33 +319,84 @@ describe('progress', () => {
   })
 })
 
-describe('publish name and audience', () => {
-  test('start empty (never from the spec name or a candidate) and save exactly the typed values', async () => {
+/** A session with a plan (and optionally a spec change accepted after it), created on its Platform draft by another client. */
+async function createdSession(options: { before?: (sessionId: string) => Promise<void>; staleAfterPlan?: boolean } = {}) {
+  const { draftId, sessionId } = await startSession()
+  await options.before?.(sessionId)
+  await createSessionApp(api, mock, sessionId, options)
+  return { draftId, sessionId }
+}
+
+describe('publish name and audience (asked after creation, design §12)', () => {
+  test('are not asked while specifying or with a plan; the server refuses them before creation (412 failed_precondition)', async () => {
     const { draftId, sessionId } = await startSession()
-    await say(sessionId, 'おすすめの名前の候補を出して')
     const page = await open(draftId)
-    const name = page.container.querySelector<HTMLInputElement>('#console-publish-name')!
-    const save = button(page.container, c.publish.save)
+    expect(page.container.querySelector('#console-publish-name')).toBeNull()
+    let session = await api.get(sessionId)
+    await expect(api.setPublishPreferences(sessionId, { name: '点検ノート', shareScope: 'private' }, { key: mintIdempotencyKey(), version: session.version }))
+      .rejects.toMatchObject({ status: 412, code: 'failed_precondition' })
+    await api.createTurn(sessionId, { kind: 'request_plan', specRevision: 0 }, { key: mintIdempotencyKey(), version: session.version })
+    await finishActive(sessionId)
+    session = await api.get(sessionId)
+    await expect(api.setPublishPreferences(sessionId, { name: '点検ノート', shareScope: 'private' }, { key: mintIdempotencyKey(), version: session.version }))
+      .rejects.toMatchObject({ status: 412, code: 'failed_precondition' })
+    await reread(page)
+    await settle(20)
+    expect(page.container.querySelector('[data-testid="build-proposal"]')).not.toBeNull()
+    expect(page.container.querySelector('#console-publish-name')).toBeNull()
+  })
+
+  test('a created session asks for them empty (never from the spec name or a candidate), saves exactly the typed values, and a reload brings them back', async () => {
+    const { draftId, sessionId } = await createdSession({ before: (id) => say(id, 'おすすめの名前の候補を出して') })
+    const page = await open(draftId)
+    await settle(30)
+    const form = page.container.querySelector('[data-testid="console-publish"]')!
+    const name = form.querySelector<HTMLInputElement>('#console-publish-name')!
+    const save = button(form, c.publish.save)
     expect(name.value).toBe('')
-    expect(page.container.querySelector('[role="radio"][aria-checked="true"]')).toBeNull()
+    expect(form.querySelector('[role="radio"][aria-checked="true"]')).toBeNull()
+    expect(form.querySelector('[data-testid="console-publish-required"]')!.textContent).toBe(c.publish.required)
     expect(save.disabled).toBe(true)
 
     await act(async () => { type(name, 'あ'.repeat(41)) })
-    expect(page.container.textContent).toContain(c.publish.nameTooLong)
+    expect(form.textContent).toContain(c.publish.nameTooLong)
     await act(async () => { type(name, '  点検ノート  ') })
-    await act(async () => { page.container.querySelector<HTMLButtonElement>('#console-publish-scope-group')!.click() })
+    await act(async () => { form.querySelector<HTMLButtonElement>('#console-publish-scope-group')!.click() })
     expect(save.disabled).toBe(false)
+    const advances = posts(sessionId, '/advance').length
     const patches: unknown[] = []
     const fetch = mock.fetch
     globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (init?.method === 'PATCH') patches.push(JSON.parse(String(init.body)))
+      if (init?.method === 'PATCH' && String(input).endsWith('/publish-preferences')) patches.push(JSON.parse(String(init.body)))
       return fetch(input, init)
     }) as typeof globalThis.fetch
     await act(async () => { save.click(); save.click() })
-    await settle()
+    await settle(30)
     expect(patches).toEqual([{ name: '点検ノート', shareScope: 'group' }])
-    expect(page.container.querySelector('[data-testid="console-publish-saved"]')!.textContent).toContain(c.publish.saved('点検ノート'))
-    expect(page.container.querySelector('[data-testid="console-publish-saved"]')!.textContent).toContain(c.publish.sync.applied)
+    // The server commits first and writes the draft on the advance the session asks for.
+    expect(posts(sessionId, '/advance')).toHaveLength(advances + 1)
+    expect((await api.get(sessionId)).publish).toEqual({ desired: { name: '点検ノート', shareScope: 'group' }, sync: { state: { kind: 'known', value: 'applied' } } })
+    const saved = form.querySelector('[data-testid="console-publish-saved"]')!.textContent
+    expect(saved).toContain(c.publish.saved('点検ノート'))
+    expect(saved).toContain(c.publish.sync.applied)
+    expect(form.querySelector('[data-testid="console-publish-required"]')).toBeNull()
+
+    const reloaded = await open(draftId)
+    await settle(30)
+    const again = reloaded.container.querySelector('[data-testid="console-publish"]')!
+    expect(again.querySelector<HTMLInputElement>('#console-publish-name')!.value).toBe('点検ノート')
+    expect(again.querySelector('[role="radio"][aria-checked="true"]')!.id).toBe('console-publish-scope-group')
+    expect(again.querySelector('[data-testid="console-publish-saved"]')!.textContent).toContain(c.publish.sync.applied)
+  })
+
+  test('an app created from an earlier specification than the last confirmed one says so once', async () => {
+    const { draftId } = await createdSession({ staleAfterPlan: true })
+    const page = await open(draftId)
+    await settle(30)
+    const titles = [...page.container.querySelectorAll('[data-testid="build-session"] > div:not([role="tablist"]) *')].filter((item) => item.textContent === c.createdFromEarlier.title)
+    expect(titles).toHaveLength(1)
+    expect(page.container.textContent).toContain(c.createdFromEarlier.waiting)
+    expect(buttons(page.container, c.plan.replan)).toHaveLength(0)
   })
 })
 
@@ -481,7 +533,8 @@ describe('wire-boundary rules', () => {
     expect(page.container.querySelector<HTMLTextAreaElement>('#build-reply')!.disabled).toBe(true)
     expect(button(page.container.querySelector('header')!, buildCopy.questions.kickoffReply).disabled).toBe(true)
     expect(buttons(page.container, c.proposal.accept).every((item) => item.disabled)).toBe(true)
-    expect(button(page.container, c.publish.save).disabled).toBe(true)
+    // An unknown lifecycle is not `created`: the publish inputs are not offered at all.
+    expect(page.container.querySelector('#console-publish-name')).toBeNull()
   })
 
   test('an unknown turn state shows its reply and offers none of its actions', async () => {

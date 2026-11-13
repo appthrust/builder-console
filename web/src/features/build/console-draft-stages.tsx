@@ -2,13 +2,17 @@
 // Platform に残す"): the conversation stays the Console session's; the plan,
 // the creation execution, the implementation and publishing are the Platform
 // draft the session points to (`session.draftId`), driven by the same shared
-// creation as the legacy engine (use-draft-creation). Nothing here sends a
-// Platform conversation turn, asks for a plan by text, or infers the published
-// name: it is the typed publish preference (the server writes it to the draft).
+// creation as the legacy engine (use-draft-creation), including its
+// name-collision recovery (NameChoice). Nothing here sends a Platform
+// conversation turn, asks for a plan by text, or infers the published name.
 //
 // 「この内容で作る」 is offered only for a current plan (`session.plan`, not stale);
 // a stale plan asks for re-planning with the typed plan action; without a plan
-// there is nothing to create from.
+// there is nothing to create from. Once the session is created, the typed
+// publish name and audience are asked where the legacy flow ran its hidden
+// preparation turn (design §12); 公開する waits until they are saved and applied.
+// A published app is changed further with 「AIで直す」 (a created session takes
+// no more spec turns), as is an app created from an earlier specification.
 import { useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { buildDraftOptions } from '../../api/queries/build'
@@ -28,17 +32,21 @@ import { ActionError, Button, Notice } from '../../ui'
 import { DatabaseChanges } from '../app/database-changes'
 import { canEditApp } from '../app/permissions'
 import { ArtifactPane } from './artifact-pane'
+import { ConsolePublishSettings, publishReady } from './console-publish-settings'
 import { readConsoleCreation, saveConsoleCreation } from './console-session-state'
 import type { ConsoleBuildView } from './console-view'
 import { AiTurn } from './conversation-pane'
 import { text } from './copy'
 import { implemented } from './implement'
+import { NameChoice } from './name-choice'
 import { ProposalBody } from './proposal'
 import { PublishStep } from './publish-step'
 import { StageAction } from './session-header'
 import { useCreatedAppView } from './use-created-app-view'
 import type { ConsoleBuildActions } from './use-console-build-session'
 import { draftFailure, useDraftCreation, useDraftCreationEffects, writeDraft, type CreationContext, type CreationTab } from './use-draft-creation'
+import { useNameSuggestion } from './use-name-suggestion'
+import { ImproveButton } from '../improve/entry'
 
 /** What the plan and creation add to the console-v1 layout. */
 export interface ConsoleStages {
@@ -128,6 +136,7 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
 
   const { appView, creationAccess, released, url, shareText } = useCreatedAppView({ projectId, draft, app, groups, initialReleaseId: tab.initialReleaseId, tasks: implementation.state.tasks })
   const started = Boolean(execution || draft.createdApplicationStackId)
+  const created = session.lifecycle.kind === 'known' && session.lifecycle.value === 'created'
   const proposal = planProposal(creation.proposalDraft)
   const preparing = tab.prepareRequested && !execution
   const canCreate = readiness.kind === 'current' && !started && !creation.defaultPending && !busy && !view.write && !session.activeTurnId && !view.unsupported
@@ -135,33 +144,64 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
     : readiness.kind === 'current' ? <Button tone="primary" loading={preparing} disabled={!canCreate || preparing} onClick={effects.prepare}>{buildCopy.primary.prepare}</Button>
       : readiness.kind === 'stale' ? <div className="space-y-2" data-testid="console-plan-stale">
         <p className="text-xs leading-relaxed text-busy-ink">{text.console.plan.stale}</p>
-        <Button disabled={!view.canRequestPlan} onClick={() => actions.requestPlan()}>{text.console.plan.replan}</Button>
+        <Button tone="primary" disabled={!view.canRequestPlan} onClick={() => actions.requestPlan()}>{text.console.plan.replan}</Button>
       </div> : undefined
-  const primary = result.primary.action === 'publish' ? { ...result.primary, enabled: result.primary.enabled && !busy && !sharing } : { action: 'none' as const, label: '', enabled: false }
-  const retry = failure && failure.failure.kind !== 'policy'
-    ? <Button size="sm" onClick={() => {
-      const { context, failure: shown } = failure
-      setFailure(undefined)
-      effects.resetBinding()
-      if (shown.kind === 'unconfirmed') void queryClient.invalidateQueries({ queryKey: buildDraftOptions(projectId, draft.id).queryKey })
-      else if (context !== 'plan') effects.retry(context)
-    }}>{failure.failure.kind === 'unconfirmed' ? buildCopy.failure.confirm : text.conversation.retry}</Button> : undefined
+
+  // The typed publish preferences are the server's once saved; the publish step starts from the draft they were written to.
+  // Asked once the creation has finished (the legacy flow wrote them then too): the Platform draft takes them only then.
+  // While the publish step is open it carries the same name and audience (started from these), so they are not shown twice.
+  const askPublish = created && Boolean(draft.createdApplicationStackId) && !running && !published && !sharing
+  const publishSaved = publishReady(view.publish)
+  useEffect(() => {
+    if (publishSaved) void queryClient.invalidateQueries({ queryKey: buildDraftOptions(projectId, draft.id).queryKey, exact: true })
+  }, [publishSaved, view.publish?.desired.name, view.publish?.desired.shareScope])
+  const primary = result.primary.action === 'publish' ? { ...result.primary, enabled: result.primary.enabled && publishSaved && !busy && !sharing } : { action: 'none' as const, label: '', enabled: false }
+
+  // 「AIで直す」 needs the created stack and a finished first build (公開する is offered); a published app gets it in the header.
+  const improveName = app?.displayName ?? draft.publishPreferences?.name ?? spec.name ?? draft.title
+  const continuing = result.primary.action === 'continue'
+  const improvable = Boolean(draft.createdApplicationStackId) && ((result.primary.action === 'publish' && result.primary.enabled) || continuing || published)
+  const improve = improvable ? <ImproveButton app={{ displayName: improveName }} stackId={draft.createdApplicationStackId!} projectId={projectId} /> : undefined
+  const earlierSpec = created && session.plan?.stale === true
+
+  // A URL or repository name another app holds: the shared recovery renames and prepares again (legacy NameChoice).
+  const suggestion = useNameSuggestion(draft, failure?.failure, groups.find((group) => group.id === session.groupId)?.path)
+  const shown = failure?.failure.reasonCode === 'PublishURLConflict' ? { ...failure.failure, suggestedName: suggestion } : failure?.failure
+  const retry = failure && shown?.kind === 'name-taken'
+    // The checked suggestion arrives after the failure: start over with it offered instead of an open field.
+    ? <NameChoice key={shown.suggestedName ?? ''} suggestion={shown.suggestedName} onUse={(name) => effects.rename(name, failure.failure, () => setFailure(undefined))} />
+    : failure && failure.failure.kind !== 'policy'
+      ? <Button size="sm" onClick={() => {
+        const { context, failure: reported } = failure
+        setFailure(undefined)
+        effects.resetBinding()
+        if (reported.kind === 'unconfirmed') void queryClient.invalidateQueries({ queryKey: buildDraftOptions(projectId, draft.id).queryKey })
+        else if (context !== 'plan') effects.retry(context)
+      }}>{failure.failure.kind === 'unconfirmed' ? buildCopy.failure.confirm : text.conversation.retry}</Button> : undefined
 
   return {
     stage: started ? result.stage : 'decide',
     released,
-    ...(started ? { headerAction: <StageAction stage={result.stage} primary={primary} progress={result.progress} onPrimary={() => { setSharing(true); onOpenArtifact() }} /> } : {}),
-    ...(readiness.kind !== 'none' && proposal ? { conversationEnd: <AiTurn><ProposalBody proposal={{ ...proposal, stale: false }} action={proposalAction} /></AiTurn> } : {}),
+    ...(started ? { headerAction: continuing && improve ? improve : <StageAction stage={result.stage} primary={primary} progress={result.progress} onPrimary={() => { setSharing(true); onOpenArtifact() }} /> } : {}),
+    ...((readiness.kind !== 'none' && proposal) || askPublish ? {
+      conversationEnd: <>
+        {readiness.kind !== 'none' && proposal ? <AiTurn><ProposalBody proposal={{ ...proposal, stale: false }} action={proposalAction} /></AiTurn> : null}
+        {askPublish ? <AiTurn><ConsolePublishSettings view={view} actions={actions} disabled={view.unsupported} /></AiTurn> : null}
+      </>,
+    } : {}),
     ...(started ? {
-      // The failure is one page notice with its retry; the pane does not repeat it.
-      artifact: <ArtifactPane draft={draft} spec={spec} proposal={proposal} stage={result.stage} progress={result.progress} implementation={implementation.state}
+      // The failure is one page notice with its retry; the pane does not repeat it (a failed preparation's card says the same).
+      artifact: <ArtifactPane draft={draft} spec={spec} proposal={proposal} stage={result.stage} progress={failure?.context === 'prepare' ? undefined : result.progress} implementation={implementation.state}
         url={url} shareText={shareText} previewDatabaseReset={implementation.previewDatabaseReset} onOpenPreview={onOpenArtifact} onRetry={implementation.retry} onSkipTask={implementation.skipTask} onConfirm={implementation.confirm}
         onCollapse={() => setArtifactCollapsed(true)}
         databaseChanges={<DatabaseChanges projectId={projectId} databaseId={app && canEditApp(app, me) ? appView?.stack?.databaseComponentId : undefined} />}
         shareStep={sharing && app ? <PublishStep app={app} publishId={appView?.platform?.publish?.id} publishPreferences={draft.publishPreferences} onPublished={() => { void effects.markPublished(); setSharing(false) }} onCancel={() => setSharing(false)} /> : undefined} />,
     } : {}),
     notices: [
-      failure ? <Notice key="creation-failure" tone={failure.failure.kind === 'unconfirmed' ? 'warning' : 'error'} title={failure.failure.title} actions={retry}>{failure.failure.reason}</Notice> : null,
+      earlierSpec ? <Notice key="earlier-spec" tone="warning" title={text.console.createdFromEarlier.title} actions={continuing ? undefined : improve}>
+        {improvable ? text.console.createdFromEarlier.reason : text.console.createdFromEarlier.waiting}
+      </Notice> : null,
+      failure && shown ? <Notice key="creation-failure" tone={shown.kind === 'unconfirmed' ? 'warning' : 'error'} title={shown.title} actions={retry}>{shown.reason}</Notice> : null,
       creationAccess.error ? <ActionError key="creation-access" error={creationAccess.error} /> : null,
       effects.waitingForPublish || creationAccess.waitingForPublish ? <p key="waiting-publish" role="status" className="text-xs text-stone-500">{text.page.waitingForPublish}</p> : null,
     ].filter(Boolean),

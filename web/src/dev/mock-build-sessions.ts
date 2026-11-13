@@ -21,8 +21,16 @@
 // generation (starting_plan) and follows it (planning; it settles with the Platform mock's `plan-generation`
 // toggles); success records `session.plan` (current), an accepted spec change after it marks the plan stale,
 // and a Platform creation execution on the draft moves the session to `created` (no more turns). Publish
-// preferences are written to the draft too. The resolver answers console-v1 for a draft a session owns, else
+// preferences are written to the draft too, and the session carries the last accepted ones with their sync state
+// (`session.publish`). The resolver answers console-v1 for a draft a session owns, else
 // platform-v1 (the Platform draft read that follows decides whether the draft exists).
+// `__mock` controls (`/api/console/__mock/<name>`, routed here by mock-console; reset restores the defaults):
+// - `GET config` answers `{newAppConversation}`, what the dev `/config` (vite.config.ts) passes on;
+// - `POST new-app-conversation {on?}` turns that flag on (default) or off (the seeded state);
+// - `POST build-session-start-failure` makes the next session's initialization fail (a recorded
+//   `service_unavailable`, nothing to advance), as when the Platform draft cannot be created;
+// - `POST build-session-unavailable {reads?, retryAfterSeconds?}` answers the next `reads` (default 1) session
+//   and turn reads with 503 `service_unavailable` and `Retry-After: retryAfterSeconds` (default 5).
 import { createHash } from 'node:crypto'
 import type { z } from 'zod'
 import {
@@ -55,10 +63,41 @@ const BASE = '/api/console/v1/build-sessions'
 
 let sessions = new Map<string, Stored>()
 let replays = new Map<string, Replay>()
+const defaultControls = () => ({ newAppConversation: false, startFailure: false, unavailableReads: 0, retryAfterSeconds: 5 })
+let controls = defaultControls()
 
 export function resetBuildSessions() {
   sessions = new Map()
   replays = new Map()
+  controls = defaultControls()
+}
+
+/** The `__mock` controls above; undefined for any other name. */
+export async function buildSessionMockControl(request: Request, name: string): Promise<Response | undefined> {
+  const input = async () => {
+    const text = await request.text()
+    return (text ? JSON.parse(text) : {}) as Record<string, unknown>
+  }
+  if (name === 'config' && request.method === 'GET') return answer(200, { newAppConversation: controls.newAppConversation })
+  if (request.method !== 'POST') return undefined
+  if (name === 'new-app-conversation') {
+    const { on = true } = await input()
+    if (typeof on !== 'boolean') return fail(400, 'invalid_argument', 'on must be a boolean')
+    controls.newAppConversation = on
+    return answer(200, { newAppConversation: on })
+  }
+  if (name === 'build-session-start-failure') {
+    controls.startFailure = true
+    return answer(200, { startFailure: true })
+  }
+  if (name === 'build-session-unavailable') {
+    const { reads = 1, retryAfterSeconds = 5 } = await input()
+    if (!Number.isInteger(reads) || !Number.isInteger(retryAfterSeconds)) return fail(400, 'invalid_argument', 'reads and retryAfterSeconds must be integers')
+    controls.unavailableReads = reads as number
+    controls.retryAfterSeconds = retryAfterSeconds as number
+    return answer(200, { reads, retryAfterSeconds })
+  }
+  return undefined
 }
 
 const stamp = () => new Date().toISOString()
@@ -222,6 +261,12 @@ const stale = (stored: Stored, version: number) => version !== stored.session.ve
 async function advance(stored: Stored): Promise<Response> {
   const active = stored.turns.find((turn) => turn.id === stored.session.activeTurnId)
   if (stored.session.lifecycle === 'initializing') {
+    if (controls.startFailure) {
+      // The server recorded why it stopped; there is nothing left to advance.
+      controls.startFailure = false
+      bump(stored, { nextAction: 'none', failure: { error: 'service_unavailable', message: 'the Platform draft could not be created' } })
+      return sessionAnswer(stored, 202)
+    }
     const url = new URL(`/api/v1/projects/${MOCK_PROJECT_ID}/application-drafts`, 'http://mock.local')
     const created = await platformRoutes(new Request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ intent: stored.intent }) }), url)
     if (!created?.ok) return fail(503, 'service_unavailable', 'the Platform draft could not be created', { retryable: true })
@@ -239,6 +284,13 @@ async function advance(stored: Stored): Promise<Response> {
   if (active?.kind === 'conversation' && active.state === 'repair_required' && active.attempt === 0) {
     bump(stored, { nextAction: 'observe' })
     stored.turns = stored.turns.map((turn) => turn.id === active.id ? { ...active, state: 'dispatching', attempt: 1, nextAction: 'observe', sessionVersion: stored.session.version, updatedAt: stamp() } : turn)
+    return sessionAnswer(stored, 202)
+  }
+  if (stored.session.publish?.sync.state === 'pending' && stored.session.draftId) {
+    // DB-first (design §12): the accepted preference is written to the Platform draft on the next advance.
+    const synced = await platform('PATCH', stored.session.draftId, { publishPreferences: stored.session.publish.desired })
+    const sync: PublishWire['sync'] = synced?.ok ? { state: 'applied' } : { state: 'failed', failure: { error: 'service_unavailable', message: 'the draft publish preferences could not be written' } }
+    bump(stored, { publish: { desired: stored.session.publish.desired, sync }, nextAction: stored.session.activeTurnId ? stored.session.nextAction : 'none' })
     return sessionAnswer(stored, 202)
   }
   return fail(409, 'conflict', 'there is no step to advance')
@@ -331,8 +383,16 @@ export async function buildSessionRoutes(request: Request, url: URL, caller: { o
   const stored = sessions.get(id)
   if (!stored || stored.owner !== owner) return notFound()
   const path = url.pathname
+  // `build-session-unavailable`: the server is overloaded; come back after `Retry-After`.
+  const unavailable = () => {
+    if (controls.unavailableReads <= 0) return undefined
+    controls.unavailableReads--
+    return answer(503, { error: 'service_unavailable', message: 'the build session service is busy', details: { retryable: true } }, { 'Retry-After': String(controls.retryAfterSeconds) })
+  }
 
   if (!sub && method === 'GET') {
+    const busy = unavailable()
+    if (busy) return busy
     // Creation runs on the Platform draft; once an execution exists the session is created and takes no more turns.
     if (stored.session.lifecycle === 'planned' && stored.session.draftId) {
       const read = await platform('GET', stored.session.draftId)
@@ -355,12 +415,16 @@ export async function buildSessionRoutes(request: Request, url: URL, caller: { o
     return write(request, owner, path, true, async (body, version) => {
       const conflict = stale(stored, version)
       if (conflict) return conflict
+      // The server's rule (domain BuildSetPublish): only a created session takes publish preferences (design §12:
+      // they replace the legacy hidden preparation after creation); anything else is 412 `failed_precondition`.
+      if (stored.session.lifecycle !== 'created') return fail(412, 'failed_precondition', 'Build command is not allowed in the current state')
       const parsed = buildPublishInput.safeParse(body)
       if (!parsed.success) return invalid(parsed.error.issues)
-      bump(stored, {})
-      // The typed preference is the draft's publish preference (design §12); the sync state says whether it landed.
-      const synced = stored.session.draftId ? await platform('PATCH', stored.session.draftId, { publishPreferences: parsed.data }) : undefined
-      const sync: PublishWire['sync'] = !synced ? { state: 'pending' } : synced.ok ? { state: 'applied' } : { state: 'failed', failure: { error: 'service_unavailable', message: 'the draft publish preferences could not be written' } }
+      if (stored.session.publish?.sync.state === 'pending') return fail(409, 'session_busy', 'Publish preferences are still pending')
+      // The typed preference is committed first and written to the draft on the next advance; the session keeps the
+      // last accepted values with their sync state, so a reload reads them back.
+      const sync: PublishWire['sync'] = { state: 'pending' }
+      bump(stored, { publish: { desired: parsed.data, sync }, nextAction: 'advance' })
       const result: PublishWire = { desired: parsed.data, sessionVersion: stored.session.version, sync }
       return answer(202, result, { ETag: etag(stored.session.version) })
     })
@@ -375,6 +439,8 @@ export async function buildSessionRoutes(request: Request, url: URL, caller: { o
   const turn = stored.turns.find((item) => item.id === subId)
   if (!turn) return fail(404, 'not_found', 'turn not found', { resource: 'operation' })
   if (!action && method === 'GET') {
+    const busy = unavailable()
+    if (busy) return busy
     const observed = turn.id === stored.session.activeTurnId ? await observe(stored, turn) : turn
     return answer(200, observed, { ETag: etag(stored.session.version) })
   }

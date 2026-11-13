@@ -78,8 +78,11 @@ export interface ConsoleBuildView {
   write?: ConsoleWriteState
   failure?: ConsoleWriteFailure
   conflict?: ConsoleConflict
-  /** The last publish-preferences answer this tab received. */
-  publish?: BuildPublishResult
+  /**
+   * The last accepted publish preferences and their sync state: the session's observation (so a reload has them),
+   * or this tab's newer write answer until the session read catches up. Absent until the user saved them.
+   */
+  publish?: ConsolePublish
 }
 
 export interface ConsoleViewInput {
@@ -92,11 +95,14 @@ export interface ConsoleViewInput {
   blocked: boolean
   failure?: ConsoleWriteFailure
   conflict?: ConsoleConflict
+  /** This tab's last publish-preferences answer. */
   publish?: BuildPublishResult
   now: number
 }
 
 const known = <K extends string>(value: OpenValue<K>, ...values: K[]) => value.kind === 'known' && values.includes(value.value)
+
+export type ConsolePublish = NonNullable<BuildSession['publish']>
 
 export function deriveConsoleBuildView(input: ConsoleViewInput): ConsoleBuildView {
   const { session, intent } = input
@@ -117,6 +123,9 @@ export function deriveConsoleBuildView(input: ConsoleViewInput): ConsoleBuildVie
   const open = input.sending || input.blocked || intent !== undefined || unsupported
   const write: ConsoleWriteState | undefined = input.sending && intent ? { family: intent.family, status: 'sending' }
     : intent ? { family: intent.family, status: intent.status === 'unconfirmed' ? 'unconfirmed' : 'interrupted' } : undefined
+  // This tab's answer only while it is newer than the session read; otherwise the session says what was saved.
+  const answered = input.publish && input.publish.sessionVersion > session.version ? input.publish : undefined
+  const publish: ConsolePublish | undefined = answered ? { desired: answered.desired, sync: answered.sync } : session.publish
   return {
     engine: 'console-v1',
     session,
@@ -132,6 +141,6 @@ export function deriveConsoleBuildView(input: ConsoleViewInput): ConsoleBuildVie
     ...(write ? { write } : {}),
     ...(input.failure ? { failure: input.failure } : {}),
     ...(input.conflict ? { conflict: input.conflict } : {}),
-    ...(input.publish ? { publish: input.publish } : {}),
+    ...(publish ? { publish } : {}),
   }
 }

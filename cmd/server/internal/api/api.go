@@ -100,8 +100,14 @@ func New(database *store.Store, auth *identity.Authenticator, upstream *platform
 }
 
 func Unavailable() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		httpx.WriteError(w, httpx.Fail(503, "console_store_unavailable", "The console database is not available"), "console")
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		err := httpx.Fail(503, "console_store_unavailable", "The console database is not available")
+		if strings.HasPrefix(r.URL.Path, "/api/console/v1/build-sessions") {
+			w.Header().Set("Cache-Control", "no-store")
+			writeBuildError(w, err)
+			return
+		}
+		httpx.WriteError(w, err, "console")
 	})
 }
 

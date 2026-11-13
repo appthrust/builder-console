@@ -21,10 +21,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useSelector } from '@tanstack/react-store'
 import { PanelRightOpen, Users } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
-import { cleanupCreation, updateDraft } from '../../api/build'
 import { buildKeys, useBuildDraft } from '../../api/queries/build'
 import { useGroups } from '../../api/queries/console'
-import { renameCreationPlan } from '../../model/build/plan'
 import { buildCopy } from '../../model/build/copy'
 import { isBuildPending } from '../../model/build/progress'
 import { paths } from '../../routes/paths'
@@ -93,21 +91,10 @@ function Session({ draft, groupId, stale }: { draft: BuildDraft; groupId: string
     else if (primary.action === 'plan') build.requestPlan()
     else if (primary.action === 'continue') { build.patch({ continuedAfterPublishAt: draft.publishedAt }); setTab('conversation') }
   }
-  const useName = (next: string) => {
-    if (!draft.creationPlan) return
-    void build.perform('prepare', async () => {
-      const publishConflict = build.failure?.reasonCode === 'PublishURLConflict'
-      // URL recovery changes the stored plan, never a schema-defaulted client copy.
-      if (!publishConflict) await cleanupCreation(me.projectId, draft.id)
-      const updated = await updateDraft(me.projectId, draft.id, publishConflict
-        ? { renameApplication: { name: next } }
-        : { creationPlan: renameCreationPlan(draft.creationPlan!, next, { domain: build.domain }) })
-      await build.receive(updated)
-      // The collision is resolved by the new name: its notice must not linger as a stale retry.
-      build.patch((current) => ({ ...current, lastPlannedIntent: updated.intent, reusePlan: true, executionRequestId: undefined, messages: current.messages.filter((message) => message.role !== 'notice' || message.retry !== 'prepare') }))
-      build.prepare()
-    })
-  }
+  // The collision is resolved by the new name: its notice must not linger as a stale retry.
+  const useName = (next: string) => build.rename(next, build.failure, (updated) => build.patch((current) => ({
+    ...current, lastPlannedIntent: updated.intent, messages: current.messages.filter((message) => message.role !== 'notice' || message.retry !== 'prepare'),
+  })))
   return <div className="flex min-h-0 flex-1 flex-col" data-testid="build-session" data-stage={stage}>
     <SessionHeader name={name} stage={stage} released={released} unsupported={build.result.unsupported} action={<StageAction stage={stage} primary={primary} progress={progress} onPrimary={onPrimary} />} />
     {/* Page-level notices share one inset place under the header, whatever raised them. */}

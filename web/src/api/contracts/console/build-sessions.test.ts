@@ -43,6 +43,22 @@ test('unknown session and progress values remain unknown, not actionable default
   expect(buildTurnReader.parse(JSON.parse(future.raw)).nextAction).toEqual({ kind: 'unknown' })
 })
 
+test('session publication observations retain desired values and open sync failures', () => {
+  const absent = fixtures.find((item) => item.name === 'session-publish-absent')!
+  expect(buildSessionReader.parse(JSON.parse(absent.raw)).publish).toBeUndefined()
+  for (const state of ['pending', 'applied', 'failed'] as const) {
+    const fixture = fixtures.find((item) => item.name === `session-publish-${state}`)!
+    const wire = JSON.parse(fixture.raw)
+    const session = buildSessionReader.parse(wire)
+    expect(session.publish?.desired).toEqual(wire.publish.desired)
+    expect(session.publish?.sync.state).toEqual({ kind: 'known', value: state })
+  }
+  const future = fixtures.find((item) => item.name === 'session-publish-future-reader')!
+  const session = buildSessionReader.parse(JSON.parse(future.raw))
+  expect(session.publish?.sync.state).toEqual({ kind: 'unknown' })
+  expect(session.publish?.sync.failure?.error).toEqual({ kind: 'unknown' })
+})
+
 test('all twelve internal operations have decodable resources and exact request preconditions', () => {
   const paths = openAPIDocument().paths
   expect(Object.keys(buildSessionOperations)).toHaveLength(12)
@@ -60,5 +76,10 @@ test('all twelve internal operations have decodable resources and exact request 
     expect(declaration.parameters.filter((p) => p.in === 'header').map((p) => [p.name, p.required])).toEqual(operation.method === 'GET' ? [] : key === 'create' ? [['Idempotency-Key', true]] : [['Idempotency-Key', true], ['If-Match', true]])
     if ('requestSchema' in operation) expect(declaration.requestBody?.content['application/json'].schema.$ref).toBe(`#/components/schemas/${operation.requestSchema}`)
     for (const status of operation.successStatuses) expect(declaration.responses[status]!.headers['Cache-Control']).toEqual({ required: true, schema: { type: 'string', const: 'no-store' } })
+    for (const status of [429, 503]) {
+      const retryAfter = declaration.responses[status]!.headers['Retry-After']
+      expect(retryAfter).toMatchObject({ required: true, schema: { type: 'integer', minimum: 1, maximum: 300 } })
+    }
+    expect(declaration.responses[409]!.headers).not.toHaveProperty('Retry-After')
   }
 })

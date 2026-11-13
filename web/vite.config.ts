@@ -14,6 +14,7 @@ import { defineConfig, loadEnv, type ProxyOptions } from 'vite'
 // edge; the file is re-read per request so a refresher can rotate it). The
 // proxy drops the browser Origin so upstreams treat calls as first-party.
 const upstream = process.env.CONSOLE_API_UPSTREAM ?? `http://127.0.0.1:${process.env.CONSOLE_MOCK_PORT ?? 54385}`
+const mockUpstream = process.env.CONSOLE_API_UPSTREAM === undefined
 const devBearer = process.env.CONSOLE_DEV_BEARER
 const devCookieFile = process.env.CONSOLE_DEV_COOKIE_FILE
 const proxy: ProxyOptions = {
@@ -26,6 +27,21 @@ const proxy: ProxyOptions = {
       if (devCookieFile) request.setHeader('cookie', readFileSync(devCookieFile, 'utf8').trim())
     })
   },
+}
+
+/**
+ * The NEW-APP conversation flag `/config` reports. Against the in-repo mock it is the mock's switch
+ * (`POST /api/console/__mock/new-app-conversation`, off after `__mock/reset`), so a story can turn it on;
+ * against a real upstream it stays off here.
+ */
+async function newAppConversation(): Promise<boolean> {
+  if (!mockUpstream) return false
+  const response = await fetch(`${upstream}/api/console/__mock/config`, { headers: { connection: 'close' } })
+  const body: unknown = response.ok ? await response.json() : undefined
+  if (!body || typeof body !== 'object' || !('newAppConversation' in body) || typeof body.newAppConversation !== 'boolean') {
+    throw new Error(`mock /api/console/__mock/config answered ${response.status} without a newAppConversation flag`)
+  }
+  return body.newAppConversation
 }
 
 export default defineConfig(({ mode }) => {
@@ -44,7 +60,13 @@ export default defineConfig(({ mode }) => {
             }
             response.setHeader('Content-Type', 'application/json')
             response.setHeader('Cache-Control', 'no-store')
-            response.end(JSON.stringify({ projectId, newAppConversation: false }))
+            newAppConversation().then(
+              (flag) => response.end(JSON.stringify({ projectId, newAppConversation: flag })),
+              (error: unknown) => {
+                response.statusCode = 502
+                response.end(JSON.stringify({ error: 'unavailable', message: error instanceof Error ? error.message : String(error) }))
+              },
+            )
           })
         },
       },
