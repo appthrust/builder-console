@@ -62,8 +62,11 @@ export function ProposalActions({ proposal, inline = false }: { proposal: Propos
       onSettled: () => { sending.current = false },
     })
   }
+  // A failed read-back confirms nothing: the gate stays closed, the page's stale notice shows the failed read,
+  // and the same confirmation can be tried again.
+  const confirm = () => void confirmation.confirm().catch(() => {})
   const failure = confirmation.unconfirmed
-    ? <UnconfirmedNotice confirming={confirmation.confirming} onConfirm={() => void confirmation.confirm()} />
+    ? <UnconfirmedNotice confirming={confirmation.confirming} onConfirm={confirm} />
     : decision.error ? <ActionError error={decision.error} /> : null
   return <div className="space-y-3" data-testid="proposal-actions">
     {gate === 'unsupported' ? <Notice tone="warning">{text.unsupported}</Notice> : null}

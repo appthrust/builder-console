@@ -276,6 +276,40 @@ describe('X5: a decision answered 2xx unreadably', () => {
     expect(pageText()).not.toContain(appText.unconfirmed.title)
   })
 
+  test('a confirmation whose read-back fails confirms nothing: the gate stays closed, nothing is resent, and the next confirmation clears it', async () => {
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => { unhandled.push(reason) }
+    process.on('unhandledRejection', onUnhandled)
+    restore.push(() => process.off('unhandledRejection', onUnhandled))
+    await renderProposal()
+    rewrites.push({ method: 'POST', path: decisionsPath, once: true, body: (wire) => ({ ...wire, resource: { phase: SECRET } }) })
+    await click(button(text.accept, actions()!))
+    expect(count('POST', decisionsPath)).toBe(1)
+
+    // The read-back answers 200 unreadably.
+    rewrites.push({ method: 'GET', path: detailPath, once: true, body: (wire) => ({ ...wire, decisions: SECRET }) })
+    const reads = count('GET', detailPath)
+    await click(button(appText.unconfirmed.confirm, actions()!))
+    expect(count('GET', detailPath)).toBe(reads + 1)
+    expect(unhandled).toEqual([])
+    expect(actions()!.textContent).toContain(appText.unconfirmed.title)
+    expect(button(appText.unconfirmed.confirm, actions()!).disabled).toBe(false)
+    expectReviewDisabled()
+    expect(pageText()).toContain(refreshFailed)
+    expect(container.innerHTML).not.toContain(SECRET)
+    expect(cachedWire()).not.toContain(SECRET)
+    await click(button(text.accept, actions()!))
+    expect(count('POST', decisionsPath)).toBe(1)
+
+    // The next confirmation reads the recorded decision back.
+    await click(button(appText.unconfirmed.confirm, actions()!))
+    expect(unhandled).toEqual([])
+    expect(count('POST', decisionsPath)).toBe(1)
+    expect(actions()).toBeNull()
+    expect(pageText()).not.toContain(appText.unconfirmed.title)
+    expect(pageText()).not.toContain(refreshFailed)
+  })
+
   test('request changes: the dialog closes, the comment is not resent; only the confirmation', async () => {
     await renderProposal()
     await click(button(text.requestChanges, actions()!))
