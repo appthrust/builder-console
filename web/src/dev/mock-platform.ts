@@ -124,6 +124,7 @@ import { applyInstruction, suggestedInstructions } from '../features/excel2app/u
 import { defaultUiDesign } from '../features/excel2app/ui-design'
 import { shareScopeLabel } from '../model/access'
 import { parseSpec, serializeSpec } from '../model/build/spec'
+import { excelAnalysisOf } from '../model/contracts/excel'
 import { buildCopy, textJa as buildTextJa } from '../model/build/copy'
 import { isFirstTurn, isKickoffReply, isPrepareTurn } from '../model/build/questions'
 import { dataModeFailure, findTable, resetDatabaseData, selectRows, state as dataState, type DataMode } from './mock-database-data'
@@ -523,12 +524,12 @@ function workbookValidationError(input: unknown, issue: { path: PropertyKey[]; m
 function draftUiPlan(draft: ApplicationDraft): AppPlan {
   const inputs = draftDesignInputs(draft)
   const analysis = draft.excelAnalysis ?? (inputs.length ? designFromReadings(inputs) : undefined)
-  if (analysis) return planApp(analysis, draft.title)
+  if (analysis) return planApp(excelAnalysisOf(analysis), draft.title)
   const { spec } = parseSpec(draft.specMarkdown)
   return {
     name: spec.name ?? draft.title,
     entities: spec.records.map((record) => ({
-      name: record.name, kind: 'records', fields: record.fields.map((name) => ({ name, kind: 'text' })),
+      name: record.name, kind: { kind: 'known', value: 'records' } as const, fields: record.fields.map((name) => ({ name, kind: { kind: 'known', value: 'text' } as const })),
       rules: [], importRows: 0, sources: [],
     })),
     screens: spec.records.flatMap((record) => [
@@ -556,7 +557,7 @@ function answerExcelTurn(draft: ApplicationDraft, turn: ApplicationDraftConversa
       readings.set(input.summary.id, stored.reading)
     }
     const analysis = designFromReadings(inputs, readings)
-    const plan = planApp(analysis, draft.title)
+    const plan = planApp(excelAnalysisOf(analysis), draft.title)
     turn.excelProgress = {
       stage: 'designing',
       workbooks: inputs.map(({ summary }) => ({

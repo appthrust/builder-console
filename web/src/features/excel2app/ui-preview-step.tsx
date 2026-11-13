@@ -4,14 +4,17 @@
 // server's `UiDesign`, the conversation, and whether a turn is running.
 // Side by side the frame and the chat share one height and scroll on their
 // own, so a reply and its effect on the screens stay visible together; narrow
-// screens stack them.
-import type { UiDesign } from '@appthrust/api-schema/platform-api'
+// screens stack them. A design with a part this console cannot read says why
+// undo and the hand-off are paused; instructions can still be sent.
 import { AlertCircle, Loader2, RotateCcw, SendHorizontal, Sparkles, Undo2 } from 'lucide-react'
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { buildCopy } from '../../model/build/copy'
 import { classifyBuildFailure, isAIQuotaExhausted } from '../../model/build/failure'
-import { Button, cn, TextInput } from '../../ui'
+import { isOneOf } from '../../model/contracts/build'
+import { completeUiDesign, type ScreenKind, type UiDesign } from '../../model/contracts/excel'
+import { Button, cn, Notice, TextInput } from '../../ui'
 import { text } from './assistant-copy'
+import { text as flowText } from './copy'
 import type { AppPlan, WorkbookGrid } from './model'
 import { previewText } from './preview-copy'
 import { UiPreview } from './ui-preview'
@@ -32,6 +35,8 @@ export interface UiPreviewStepProps {
   onSend: (instruction: string) => void
   onUndo: () => void
   canUndo: boolean
+  /** The page's hand-off gate (design and analysis known); unset, the design alone decides. */
+  complete?: boolean
   suggestions: string[]
   /** Re-sends the failed turn; the retry button shows on a trailing failed message only when given. */
   onRetry?: () => void
@@ -50,7 +55,7 @@ export function changedScreenId(before: UiDesign, after: UiDesign): string | und
     const old = previous[index]
     if (!old || old.id !== screen.id || old.title !== screen.title) return screen.id
   }
-  const screenOf = (kind: string, entity?: string) => visible.find((screen) => screen.kind === kind && (entity === undefined || screen.entity === entity))?.id
+  const screenOf = (kind: ScreenKind, entity?: string) => visible.find((screen) => isOneOf(screen.kind, kind) && (entity === undefined || screen.entity === entity))?.id
   for (const entity of Object.keys(after.lists)) {
     if (!sameJson(before.lists[entity], after.lists[entity])) {
       const id = screenOf('list', entity)
@@ -67,7 +72,7 @@ export function changedScreenId(before: UiDesign, after: UiDesign): string | und
   return undefined
 }
 
-export function UiPreviewStep({ plan, design, grids, messages, busy, readOnly = false, activityTail, onSend, onUndo, canUndo, suggestions, onRetry }: UiPreviewStepProps) {
+export function UiPreviewStep({ plan, design, grids, messages, busy, readOnly = false, activityTail, onSend, onUndo, canUndo, complete, suggestions, onRetry }: UiPreviewStepProps) {
   const visible = design?.screens.filter((screen) => !screen.hidden) ?? []
   const [screenId, setScreenId] = useState(visible[0]?.id ?? '')
   const [shownDesign, setShownDesign] = useState(design)
@@ -89,6 +94,9 @@ export function UiPreviewStep({ plan, design, grids, messages, busy, readOnly = 
   return (
     <div className="@container space-y-4">
       {!readOnly ? <p className="text-sm text-stone-600">{text.chat.lead}</p> : null}
+      {design && !readOnly && !(complete ?? completeUiDesign(design) !== undefined) ? (
+        <div data-testid="excel2app-design-incomplete"><Notice tone="warning" title={flowText.preview.incomplete.title}>{flowText.preview.incomplete.body}</Notice></div>
+      ) : null}
       <div className="grid gap-5 @2xl:h-[clamp(34rem,calc(100dvh-7rem),44rem)] @2xl:grid-cols-[minmax(0,1fr)_17rem] @2xl:grid-rows-[minmax(0,1fr)] @5xl:grid-cols-[minmax(0,1fr)_20rem]">
         <div data-testid="excel2app-preview" className="min-w-0 @2xl:min-h-0">
           {design ? (

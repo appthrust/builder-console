@@ -2,16 +2,20 @@
 // app's own navigation and the selected screen, filled from entity sources.
 // Pure render of (plan, design, grids): every design change shows
 // immediately. Search, filters and opening a row are local to the preview.
-// `design` is the server's `UiDesign` (written by the ui-design turn); the
-// heuristic `ui-design.ts` produces the same shape for the mock runtime.
+// `design` is a read `UiDesign`: the server's (written by the ui-design turn)
+// or the heuristic `ui-design.ts` one, read through the same constructor. A
+// screen, card, list layout or field of a kind this console does not know and
+// a list, form or dashboard it cannot read stay where they are and show a
+// fixed note; the rest of the design renders normally.
 // The frame fills its parent's height when the parent has one (side by side
 // with the chat) and scrolls the screen inside it; otherwise it grows.
-import type { Accent, DashboardCard, Density, ListDesign, ScreenDesign, UiDesign } from '@appthrust/api-schema/platform-api'
-import { AlertCircle, Check, ChevronDown, Database, FileText, Image, LayoutDashboard, LayoutGrid, Lock, Paperclip, Pencil, Plus, Search, SquareKanban, SquarePen, Table2, Upload, User } from 'lucide-react'
+import { AlertCircle, Check, ChevronDown, CircleDashed, Database, FileText, Image, LayoutDashboard, LayoutGrid, Lock, Paperclip, Pencil, Plus, Search, SquareKanban, SquarePen, Table2, Upload, User } from 'lucide-react'
 import { Fragment, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
+import { isOneOf, knownValue } from '../../model/contracts/build'
+import { partValue, type Accent, type DashboardCard, type Density, type DesignPart, type FormDesign, type ListDesign, type ListLayout, type ScreenDesign, type ScreenKind, type UiDesign } from '../../model/contracts/excel'
 import { locale } from '../../shell/language'
 import { cn } from '../../ui'
-import { cellText, entityRows, type AppPlan, type CellValue, type EntityRow, type PlannedEntity, type PlannedField, type ScreenKind, type WorkbookGrid } from './model'
+import { cellText, entityRows, type AppPlan, type CellValue, type EntityRow, type PlannedEntity, type PlannedField, type WorkbookGrid } from './model'
 import { previewText as text } from './preview-copy'
 
 /** Rows a list or master screen shows before the 「全 N 件中」 footer. */
@@ -87,6 +91,16 @@ const SCREEN_ICON: Record<ScreenKind, typeof Table2> = {
   master: Database,
 }
 
+/** A part of the design this preview cannot show: of an unknown kind (`unsupported`) or unreadable (`broken`). Fixed text only. */
+function UnavailablePart({ reason }: { reason: 'unsupported' | 'broken' }) {
+  return (
+    <p data-testid={`excel2app-ui-preview-${reason}`} className={cn('flex items-center gap-2 rounded-lg border border-dashed px-4 py-6 text-stone-600', reason === 'broken' ? 'border-rose-300 bg-rose-50/60' : 'border-stone-300 bg-stone-50')}>
+      {reason === 'broken' ? <AlertCircle aria-hidden className="size-4 shrink-0 text-rose-600" /> : <CircleDashed aria-hidden className="size-4 shrink-0 text-stone-400" />}
+      {text[reason]}
+    </p>
+  )
+}
+
 const REJECTED_STAGE = /廃止|中止|却下|取消|取り消し|cancel|reject/i
 const DONE_STAGE = /完了|済|クローズ|close|done|完成|承認/i
 const DEADLINE_FIELD = /期限|予定|納期/
@@ -145,16 +159,15 @@ const formatNumber = (value: number) => new Intl.NumberFormat(locale(), { maximu
 
 function display(value: CellValue, field: PlannedField | undefined): string {
   if (isBlank(value)) return ''
-  const date = field?.kind === 'date' ? toDate(value) : value instanceof Date ? value : undefined
+  const date = isOneOf(field?.kind, 'date') ? toDate(value) : value instanceof Date ? value : undefined
   if (date) return formatDate(date)
-  if (typeof value === 'number' && field?.kind !== 'id') return formatNumber(value)
+  if (typeof value === 'number' && !isOneOf(field?.kind, 'id')) return formatNumber(value)
   return cellText(value)
 }
 
-
 function titleFieldOf(entity: PlannedEntity): string | undefined {
-  const named = entity.fields.find((field) => field.kind !== 'id' && TITLE_FIELD.test(field.name))
-  return (named ?? entity.fields.find((field) => field.kind === 'reference') ?? entity.fields.find((field) => field.kind === 'text') ?? entity.fields.find((field) => field.kind !== 'id'))?.name
+  const named = entity.fields.find((field) => !isOneOf(field.kind, 'id') && TITLE_FIELD.test(field.name))
+  return (named ?? entity.fields.find((field) => isOneOf(field.kind, 'reference')) ?? entity.fields.find((field) => isOneOf(field.kind, 'text')) ?? entity.fields.find((field) => !isOneOf(field.kind, 'id')))?.name
 }
 
 interface Context {
@@ -189,7 +202,7 @@ function sortRows(rows: Row[], field: PlannedField | undefined): Row[] {
   if (!field) return rows
   const key = (row: Row) => {
     const value = row.values[field.name]
-    if (field.kind === 'date') return -(toDate(value)?.getTime() ?? -Infinity)
+    if (isOneOf(field.kind, 'date')) return -(toDate(value)?.getTime() ?? -Infinity)
     return numberOf(value) ?? cellText(value)
   }
   return [...rows].sort((a, b) => {
@@ -218,8 +231,11 @@ export interface UiPreviewProps {
 }
 
 export function UiPreview({ plan, design, grids, screenId, onScreenChange, today }: UiPreviewProps) {
-  const theme = ACCENT[design.accent]
-  const space = DENSITY[design.density]
+  // An accent or density this console does not know renders in the neutral look; the decisions list leaves it out.
+  const accent = knownValue(design.accent)
+  const density = knownValue(design.density)
+  const theme = accent ? ACCENT[accent] : ACCENT.stone
+  const space = density ? DENSITY[density] : DENSITY.comfortable
   const visible = design.screens.filter((screen) => !screen.hidden)
   const screen = visible.find((item) => item.id === screenId) ?? visible[0]
   const [openedRow, setOpenedRow] = useState<Record<string, number>>({})
@@ -232,7 +248,7 @@ export function UiPreview({ plan, design, grids, screenId, onScreenChange, today
   const masterLabels = useMemo(() => {
     const labels = new Map<string, Map<string, string>>()
     for (const entity of plan.entities) {
-      if (entity.kind !== 'master' || entity.fields.length === 0) continue
+      if (!isOneOf(entity.kind, 'master') || entity.fields.length === 0) continue
       const [key, name] = entity.fields
       labels.set(entity.name, new Map(entityRows(entity, grids).map((row) => [cellText(row.values[key.name]), name ? cellText(row.values[name.name]) : ''])))
     }
@@ -241,10 +257,10 @@ export function UiPreview({ plan, design, grids, screenId, onScreenChange, today
   const rowsByEntity = useMemo(() => new Map(plan.entities.map((entity) => [entity.name, entityRows(entity, grids)])), [plan, grids])
 
   const go = (kind: ScreenKind, entity: string) => {
-    const target = visible.find((item) => item.kind === kind && item.entity === entity)
+    const target = visible.find((item) => isOneOf(item.kind, kind) && item.entity === entity)
     if (target) onScreenChange(target.id)
   }
-  const canGo = (kind: ScreenKind, entity: string) => visible.some((item) => item.kind === kind && item.entity === entity)
+  const canGo = (kind: ScreenKind, entity: string) => visible.some((item) => isOneOf(item.kind, kind) && item.entity === entity)
 
   const entity = screen ? plan.entities.find((entity) => entity.name === screen.entity) : undefined
   const now = today ?? PREVIEW_TODAY
@@ -258,9 +274,9 @@ export function UiPreview({ plan, design, grids, screenId, onScreenChange, today
     masterLabels,
     today: Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()),
     done: doneStages(entity),
-    deadline: entity.fields.find((field) => field.kind === 'date' && DEADLINE_FIELD.test(field.name))?.name,
+    deadline: entity.fields.find((field) => isOneOf(field.kind, 'date') && DEADLINE_FIELD.test(field.name))?.name,
     titleField: titleFieldOf(entity),
-    idField: entity.fields.find((field) => field.kind === 'id')?.name,
+    idField: entity.fields.find((field) => isOneOf(field.kind, 'id'))?.name,
   }
   const openRow = (row: Row) => {
     if (!entity) return
@@ -289,19 +305,21 @@ export function UiPreview({ plan, design, grids, screenId, onScreenChange, today
           </div>
           <ul className="flex gap-0.5 overflow-x-auto px-2 pb-2 @xl/frame:flex-col @xl/frame:overflow-visible">
             {visible.map((item) => {
-              const Icon = item.kind === 'list' && design.lists[item.entity]?.layout === 'cards' ? LayoutGrid : SCREEN_ICON[item.kind]
+              const kind = knownValue(item.kind)
+              const Icon = !kind ? CircleDashed : kind === 'list' && isOneOf(partValue(design.lists[item.entity])?.layout, 'cards') ? LayoutGrid : SCREEN_ICON[kind]
               const current = item.id === screen?.id
               return (
                 <li key={item.id} className="shrink-0">
                   <button
                     type="button"
                     aria-current={current ? 'page' : undefined}
-                    data-testid={`excel2app-ui-preview-nav-${item.kind}`}
+                    data-testid={`excel2app-ui-preview-nav-${kind ?? 'unsupported'}`}
                     onClick={() => onScreenChange(item.id)}
                     className={cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left whitespace-nowrap transition-colors', current ? cn('font-medium', theme.active) : 'text-stone-600 hover:bg-stone-200/60 hover:text-stone-900 [&_svg]:text-stone-400')}
                   >
                     <Icon aria-hidden className="size-4 shrink-0" />
                     <span className="truncate">{item.title}</span>
+                    {kind ? null : <span className="sr-only">{`（${text.unsupportedScreen}）`}</span>}
                   </button>
                 </li>
               )
@@ -315,9 +333,11 @@ export function UiPreview({ plan, design, grids, screenId, onScreenChange, today
           aria-label={screen?.title ?? text.nav}
           tabIndex={0}
           className="@container min-h-0 min-w-0 flex-1 overflow-y-auto focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-stone-400"
-          data-testid={screen ? `excel2app-ui-preview-screen-${screen.kind}` : undefined}
+          data-testid={screen ? `excel2app-ui-preview-screen-${knownValue(screen.kind) ?? 'unsupported'}` : undefined}
         >
-          {!screen || !context ? (
+          {screen && !knownValue(screen.kind) ? (
+            <div className={space.page}><UnavailablePart reason="unsupported" /></div>
+          ) : !screen || !context ? (
             <p className={cn('text-stone-500', space.page)}>{text.noScreens}</p>
           ) : (
             <ScreenView
@@ -349,11 +369,11 @@ interface ScreenProps {
 
 function ScreenView({ screen, design, context, openedRow, onOpenRow, onCreate, onEdit }: ScreenProps) {
   const { space, theme } = context
-  const list = design.lists[context.designEntity] ?? design.lists[context.entity.name]
+  const kind = knownValue(screen.kind)
   const actions: ReactNode =
-    screen.kind === 'list' && onCreate ? (
+    kind === 'list' && onCreate ? (
       <ActionButton theme={theme} onClick={onCreate} icon={<Plus aria-hidden className="size-3.5" />}>{text.create}</ActionButton>
-    ) : screen.kind === 'dashboard' ? (
+    ) : kind === 'dashboard' ? (
       <span className="text-xs text-stone-500">{text.asOf(formatDate(new Date(context.today)))}</span>
     ) : null
   return (
@@ -363,16 +383,29 @@ function ScreenView({ screen, design, context, openedRow, onOpenRow, onCreate, o
         {actions}
       </header>
       <div className={space.page}>
-        {screen.kind === 'list' && list ? <ListScreen list={list} context={context} onOpenRow={onOpenRow} /> : null}
-        {screen.kind === 'list' && !list ? <MasterScreen context={context} /> : null}
-        {screen.kind === 'form' ? <FormScreen design={design} context={context} /> : null}
-        {screen.kind === 'detail' ? <DetailScreen context={context} openedRow={openedRow} onEdit={onEdit} /> : null}
-        {screen.kind === 'board' ? <BoardScreen context={context} onOpenRow={onOpenRow} /> : null}
-        {screen.kind === 'master' ? <MasterScreen context={context} /> : null}
-        {screen.kind === 'dashboard' ? <DashboardScreen cards={design.dashboard.cards} context={context} onOpenRow={onOpenRow} /> : null}
+        {kind === 'list' ? <ListPart part={design.lists[context.designEntity] ?? design.lists[context.entity.name]} context={context} onOpenRow={onOpenRow} /> : null}
+        {kind === 'form' ? <FormPart part={design.forms[context.designEntity] ?? design.forms[context.entity.name]} context={context} /> : null}
+        {kind === 'detail' ? <DetailScreen context={context} openedRow={openedRow} onEdit={onEdit} /> : null}
+        {kind === 'board' ? <BoardScreen context={context} onOpenRow={onOpenRow} /> : null}
+        {kind === 'master' ? <MasterScreen context={context} /> : null}
+        {kind === 'dashboard' ? (design.dashboard.state === 'ok' ? <DashboardScreen cards={design.dashboard.value} context={context} onOpenRow={onOpenRow} /> : <UnavailablePart reason="broken" />) : null}
       </div>
     </div>
   )
+}
+
+/** A list screen: the entity's list design, or its records as a plain table when the design has none. */
+function ListPart({ part, context, onOpenRow }: { part: DesignPart<ListDesign> | undefined; context: Context; onOpenRow?: (row: Row) => void }) {
+  if (!part) return <MasterScreen context={context} />
+  if (part.state === 'broken') return <UnavailablePart reason="broken" />
+  const layout = knownValue(part.value.layout)
+  return layout ? <ListScreen list={part.value} layout={layout} context={context} onOpenRow={onOpenRow} /> : <UnavailablePart reason="unsupported" />
+}
+
+/** A form screen: the entity's form design, or every field when the design has none. */
+function FormPart({ part, context }: { part: DesignPart<FormDesign> | undefined; context: Context }) {
+  if (part?.state === 'broken') return <UnavailablePart reason="broken" />
+  return <FormScreen form={partValue(part)} context={context} />
 }
 
 function ActionButton({ theme, onClick, icon, children, tone = 'solid' }: { theme: Theme; onClick?: () => void; icon?: ReactNode; children: ReactNode; tone?: 'solid' | 'plain' }) {
@@ -406,20 +439,20 @@ function PersonChip({ name }: { name: string }) {
   )
 }
 
-/** One value as the built app would show it in a table cell, card or detail. */
+/** One value as the built app would show it in a table cell, card or detail; a field of an unknown kind shows the plain cell text. */
 function Value({ name, row, context, colorField, wrap = false }: { name: string; row: Row; context: Context; colorField?: string; wrap?: boolean }) {
   const field = context.fields.get(name)
   const value = row.values[name]
   const shown = display(value, field)
   if (!shown) return <span className="text-stone-300">{text.empty}</span>
   if (name === colorField) return <Pill value={shown} tone={toneOf(shown, field, context.entity)} />
-  switch (field?.kind) {
+  switch (knownValue(field?.kind)) {
     case 'id':
       return <span className="whitespace-nowrap text-stone-500 tabular-nums">{shown}</span>
     case 'person':
       return <PersonChip name={shown} />
     case 'reference': {
-      const label = field.referenceEntity ? context.masterLabels.get(field.referenceEntity)?.get(shown) : undefined
+      const label = field?.referenceEntity ? context.masterLabels.get(field.referenceEntity)?.get(shown) : undefined
       return (
         <span className={cn(!wrap && 'whitespace-nowrap', context.theme.text)} title={label || undefined}>
           {shown}
@@ -457,9 +490,9 @@ function Value({ name, row, context, colorField, wrap = false }: { name: string;
   }
 }
 
-const isNumeric = (field: PlannedField | undefined) => field?.kind === 'number'
+const isNumeric = (field: PlannedField | undefined) => isOneOf(field?.kind, 'number')
 
-function ListScreen({ list, context, onOpenRow }: { list: ListDesign; context: Context; onOpenRow?: (row: Row) => void }) {
+function ListScreen({ list, layout, context, onOpenRow }: { list: ListDesign; layout: ListLayout; context: Context; onOpenRow?: (row: Row) => void }) {
   const { fields, space, theme } = context
   const [query, setQuery] = useState('')
   const [filters, setFilters] = useState<Record<string, string>>({})
@@ -490,7 +523,7 @@ function ListScreen({ list, context, onOpenRow }: { list: ListDesign; context: C
   )
 
   return (
-    <div data-layout={list.layout} className={cn('flex flex-col', space.gap)}>
+    <div data-layout={layout} className={cn('flex flex-col', space.gap)}>
       {list.searchable || list.filters.length ? (
         <div className="flex flex-wrap items-center gap-2">
           {list.searchable ? (
@@ -528,7 +561,7 @@ function ListScreen({ list, context, onOpenRow }: { list: ListDesign; context: C
         <p className="rounded-lg border border-dashed border-stone-300 px-4 py-8 text-center text-stone-500">{text.noRows}</p>
       ) : shown.length === 0 ? (
         <p className="rounded-lg border border-dashed border-stone-300 px-4 py-8 text-center text-stone-500">{text.noMatch}</p>
-      ) : list.layout === 'cards' ? (
+      ) : layout === 'cards' ? (
         <div className={cn('flex flex-col', space.gap)}>
           {groups.map((group) => (
             <div key={group.key} className="flex flex-col gap-2">
@@ -619,8 +652,7 @@ function RecordCard({ row, context, fields, colorField, onOpen, compact = false 
   )
 }
 
-function FormScreen({ design, context }: { design: UiDesign; context: Context }) {
-  const form = design.forms[context.designEntity] ?? design.forms[context.entity.name]
+function FormScreen({ form, context }: { form: FormDesign | undefined; context: Context }) {
   const { fields, theme, space } = context
   const id = useId()
   const names = (form?.fields ?? context.entity.fields.map((field) => field.name)).filter((name) => fields.has(name))
@@ -632,12 +664,15 @@ function FormScreen({ design, context }: { design: UiDesign; context: Context })
   const control = (field: PlannedField, controlId: string) => {
     const example = sample(field.name)
     const isRequired = required.has(field.name)
-    switch (field.kind) {
+    switch (knownValue(field.kind)) {
+      case undefined:
+        // A field of a kind this console does not know gets no guessed input.
+        return <span id={controlId} data-testid="excel2app-ui-preview-unsupported-field" className="flex items-center gap-2 rounded-md border border-dashed border-stone-300 bg-stone-50 px-2.5 py-2 text-xs text-stone-600"><CircleDashed aria-hidden className="size-3.5 shrink-0 text-stone-400" />{text.unsupported}</span>
       case 'date':
         return <input id={controlId} type="date" required={isRequired} className={input} />
       case 'choice':
       case 'reference': {
-        const labels = field.kind === 'reference' && field.referenceEntity ? context.masterLabels.get(field.referenceEntity) : undefined
+        const labels = isOneOf(field.kind, 'reference') && field.referenceEntity ? context.masterLabels.get(field.referenceEntity) : undefined
         const options = labels ? [...labels] : valuesOf(field, context.rows).map((value): [string, string] => [value, ''])
         return (
           <span className="relative block">
@@ -681,7 +716,7 @@ function FormScreen({ design, context }: { design: UiDesign; context: Context })
         )
       case 'id':
       case 'formula':
-        return <input id={controlId} type="text" readOnly tabIndex={-1} value={field.kind === 'id' ? text.autoNumber : text.computed} className={cn(input, 'bg-stone-50 text-stone-500 shadow-none')} />
+        return <input id={controlId} type="text" readOnly tabIndex={-1} value={isOneOf(field.kind, 'id') ? text.autoNumber : text.computed} className={cn(input, 'bg-stone-50 text-stone-500 shadow-none')} />
       default:
         return <input id={controlId} type="text" required={isRequired} placeholder={example ? text.example(example) : undefined} className={input} />
     }
@@ -694,11 +729,12 @@ function FormScreen({ design, context }: { design: UiDesign; context: Context })
           const field = fields.get(name)
           if (!field) return null
           const controlId = `${id}-${position}`
-          const wide = field.kind === 'longText' || field.kind === 'attachment'
-          const Wrapper = field.kind === 'attachment' ? 'label' : 'div'
+          const attachment = isOneOf(field.kind, 'attachment')
+          const wide = attachment || isOneOf(field.kind, 'longText')
+          const Wrapper = attachment ? 'label' : 'div'
           return (
-            <Wrapper key={name} htmlFor={field.kind === 'attachment' ? controlId : undefined} data-field={name} className={cn('flex flex-col gap-1', wide && twoColumns && '@lg:col-span-2', field.kind === 'attachment' && 'cursor-pointer')}>
-              {field.kind === 'attachment' ? (
+            <Wrapper key={name} htmlFor={attachment ? controlId : undefined} data-field={name} className={cn('flex flex-col gap-1', wide && twoColumns && '@lg:col-span-2', attachment && 'cursor-pointer')}>
+              {attachment ? (
                 <span className="font-medium text-stone-800">{name}{required.has(name) ? <RequiredMark /> : null}</span>
               ) : (
                 <label htmlFor={controlId} className="font-medium text-stone-800">{name}{required.has(name) ? <RequiredMark /> : null}</label>
@@ -734,9 +770,9 @@ function DetailScreen({ context, openedRow, onEdit }: { context: Context; opened
   const status = workflow ? cellText(row.values[workflow.column]) : ''
   const stage = workflow ? workflow.stages.indexOf(status) : -1
   const shownFields = entity.fields.filter((field) => field.name !== titleField && field.name !== idField && field.name !== workflow?.column)
-  const short = shownFields.filter((field) => field.kind !== 'longText' && field.kind !== 'attachment')
-  const long = shownFields.filter((field) => field.kind === 'longText')
-  const files = shownFields.filter((field) => field.kind === 'attachment')
+  const short = shownFields.filter((field) => !isOneOf(field.kind, 'longText', 'attachment'))
+  const long = shownFields.filter((field) => isOneOf(field.kind, 'longText'))
+  const files = shownFields.filter((field) => isOneOf(field.kind, 'attachment'))
   return (
     <article className={cn('flex flex-col', space.gap)}>
       <div className="flex items-start gap-3">
@@ -804,7 +840,7 @@ function BoardScreen({ context, onOpenRow }: { context: Context; onOpenRow?: (ro
   const workflow = entity.workflow
   if (!workflow) return <p className="text-stone-500">{text.noRows}</p>
   const field = fields.get(workflow.column)
-  const cardFields = [context.titleField, context.idField, entity.fields.find((item) => item.kind === 'person')?.name, context.deadline].filter((name): name is string => Boolean(name))
+  const cardFields = [context.titleField, context.idField, entity.fields.find((item) => isOneOf(item.kind, 'person'))?.name, context.deadline].filter((name): name is string => Boolean(name))
   const deadlineField = context.deadline ? fields.get(context.deadline) : undefined
   return (
     <div className="-mx-1 overflow-x-auto px-1 pb-1">
@@ -871,7 +907,7 @@ function DashboardScreen({ cards, context, onOpenRow }: { cards: DashboardCard[]
   return (
     <ul className={cn('grid @md:grid-cols-2 @2xl:grid-cols-3', space.gap === 'gap-4' ? 'gap-3' : 'gap-2')}>
       {cards.map((card) => (
-        <li key={card.id} data-card={card.kind} className={cn('flex flex-col gap-2 rounded-lg border border-stone-200 bg-white shadow-xs', space.card, card.kind === 'countBy' && '@2xl:col-span-2')}>
+        <li key={card.id} data-card={knownValue(card.kind) ?? 'unsupported'} className={cn('flex flex-col gap-2 rounded-lg border border-stone-200 bg-white shadow-xs', space.card, isOneOf(card.kind, 'countBy') && '@2xl:col-span-2')}>
           <h4 className="text-xs font-medium text-stone-500">{card.title}</h4>
           <DashboardCardBody card={card} context={context} onOpenRow={onOpenRow} />
         </li>
@@ -892,7 +928,9 @@ function BigNumber({ value, unit, tone }: { value: string; unit?: string; tone?:
 function DashboardCardBody({ card, context, onOpenRow }: { card: DashboardCard; context: Context; onOpenRow?: (row: Row) => void }) {
   const { rows, fields, entity, theme } = context
   const field = card.field ? fields.get(card.field) : undefined
-  switch (card.kind) {
+  switch (knownValue(card.kind)) {
+    case undefined:
+      return <p data-testid="excel2app-ui-preview-unsupported" className="text-xs text-stone-500">{text.unsupported}</p>
     case 'count': {
       const status = entity.workflow?.column
       const open = status ? rows.filter((row) => !context.done.has(cellText(row.values[status]))).length : undefined

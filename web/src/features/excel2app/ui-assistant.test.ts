@@ -1,18 +1,19 @@
 import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { preserveLanguage } from '../../../test/language'
 import { setLanguage } from '../../shell/language'
+import { excelAnalysisOf, type Accent, type CompleteUiDesign } from '../../model/contracts/excel'
 import { textJa } from './assistant-copy'
 import { designFromReadings } from './design'
 import { planApp, type AppPlan } from './model'
 import { SAMPLE_SETS } from './samples'
 import { applyInstruction, suggestedInstructions } from './ui-assistant'
-import { defaultUiDesign, screenId, type Accent, type UiDesign } from './ui-design'
+import { defaultUiDesign, screenId } from './ui-design'
 
 const sample = SAMPLE_SETS[0].workbooks[0]
-const plan = planApp(designFromReadings([{
+const plan = planApp(excelAnalysisOf(designFromReadings([{
   grid: sample,
   summary: { id: 'wb-000000000001', fileName: sample.fileName, sheetCount: sample.sheets.length, rowCount: 0, truncated: false, bytes: 1, digest: '0'.repeat(64), addedAt: '2026-11-01T00:00:00Z' },
-}]), '不具合管理台帳')
+}])), '不具合管理台帳')
 const entity = plan.entities[0].name
 const initial = () => defaultUiDesign(plan)
 const apply = (instruction: string, design = initial()) => applyInstruction(design, plan, instruction)
@@ -394,7 +395,7 @@ describe('suggestedInstructions', () => {
   })
 
   test('chips adapt after layout, form, density, and group changes', () => {
-    let design: UiDesign = initial()
+    let design: CompleteUiDesign = initial()
     for (const instruction of ['一覧をカード表示に', '登録フォームは1列で', '工程でグループ化', 'コンパクトにして']) design = apply(instruction, design).design
     const suggestions = suggestedInstructions(design, plan)
     expect(suggestions).not.toContain(textJa.suggest.layout('cards'))
@@ -424,5 +425,26 @@ describe('suggestedInstructions', () => {
       expect(result.changed).toBe(true)
       expect(result.design.notes).toEqual([])
     }
+  })
+})
+
+describe('a field of a kind this console does not know', () => {
+  const unknownKind: AppPlan = { ...plan, entities: [{ ...plan.entities[0], fields: [...plan.entities[0].fields, { name: '署名欄', kind: { kind: 'unknown' } }] }] }
+
+  test('never becomes a form input: the default form leaves it out, asking for it stays a note', () => {
+    const design = defaultUiDesign(unknownKind)
+    expect(design.forms[entity].fields).not.toContain('署名欄')
+    for (const instruction of ['登録フォームに署名欄を追加', '署名欄を必須に']) {
+      const result = applyInstruction(design, unknownKind, instruction)
+      expect(result.design.forms[entity]).toEqual(design.forms[entity])
+      expect(result.design.notes).toEqual([instruction])
+    }
+  })
+
+  test('is not read as a date, choice or number', () => {
+    const design = defaultUiDesign(unknownKind)
+    expect(design.lists[entity].filters).not.toContain('署名欄')
+    expect(design.forms[entity].required).not.toContain('署名欄')
+    expect(design.dashboard.cards.map((card) => card.field)).not.toContain('署名欄')
   })
 })

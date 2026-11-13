@@ -18,6 +18,8 @@ export const decisionsTextJa = {
   dashboard: 'ダッシュボード',
   separator: '・',
   partSeparator: '／',
+  /** Shown under the decisions when the design holds a part this console cannot read. */
+  incomplete: 'ほかに、この画面では表示できない決定があります。',
 }
 
 export const decisionsText = localized({ ja: decisionsTextJa, en: decisionsTextEn })

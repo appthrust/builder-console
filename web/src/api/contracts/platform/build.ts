@@ -39,6 +39,7 @@ import type {
 } from '../../../model/contracts/build'
 import { absentMeansEmpty, openEnum } from '../../boundary'
 import { platformContract } from '../define'
+import { excelAnalysisReader, excelProgressReader, uiDesignReader } from './excel'
 
 /** The canonical enum's values, read as an open enum (shared by this file and workspace.ts). */
 export function openCanonical<K extends string>(canonical: { options: readonly K[] }) {
@@ -51,6 +52,8 @@ export const turnReader: z.ZodType<BuildTurn> = ApplicationDraftConversationTurn
   // A turn without `kind` predates the field and is a conversation turn (canonical default).
   kind: openCanonical(ApplicationDraftConversationTurnKind).default({ kind: 'known', value: 'conversation' }),
   status: openCanonical(ApplicationDraftConversationTurnStatus),
+  excelProgress: excelProgressReader.optional(),
+  uiDesign: uiDesignReader.optional(),
 })
 
 export const generationReader: z.ZodType<BuildGeneration> = ApplicationDraftCreationPlanGeneration.extend({
@@ -92,6 +95,8 @@ const nested = (prefix: string) => draftFieldPolicies.map((policy) => ({ ...poli
 
 export const draftReader: z.ZodType<BuildDraft> = ApplicationDraft.extend({
   phase: openCanonical(ApplicationDraftPhase),
+  excelAnalysis: excelAnalysisReader.optional(),
+  uiDesign: uiDesignReader.optional(),
   creationExecutions: creationExecutions.schema,
   creationPlanGenerations: creationPlanGenerations.schema,
   conversationTurns: conversationTurns.schema,

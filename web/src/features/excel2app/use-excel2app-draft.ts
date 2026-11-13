@@ -1,11 +1,13 @@
 // One draft owns the workbook set, staged analysis, specification and screen design.
 // Files are parsed and stored sequentially; only an explicit start submits analysis.
-import type { ApplicationDraftPublishPreferences, ApplicationDraftWorkbookSummary, ExcelAnalysis, UiDesign, UpdateApplicationDraftRequest } from '@appthrust/api-schema/platform-api'
-import { isOneOf, jobState, knownValue, type BuildDraft, type BuildTurn, type TurnKind } from '../../model/contracts/build'
+import { isOneOf, jobState, knownValue, type BuildDraft, type BuildTurn, type PublishPreferences, type TurnKind } from '../../model/contracts/build'
+import { analysisComplete, completeUiDesign, excelAnalysisOf, uiDesignOf, workbookReadingOf, type CompleteUiDesign, type ExcelAnalysis, type UiDesign, type WorkbookEntry, type WorkbookSummary } from '../../model/contracts/excel'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../../api/build'
-import { buildDraftOptions, draftWorkbookGridOptions, draftWorkbooksOptions, readDraft } from '../../api/queries/build'
+import { buildDraftOptions, readDraft } from '../../api/queries/build'
+import { draftWorkbookGridOptions, draftWorkbooksOptions } from '../../api/queries/excel'
+import { isResponseContractError } from '../../api/boundary'
 import { platformErrorEnvelope } from '../../api/platform-error'
 import { useCreationTools } from '../../api/queries/catalog'
 import { classifyBuildFailure } from '../../model/build/failure'
@@ -32,7 +34,7 @@ const TURN_MESSAGE_MAX = 4000
 /** The 「AI なしで続ける」 choice of a draft survives a reload of this tab. */
 const OFFLINE_PREFIX = 'builder-console:excel2app:offline:'
 
-const EMPTY_MEMBERS: ApplicationDraftWorkbookSummary[] = []
+const EMPTY_MEMBERS: WorkbookSummary[] = []
 export type Excel2AppStep = 0 | 1 | 2 | 3 | 4
 
 export interface CollectionResult {
@@ -54,7 +56,7 @@ export interface UiPreviewChatMessage {
 export type AnalysisProblem = 'unavailable' | 'failed' | 'quota' | 'policy'
 
 /** Why the workbook could not be stored. */
-export type StoreProblem = Exclude<WorkbookFileState, 'reading' | 'storing' | 'stored' | 'unsupported' | 'unreadable'> | 'busy' | 'created'
+export type StoreProblem = Exclude<WorkbookFileState, 'reading' | 'storing' | 'stored' | 'unsupported' | 'unreadable'> | 'busy' | 'created' | 'unconfirmed'
 
 export class WorkbookStoreError extends Error {
   constructor(readonly problem: StoreProblem, readonly location?: { sheet?: string; row?: number }) {
@@ -105,7 +107,8 @@ const turnsOf = (turns: BuildTurn[], kind: TurnKind) => turns.filter((turn) => i
 
 export const isUndoMessage = (message: string) => message.startsWith(textJa.preview.undoRequest) || message.startsWith(textEn.preview.undoRequest)
 
-export function undoMessage(previous: UiDesign): string {
+/** The ui-design turn that restores `previous`: only a complete design is ever sent back (nothing in it is dropped). */
+export function undoMessage(previous: CompleteUiDesign): string {
   return `${text.preview.undoRequest}\n\`\`\`json\n${JSON.stringify(previous)}\n\`\`\``
 }
 
@@ -184,10 +187,13 @@ export function analysisTitle(draft: BuildDraft, turn: BuildTurn | undefined): s
 }
 
 /** 用意する's two questions, persisted on the draft for every tab. */
-export type PublishChoice = Required<ApplicationDraftPublishPreferences>
+export type PublishChoice = Required<PublishPreferences>
+
+/** The hand-off's PATCH: the aligned name (title and specification) and the publish preferences. */
+export interface HandOffPatch { title?: string; specMarkdown?: string; publishPreferences: PublishChoice }
 
 /** Align the title/spec name and replace the draft's publish preferences in the same PATCH. */
-export function handOffPatch(draft: Pick<BuildDraft, 'title' | 'specMarkdown'>, specMarkdown: string, publish: PublishChoice): UpdateApplicationDraftRequest {
+export function handOffPatch(draft: Pick<BuildDraft, 'title' | 'specMarkdown'>, specMarkdown: string, publish: PublishChoice): HandOffPatch {
   const { name } = publish
   const { spec, body } = parseSpec(specMarkdown)
   // A document without readable front-matter keeps its text as is; the title still carries the name.
@@ -199,8 +205,8 @@ type SpecSave = { state: 'idle' | 'saving' | 'saved' } | { state: 'failed'; body
 
 /** The 「AI なしで続ける」 preview: the design lives in this tab until the hand-off writes it into the specification. */
 interface OfflineDesign {
-  design: UiDesign
-  history: UiDesign[]
+  design: CompleteUiDesign
+  history: CompleteUiDesign[]
   messages: UiPreviewChatMessage[]
 }
 
@@ -219,7 +225,12 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
   const codexAvailable = tools.data?.codexAvailable !== false
   const draftQuery = useQuery({ ...buildDraftOptions(projectId, draftId ?? ''), enabled: Boolean(draftId) })
   const [storedDraft, setStoredDraft] = useState<BuildDraft>()
-  const draft = draftQuery.data ?? (storedDraft?.projectId === projectId && (!draftId || storedDraft.id === draftId) ? storedDraft : undefined)
+  const observed = draftQuery.data ?? (storedDraft?.projectId === projectId && (!draftId || storedDraft.id === draftId) ? storedDraft : undefined)
+  // This flow's writes reach the draft cache at once (`receive`), but the page re-renders with them only after
+  // React Query's batched observer notification. A render in between must already read the written draft: with
+  // the observed one, `draftRef` goes back to the older draft and the next write builds on it (a turn appended
+  // to the draft as it was before the PATCH that preceded it, undoing that PATCH in the cache).
+  const draft = observed ? queryClient.getQueryData<BuildDraft>(buildDraftOptions(projectId, observed.id).queryKey) ?? observed : undefined
   const members = draft?.source?.workbooks ?? EMPTY_MEMBERS
   const [previewRequested, setPreviewRequested] = useState(false)
   const [offline, setOffline] = useState(() => (draftId ? readOffline(draftId) : false))
@@ -230,6 +241,9 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
   const [offlineDesign, setOfflineDesign] = useState<OfflineDesign>()
   const [createdDraftId, setCreatedDraftId] = useState<string>()
   const createdDraftRef = useRef<string>(undefined)
+  /** A write answered 2xx in a shape this console cannot read: it may have happened. Writes stay closed until a re-read. */
+  const [unconfirmed, setUnconfirmed] = useState(false)
+  const unconfirmedRef = useRef(false)
   const readOnly = Boolean(draft?.createdApplicationId || draft?.createdApplicationStackId || (draft && createdDraftId === draft.id))
   const lock = useRef(false)
   const draftRef = useRef(draft)
@@ -268,10 +282,11 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
   }, [gridQueries.data, members])
   const gridsReady = members.length > 0 && grids.size === members.length
   const inputs = useMemo(() => gridsReady ? members.map((summary) => ({ summary, grid: grids.get(summary.id)! })) : [], [gridsReady, members, grids])
-  const reading = useMemo<ExcelAnalysis | undefined>(() => draft?.excelAnalysis ?? (offline && gridsReady ? designFromReadings(inputs) : undefined), [draft?.excelAnalysis, offline, gridsReady, inputs])
+  const reading = useMemo<ExcelAnalysis | undefined>(() => draft?.excelAnalysis ?? (offline && gridsReady ? excelAnalysisOf(designFromReadings(inputs)) : undefined), [draft?.excelAnalysis, offline, gridsReady, inputs])
   const plan = useMemo<AppPlan | undefined>(() => reading ? planApp(reading, draft?.title ?? '') : undefined, [reading, draft?.title])
-  const entries = useMemo(() => offline && gridsReady ? inputs.map((input) => ({ workbook: input.summary, reading: readingOf(input) })) : workbooksQuery.data?.data ?? [], [offline, gridsReady, inputs, workbooksQuery.data])
   const usingOffline = offline && !draft?.excelAnalysis
+  /** The offline fallback's own readings (read through the same constructor as the server's); the server's come from `workbooksQuery`. */
+  const offlineEntries = useMemo<WorkbookEntry[] | undefined>(() => usingOffline && gridsReady ? inputs.map((input) => ({ workbook: input.summary, reading: workbookReadingOf(readingOf(input)) })) : undefined, [usingOffline, gridsReady, inputs])
 
   /**
    * Writes a write's answer into the draft cache after cancelling draft reads still in flight (polls and
@@ -303,6 +318,41 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
   function isReadOnly() {
     const current = draftRef.current
     return Boolean(current?.createdApplicationId || current?.createdApplicationStackId || (current && createdDraftRef.current === current.id))
+  }
+
+  /** No new write starts: the app exists, or an earlier write is still unconfirmed. */
+  function writesClosed() {
+    return isReadOnly() || unconfirmedRef.current
+  }
+
+  /**
+   * A write whose 2xx answer this console cannot read may have happened (design §6): nothing from it is cached,
+   * nothing is resent, the draft is read back, and only `confirm` (a re-read) reopens writes.
+   */
+  function unconfirmedWrite(error: unknown): boolean {
+    if (!isResponseContractError(error)) return false
+    unconfirmedRef.current = true
+    setUnconfirmed(true)
+    const id = draftRef.current?.id
+    if (id) void queryClient.invalidateQueries({ queryKey: buildDraftOptions(projectId, id).queryKey })
+    return true
+  }
+
+  /** Reads the latest draft and its set back; files whose add was unconfirmed are matched to it or offered again (same key). */
+  async function confirm() {
+    if (draftRef.current) await refetchDraft()
+    const id = draftRef.current?.id
+    if (id) await queryClient.invalidateQueries({ queryKey: [...buildDraftOptions(projectId, id).queryKey.slice(0, 3), 'workbooks'] })
+    const members = draftRef.current?.source?.workbooks ?? []
+    setFiles((rows) => rows.map((row) => {
+      if (row.problem !== 'unconfirmed') return row
+      const stored = members.find((member) => member.fileName === row.fileName && !rows.some((other) => other.workbookId === member.id))
+      if (!stored) return { ...row, problem: undefined }
+      uploads.current.delete(row.key)
+      return { ...row, state: 'stored', problem: undefined, workbookId: stored.id }
+    }))
+    unconfirmedRef.current = false
+    setUnconfirmed(false)
   }
 
   function markCreated(id: string) {
@@ -344,10 +394,11 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
       try {
         result = await api.addWorkbook(projectId, target.id, payload, key)
       } catch (error) {
-        if (!current) {
+        // An unconfirmed add may have stored the workbook: the new draft is kept for the re-read and a same-key retry.
+        if (!current && !isResponseContractError(error)) {
           try { await api.deleteDraft(projectId, target.id) }
           catch { pendingWorkbookDraft.current = target }
-        }
+        } else if (!current) pendingWorkbookDraft.current = target
         throw error
       }
       pendingWorkbookDraft.current = undefined
@@ -359,6 +410,11 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
       return result.draft.id
     } catch (error) {
       if (isApplicationCreated(error) && target) markCreated(target.id)
+      if (unconfirmedWrite(error)) {
+        // The new draft itself was answered readably: it is bound so the re-read and the same-key retry find it.
+        if (target && !current) await receive(target)
+        throw new WorkbookStoreError('unconfirmed')
+      }
       throw classifyStoreError(error)
     }
   }
@@ -383,14 +439,15 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
     changeFile(key, { state: 'storing' })
     try { await store(grid, key); return true }
     catch (error) {
-      const failure = error instanceof WorkbookStoreError ? error : new WorkbookStoreError('failed')
-      changeFile(key, { state: failure.problem === 'busy' || failure.problem === 'created' ? 'failed' : failure.problem, problem: failure.problem === 'busy' || failure.problem === 'created' ? failure.problem : undefined, location: failure.location })
+      const { problem } = error instanceof WorkbookStoreError ? error : new WorkbookStoreError('failed')
+      const flagged = problem === 'busy' || problem === 'created' || problem === 'unconfirmed'
+      changeFile(key, { state: flagged ? 'failed' : problem, problem: flagged ? problem : undefined, location: error instanceof WorkbookStoreError ? error.location : undefined })
       return false
     }
   }
 
   async function collect(inputs: readonly (File | WorkbookGrid)[], start = false): Promise<CollectionResult | undefined> {
-    if (inputs.length === 0 || collectLock.current || lock.current || isReadOnly() || turnRunning || !confirmSetChange()) return
+    if (inputs.length === 0 || collectLock.current || lock.current || writesClosed() || turnRunning || !confirmSetChange()) return
     collectLock.current = true
     setCollecting(true)
     try {
@@ -399,7 +456,11 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
       setFiles((rows) => [...rows, ...queued.map(({ input, key }): CollectedWorkbook => ({ key, fileName: input instanceof File ? input.name : input.fileName, state: 'reading' }))])
       let allStored = true
       for (const { input, key } of queued) {
-        if (!await processFile(key, input)) allStored = false
+        // An unconfirmed add closes writes: the rest of the batch is not sent; after the re-read each is offered again (same key).
+        if (unconfirmedRef.current) {
+          changeFile(key, { state: 'failed' })
+          allStored = false
+        } else if (!await processFile(key, input)) allStored = false
       }
       const analysisRequested = start && allStored && Boolean(draftRef.current?.source)
       if (analysisRequested) await analyse()
@@ -412,7 +473,7 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
 
   async function retryFile(key: string) {
     const input = uploads.current.get(key)
-    if (!input || collectLock.current || lock.current || turnRunning || isReadOnly() || !confirmSetChange()) return
+    if (!input || collectLock.current || lock.current || turnRunning || writesClosed() || !confirmSetChange()) return
     collectLock.current = true
     setCollecting(true)
     try { await processFile(key, input) }
@@ -420,7 +481,7 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
   }
 
   async function removeWorkbook(key: string, workbookId?: string) {
-    if (collectLock.current || lock.current || turnRunning || isReadOnly()) return
+    if (collectLock.current || lock.current || turnRunning || writesClosed()) return
     if (workbookId && !confirmSetChange()) return
     collectLock.current = true
     setCollecting(true)
@@ -434,13 +495,14 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
       setFiles((rows) => rows.filter((row) => row.key !== key && (!workbookId || row.workbookId !== workbookId)))
     } catch (error) {
       if (isApplicationCreated(error) && draftRef.current) markCreated(draftRef.current.id)
+      if (unconfirmedWrite(error)) return
       throw classifyStoreError(error)
     } finally { collectLock.current = false; setCollecting(false) }
   }
 
   async function analyse(message = hint) {
     const current = draftRef.current
-    if (!current?.source || isReadOnly() || currentTurns(current).some((turn) => jobState(turn) !== 'settled')) return
+    if (!current?.source || writesClosed() || currentTurns(current).some((turn) => jobState(turn) !== 'settled')) return
     setAnalysisProblem(undefined)
     setStarting(true)
     try {
@@ -451,6 +513,7 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
           await appendTurn(await api.createTurn(projectId, current.id, { kind: 'excel-analysis', message: message.trim() }))
         } catch (error) {
           if (isApplicationCreated(error)) return markCreated(current.id)
+          if (unconfirmedWrite(error)) return
           const status = errorStatus(error)
           if (status === 409) return void (await refetchDraft().catch(() => undefined))
           const envelope = platformErrorEnvelope(error)
@@ -478,9 +541,9 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
 
   async function continueOffline() {
     const current = draftRef.current
-    if (!current || !gridsReady || codexAvailable || isReadOnly() || turnRunning) return
+    if (!current || !gridsReady || codexAvailable || writesClosed() || turnRunning) return
     const local = designFromReadings(inputs)
-    const localPlan = planApp(local, current.title)
+    const localPlan = planApp(excelAnalysisOf(local), current.title)
     await exclusive(async () => {
       try {
         await receive(await api.updateDraft(projectId, current.id, { specMarkdown: excelSpecMarkdown(local, localPlan, members) }))
@@ -489,7 +552,7 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
         setAnalysisProblem(undefined)
       } catch (error) {
         if (isApplicationCreated(error)) markCreated(current.id)
-        else setAnalysisProblem({ kind: 'failed' })
+        else if (!unconfirmedWrite(error)) setAnalysisProblem({ kind: 'failed' })
       }
     })
   }
@@ -497,7 +560,7 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
   /** Saves an edited specification body under the unchanged front-matter; resolves whether it is saved. */
   async function saveSpec(body: string): Promise<boolean> {
     const current = draftRef.current
-    if (!current || isReadOnly()) return false
+    if (!current || writesClosed()) return false
     const { frontMatter, body: saved } = specParts(current.specMarkdown)
     if (body === saved) {
       if (specSave.state === 'failed') setSpecSave({ state: 'idle' })
@@ -508,15 +571,16 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
       await receive(await api.updateDraft(projectId, current.id, { specMarkdown: `${frontMatter}${body}` }))
       setSpecSave({ state: 'saved' })
       return true
-    } catch {
-      setSpecSave({ state: 'failed', body })
+    } catch (error) {
+      // An unconfirmed save keeps the typed text unsaved (it is not resent); the re-read decides what to do next.
+      setSpecSave(unconfirmedWrite(error) ? { state: 'idle' } : { state: 'failed', body })
       return false
     }
   }
 
   async function sendDesignTurn(message: string) {
     const current = draftRef.current
-    if (!current || isReadOnly()) return
+    if (!current || writesClosed()) return
     await exclusive(async () => {
       setSendProblem(undefined)
       setSending(message)
@@ -524,6 +588,7 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
         await appendTurn(await api.createTurn(projectId, current.id, { kind: 'ui-design', message }))
       } catch (error) {
         if (isApplicationCreated(error)) return markCreated(current.id)
+        if (unconfirmedWrite(error)) return
         const status = errorStatus(error)
         if (status === 409) await refetchDraft().catch(() => undefined)
         const envelope = platformErrorEnvelope(error)
@@ -540,6 +605,13 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
   const stack = useMemo(() => designStack(designTurns), [designTurns])
   const previous = stack.at(-2)
   const serverDesign = draft?.uiDesign ?? stack.at(-1) ?? null
+  // The offline design is complete by construction; it is shown through the same constructor as the server's.
+  const offlineShown = useMemo(() => (offlineDesign ? uiDesignOf(offlineDesign.design) : null), [offlineDesign])
+  const currentDesign = usingOffline ? offlineShown : serverDesign
+  /** Whether the shown design can be written as it is: no part of it is of a kind this console does not know or unreadable. */
+  const designComplete = Boolean(currentDesign && completeUiDesign(currentDesign))
+  /** The hand-off builds from the analysis and the design: an unknown part of either keeps it closed (also after a reload). */
+  const handOffReady = designComplete && Boolean(reading && analysisComplete(reading))
 
   /** Entering the preview asks for the default design once, unless one exists or is on its way. */
   function initDesign() {
@@ -571,7 +643,9 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
     void sendDesignTurn(instruction)
   }
 
-  const serverUndo = previous ? undoMessage(previous) : undefined
+  // Undo sends the previous design back, so both it and the design it replaces must be complete: never drop a part.
+  const previousComplete = previous && designComplete ? completeUiDesign(previous) : undefined
+  const serverUndo = previousComplete ? undoMessage(previousComplete) : undefined
   const canUndo = usingOffline ? Boolean(offlineDesign?.history.length) : Boolean(serverUndo && serverUndo.length <= TURN_MESSAGE_MAX)
 
   function undo() {
@@ -610,7 +684,8 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
   /** Persist the fallback's screen decisions, aligned name and publish preferences before opening the build. */
   async function handOff(publish: PublishChoice): Promise<boolean> {
     const current = draftRef.current
-    if (!current || isReadOnly()) return false
+    // The build must not start from an analysis or design whose unknown part the user never saw.
+    if (!current || writesClosed() || !handOffReady) return false
     const specMarkdown = usingOffline && offlineDesign ? withUiDecisions(current.specMarkdown, offlineDesign.design) : current.specMarkdown
     const patch = handOffPatch(current, specMarkdown, publish)
     try {
@@ -626,7 +701,7 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
     draft,
     readOnly,
     workbooksQuery,
-    entries,
+    offlineEntries,
     grids,
     gridsReady,
     gridsFailed: gridQueries.failed,
@@ -660,7 +735,9 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
     },
     spec: { save: saveSpec, status: specSave },
     design: {
-      current: usingOffline ? (offlineDesign?.design ?? null) : serverDesign,
+      current: currentDesign,
+      /** The hand-off may start: neither the design nor the analysis has an unknown or broken part. */
+      complete: handOffReady,
       messages,
       busy: designBusy,
       activityTail: isBuildPending(latestDesignTurn) ? latestDesignTurn?.activityTail : undefined,
@@ -673,5 +750,8 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
     },
     turnRunning,
     handOff,
+    /** A write's 2xx answer could not be read; `confirm` (a re-read) is the only way on. */
+    unconfirmed,
+    confirm: () => confirm().catch(() => undefined),
   }
 }

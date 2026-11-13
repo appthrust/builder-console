@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import type { ApplicationDraft, ApplicationDraftConversationTurn, UiDesign } from '@appthrust/api-schema/platform-api'
+import type { ApplicationDraft, ApplicationDraftConversationTurn } from '@appthrust/api-schema/platform-api'
+import { completeUiDesign, excelAnalysisOf, uiDesignOf, type CompleteUiDesign } from '../../model/contracts/excel'
 import { draftOf, readEachFirst, readFirst, turnOf } from '../../api/testing/build-domain'
 import { serializeSpec } from '../../model/build/spec'
 import { textJa } from './copy'
@@ -17,9 +18,10 @@ const analysisTitle = (draft: ApplicationDraft, turn: ApplicationDraftConversati
 
 const workbook = SAMPLE_SETS[0]!.workbooks[0]!
 const summary = { id: 'wb-000000000001', fileName: workbook.fileName, sheetCount: 3, rowCount: 28, truncated: false, bytes: 100, digest: 'a'.repeat(64), addedAt: '2026-10-26T00:01:00Z' }
-const plan = planApp(designFromReadings([{ summary, grid: workbook }]), fileStem(workbook.fileName))
-const design = defaultUiDesign(plan) as UiDesign
-const cards: UiDesign = { ...design, lists: Object.fromEntries(Object.entries(design.lists).map(([entity, list]) => [entity, { ...list, layout: 'cards' as const }])) }
+const plan = planApp(excelAnalysisOf(designFromReadings([{ summary, grid: workbook }])), fileStem(workbook.fileName))
+/** Designs as the ui-design turns carry them on the wire (complete: every kind known). */
+const design: CompleteUiDesign = defaultUiDesign(plan)
+const cards: CompleteUiDesign = { ...design, lists: Object.fromEntries(Object.entries(design.lists).map(([entity, list]) => [entity, { ...list, layout: 'cards' as const }])) }
 
 const turn = (id: string, userMessage: string, minute: number, extra: Partial<ApplicationDraftConversationTurn> = {}): ApplicationDraftConversationTurn => ({
   kind: 'ui-design', id, userMessage, status: 'succeeded', startedAt: `2026-10-26T00:0${minute}:00Z`, devWorkspaceId: 'ws-1', ...extra,
@@ -123,10 +125,19 @@ describe('screen design turns', () => {
   const undo = turn('t-undo', undoMessage(design), 3, { uiDesign: design, assistantMessage: '## 要約\nひとつ前の画面に戻しました。' })
 
   test('undo history: each change pushes, each undo pops, so it survives a reload', () => {
-    expect(designStack([init])).toEqual([design])
-    expect(designStack([init, change])).toEqual([design, cards])
-    expect(designStack([init, change, undo])).toEqual([design])
-    expect(designStack([init, change, turn('t-failed', '色を青に', 3, { status: 'failed' })])).toEqual([design, cards])
+    expect(designStack([init])).toEqual([uiDesignOf(design)])
+    expect(designStack([init, change])).toEqual([uiDesignOf(design), uiDesignOf(cards)])
+    expect(designStack([init, change, undo])).toEqual([uiDesignOf(design)])
+    expect(designStack([init, change, turn('t-failed', '色を青に', 3, { status: 'failed' })])).toEqual([uiDesignOf(design), uiDesignOf(cards)])
+  })
+
+  test('an undo sends back exactly the complete design the stack read; a design with an unknown part cannot be sent', () => {
+    const [read] = designStack([init])
+    const back = completeUiDesign(read!)
+    expect(back).toEqual(design)
+    expect(JSON.parse(undoMessage(back!).split('```json\n')[1]!.replace(/\n```$/, ''))).toEqual(JSON.parse(JSON.stringify(design)))
+    const newer = turn('t-newer', '予定表を追加', 4, { uiDesign: { ...design, screens: [...design.screens, { id: 'calendar:x', kind: 'calendar' as never, entity: 'x', title: '予定表', hidden: false }] } })
+    expect(completeUiDesign(designStack([init, newer]).at(-1)!)).toBeUndefined()
   })
   test('the chat shows instructions and reply summaries, never __init__ or the undo JSON', () => {
     const failed = turn('t-failed', '色を青に', 4, { status: 'failed', error: 'AI が止まりました' })

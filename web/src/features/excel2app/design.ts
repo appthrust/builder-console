@@ -1,11 +1,13 @@
 // Deterministic design for the mock runtime and explicit offline fallback only.
-import type { ApplicationDraftWorkbookSummary, ExcelAnalysis, ExcelAnalysisEntity, ExcelAnalysisSheet, ExcelAnalysisWorkbookRole, ExcelWorkbookReading } from '@appthrust/api-schema/platform-api'
+// It builds complete values (every kind known); the page reads them through the
+// same constructors as the server's (`workbookReadingOf`, `excelAnalysisOf`).
+import { excelAnalysisOf, type CompleteAnalysisEntity, type CompleteExcelAnalysis, type CompleteReadingSheet, type CompleteWorkbookReading, type WorkbookRole, type WorkbookSummary } from '../../model/contracts/excel'
 import { analysisNarrative } from './analysis'
 import { designText } from './design-copy'
 import { cellText, entityRows, planApp, readingCapabilities, readWorkbook, type WorkbookGrid } from './model'
 
 export interface DesignInput {
-  summary: ApplicationDraftWorkbookSummary
+  summary: WorkbookSummary
   grid: WorkbookGrid
 }
 
@@ -13,7 +15,7 @@ const label = (value: string) => value.slice(0, 200)
 const normalized = (value: string) => value.normalize('NFKC').replace(/\s+/g, '').toLowerCase()
 const fileStem = (name: string) => name.replace(/\.(xlsx|xlsm|xls|csv)$/i, '')
 
-export function readingOf(input: DesignInput): ExcelWorkbookReading {
+export function readingOf(input: DesignInput): CompleteWorkbookReading {
   const reading = readWorkbook(input.grid)
   return {
     workbookId: input.summary.id,
@@ -32,8 +34,8 @@ export function readingOf(input: DesignInput): ExcelWorkbookReading {
   }
 }
 
-interface Member { input: DesignInput; sheet: ExcelAnalysisSheet }
-interface Group { members: Member[]; headers: Set<string>; entity: ExcelAnalysisEntity }
+interface Member { input: DesignInput; sheet: CompleteReadingSheet }
+interface Group { members: Member[]; headers: Set<string>; entity: CompleteAnalysisEntity }
 
 function overlap(a: Set<string>, b: Set<string>): number {
   let shared = 0
@@ -41,14 +43,14 @@ function overlap(a: Set<string>, b: Set<string>): number {
   return shared / Math.max(a.size, b.size)
 }
 
-function workbookRole(sheets: ExcelAnalysisSheet[]): ExcelAnalysisWorkbookRole {
-  const roles = new Set<ExcelAnalysisWorkbookRole>()
+function workbookRole(sheets: CompleteReadingSheet[]): WorkbookRole {
+  const roles = new Set<WorkbookRole>()
   for (const sheet of sheets) if (sheet.role !== 'empty') roles.add(sheet.role === 'summary' ? 'report' : sheet.role)
   if (roles.size > 1) return 'mixed'
   return [...roles][0] ?? 'unused'
 }
 
-export function designFromReadings(inputs: DesignInput[], readings?: ReadonlyMap<string, ExcelWorkbookReading>): ExcelAnalysis {
+export function designFromReadings(inputs: DesignInput[], readings?: ReadonlyMap<string, CompleteWorkbookReading>): CompleteExcelAnalysis {
   const members = inputs.map((input) => ({ input, reading: readings?.get(input.summary.id) ?? readingOf(input) }))
   const groups: Group[] = []
   const omitted = new Set<string>()
@@ -71,7 +73,7 @@ export function designFromReadings(inputs: DesignInput[], readings?: ReadonlyMap
       group.members.push({ input, sheet })
       const entity = group.entity
       const fieldNames = new Map(entity.fields.map((field) => [normalized(field.name), field.name]))
-      const columns: ExcelAnalysisEntity['sources'][number]['columns'] = []
+      const columns: CompleteAnalysisEntity['sources'][number]['columns'] = []
       for (const column of sheet.columns) {
         const header = normalized(column.header)
         if (!header) continue
@@ -147,17 +149,19 @@ export function designFromReadings(inputs: DesignInput[], readings?: ReadonlyMap
 
   const capabilities = readingCapabilities(members.flatMap(({ reading }) => reading.sheets))
   if (groups.some((group) => group.entity.fields.some((field) => field.referenceEntity)) && !capabilities.includes('lookup')) capabilities.push('lookup')
-  const findings: ExcelAnalysis['findings'] = groups.filter((group) => group.members.length > 1).map((group) => ({
+  const findings: CompleteExcelAnalysis['findings'] = groups.filter((group) => group.members.length > 1).map((group) => ({
     kind: 'merged', message: label(designText.merged(group.entity.name, group.members.length)), workbookIds: [...new Set(group.members.map((member) => member.input.summary.id))],
   }))
   for (const { summary, grid } of inputs) {
     if (summary.truncated || grid.sheets.some((sheet) => sheet.truncated)) findings.push({ kind: 'truncated', message: label(designText.truncated(summary.fileName)), workbookIds: [summary.id] })
   }
   if (omitted.size) findings.unshift({ kind: 'unused', message: designText.entityLimit, workbookIds: [...omitted] })
-  const design: Omit<ExcelAnalysis, 'summary' | 'bullets'> = {
+  const design: Omit<CompleteExcelAnalysis, 'summary' | 'bullets'> = {
     capabilities,
     workbooks: members.map(({ input, reading }) => ({ workbookId: input.summary.id, role: workbookRole(reading.sheets), summary: reading.summary })),
     entities: groups.map((group) => group.entity), flows: [], findings: findings.slice(0, 20),
   }
-  return { ...design, ...analysisNarrative(design, planApp(design, fileStem(inputs[0]?.summary.fileName ?? '')), inputs.map((input) => input.summary)) }
+  // The narrative describes the plan this analysis implies, read like any other analysis.
+  const plan = planApp(excelAnalysisOf({ ...design, summary: '', bullets: [] }), fileStem(inputs[0]?.summary.fileName ?? ''))
+  return { ...design, ...analysisNarrative(design, plan, inputs.map((input) => input.summary)) }
 }

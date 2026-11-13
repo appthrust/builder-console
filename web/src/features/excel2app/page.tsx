@@ -1,9 +1,10 @@
 // Collect a workbook set, review its integrated business design, then hand the
 // same draft and screen decisions to the build flow.
-import type { ApplicationDraftCreationToolRegistryResponse, ApplicationDraftWorkbookEntry, ApplicationDraftWorkbookSummary, ExcelAnalysis, UiDesign } from '@appthrust/api-schema/platform-api'
-import { isOneOf, type BuildTurn } from '../../model/contracts/build'
+import { isOneOf, knownValue, type BuildTurn } from '../../model/contracts/build'
+import type { Capability, ColumnKind, ExcelAnalysis, ReadingSheet, SheetRole, UiDesign, WorkbookEntry, WorkbookList, WorkbookSummary } from '../../model/contracts/excel'
 import { useNavigate } from '@tanstack/react-router'
-import { ArrowRight, Calculator, CalendarClock, Check, ClipboardList, Database, Download, Eye, FileSpreadsheet, GitBranch, ListChecks, Loader2, Pencil, PieChart, RotateCcw, Search, Sparkles, Table2, Upload } from 'lucide-react'
+import { ArrowRight, Calculator, CalendarClock, Check, CircleDashed, ClipboardList, Database, Download, Eye, FileSpreadsheet, GitBranch, ListChecks, Loader2, Pencil, PieChart, RotateCcw, Search, Sparkles, Table2, Upload } from 'lucide-react'
+import type { OpenValue } from '../../api/boundary'
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { aiPolicyCopy, aiPolicyExplanation } from '../../copy/ai-policy'
 import { shareScopeLabel, type DraftShareScope } from '../../model/access'
@@ -16,10 +17,12 @@ import { parseSpec } from '../../model/build/spec'
 import { paths } from '../../routes/paths'
 import { useShell } from '../../shell/use-shell'
 import { Button, Card, CardBody, cn, CopyButton, Field, focusHeading, LinkButton, Markdown, Notice, PageHeader, RadioCards, Stepper, TextArea, TextInput, useDocumentTitle, useUnsavedChangesGuard } from '../../ui'
+import { ResourceBoundary, type ResourceQuery } from '../../ui/resource-boundary'
 import { resolveBuildGroup } from '../build/entry'
+import { UnconfirmedNotice } from '../build/unconfirmed-notice'
 import { filesFromDrop, filesFromList, type CollectedWorkbook } from './collect'
 import { text } from './copy'
-import { readWorkbook, type AppPlan, type Capability, type ColumnKind, type SheetReading, type WorkbookGrid } from './model'
+import { readWorkbook, type AppPlan, type WorkbookGrid } from './model'
 import { SAMPLE_SETS } from './samples'
 import { screenId } from './ui-design'
 import { UiDecisions } from './ui-decisions'
@@ -36,7 +39,7 @@ const CAPABILITY_ICON: Record<Capability, ReactNode> = {
   deadlines: <CalendarClock aria-hidden className="size-4" />,
 }
 
-const ROLE_PILL: Record<SheetReading['role'], string> = {
+const ROLE_PILL: Record<SheetRole, string> = {
   records: 'bg-accent-soft text-accent-strong',
   master: 'bg-stone-100 text-stone-700',
   summary: 'bg-amber-50 text-amber-800',
@@ -47,6 +50,14 @@ const ROLE_PILL: Record<SheetReading['role'], string> = {
 const KIND_PILL: Partial<Record<ColumnKind, string>> = {
   formula: 'bg-accent-soft text-accent-strong',
   reference: 'bg-accent-soft text-accent-strong',
+}
+
+/** A role or kind this console does not know: muted, never styled as a known one. */
+const UNSUPPORTED_PILL = 'bg-stone-100 text-stone-500 ring-1 ring-stone-300 ring-inset'
+
+function rolePill(role: OpenValue<SheetRole>): string {
+  const known = knownValue(role)
+  return known ? ROLE_PILL[known] : UNSUPPORTED_PILL
 }
 
 /** Step indexes in `text.steps` order. */
@@ -61,6 +72,12 @@ const PUBLISH_NAME_ID = 'excel2app-publish-name'
 
 /** Rows each sample card advertises: the rows the app imports, so the card agrees with the spec. */
 const SAMPLE_IMPORT_ROWS = new Map(SAMPLE_SETS.map((sample) => [sample.id, sample.workbooks.reduce((sum, workbook) => sum + readWorkbook(workbook).sheets.filter((sheet) => sheet.role === 'records' || sheet.role === 'master').reduce((rows, sheet) => rows + sheet.dataRows, 0), 0)]))
+
+/** The label of a known value; a kind, role or category this console does not know reads as unsupported. */
+function labelOf<K extends string>(labels: Record<K, string>, value: OpenValue<K>): string {
+  const known = knownValue(value)
+  return known ? labels[known] : text.unsupported
+}
 
 export function Excel2AppPage({ draftId }: { draftId?: string }) {
   const createdDraftId = useRef<string>(undefined)
@@ -194,7 +211,8 @@ function Excel2AppFlow({ draftId, onCreatedDraft }: { draftId?: string; onCreate
     void navigate({ href: paths.build(draft.id) })
   }
 
-  if (draftId && flow.draftQuery.isError) {
+  // Every step reads the draft: an unreadable first load fails the route; a failed re-read keeps the last draft (stale notice below).
+  if (draftId && flow.draftQuery.isError && !draft) {
     return (
       <div className="mx-auto max-w-3xl">
         <PageHeader title={text.title} lead={text.lead} />
@@ -236,11 +254,13 @@ function Excel2AppFlow({ draftId, onCreatedDraft }: { draftId?: string; onCreate
       <Card className="mt-6">
         <CardBody className="px-4 py-6 sm:px-8 sm:py-8">
           <h2 id="excel2app-step-title" tabIndex={-1} className="mb-5 text-lg font-semibold break-words text-stone-900 focus:outline-none">{stepTitle}</h2>
+          {draftId && draft ? <ResourceBoundary query={flow.draftQuery} resetKey={draftId} loading={null}>{(_read, stale) => stale ? <div className="mb-5">{stale}</div> : null}</ResourceBoundary> : null}
+          {flow.unconfirmed ? <div className="mb-5" data-testid="excel2app-unconfirmed"><UnconfirmedNotice onConfirm={() => void flow.confirm()} /></div> : null}
 
-          {step === 0 && !readOnly ? <PickStep busy={flow.collecting || flow.starting || flow.turnRunning} error={pickError} files={flow.files} budget={flow.budget} hint={flow.hint} onHint={flow.setHint} onFiles={(files) => void collected(files)} onSample={(grids) => void collected(grids, true)} onRemove={(file) => void remove(file)} onRetry={(file) => void flow.retryFile(file.key)} onStart={() => { setStep(ANALYSIS_STEP); void flow.startAnalysis() }} /> : null}
+          {step === 0 && !readOnly ? <PickStep busy={flow.collecting || flow.starting || flow.turnRunning} closed={flow.unconfirmed} error={pickError} files={flow.files} budget={flow.budget} hint={flow.hint} onHint={flow.setHint} onFiles={(files) => void collected(files)} onSample={(grids) => void collected(grids, true)} onRemove={(file) => void remove(file)} onRetry={(file) => void flow.retryFile(file.key)} onStart={() => { setStep(ANALYSIS_STEP); void flow.startAnalysis() }} /> : null}
           {step === ANALYSIS_STEP && draft ? (
             reading ? (
-              <AnalysisStep reading={reading} workbooks={draft.source?.workbooks ?? []} entries={flow.entries} offline={flow.offline} />
+              <AnalysisStep reading={reading} workbooks={draft.source?.workbooks ?? []} entries={flow.offlineEntries} readings={flow.workbooksQuery} resetKey={draft.id} offline={flow.offline} />
             ) : !readOnly ? (
               <AnalysingStep
                 workbooks={draft.source?.workbooks ?? []}
@@ -257,7 +277,6 @@ function Excel2AppFlow({ draftId, onCreatedDraft }: { draftId?: string; onCreate
               />
             ) : null
           ) : null}
-          {step === ANALYSIS_STEP && reading && !flow.offline && flow.workbooksQuery.isError ? <Notice tone="error" title={text.loadFailed} actions={<Button type="button" onClick={() => void flow.workbooksQuery.refetch()}>{text.retryLoad}</Button>} /> : null}
           {step === SPEC_STEP && draft ? (
             <SpecStep
               body={readOnly ? savedBody : specEdit ?? savedBody}
@@ -279,11 +298,12 @@ function Excel2AppFlow({ draftId, onCreatedDraft }: { draftId?: string; onCreate
               grids={grids}
               messages={flow.design.messages}
               busy={flow.design.busy}
-              readOnly={readOnly}
+              readOnly={readOnly || flow.unconfirmed}
               activityTail={flow.design.activityTail}
               onSend={flow.design.send}
               onUndo={flow.design.undo}
               canUndo={flow.design.canUndo}
+              complete={flow.design.complete}
               suggestions={flow.design.suggestions}
               onRetry={flow.design.retry}
             />
@@ -304,7 +324,7 @@ function Excel2AppFlow({ draftId, onCreatedDraft }: { draftId?: string; onCreate
               onShareChoice={setShareChoice}
             />
           ) : null}
-          {step === IMPLEMENT_STEP && !readOnly && startError ? <Notice tone="error" className="mt-4">{text.implement.startFailed}</Notice> : null}
+          {step === IMPLEMENT_STEP && !readOnly && startError && !flow.unconfirmed ? <Notice tone="error" className="mt-4">{text.implement.startFailed}</Notice> : null}
 
           {step > 0 ? (
             <div className="mt-8 flex flex-col-reverse gap-3 border-t border-stone-100 pt-5 sm:flex-row sm:items-center">
@@ -313,11 +333,11 @@ function Excel2AppFlow({ draftId, onCreatedDraft }: { draftId?: string; onCreate
                 {readOnly && step >= PREVIEW_STEP ? (
                   <LinkButton href={paths.build(draft!.id)}>{text.created.openBuild}</LinkButton>
                 ) : step < PREVIEW_STEP ? (
-                  <Button type="button" tone="primary" data-testid="excel2app-next" disabled={nextDisabled} loading={advancing} onClick={() => void next()} icon={<ArrowRight className="size-4" />}>{text.next}</Button>
+                  <Button type="button" tone="primary" data-testid="excel2app-next" disabled={nextDisabled || flow.unconfirmed} loading={advancing} onClick={() => void next()} icon={<ArrowRight className="size-4" />}>{text.next}</Button>
                 ) : step === PREVIEW_STEP ? (
-                  <Button type="button" tone="primary" data-testid="excel2app-to-implement" disabled={flow.design.busy || !design} onClick={() => setStep(IMPLEMENT_STEP)} icon={<ArrowRight className="size-4" />}>{text.preview.toImplement}</Button>
+                  <Button type="button" tone="primary" data-testid="excel2app-to-implement" disabled={flow.design.busy || !design || !flow.design.complete || flow.unconfirmed} onClick={() => setStep(IMPLEMENT_STEP)} icon={<ArrowRight className="size-4" />}>{text.preview.toImplement}</Button>
                 ) : (
-                  <Button type="button" tone="primary" data-testid="excel2app-start-build" loading={advancing} disabled={advancing || !design} onClick={() => void startBuild()} icon={<Sparkles className="size-4" />}>{text.implement.start}</Button>
+                  <Button type="button" tone="primary" data-testid="excel2app-start-build" loading={advancing} disabled={advancing || !design || !flow.design.complete || flow.unconfirmed} onClick={() => void startBuild()} icon={<Sparkles className="size-4" />}>{text.implement.start}</Button>
                 )}
               </div>
             </div>
@@ -329,7 +349,10 @@ function Excel2AppFlow({ draftId, onCreatedDraft }: { draftId?: string; onCreate
 }
 
 interface PickStepProps {
+  /** Work is running (the drop zone shows it). */
   busy: boolean
+  /** Nothing new may start while nothing runs (an unconfirmed write waits for the re-read). */
+  closed: boolean
   error?: string
   files: CollectedWorkbook[]
   budget: { files: number; maxFiles: number; bytes: number; maxBytes: number; sheets: number; maxSheets: number }
@@ -353,12 +376,13 @@ function fileStateText(file: CollectedWorkbook): string {
   }
 }
 
-function PickStep({ busy, error, files, budget, hint, onHint, onFiles, onSample, onRemove, onRetry, onStart }: PickStepProps) {
+function PickStep({ busy, closed, error, files, budget, hint, onHint, onFiles, onSample, onRemove, onRetry, onStart }: PickStepProps) {
   const input = useRef<HTMLInputElement>(null)
   const [over, setOver] = useState(false)
   const [dropError, setDropError] = useState(false)
   const [walking, setWalking] = useState(false)
-  const blocked = busy || walking
+  const working = busy || walking
+  const blocked = working || closed
   const drop = async (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault()
     setOver(false)
@@ -372,7 +396,7 @@ function PickStep({ busy, error, files, budget, hint, onHint, onFiles, onSample,
   return (
     <div className="space-y-6">
       <div data-testid="excel2app-drop" onDragOver={(event) => { event.preventDefault(); setOver(true) }} onDragLeave={() => setOver(false)} onDrop={(event) => void drop(event)} className={cn('flex flex-col items-center gap-3 rounded-lg border-2 border-dashed px-5 py-8 text-center', over ? 'border-accent bg-accent-soft' : 'border-stone-300 bg-stone-50/60')}>
-        {blocked ? <Loader2 aria-hidden className="size-6 animate-spin text-accent-strong" /> : <Upload aria-hidden className="size-6 text-stone-500" />}
+        {working ? <Loader2 aria-hidden className="size-6 animate-spin text-accent-strong" /> : <Upload aria-hidden className="size-6 text-stone-500" />}
         <p className="text-sm font-semibold text-stone-900">{text.pick.drop}</p>
         <p className="text-xs text-stone-500">{text.pick.dropHint}</p>
         <input ref={input} type="file" multiple accept=".xlsx,.xlsm" className="sr-only" data-testid="excel2app-files-input" onChange={(event) => { onFiles(filesFromList(event.target.files)); event.target.value = '' }} />
@@ -415,13 +439,13 @@ function PickStep({ busy, error, files, budget, hint, onHint, onFiles, onSample,
 
 /** Progress is persisted by the staged turn, never inferred from elapsed time. */
 export function AnalysingStep({ workbooks = [], turn, problem, error, failure, codexAvailable, codexUnavailableReason, codexPolicy, canContinueOffline, onRetry, onOffline }: {
-  workbooks?: ApplicationDraftWorkbookSummary[]
+  workbooks?: WorkbookSummary[]
   turn?: BuildTurn
   problem?: AnalysisProblem
   error?: string
   failure?: BuildFailure
   codexAvailable: boolean
-  codexUnavailableReason?: ApplicationDraftCreationToolRegistryResponse['codexUnavailableReason']
+  codexUnavailableReason?: unknown
   codexPolicy?: string
   canContinueOffline: boolean
   onRetry: () => void
@@ -429,6 +453,7 @@ export function AnalysingStep({ workbooks = [], turn, problem, error, failure, c
 }) {
   const running = isOneOf(turn?.status, 'pending', 'running')
   const progress = turn?.excelProgress
+  const stage = progress ? knownValue(progress.stage) : undefined
   const log = activityLines(turn?.activityTail).at(-1)
   const offline = canContinueOffline && !codexAvailable ? <Button type="button" tone="secondary" size="sm" data-testid="excel2app-offline" onClick={onOffline}>{text.analysis.offline}</Button> : null
   const retry = <Button type="button" tone="primary" size="sm" data-testid="excel2app-analysis-retry" onClick={onRetry} icon={<RotateCcw className="size-4" />}>{text.analysis.retry}</Button>
@@ -439,11 +464,12 @@ export function AnalysingStep({ workbooks = [], turn, problem, error, failure, c
     <div className="space-y-5" aria-busy={running}>
       <ul data-testid="excel2app-progress" className="space-y-3">
         {workbooks.map((workbook) => {
-          const state = progress?.workbooks.find((item) => item.workbookId === workbook.id)?.state ?? 'pending'
-          return <li key={workbook.id} data-testid="excel2app-progress-file" data-state={state} className="flex flex-wrap items-center gap-2 text-sm"><FileSpreadsheet aria-hidden className="size-4" /><span className="min-w-0 flex-1 break-words">{workbook.fileName}</span><span>{text.analysis.progress[state]}</span></li>
+          const read = progress?.workbooks.find((item) => item.workbookId === workbook.id)?.state
+          const state = read ? knownValue(read) : 'pending'
+          return <li key={workbook.id} data-testid="excel2app-progress-file" data-state={state ?? 'unsupported'} className="flex flex-wrap items-center gap-2 text-sm"><FileSpreadsheet aria-hidden className="size-4" /><span className="min-w-0 flex-1 break-words">{workbook.fileName}</span><span>{state ? text.analysis.progress[state] : text.unsupported}</span></li>
         })}
       </ul>
-      {progress ? <p data-testid="excel2app-progress-stage" data-stage={progress.stage} className="text-sm font-medium">{text.analysis.stagesByName[progress.stage]}</p> : null}
+      {progress ? <p data-testid="excel2app-progress-stage" data-stage={stage ?? 'unsupported'} className="text-sm font-medium">{stage ? text.analysis.stagesByName[stage] : text.unsupported}</p> : null}
       {policy ? (
         <div data-testid="excel2app-analysis-policy"><Notice tone="warning" title={aiPolicyCopy.title} actions={offline}>{policy}</Notice></div>
       ) : quota ? (
@@ -462,7 +488,11 @@ export function AnalysingStep({ workbooks = [], turn, problem, error, failure, c
   )
 }
 
-function AnalysisStep({ reading, workbooks, entries, offline }: { reading: ExcelAnalysis; workbooks: ApplicationDraftWorkbookSummary[]; entries: ApplicationDraftWorkbookEntry[]; offline: boolean }) {
+/**
+ * The integrated design, then each file's reading: the offline fallback's own (`entries`), or the server's list
+ * (`readings`), whose failed re-read keeps the readings shown under the fixed stale notice.
+ */
+function AnalysisStep({ reading, workbooks, entries, readings, resetKey, offline }: { reading: ExcelAnalysis; workbooks: WorkbookSummary[]; entries?: WorkbookEntry[]; readings: ResourceQuery<WorkbookList>; resetKey: string; offline: boolean }) {
   const names = new Map(workbooks.map((workbook) => [workbook.id, workbook.fileName]))
   return (
     <div className="space-y-8">
@@ -478,35 +508,43 @@ function AnalysisStep({ reading, workbooks, entries, offline }: { reading: Excel
         <h3 className="font-semibold">{text.analysis.entities}</h3>
         {reading.entities.map((entity) => (
           <article key={entity.name} data-testid="excel2app-entity" data-entity={entity.name} className="rounded-lg border border-stone-200 p-4">
-            <h4 className="font-semibold">{entity.name} <span className="text-xs font-normal text-stone-500">{text.role[entity.kind]} ・ {text.analysis.rows(entity.importRows)}</span></h4>
-            <ul className="mt-3 flex flex-wrap gap-2">{entity.fields.map((field) => <li key={field.name} className="rounded bg-stone-100 px-2 py-1 text-xs">{field.name} · {text.kind[field.kind]}{field.referenceEntity ? ` → ${field.referenceEntity}` : ''}</li>)}</ul>
+            <h4 className="font-semibold">{entity.name} <span className="text-xs font-normal text-stone-500">{labelOf(text.role, entity.kind)} ・ {text.analysis.rows(entity.importRows)}</span></h4>
+            <ul className="mt-3 flex flex-wrap gap-2">{entity.fields.map((field) => <li key={field.name} className="rounded bg-stone-100 px-2 py-1 text-xs">{field.name} · {labelOf(text.kind, field.kind)}{field.referenceEntity ? ` → ${field.referenceEntity}` : ''}</li>)}</ul>
             <p className="mt-3 text-xs font-medium text-stone-500">{text.analysis.sources}</p>
             <ul className="mt-1 space-y-1">{entity.sources.map((source, index) => <li key={`${source.workbookId}:${source.sheet}:${index}`} data-testid="excel2app-entity-source" className="text-sm">{names.get(source.workbookId)} ・ {source.sheet} ・ {text.analysis.rows(source.dataRows)}</li>)}</ul>
           </article>
         ))}
       </section>
-      {reading.findings.length > 0 ? <section data-testid="excel2app-findings"><h3 className="font-semibold">{text.analysis.findings}</h3><ul className="mt-2 list-disc space-y-2 pl-5">{reading.findings.map((finding, index) => <li key={`${finding.kind}:${index}`} className="text-sm">{finding.message}</li>)}</ul></section> : null}
+      {reading.findings.length > 0 ? <section data-testid="excel2app-findings"><h3 className="font-semibold">{text.analysis.findings}</h3><ul className="mt-2 list-disc space-y-2 pl-5">{reading.findings.map((finding, index) => <li key={`${knownValue(finding.kind) ?? 'unsupported'}:${index}`} className="text-sm">{finding.message}</li>)}</ul></section> : null}
       <section aria-labelledby="excel2app-capabilities">
         <h3 id="excel2app-capabilities" className="mb-3 font-semibold">{text.analysis.capabilities}</h3>
-        <ul className="grid gap-3 sm:grid-cols-2">{reading.capabilities.map((capability) => <li key={capability} className="flex gap-3 text-sm"><span className="text-accent-strong">{CAPABILITY_ICON[capability]}</span><span>{text.capability[capability].title}</span></li>)}</ul>
+        <ul className="grid gap-3 sm:grid-cols-2">{reading.capabilities.map((capability, index) => {
+          const known = knownValue(capability)
+          // biome-ignore lint/suspicious/noArrayIndexKey: capabilities this console does not know have no name to key on.
+          return <li key={index} className="flex gap-3 text-sm"><span className="text-accent-strong">{known ? CAPABILITY_ICON[known] : <CircleDashed aria-hidden className="size-4" />}</span><span>{known ? text.capability[known].title : text.unsupported}</span></li>
+        })}</ul>
       </section>
       <section className="space-y-4">
         <h3 className="font-semibold">{text.analysis.readings}</h3>
-        {entries.filter((entry) => entry.reading).map((entry) => <details key={entry.workbook.id} data-testid="excel2app-reading" className="space-y-3"><summary className="cursor-pointer text-sm font-medium">{entry.workbook.fileName}</summary><p className="text-sm text-stone-600">{entry.reading!.summary}</p>{entry.reading!.sheets.map((sheet) => <SheetCard key={sheet.name} sheet={sheet} />)}</details>)}
+        {entries ? <Readings entries={entries} /> : <ResourceBoundary query={readings} resetKey={resetKey}>{(list, stale) => <>{stale}<Readings entries={list.data} /></>}</ResourceBoundary>}
       </section>
     </div>
   )
 }
 
-function SheetCard({ sheet }: { sheet: SheetReading }) {
+function Readings({ entries }: { entries: WorkbookEntry[] }) {
+  return entries.filter((entry) => entry.reading).map((entry) => <details key={entry.workbook.id} data-testid="excel2app-reading" className="space-y-3"><summary className="cursor-pointer text-sm font-medium">{entry.workbook.fileName}</summary><p className="text-sm text-stone-600">{entry.reading!.summary}</p>{entry.reading!.sheets.map((sheet) => <SheetCard key={sheet.name} sheet={sheet} />)}</details>)
+}
+
+function SheetCard({ sheet }: { sheet: ReadingSheet }) {
   return (
     <div data-testid="excel2app-sheet" data-sheet={sheet.name} className="overflow-hidden rounded-lg border border-stone-200">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-stone-200 bg-stone-50 px-4 py-3">
         <Table2 aria-hidden className="size-4 shrink-0 text-stone-500" />
         <span className="font-semibold break-words text-stone-900">{sheet.name}</span>
-        <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium', ROLE_PILL[sheet.role])}>{text.role[sheet.role]}</span>
+        <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium', rolePill(sheet.role))}>{labelOf(text.role, sheet.role)}</span>
         <span className="text-xs text-stone-500">{text.analysis.rows(sheet.dataRows)}</span>
-        {sheet.role === 'summary' ? <span className="basis-full text-xs text-amber-800 sm:ml-auto sm:basis-auto">{text.analysis.skipped}</span> : null}
+        {isOneOf(sheet.role, 'summary') ? <span className="basis-full text-xs text-amber-800 sm:ml-auto sm:basis-auto">{text.analysis.skipped}</span> : null}
       </div>
       {sheet.columns.length === 0 ? <p className="px-4 py-3 text-sm text-stone-500">{text.analysis.noColumns}</p> : (
         <div className="overflow-x-auto">
@@ -521,15 +559,16 @@ function SheetCard({ sheet }: { sheet: SheetReading }) {
             </thead>
             <tbody>
               {sheet.columns.map((column) => {
-                const rules = column.kind === 'formula' ? sheet.rules.filter((item) => item.column === column.header) : []
+                const kind = knownValue(column.kind)
+                const rules = kind === 'formula' ? sheet.rules.filter((item) => item.column === column.header) : []
                 const samples = column.samples.join(' / ')
                 return (
                   <tr key={column.index} className="border-t border-stone-100 align-top">
                     <td className="px-4 py-2.5 font-medium whitespace-nowrap text-stone-900">{column.header}</td>
                     <td className="min-w-28 px-2 py-2.5 text-stone-700">
-                      <span className={cn('inline-block rounded px-1.5 py-0.5 text-xs font-medium whitespace-nowrap', KIND_PILL[column.kind] ?? 'bg-stone-100 text-stone-700')}>{text.kind[column.kind]}</span>
-                      {column.kind === 'choice' && column.options ? <span className="mt-1 block text-xs leading-relaxed text-stone-500">{column.options.join(' / ')}</span> : null}
-                      {column.kind === 'reference' && column.referenceSheet ? <span className="mt-1 block text-xs text-stone-500">→ {column.referenceSheet}</span> : null}
+                      <span className={cn('inline-block rounded px-1.5 py-0.5 text-xs font-medium whitespace-nowrap', kind ? KIND_PILL[kind] ?? 'bg-stone-100 text-stone-700' : UNSUPPORTED_PILL)}>{kind ? text.kind[kind] : text.unsupported}</span>
+                      {kind === 'choice' && column.options ? <span className="mt-1 block text-xs leading-relaxed text-stone-500">{column.options.join(' / ')}</span> : null}
+                      {kind === 'reference' && column.referenceSheet ? <span className="mt-1 block text-xs text-stone-500">→ {column.referenceSheet}</span> : null}
                       {rules.map((rule) => <span key={rule.expression} className="mt-1 block font-mono text-xs break-words text-stone-500 sm:hidden">= {rule.expression}</span>)}
                     </td>
                     <td className="hidden px-2 py-2.5 text-xs leading-relaxed sm:table-cell">
@@ -538,13 +577,13 @@ function SheetCard({ sheet }: { sheet: SheetReading }) {
                           {rules.map((rule) => (
                             <li key={rule.expression} className="flex items-baseline gap-2">
                               <code className="min-w-0 font-mono break-words text-stone-700">= {rule.expression}</code>
-                              <span className="shrink-0 rounded-full bg-white px-1.5 text-[11px] whitespace-nowrap text-stone-500 ring-1 ring-stone-200">{text.ruleCategory[rule.category]}</span>
+                              <span className="shrink-0 rounded-full bg-white px-1.5 text-[11px] whitespace-nowrap text-stone-500 ring-1 ring-stone-200">{labelOf(text.ruleCategory, rule.category)}</span>
                             </li>
                           ))}
                         </ul>
                       ) : <span title={samples} className="line-clamp-2 break-words text-stone-500">{samples}</span>}
                     </td>
-                    <td className={cn('px-4 py-2.5 text-right tabular-nums whitespace-nowrap', column.kind === 'formula' ? 'text-xs text-accent-strong' : column.fill < 0.5 ? 'text-stone-400' : 'text-stone-700')}>{column.kind === 'formula' ? text.analysis.auto : `${Math.round(column.fill * 100)}%`}</td>
+                    <td className={cn('px-4 py-2.5 text-right tabular-nums whitespace-nowrap', kind === 'formula' ? 'text-xs text-accent-strong' : column.fill < 0.5 ? 'text-stone-400' : 'text-stone-700')}>{kind === 'formula' ? text.analysis.auto : `${Math.round(column.fill * 100)}%`}</td>
                   </tr>
                 )
               })}
@@ -677,7 +716,7 @@ function ImplementStep({ reading, plan, design, name, shareChoice, ownerGroupNam
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <Database aria-hidden className="size-4 shrink-0 text-stone-500" />
                 <span className="font-medium break-words text-stone-900">{entity.name}</span>
-                <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium', ROLE_PILL[entity.kind])}>{text.role[entity.kind]}</span>
+                <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium', rolePill(entity.kind))}>{labelOf(text.role, entity.kind)}</span>
                 <span className="text-xs text-stone-500">{text.implement.fields(entity.fields.length)} ・ {text.implement.rows(entity.importRows)}</span>
               </div>
               <ul className="mt-2 flex flex-wrap gap-1.5 pl-6">

@@ -39,4 +39,7 @@ export const previewTextEn: typeof previewTextJa = {
   noCards: 'No cards on the dashboard.',
   preparing: 'AI is preparing the screens from the specification…',
   notReady: 'The screens are not ready yet.',
+  unsupported: 'This part cannot be shown on this page.',
+  broken: 'This part could not be loaded.',
+  unsupportedScreen: 'Unsupported screen',
 }
