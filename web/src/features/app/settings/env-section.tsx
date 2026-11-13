@@ -3,13 +3,13 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { createColumnHelper, getCoreRowModel, useReactTable } from '@tanstack/react-table'
 import { KeyRound, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { client } from '../../../api/client'
-import { keys } from '../../../api/queries/shared'
-import { useEnvVars, type ComponentScope } from '../../../api/queries/app'
+import { envVarsKey, updateEnvVars, useEnvVars, type ComponentScope } from '../../../api/queries/app'
+import { isOneOf } from '../../../model/contracts/build'
 import { copy } from '../../../copy'
-import { ActionError, Button, Checkbox, cn, DataTable, Disclosure, EmptyState, Field, LoadFailed, Loading, TextInput, useUnsavedChangesGuard } from '../../../ui'
+import { ActionError, Button, Checkbox, cn, DataTable, Disclosure, EmptyState, Field, LoadFailed, Loading, Notice, TextInput, useUnsavedChangesGuard } from '../../../ui'
 import { text } from '../copy'
-import { pendingRows, stageAdd, stageEdit, stageRemove, unstage, variablesToSave, type EnvChanges, type EnvRow, type EnvVariable } from './env-changes'
+import { hasUnsupportedEntry, isUserOwned, pendingRows, stageAdd, stageEdit, stageRemove, unstage, variablesToSave, type EnvChanges, type EnvRow, type EnvVariable } from './env-changes'
+import { StaleNotice, UnconfirmedNotice, useWriteConfirmation } from '../notices'
 import { fieldError, SaveRow, SettingsCard } from './parts'
 
 const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/
@@ -33,7 +33,7 @@ const CHANGE_BADGE: Record<NonNullable<EnvRow['change']>, string> = {
 
 /** Staged-change actions for a user-owned value; null for automatic values or read-only viewers. */
 function rowActions(entry: EnvRow, meta: EnvMeta) {
-  if (entry.source !== 'user' || !meta.canEdit) return null
+  if (!isUserOwned(entry) || !meta.canEdit) return null
   const undo = (
     <Button size="sm" tone="ghost" icon={<RotateCcw />} disabled={meta.busy} onClick={() => meta.undo(entry.key)} aria-label={text.settings.envUndoLabel(entry.key)}>
       {text.settings.envUndo}
@@ -127,7 +127,7 @@ const createColumns = () => [
         )
       }
       const removed = entry.change === 'removed' && 'line-through'
-      if (entry.source === 'generated') return <span className="text-stone-500">{copy.app.settings.envAutomatic}</span>
+      if (isOneOf(entry.source, 'generated')) return <span className="text-stone-500">{copy.app.settings.envAutomatic}</span>
       if (entry.sensitive || entry.value === undefined) return <span className={cn('text-stone-500', removed)}>{copy.app.settings.envHidden}</span>
       return <span className={cn('font-mono break-all text-stone-800', removed && 'text-stone-500 line-through')}>{entry.value}</span>
     },
@@ -155,25 +155,30 @@ export function EnvSection({ scope, canEdit }: { scope: ComponentScope | undefin
   const [changes, setChanges] = useState<EnvChanges>(NO_CHANGES)
   const [editing, setEditing] = useState<{ key: string; value: string }>()
   const rows = useMemo(() => pendingRows(entries, changes), [entries, changes])
-  const ownRows = useMemo(() => rows.filter((entry) => entry.source === 'user' && !entry.key.startsWith('DATABASE_')), [rows])
-  const automaticRows = useMemo(() => rows.filter((entry) => entry.source !== 'user' || entry.key.startsWith('DATABASE_')), [rows])
+  const ownRows = useMemo(() => rows.filter((entry) => isUserOwned(entry) && !entry.key.startsWith('DATABASE_')), [rows])
+  const automaticRows = useMemo(() => rows.filter((entry) => !isUserOwned(entry) || entry.key.startsWith('DATABASE_')), [rows])
+  const unsupported = hasUnsupportedEntry(entries)
 
   const mutation = useMutation({
     // PUT replaces the user-owned set.
     mutationFn: (variables: EnvVariable[]) => {
       if (!scope) throw new Error('env vars require a web component')
-      return client.platformApiUpdateApplicationBranchComponentConfig({ params: scope, body: { variables } })
+      return updateEnvVars(scope, variables)
     },
-    onSuccess: (result) => {
+    onSuccess: async (written) => {
       if (scope) {
-        queryClient.setQueryData(keys.envVars(scope.projectId, scope.applicationId, scope.branchId, scope.componentId), result.resource)
+        // A read that started before the write must not land over the written configuration.
+        await queryClient.cancelQueries({ queryKey: envVarsKey(scope), exact: true })
+        queryClient.setQueryData(envVarsKey(scope), written)
       }
       setChanges(NO_CHANGES)
       setEditing(undefined)
     },
   })
+  // A save whose answer could not be read may have happened: the staged changes stay, and the saved list is read back first.
+  const confirmation = useWriteConfirmation([mutation.error], mutation.reset, () => queryClient.refetchQueries({ queryKey: envVarsKey(scope), exact: true }))
 
-  const busy = mutation.isPending
+  const busy = mutation.isPending || confirmation.unconfirmed
   const meta = useMemo<EnvMeta>(() => ({
     canEdit,
     busy,
@@ -226,16 +231,20 @@ export function EnvSection({ scope, canEdit }: { scope: ComponentScope | undefin
     form.reset()
     mutation.reset()
   }
-  const ready = scope !== undefined && !config.isPending && !config.isError
+  // Shown data stays through a failed refresh (with the staged input); saving needs the current list.
+  const ready = scope !== undefined && config.data !== undefined
+  const stale = config.isError && config.data !== undefined
 
   return (
     <SettingsCard id="env" title={copy.app.settings.env} lead={copy.app.settings.envHelp}>
+      {stale ? <div className="mb-4"><StaleNotice updatedAt={config.dataUpdatedAt} refetching={config.isFetching} onRetry={() => void config.refetch()} /></div> : null}
+      {ready && unsupported ? <div className="mb-4"><Notice tone="warning">{text.unsupported.env}</Notice></div> : null}
       {!scope ? (
         <EmptyState icon={<KeyRound />} title={copy.app.settings.envEmpty} />
-      ) : config.isPending ? (
-        <Loading />
-      ) : config.isError ? (
+      ) : config.data === undefined && config.isError ? (
         <LoadFailed onRetry={() => void config.refetch()} error={config.error} />
+      ) : config.data === undefined ? (
+        <Loading />
       ) : (
         <div data-testid="env-table">
           <DataTable table={table} caption={copy.app.settings.env} emptyState={<EmptyState icon={<KeyRound />} title={copy.app.settings.envEmpty} />} />
@@ -342,14 +351,16 @@ export function EnvSection({ scope, canEdit }: { scope: ComponentScope | undefin
         >
           {pendingCount > 0 ? <p className="text-sm text-stone-600">{text.settings.envPending(pendingCount)}</p> : null}
           <div className="flex flex-wrap items-center gap-3">
-            <SaveRow pending={busy} disabled={pendingCount === 0 && !editingDirty} saved={mutation.isSuccess && pendingCount === 0} />
+            <SaveRow pending={mutation.isPending} disabled={busy || stale || unsupported || (pendingCount === 0 && !editingDirty)} saved={mutation.isSuccess && pendingCount === 0} />
             {pendingCount > 0 || editingDirty ? (
               <Button tone="ghost" disabled={busy} onClick={discard}>
                 {text.settings.envDiscard}
               </Button>
             ) : null}
           </div>
-          {mutation.isError ? <ActionError error={mutation.error} /> : null}
+          {confirmation.unconfirmed ? (
+            <UnconfirmedNotice onConfirm={() => void confirmation.confirm()} confirming={confirmation.confirming} />
+          ) : mutation.isError ? <ActionError error={mutation.error} /> : null}
         </form>
       ) : null}
 

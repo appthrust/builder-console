@@ -10,19 +10,25 @@ import type {
   ReleasePhase,
 } from '@appthrust/api-schema/platform-api'
 import { copy } from '../copy'
+import { appsInputOf, releaseOf, releaseStateOf, sourcesOf, type WireAppSources, type WireAppsInput } from '../api/testing/app-domain'
 import { runOf, taskOf } from '../api/testing/build-domain'
-import {
-  draftState,
-  versionLabel,
-  appSecondLine,
-  deriveAppView,
-  deriveConsoleApp,
-  deriveConsoleApps,
-  deriveRollbackView,
-  implementedReleaseReady,
-  type ConsoleAppSources,
-  type ConsoleAppsInput,
-} from './app'
+import { isSourceBuildFailed } from '../features/app/platform'
+import * as model from './app'
+import { draftState, versionLabel, type AppBuildProgress, type ConsoleApp, type DraftPlatformState } from './app'
+
+// Fixtures are wire literals; every model function under test sees only what the production readers make of them.
+type ConsoleAppSources = WireAppSources
+type ConsoleAppsInput = WireAppsInput
+const deriveConsoleApp = (wire: WireAppSources) => model.deriveConsoleApp(sourcesOf(wire))
+const deriveConsoleApps = (wire: WireAppsInput) => model.deriveConsoleApps(appsInputOf(wire))
+const deriveAppView = (app: Parameters<typeof model.deriveAppView>[0], wire: WireAppsInput, now?: number, draftPlatform?: DraftPlatformState, build?: AppBuildProgress) =>
+  model.deriveAppView(app, appsInputOf(wire), now, draftPlatform, build)
+const implementedReleaseReady = (platform: ConsoleApp | undefined, releases: readonly unknown[], build: AppBuildProgress) =>
+  model.implementedReleaseReady(platform, releases.map(releaseOf), build)
+const appSecondLine = (platform: ConsoleApp, releases: readonly unknown[], now?: number, build?: AppBuildProgress) =>
+  model.appSecondLine(platform, releases.map(releaseOf), now, build)
+const deriveRollbackView = (wire: unknown) => model.deriveRollbackView(releaseStateOf(wire))
+const repositoryFacts = (repository: { id: string; build?: { state?: string } }) => ({ id: repository.id, buildFailed: isSourceBuildFailed(repository) })
 
 const application: Application = {
   id: 'shop',
@@ -147,7 +153,7 @@ describe('AI build URL gate', () => {
     const platform = deriveConsoleApp(sources({ releases: overview(next) }))
     expect(implementedReleaseReady(platform, [template, next], build)).toBe(true)
     expect(implementedReleaseReady(platform, [template, next], { ...build, tasks: [taskOf({ id: 'one', title: '顧客一覧', status: 'skipped' })] })).toBe(false)
-    expect(implementedReleaseReady({ ...platform, lastRelease: { ...platform.lastRelease!, phase: 'InProgress' } }, [template, next], build)).toBe(false)
+    expect(implementedReleaseReady({ ...platform, lastRelease: { ...platform.lastRelease!, phase: { kind: 'known', value: 'InProgress' } } }, [template, next], build)).toBe(false)
     const ready = deriveAppView(app, { ...input, releasesByApplication: { shop: overview(next) } }, Date.now(), undefined, build)
     expect(ready.url).toBe(succeededPublish.publicUrl)
     expect(ready.label).toBe('作っています')
@@ -713,7 +719,7 @@ describe('source build status on app details and mine rows', () => {
   const input: ConsoleAppsInput = {
     applications: [application], stacks: [{ ...stack, sourceKind: 'application-source-repository', sourceRepositoryRefName: repository.id }],
     publishes: [succeededPublish], componentSummaries: readyComponents, releasesByApplication: { shop: overview(release('Succeeded')) },
-    sourceRepositories: [repository],
+    sourceRepositories: [repositoryFacts(repository)],
   }
   test('an observed failure overrides AI 作っています and an older Ready image', () => {
     const result = deriveAppView(app, input, Date.now(), undefined, { draftId: 'draft', taskCount: 1, tasks: [taskOf({ id: 'screen', title: '顧客一覧', status: 'running' })] })
@@ -723,9 +729,9 @@ describe('source build status on app details and mine rows', () => {
   })
   test('joins only the explicit source and recovers with the next observation', () => {
     expect(deriveAppView(app, { ...input, stacks: [stack] }).status).toBe('live')
-    expect(deriveAppView(app, { ...input, sourceRepositories: [{ ...repository, id: 'other-src' }] }).status).toBe('live')
+    expect(deriveAppView(app, { ...input, sourceRepositories: [repositoryFacts({ ...repository, id: 'other-src' })] }).status).toBe('live')
     for (const state of ['healthy', 'running', 'unknown'] as const) {
-      expect(deriveAppView(app, { ...input, sourceRepositories: [{ ...repository, build: { state } }] }).status).toBe('live')
+      expect(deriveAppView(app, { ...input, sourceRepositories: [repositoryFacts({ ...repository, build: { state } })] }).status).toBe('live')
     }
   })
   test('drafts use the retained source reference before a stack exists', () => {

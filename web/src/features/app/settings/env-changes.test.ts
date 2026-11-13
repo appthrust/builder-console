@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test'
-import type { ApplicationBranchComponentConfigEntry } from '@appthrust/api-schema/platform-api'
-import { pendingRows, stageAdd, stageEdit, stageRemove, unstage, variablesToSave, type EnvChanges } from './env-changes'
+import { configOf } from '../../../api/testing/app-domain'
+import { hasUnsupportedEntry, pendingRows, stageAdd, stageEdit, stageRemove, unstage, variablesToSave, type EnvChanges } from './env-changes'
 
-const entries: ApplicationBranchComponentConfigEntry[] = [
+const entries = configOf({ revision: 'r1', variables: [
   { key: 'APP_TITLE', state: 'configured', source: 'user', sensitive: false, value: 'mitsumori' },
   { key: 'API_TOKEN', state: 'configured', source: 'user', sensitive: true },
   { key: 'DATABASE_URL', state: 'generated', source: 'generated', sensitive: true },
-]
+] }).variables
 
 describe('pending env changes', () => {
   test('nothing staged saves the user-owned list unchanged (secrets without their value)', () => {
@@ -51,5 +51,23 @@ describe('pending env changes', () => {
     const removed = stageRemove({}, 'APP_TITLE')
     expect(stageAdd(entries, removed, 'APP_TITLE', 'again', true)).toEqual({ APP_TITLE: { kind: 'edited', value: 'again', sensitive: true } })
     expect(unstage(removed, 'APP_TITLE')).toEqual({})
+  })
+})
+
+describe('entries this console does not know', () => {
+  const future = configOf({ revision: 'r2', variables: [
+    { key: 'APP_TITLE', state: 'configured', source: 'user', sensitive: false, value: 'mitsumori' },
+    { key: 'MANAGED_BY_POLICY', state: 'configured', source: 'policy', sensitive: false, value: 'x' },
+  ] }).variables
+
+  test('an unknown source is never the user\'s own: not edited and not saved', () => {
+    expect(variablesToSave(future, {})).toEqual([{ key: 'APP_TITLE', value: 'mitsumori', sensitive: false }])
+    expect(stageEdit(future, {}, 'MANAGED_BY_POLICY', 'y')).toEqual({})
+  })
+
+  test('saving the full user-owned list is not offered while any entry is unknown', () => {
+    expect(hasUnsupportedEntry(entries)).toBe(false)
+    expect(hasUnsupportedEntry(future)).toBe(true)
+    expect(hasUnsupportedEntry(configOf({ revision: 'r3', variables: [{ key: 'A', state: 'rotating', source: 'user', sensitive: true }] }).variables)).toBe(true)
   })
 })

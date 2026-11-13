@@ -1,17 +1,50 @@
-// Console server reads (`/api/console/*`, `/config`). Contracted operations
-// (me, groups, comments, config) go through the gateway; the rest still use the
-// unverified facade until their contracts land.
+// Console server reads (`/api/console/*`, `/config`) and the app screens'
+// Console writes. Every answer is decoded at the boundary
+// (api/contracts/console/*); nothing here reads an unchecked body.
 import { queryOptions, useQuery, useSuspenseQuery } from '@tanstack/react-query'
 import { isResponseContractError } from '../boundary'
-import { consoleApi, type AppListParams, type DirectoryAppsParams } from '../console-unverified'
 import { isConsoleError } from '../console'
 import { listCommentsContract, postCommentContract, removeCommentContract } from '../contracts/console/comments'
 import { configContract } from '../contracts/console/config'
 import { groupsContract } from '../contracts/console/groups'
 import { meContract } from '../contracts/console/me'
+import {
+  appAccessRequestsContract,
+  appContract,
+  appsContract,
+  approveAccessRequestContract,
+  createAccessRequestContract,
+  createPersonContract,
+  declineAccessRequestContract,
+  directoryAppsContract,
+  directoryEntryContract,
+  directoryUsersContract,
+  membersContract,
+  migrateDirectoryContract,
+  myAccessRequestContract,
+  pendingAccessRequestsContract,
+  peopleContract,
+  personContract,
+  removeAppContract,
+  removeScreenshotContract,
+  reorderScreenshotsContract,
+  resolveContract,
+  settingsContract,
+  toolsContract,
+  updateAppContract,
+  uploadScreenshotContract,
+  type AppListInput,
+  type DirectoryAppsInput,
+  type UpdateAppInput,
+} from '../contracts/console/operations'
 import { apiGateway } from '../gateway'
 import { isTransientError } from '../platform-error'
+import type { BusinessApp, Person } from '../../model/contracts/console'
 import { POLL_INTERVAL_MS, readRetryDelay, retryReadQuery, retryTransient, TRANSIENT_RETRIES } from './shared'
+
+export type AppListParams = AppListInput
+export type DirectoryAppsParams = DirectoryAppsInput
+export type { UpdateAppInput }
 
 export const consoleKeys = {
   me: ['console', 'me'] as const,
@@ -44,19 +77,19 @@ export const meQuery = queryOptions({ queryKey: consoleKeys.me, queryFn: () => a
 export const groupsQuery = queryOptions({ queryKey: consoleKeys.groups, queryFn: () => apiGateway.console(groupsContract, undefined) })
 
 export const membersQuery = (groupId: string) =>
-  queryOptions({ queryKey: consoleKeys.members(groupId), queryFn: () => consoleApi.directory.members(groupId) })
+  queryOptions({ queryKey: consoleKeys.members(groupId), queryFn: () => apiGateway.console(membersContract, groupId) })
 
 export const appsQuery = (params: AppListParams) =>
-  queryOptions({ queryKey: consoleKeys.apps(params), queryFn: () => consoleApi.apps.list(params) })
+  queryOptions({ queryKey: consoleKeys.apps(params), queryFn: () => apiGateway.console(appsContract, params) })
 
 export const appQuery = (appId: string) =>
-  queryOptions({ queryKey: consoleKeys.app(appId), queryFn: () => consoleApi.apps.get(appId), retry: retryReadQuery, retryDelay: readRetryDelay })
+  queryOptions({ queryKey: consoleKeys.app(appId), queryFn: () => apiGateway.console(appContract, appId), retry: retryReadQuery, retryDelay: readRetryDelay })
 
 export const directoryAppsQuery = (params: DirectoryAppsParams = {}) =>
-  queryOptions({ queryKey: consoleKeys.directoryApps(params), queryFn: () => consoleApi.apps.directory(params) })
+  queryOptions({ queryKey: consoleKeys.directoryApps(params), queryFn: () => apiGateway.console(directoryAppsContract, params) })
 
 export const directoryEntryQuery = (appId: string) =>
-  queryOptions({ queryKey: consoleKeys.directoryEntry(appId), queryFn: () => consoleApi.apps.directoryEntry(appId), retry: retryUnlessNotFound })
+  queryOptions({ queryKey: consoleKeys.directoryEntry(appId), queryFn: () => apiGateway.console(directoryEntryContract, appId), retry: retryUnlessNotFound })
 
 export const commentsQuery = (appId: string) =>
   queryOptions({ queryKey: consoleKeys.comments(appId), queryFn: () => apiGateway.console(listCommentsContract, appId) })
@@ -68,34 +101,44 @@ export const APP_TOOLS_POLL_MS = 60_000
 export const appToolsQuery = (appId: string) =>
   queryOptions({
     queryKey: consoleKeys.appTools(appId),
-    queryFn: () => consoleApi.apps.tools(appId),
+    queryFn: () => apiGateway.console(toolsContract, appId),
     staleTime: 30_000,
     refetchInterval: (query) => (query.state.data && !query.state.data.available && query.state.data.pending ? POLL_INTERVAL_MS : APP_TOOLS_POLL_MS),
   })
 
 export const personQuery = (personId: string) =>
-  queryOptions({ queryKey: consoleKeys.person(personId), queryFn: () => consoleApi.directory.person(personId), retry: retryUnlessNotFound })
+  queryOptions({ queryKey: consoleKeys.person(personId), queryFn: () => apiGateway.console(personContract, personId), retry: retryUnlessNotFound })
 
-/** Directory people by id (batch); unknown ids are simply absent. */
+/** The Directory answers at most 100 ids per call. */
+const PEOPLE_BATCH = 100
+
+/** Directory people by id (batches of 100; no call for an empty list); unknown ids are simply absent. */
+export async function peopleByIds(ids: readonly string[]): Promise<Person[]> {
+  const batches: string[][] = []
+  for (let start = 0; start < ids.length; start += PEOPLE_BATCH) batches.push(ids.slice(start, start + PEOPLE_BATCH))
+  const pages = await Promise.all(batches.map((batch) => apiGateway.console(peopleContract, { ids: batch })))
+  return pages.flat()
+}
+
 export const peopleQuery = (ids: readonly string[]) =>
-  queryOptions({ queryKey: consoleKeys.people(ids), queryFn: () => consoleApi.directory.people([...ids]) })
+  queryOptions({ queryKey: consoleKeys.people(ids), queryFn: () => peopleByIds(ids) })
 
 export const myAccessRequestQuery = (appName: string) =>
-  queryOptions({ queryKey: consoleKeys.accessRequestMine(appName), queryFn: () => consoleApi.accessRequests.mine(appName) })
+  queryOptions({ queryKey: consoleKeys.accessRequestMine(appName), queryFn: () => apiGateway.console(myAccessRequestContract, appName) })
 
 export const pendingAccessRequestsQuery = queryOptions({
   queryKey: consoleKeys.accessRequestsPending,
-  queryFn: () => consoleApi.accessRequests.pending(),
+  queryFn: () => apiGateway.console(pendingAccessRequestsContract, undefined),
 })
 
 export const appAccessRequestsQuery = (appId: string) =>
-  queryOptions({ queryKey: consoleKeys.accessRequestsOfApp(appId), queryFn: () => consoleApi.accessRequests.ofApp(appId) })
+  queryOptions({ queryKey: consoleKeys.accessRequestsOfApp(appId), queryFn: () => apiGateway.console(appAccessRequestsContract, appId) })
 
 /** `path` is the console URL path ("/sales/east"); follows the server's redirect table. */
 export const resolveQuery = (path: string) =>
   queryOptions({
     queryKey: consoleKeys.resolve(path),
-    queryFn: () => consoleApi.resolve(path),
+    queryFn: () => apiGateway.console(resolveContract, path),
     staleTime: 30_000,
     retry: retryTransient,
     refetchInterval: false,
@@ -103,9 +146,9 @@ export const resolveQuery = (path: string) =>
 
 /** Realm accounts for the person pickers; idle until something is typed. */
 export const directoryUsersQuery = (q: string) =>
-  queryOptions({ queryKey: consoleKeys.directoryUsers(q), queryFn: () => consoleApi.directory.users(q), enabled: q.length > 0 })
+  queryOptions({ queryKey: consoleKeys.directoryUsers(q), queryFn: () => apiGateway.console(directoryUsersContract, q), enabled: q.length > 0 })
 
-export const platformSettingsQuery = queryOptions({ queryKey: consoleKeys.platform, queryFn: () => consoleApi.admin.platform() })
+export const platformSettingsQuery = queryOptions({ queryKey: consoleKeys.platform, queryFn: () => apiGateway.console(settingsContract, undefined) })
 
 /** The caller; the root route's beforeLoad has loaded it before any page renders. */
 export function useMe() {
@@ -125,6 +168,24 @@ export function useApps(params: AppListParams, enabled = true) {
 export const postComment = (appId: string, body: string) => apiGateway.console(postCommentContract, { appId, body })
 
 export const removeComment = (appId: string, commentId: string) => apiGateway.console(removeCommentContract, { appId, commentId })
+
+// Console writes of the app screens. A 2xx answer that breaks its contract
+// rejects with a typed failure: nothing is cached from it, and callers read the
+// state back instead of resending.
+export const updateApp = (appId: string, input: UpdateAppInput): Promise<BusinessApp> => apiGateway.console(updateAppContract, { appId, input })
+export const removeApp = (appId: string): Promise<void> => apiGateway.console(removeAppContract, appId)
+/** Registered people matching a name or email. */
+export const searchPeople = (q: string): Promise<Person[]> => apiGateway.console(peopleContract, { q })
+/** Pre-registers a person by email; 409 when the email is known. */
+export const createPerson = (input: { email: string; displayName: string }): Promise<Person> => apiGateway.console(createPersonContract, input)
+export const uploadScreenshot = (appId: string, file: File, caption?: string) => apiGateway.console(uploadScreenshotContract, { appId, file, caption })
+export const removeScreenshot = (appId: string, screenshotId: string) => apiGateway.console(removeScreenshotContract, { appId, screenshotId })
+export const reorderScreenshots = (appId: string, order: string[]) => apiGateway.console(reorderScreenshotsContract, { appId, order })
+export const createAccessRequest = (input: { appName: string; message: string }) => apiGateway.console(createAccessRequestContract, input)
+export const approveAccessRequest = (appId: string, requestId: string) => apiGateway.console(approveAccessRequestContract, { appId, requestId })
+export const declineAccessRequest = (appId: string, requestId: string) => apiGateway.console(declineAccessRequestContract, { appId, requestId })
+/** Console admin only; pushes the console's people, groups and memberships into the Directory (release N only). */
+export const migrateDirectory = () => apiGateway.console(migrateDirectoryContract, undefined)
 
 const fetchConsoleConfig = () => apiGateway.console(configContract, undefined)
 

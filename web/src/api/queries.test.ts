@@ -9,6 +9,7 @@ import { ResponseContractError } from './boundary'
 import { ConsoleApiError } from './console'
 import { appQuery, consoleConfigQuery, projectIdQuery, resolveQuery } from './queries/console'
 import { componentLogsQuery } from './queries/app'
+import { createTestGateway } from './testing/gateway'
 import { createConnectionsQuery, creationToolsQuery, githubRepositoriesQuery } from './queries/catalog'
 import { dataPreconditionReason, isDataForbidden, membershipUnboundReason } from './queries/data'
 import { queryClient, readRetryDelay, retryDelay, retryQuery, retryReadQuery } from './queries/shared'
@@ -180,9 +181,8 @@ test('github repositories: the search term is trimmed and only sent when present
 
 test('logs send branchId and isolate cached results between branches', async () => {
   const requests: URL[] = []
-  const link = new OpenAPILink(platformApiRouter, {
-    url: 'http://platform.test',
-    fetch: async (request) => {
+  const api = createTestGateway({
+    platformFetch: async (request) => {
       requests.push(new URL(request.url))
       return Response.json({
         clusterId: 'wlc-1', namespace: 'pj-1', service: 'web',
@@ -191,7 +191,6 @@ test('logs send branchId and isolate cached results between branches', async () 
       })
     },
   })
-  const api = createORPCClient<PlatformApiClient>(link)
   const cache = new QueryClient()
   const production = componentLogsQuery('pj-1', 'web', 'production', api)
   const staging = componentLogsQuery('pj-1', 'web', 'staging', api)

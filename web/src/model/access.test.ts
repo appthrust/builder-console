@@ -1,5 +1,14 @@
 import { describe, expect, test } from 'bun:test'
-import { accessRequest, deriveAccess, matchesAccess, movePerson, shareScopeLabel } from './access'
+import { publishAccessOf } from '../api/testing/app-domain'
+import { sharingCopy } from '../copy/sharing'
+import { text } from '../features/app/copy'
+import * as model from './access'
+import { accessRequest, movePerson, shareScopeLabel } from './access'
+
+// Access fixtures are wire literals read by the production reader.
+const accessOf = (wire: unknown) => (wire === undefined ? undefined : publishAccessOf(wire))
+const deriveAccess = (wire: unknown, ...rest: Parameters<typeof model.deriveAccess> extends [unknown, ...infer R] ? R : never) => model.deriveAccess(accessOf(wire), ...rest)
+const matchesAccess = (wire: unknown, scope: Parameters<typeof model.matchesAccess>[1]) => model.matchesAccess(accessOf(wire), scope)
 
 const share = { scope: 'private' as const, groupIds: [], extraPersonIds: ['viewer'] }
 const app = { share, owners: [{ id: 'owner' }] }
@@ -58,4 +67,20 @@ test('role moves use one disjoint owner/share patch and guard the last owner', (
   expect(demoted).toEqual({ ownerIds: ['owner'], share })
   expect(movePerson(app, 'viewer', 'remove').share.extraPersonIds).toEqual([])
   expect(() => movePerson(app, 'owner', 'remove')).toThrow('編集できる人を 1 人以上残してください。')
+})
+
+describe('values this console does not know grant nothing', () => {
+  test('an unknown access mode is neither public nor limited, and is never applied', () => {
+    for (const scope of ['private', 'group', 'company', 'public'] as const) expect(matchesAccess({ mode: 'Restricted' }, scope)).toBe(false)
+    expect(deriveAccess({ mode: 'Restricted', authorization: external }, app)).toMatchObject({ applied: false, label: sharingCopy.status.unapplied })
+    expect(deriveAccess({ mode: 'Restricted' }, app, [], 'failed').label).toBe(sharingCopy.status.failed)
+  })
+  test('an unknown share scope matches no observed policy and says it cannot be handled', () => {
+    const unknown = { ...app, share: { ...share, scope: { kind: 'unknown' as const } } }
+    expect(matchesAccess({ mode: 'Public' }, { kind: 'unknown' })).toBe(false)
+    expect(matchesAccess({ mode: 'Authenticated', authorization: external }, { kind: 'unknown' })).toBe(false)
+    expect(deriveAccess({ mode: 'Authenticated', authorization: external }, unknown)).toEqual({ state: 'unapplied', applied: false, label: text.unsupported.share })
+    // An exposed URL is still said to be public.
+    expect(deriveAccess({ mode: 'Public' }, unknown).label).toBe(sharingCopy.status.public)
+  })
 })

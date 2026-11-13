@@ -1,11 +1,11 @@
-import type { Publish } from '@appthrust/api-schema/platform-api'
+import type { BusinessApp } from '../../model/contracts/console'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
-import type { BusinessApp } from '../../api/console-unverified'
 import { createdAppAccessRetryDelay, putAppAccess, retryCreatedAppAccess } from '../../api/access'
 import { keys } from '../../api/queries/shared'
 import { isPublishPreparationPending } from '../../api/publish-retry'
 import { matchesAccess } from '../../model/access'
+import { knownScope } from '../../model/share'
 
 const pendingApps = new Set<string>()
 const key = (id: string) => `builder-console:create-access:${id}`
@@ -21,15 +21,16 @@ export function hasCreatedAppAccess(id: string): boolean {
   try { return sessionStorage.getItem(key(id)) === 'pending' } catch { return false }
 }
 
-/** Uses the app page's selected publish, and Query's deduplication across polls/remounts. */
-export function useCreatedAppAccess(projectId: string, app: BusinessApp | undefined, publish: Publish | undefined) {
+/** Uses the app page's selected publish, and Query's deduplication across polls/remounts. A share scope this console does not know is never written. */
+export function useCreatedAppAccess(projectId: string, app: Pick<BusinessApp, 'id' | 'share'> | undefined, publish: { id: string; access?: Parameters<typeof matchesAccess>[0] } | undefined) {
   const queryClient = useQueryClient()
   const queued = app ? hasCreatedAppAccess(app.id) : false
-  const queryKey = ['create-access', projectId, app?.id, publish?.id, app?.share.scope]
+  const scope = app ? knownScope(app.share.scope) : undefined
+  const queryKey = ['create-access', projectId, app?.id, publish?.id, scope]
   const request = useQuery({
     queryKey,
-    queryFn: () => putAppAccess(projectId, publish!.id, app!.share.scope, `console-create-access:${app!.id}:${publish!.id}:${app!.share.scope}`),
-    enabled: queued && Boolean(publish),
+    queryFn: () => putAppAccess(projectId, publish!.id, scope!, `console-create-access:${app!.id}:${publish!.id}:${scope!}`),
+    enabled: queued && Boolean(publish) && scope !== undefined,
     retry: retryCreatedAppAccess,
     retryDelay: createdAppAccessRetryDelay,
     refetchInterval: false,

@@ -3,12 +3,14 @@ import { useNavigate } from '@tanstack/react-router'
 import { Search, X } from 'lucide-react'
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { subtreeIds } from '../../model/contracts/console'
+import { isOneOf } from '../../model/contracts/build'
 import { appsQuery } from '../../api/queries/console'
 import { copy } from '../../copy'
 import { paths } from '../../routes/paths'
 import { useShell } from '../../shell/use-shell'
 import { Button, EmptyState, HrefLink, LoadFailed, useDocumentTitle } from '../../ui'
 import { useAppViews, type AppViews } from '../app/use-app-views'
+import { StaleNotice } from '../app/notices'
 import { AppCards, AppCardsSkeleton, AppLines, AppListSkeleton, AppTable, StatusLoadNotice, usePendingAccessRequestCounts } from './app-list'
 import { text } from './copy'
 import { matchesAppSearch } from './search'
@@ -123,9 +125,10 @@ function SearchResults({ q, lookup, pendingCounts }: { q: string; lookup: AppVie
       <p aria-live="polite" aria-atomic="true" className="mb-4 text-sm text-stone-500">
         {results.isFetching ? text.home.searching : results.data ? text.home.resultsCount(matches.length) : ''}
       </p>
+      {results.isRefetchError ? <StaleNotice updatedAt={results.dataUpdatedAt} refetching={results.isFetching} onRetry={() => void results.refetch()} /> : null}
       {results.isPending ? (
         <AppListSkeleton />
-      ) : results.isError ? (
+      ) : results.isLoadingError ? (
         <LoadFailed error={results.error} onRetry={() => void results.refetch()} />
       ) : (
         <AppTable
@@ -152,19 +155,20 @@ function Sections({ lookup, pendingCounts }: { lookup: AppViews; pendingCounts: 
     return {
       group: apps.filter((app) => contextIds.has(app.group.id)),
       // Visible through a `group` share although owned outside the caller's groups: shared from above.
-      shared: apps.filter((app) => app.share.scope === 'group' && !myGroupIds.has(app.group.id)),
+      shared: apps.filter((app) => isOneOf(app.share.scope, 'group') && !myGroupIds.has(app.group.id)),
       company: apps
-        .filter((app) => app.share.scope === 'company' || app.share.scope === 'public')
+        .filter((app) => isOneOf(app.share.scope, 'company', 'public'))
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         .slice(0, NEW_LIMIT),
     }
   }, [visible.data, currentGroup, groups, me.effectiveGroupIds])
 
-  if (visible.isError) return <LoadFailed error={visible.error} onRetry={() => void visible.refetch()} />
+  if (visible.isLoadingError) return <LoadFailed error={visible.error} onRetry={() => void visible.refetch()} />
   const loading = visible.isPending
 
   return (
     <>
+      {visible.isRefetchError ? <StaleNotice updatedAt={visible.dataUpdatedAt} refetching={visible.isFetching} onRetry={() => void visible.refetch()} /> : null}
       <section aria-labelledby="home-group">
         <SectionHeading
           id="home-group"

@@ -4,44 +4,52 @@
 import { useQuery } from '@tanstack/react-query'
 import { AlertCircle, ArrowUpRight, Clock, Plus, Wrench } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { isResponseContractError } from '../../api/boundary'
 import { ConsoleApiError } from '../../api/console'
-import { type AppTool, type AppTools } from '../../api/console-unverified'
+import { type AppTool, type AppTools } from '../../model/contracts/console'
 import { appToolsQuery } from '../../api/queries/console'
 import { copy } from '../../copy'
 import { Button, LinkButton, Section } from '../../ui'
 import { text } from './copy'
+import { StaleNotice } from './notices'
 
 /** Response-driven for every app, drafts included: the server answers an unbound app with `{available: true, tools: []}`. */
 export function ToolsPanel({ appId }: { appId: string }) {
   const tools = useQuery(appToolsQuery(appId))
   if (tools.isPending) return null
-  return <ToolsPanelView tools={tools.data} error={tools.error} retrying={tools.isFetching} onRetry={() => void tools.refetch()} />
+  return <ToolsPanelView tools={tools.data} error={tools.error} updatedAt={tools.dataUpdatedAt} retrying={tools.isFetching} onRetry={() => void tools.refetch()} />
 }
 
-export function ToolsPanelView({ tools, error, retrying = false, onRetry }: {
+export function ToolsPanelView({ tools, error, updatedAt = 0, retrying = false, onRetry }: {
   tools: AppTools | undefined
   error: unknown
+  /** When `tools` was read; shown when a refresh of them failed. */
+  updatedAt?: number
   retrying?: boolean
   onRetry(): void
 }) {
   if (!tools) {
     // 403/404: the caller cannot see this app's tools (or the server predates them), so there is nothing to show.
     if (!error || (error instanceof ConsoleApiError && (error.status === 403 || error.status === 404))) return null
-    return <Frame><Unavailable retrying={retrying} onRetry={onRetry} /></Frame>
+    return <Frame><Unavailable retrying={retrying} onRetry={onRetry} message={isResponseContractError(error) ? copy.common.loadFailed : text.tools.unavailable} /></Frame>
   }
+  const stale = error ? <div className="mb-3"><StaleNotice updatedAt={updatedAt} refetching={retrying} onRetry={onRetry} /></div> : null
   if (!tools.available) {
     if (!tools.pending) return null
-    return <Frame><Calm icon={<Clock />}>{text.tools.installing}</Calm></Frame>
+    return <Frame>{stale}<Calm icon={<Clock />}>{text.tools.installing}</Calm></Frame>
   }
   const create = tools.editUrl ? (
     <LinkButton href={tools.editUrl} external size="sm" icon={<Plus />} data-testid="app-tools-create">
       {text.tools.create}
     </LinkButton>
   ) : undefined
-  if (tools.error === 'tools_unavailable') return <Frame><Unavailable retrying={retrying} onRetry={onRetry} /></Frame>
+  if (tools.error?.kind === 'known') return <Frame>{stale}<Unavailable retrying={retrying} onRetry={onRetry} message={text.tools.unavailable} /></Frame>
+  // A failure kind this console does not know: the list may be incomplete, so it is not shown as the tools.
+  if (tools.error) return <Frame>{stale}<Calm icon={<AlertCircle />}>{text.unsupported.tools}</Calm></Frame>
   if (tools.tools.length === 0) {
     return (
       <Frame>
+        {stale}
         <div className="flex flex-col items-start gap-3 rounded-lg border border-dashed border-stone-300 px-4 py-5 sm:flex-row sm:items-center sm:justify-between" data-testid="app-tools-empty">
           <div className="min-w-0">
             <p className="text-sm font-medium text-stone-800">{text.tools.empty}</p>
@@ -54,6 +62,7 @@ export function ToolsPanelView({ tools, error, retrying = false, onRetry }: {
   }
   return (
     <Frame actions={create}>
+      {stale}
       <ul className="grid gap-3 sm:grid-cols-2" data-testid="app-tools">
         {tools.tools.map((tool) => <ToolCard key={tool.slug} tool={tool} />)}
       </ul>
@@ -86,10 +95,10 @@ function Frame({ actions, children }: { actions?: ReactNode; children: ReactNode
   )
 }
 
-function Unavailable({ retrying, onRetry }: { retrying: boolean; onRetry(): void }) {
+function Unavailable({ retrying, onRetry, message }: { retrying: boolean; onRetry(): void; message: string }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3" data-testid="app-tools-unavailable">
-      <Calm icon={<AlertCircle />}>{text.tools.unavailable}</Calm>
+      <Calm icon={<AlertCircle />}>{message}</Calm>
       <Button size="sm" tone="ghost" onClick={onRetry} disabled={retrying}>{copy.common.retry}</Button>
     </div>
   )

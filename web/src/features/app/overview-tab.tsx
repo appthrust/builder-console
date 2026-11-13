@@ -1,15 +1,14 @@
-import type { ApplicationSourceRepository } from '@appthrust/api-schema/platform-api'
 import { useIsFetching, useQueryClient } from '@tanstack/react-query'
 import { ExternalLink, History, ScrollText } from 'lucide-react'
 import type { ReactNode } from 'react'
-import type { BusinessApp } from '../../api/console-unverified'
 import { keys } from '../../api/queries/shared'
 import { copy } from '../../copy'
 import type { AppView } from '../../model/app'
+import type { BusinessApp } from '../../model/contracts/console'
 import type { AccessDisplay } from '../../model/access'
 import { buildCopy } from '../../model/build/copy'
 import { hasCreatedAppAccess } from '../create/access'
-import { deriveCreateProgress, repositoryLabel, showsCreateProgress } from '../../model/progress'
+import { deriveCreateProgress, repositoryLabel, showsCreateProgress, type ProgressInput } from '../../model/progress'
 import { paths } from '../../routes/paths'
 import { ActionError, Button, Card, CardBody, CardHeader, Disclosure, HrefLink, LinkButton, StatusPill } from '../../ui'
 import { AppAbout, GuideSummary } from './app-about'
@@ -19,6 +18,7 @@ import { ProgressList } from './progress-list'
 import { readCreateSession } from '../create/persistence'
 import { OwnerContact } from './owner-contact'
 import { OwnerLinks } from './owner-links'
+import { isSourceBuildFailed } from './platform'
 import { ScreenshotStrip } from './screenshots'
 import { ToolsPanel } from './tools-panel'
 
@@ -39,7 +39,7 @@ export function OverviewTab({
   sharing: string
   access: AccessDisplay
   accessError?: unknown
-  sourceRepository: ApplicationSourceRepository | undefined
+  sourceRepository: ProgressInput['sourceRepository']
   canEdit: boolean
   onDelete: () => void
 }) {
@@ -47,7 +47,7 @@ export function OverviewTab({
   // The creation marker outlives the URL step until the requested audience is
   // observed on the publish; once applied, the plain overview takes over.
   const finishingCreation = hasCreatedAppAccess(app.id) && !access.applied
-  const creating = sourceRepository?.build?.state !== 'failed' && (view.draft || showsCreateProgress(view) || finishingCreation)
+  const creating = !(sourceRepository && isSourceBuildFailed(sourceRepository)) && (view.draft || showsCreateProgress(view) || finishingCreation)
   const session = view.draft ? readCreateSession(app.id) : undefined
   const steps = creating ? deriveCreateProgress({ view, sourceRepository, shareSentence: sharing, access }) : []
   if (view.status === 'unfinished') {

@@ -5,7 +5,7 @@ import { useCreateStore, useSelector } from '@tanstack/react-store'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../../api/build'
 import { buildDraftOptions, readDraft } from '../../api/queries/build'
-import { consoleApi, type BusinessApp } from '../../api/console-unverified'
+import { consoleApi } from '../../api/console-unverified'
 import { isConsoleError } from '../../api/console'
 import { type Me } from '../../model/contracts/console'
 import { platformErrorEnvelope } from '../../api/platform-error'
@@ -175,7 +175,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
   useEffect(() => {
     const release = appView?.platform?.lastRelease
     const history = appViews.input.releasesByApplication[draft.createdApplicationId ?? '']?.components.find((component) => component.id === appView?.platform?.webComponentId)?.releases
-    if (!session.initialReleaseId && history?.length === 1 && release?.phase === 'Succeeded' && !implemented(implementation.state)) patch({ initialReleaseId: release.id })
+    if (!session.initialReleaseId && history?.length === 1 && release && isOneOf(release.phase, 'Succeeded') && !implemented(implementation.state)) patch({ initialReleaseId: release.id })
   })
   useEffect(() => {
     if (!running && !session.pending.length && !session.prepareRequested && !appProgress) return
@@ -479,6 +479,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
       else send(buildCopy.questions.kickoffReply)
     },
     prepare: () => { bindingFailed.current = false; setFailure(undefined); patch({ prepareRequested: true }) },
-    published: (updated: BusinessApp) => { queryClient.setQueryData(consoleKeys.app(updated.id), updated); return markPublished() },
+    // PublishStep has written the answered app into its cache entry.
+    published: () => markPublished(),
   }
 }

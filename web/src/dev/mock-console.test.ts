@@ -85,7 +85,7 @@ test('platform reset restores seeded stacks, lifecycle state, toggles and the ID
     expect((await call('POST', `${project}/application-drafts/${draft.body.id}/creation-plan-generations`)).status).toBe(202)
     expect((await call('POST', `${mock}/advance`)).body.moved).toBeGreaterThan(0)
     expect((await call('GET', `${project}/application-stacks/reset-stack`)).body.state).toBe('ACTIVE')
-    expect((await call('PUT', `${project}/applications/nippo/branches/production/components/nippo-web/env-vars`, { variables: [{ key: 'APP_TITLE', value: 'Changed', sensitive: false }] })).status).toBe(200)
+    expect((await call('PUT', `${project}/applications/nippo/branches/production/components/nippo-web/env-vars`, { variables: [{ key: 'APP_TITLE', value: 'Changed', sensitive: false }] })).status).toBe(202)
     expect((await call('POST', `${mock}/plan-generation`, { priorGenerations: 2 })).status).toBe(200)
     expect((await call('DELETE', `${project}/application-stacks/mitsumori`)).status).toBe(202)
     expect((await call('POST', `${mock}/logs`, { componentId: 'nippo-web', status: 500 })).status).toBe(200)

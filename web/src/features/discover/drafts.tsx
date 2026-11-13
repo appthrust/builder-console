@@ -12,7 +12,7 @@ import { isOneOf, type BuildDraft } from '../../model/contracts/build'
 import { useQuery } from '@tanstack/react-query'
 import { PencilLine } from 'lucide-react'
 import { draftsOptions } from '../../api/queries/build'
-import type { BusinessApp } from '../../api/console-unverified'
+import type { BusinessApp } from '../../model/contracts/console'
 import type { Me } from '../../model/contracts/console'
 import { appsQuery } from '../../api/queries/console'
 import { relativeTime } from '../../copy'
@@ -29,6 +29,7 @@ import { DiscardBuildButton } from '../build/discard'
 import { stateWord } from '../build/session-header'
 import { improveStateWord, text as improveText } from '../improve/copy'
 import { AppListSkeleton, AppStatus, StatusLoadNotice } from './app-list'
+import { StaleNotice } from '../app/notices'
 import { text } from './copy'
 import { proposalsOptions } from '../../api/queries/proposal'
 import { proposalTerminal } from '../proposals/model'
@@ -86,7 +87,7 @@ export function DraftsPage() {
       <PageHeader title={text.drafts.title} lead={text.drafts.lead} actions={items.length ? start : undefined} />
       {items.some((item) => item.kind === 'app') ? <StatusLoadNotice lookup={lookup} /> : null}
       {drafts.isLoadingError ? <LoadFailed error={drafts.error} onRetry={() => void drafts.refetch()} /> : null}
-      {apps.isError ? <LoadFailed error={apps.error} onRetry={() => void apps.refetch()} /> : null}
+      {apps.isLoadingError ? <LoadFailed error={apps.error} onRetry={() => void apps.refetch()} /> : apps.isRefetchError ? <StaleNotice updatedAt={apps.dataUpdatedAt} refetching={apps.isFetching} onRetry={() => void apps.refetch()} /> : null}
       {sent.isError ? <LoadFailed error={sent.error} onRetry={() => void sent.refetch()} /> : null}
       {incoming.isError ? <LoadFailed error={incoming.error} onRetry={() => void incoming.refetch()} /> : null}
       {loading ? <AppListSkeleton /> : items.length ? (
@@ -112,7 +113,7 @@ export function DraftsPage() {
             </li>
           })}
         </ul>
-      ) : apps.isError ? null : (
+      ) : apps.isLoadingError ? null : (
         <EmptyState
           icon={<PencilLine aria-hidden />}
           title={text.drafts.empty}

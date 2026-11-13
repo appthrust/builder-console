@@ -1,10 +1,11 @@
 import { useForm, useStore } from '@tanstack/react-form'
 import { z } from 'zod'
-import type { BusinessApp } from '../../../api/console-unverified'
+import type { BusinessApp } from '../../../model/contracts/console'
 import { copy } from '../../../copy'
 import { ActionError, Field, TextArea, TextInput, useUnsavedChangesGuard } from '../../../ui'
 import { text } from '../copy'
-import { useUpdateApp } from '../mutations'
+import { useAppReadBack, useUpdateApp } from '../mutations'
+import { UnconfirmedNotice, useWriteConfirmation } from '../notices'
 import { fieldError, SaveRow, SettingsCard } from './parts'
 
 const schema = z.object({
@@ -26,6 +27,7 @@ const valuesOf = (app: BusinessApp): GeneralValues => ({
 /** 名前・説明・アイコン・タグ. */
 export function GeneralSection({ app, canEdit }: { app: BusinessApp; canEdit: boolean }) {
   const mutation = useUpdateApp(app)
+  const confirmation = useWriteConfirmation([mutation.error], mutation.reset, useAppReadBack(app.id))
   const form = useForm({
     defaultValues: valuesOf(app),
     validators: { onChange: schema },
@@ -125,10 +127,14 @@ export function GeneralSection({ app, canEdit }: { app: BusinessApp; canEdit: bo
         <div className="sm:col-span-2">
           <form.Subscribe selector={(state) => [state.isDirty, state.canSubmit] as const}>
             {([dirty, canSubmit]) => (
-              <SaveRow pending={mutation.isPending} disabled={!canEdit || !dirty || !canSubmit} saved={mutation.isSuccess && !dirty} />
+              <SaveRow pending={mutation.isPending} disabled={!canEdit || !dirty || !canSubmit || confirmation.unconfirmed} saved={mutation.isSuccess && !dirty} />
             )}
           </form.Subscribe>
-          {mutation.isError ? (
+          {confirmation.unconfirmed ? (
+            <div className="mt-3">
+              <UnconfirmedNotice onConfirm={() => void confirmation.confirm()} confirming={confirmation.confirming} />
+            </div>
+          ) : mutation.isError ? (
             <div className="mt-3">
               <ActionError error={mutation.error} />
             </div>

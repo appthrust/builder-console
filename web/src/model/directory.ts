@@ -1,5 +1,5 @@
-import type { DirectoryEntry } from '../api/console-unverified'
-import type { Group, Person } from './contracts/console'
+import { copy } from '../copy'
+import { isUnknownPerson, type DirectoryEntry, type Group, type Person, type PersonRef } from './contracts/console'
 import type { AppView } from './app'
 
 /** Directory candidates reuse the existing view's draft and initial-publication gates. */
@@ -26,16 +26,26 @@ export function storeOrder<T extends StoreFields & { displayName: string }>(entr
     .map(({ entry }) => entry)
 }
 
+/** A person's name; a person the server can no longer resolve is named as unknown (never with invented details). */
+export function personName(person: PersonRef): string {
+  return isUnknownPerson(person) ? copy.common.unknownPerson : person.displayName
+}
+
+/** The resolved people among `refs`: the only ones with a name, address or page. */
+export function resolvedPeople(refs: readonly PersonRef[]): Person[] {
+  return refs.filter((person): person is Person => !isUnknownPerson(person))
+}
+
 export interface Maker {
   person: Person
   appCount: number
 }
 
-/** Everyone who owns at least one of `entries`, most apps first, then by Japanese name. */
+/** Everyone (resolved) who owns at least one of `entries`, most apps first, then by Japanese name. */
 export function makersOf(entries: readonly Pick<DirectoryEntry, 'owners'>[]): Maker[] {
   const byId = new Map<string, Maker>()
   for (const entry of entries) {
-    for (const person of entry.owners) {
+    for (const person of resolvedPeople(entry.owners)) {
       const maker = byId.get(person.id)
       if (maker) maker.appCount += 1
       else byId.set(person.id, { person, appCount: 1 })

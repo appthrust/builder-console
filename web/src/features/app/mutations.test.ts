@@ -13,16 +13,14 @@ function deps(source: Array<() => unknown> = [], stack: () => unknown = () => ({
   const calls: string[] = []
   let clock = 0
   const value: AppDeletionDeps = {
-    platform: {
-      platformApiDeleteApplicationStack: (async (input: { params: { id: string } }) => {
-        calls.push(`stack:${input.params.id}`)
-        return stack()
-      }) as never,
-      platformApiDeleteApplicationSourceRepository: (async (input: { params: { id: string } }) => {
-        calls.push(`source:${input.params.id}`)
-        const next = source.length > 1 ? source.shift()! : source[0]
-        return next ? next() : {}
-      }) as never,
+    deleteStack: async (_projectId, id) => {
+      calls.push(`stack:${id}`)
+      return stack()
+    },
+    deleteSourceRepository: async (_projectId, id) => {
+      calls.push(`source:${id}`)
+      const next = source.length > 1 ? source.shift()! : source[0]
+      return next ? next() : {}
     },
     removeApp: async (appId) => void calls.push(`console:${appId}`),
     wait: async (ms) => {
@@ -86,12 +84,12 @@ describe('forgetDeletedApp', () => {
 
   test('takes the app out of every cached list and leaves the others', async () => {
     const queryClient = new QueryClient()
-    queryClient.setQueryData(keys.applications('commerce'), { data: [{ id: 'keihi' }, { id: 'nippo' }], meta: { total: 2 } })
-    queryClient.setQueryData(keys.stacks('commerce'), { data: [{ id: 'keihi' }, { id: 'nippo' }] })
+    queryClient.setQueryData(keys.applications('commerce'), [{ id: 'keihi' }, { id: 'nippo' }])
+    queryClient.setQueryData(keys.stacks('commerce'), [{ id: 'keihi' }, { id: 'nippo' }])
     queryClient.setQueryData(consoleKeys.apps({ scope: 'mine' }), [{ id: 'a-keihi' }, { id: 'a-nippo' }])
     await forgetDeletedApp(queryClient, 'commerce', deleted)
-    expect(queryClient.getQueryData<unknown>(keys.applications('commerce'))).toEqual({ data: [{ id: 'nippo' }], meta: { total: 2 } })
-    expect(queryClient.getQueryData<unknown>(keys.stacks('commerce'))).toEqual({ data: [{ id: 'nippo' }] })
+    expect(queryClient.getQueryData<unknown>(keys.applications('commerce'))).toEqual([{ id: 'nippo' }])
+    expect(queryClient.getQueryData<unknown>(keys.stacks('commerce'))).toEqual([{ id: 'nippo' }])
     expect(queryClient.getQueryData<unknown>(consoleKeys.apps({ scope: 'mine' }))).toEqual([{ id: 'a-nippo' }])
   })
 
@@ -120,5 +118,19 @@ describe('forgetDeletedApp', () => {
     expect(reads(keys.releases('commerce', 'nippo', 'production'))).toBe(false)
     expect(reads(keys.applications('commerce'))).toBe(false)
     expect(reads(consoleKeys.apps({ scope: 'mine' }))).toBe(false)
+  })
+})
+
+describe('cache writes after a delete', () => {
+  test('a list read that started before the delete cannot put the deleted app back', async () => {
+    const deleted = { appId: 'a-keihi', applicationId: 'keihi', stackId: 'keihi' }
+    const queryClient = new QueryClient()
+    queryClient.setQueryData(keys.stacks('commerce'), [{ id: 'keihi' }, { id: 'nippo' }])
+    let resolveRead: (value: { id: string }[]) => void = () => {}
+    const read = queryClient.fetchQuery({ queryKey: keys.stacks('commerce'), queryFn: () => new Promise<{ id: string }[]>((resolve) => { resolveRead = resolve }), staleTime: 0 }).catch(() => {})
+    await forgetDeletedApp(queryClient, 'commerce', deleted)
+    resolveRead([{ id: 'keihi' }, { id: 'nippo' }])
+    await read
+    expect(queryClient.getQueryData<unknown>(keys.stacks('commerce'))).toEqual([{ id: 'nippo' }])
   })
 })

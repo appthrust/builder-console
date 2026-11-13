@@ -1,8 +1,15 @@
 // Joins between the console record and the platform read models the app page needs.
-import type { ApplicationSourceRepository } from '@appthrust/api-schema/platform-api'
-import type { BusinessApp } from '../../api/console-unverified'
 import type { ComponentScope } from '../../api/queries/app'
 import type { AppView } from '../../model/app'
+import { isOneOf } from '../../model/contracts/build'
+import type { BusinessApp } from '../../model/contracts/console'
+
+/** What the app screens read of a source repository (the catalog's list item). */
+export interface SourceRepositoryRef {
+  id: string
+  repositoryUrl?: string
+  existing?: { repository?: string }
+}
 
 /** The web component of the bound application, when the platform has observed it. */
 export function webScope(projectId: string, view: AppView): ComponentScope | undefined {
@@ -15,19 +22,21 @@ export function webScope(projectId: string, view: AppView): ComponentScope | und
 /** The stack's explicit source reference is authoritative; shared images never imply repository ownership. */
 export function sourceRepositoryIdFor(view: AppView): string | undefined {
   const stack = view.stack
-  return stack?.sourceKind === 'application-source-repository' ? stack.sourceRepositoryRefName || undefined : undefined
+  return stack && isOneOf(stack.sourceKind, 'application-source-repository') ? stack.sourceRepositoryRefName || undefined : undefined
 }
 
-export function sourceRepositoryFor(
-  view: AppView,
-  repositories: readonly ApplicationSourceRepository[] | undefined
-): ApplicationSourceRepository | undefined {
+export function sourceRepositoryFor<R extends SourceRepositoryRef>(view: AppView, repositories: readonly R[] | undefined): R | undefined {
   const id = sourceRepositoryIdFor(view)
   return id ? repositories?.find((repository) => repository.id === id) : undefined
 }
 
+/** Whether the source's last image build is known to have failed; a state this console does not know is not a failure. */
+export function isSourceBuildFailed(repository: { build?: { state?: string } }): boolean {
+  return repository.build?.state === 'failed'
+}
+
 /** `owner/name` of the GitHub repository (置き場) behind a source, once the platform reports it. */
-export function repositoryNameOf(repository: ApplicationSourceRepository | undefined): string | undefined {
+export function repositoryNameOf(repository: SourceRepositoryRef | undefined): string | undefined {
   return repository?.existing?.repository ?? repository?.repositoryUrl?.replace(/^https:\/\/github\.com\//, '').replace(/\/+$/, '')
 }
 

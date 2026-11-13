@@ -5,7 +5,7 @@
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { Eye, Lock, Plus, Search, Table2 } from 'lucide-react'
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import type { BusinessApp } from '../../../api/console-unverified'
+import type { BusinessApp } from '../../../model/contracts/console'
 import { dataPreconditionReason, isDataForbidden, useDatabaseCatalog, useDatabaseRows, type DatabaseCatalogQuery } from '../../../api/queries/data'
 import { copy, relativeTime } from '../../../copy'
 import type { AppView } from '../../../model/app'

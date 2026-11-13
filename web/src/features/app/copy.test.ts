@@ -7,6 +7,7 @@ import { preserveLanguage } from '../../../test/language'
 import { setLanguage } from '../../shell/language'
 import { text } from './copy'
 import { runOf } from '../../api/testing/build-domain'
+import { publishAccessOf } from '../../api/testing/app-domain'
 
 const platform: ConsoleApp = {
   id: 'app', name: 'App', status: 'deploying', statusText: '', branchId: 'production',
@@ -70,7 +71,7 @@ test('group lists localize separators without translating user-supplied names', 
   const restoreLanguage = preserveLanguage()
   const groups = [{ id: 'sales', name: 'Sales' }, { id: 'support', name: 'Support' }]
   const app = { share: { scope: 'group' as const, groupIds: ['sales', 'support'], extraPersonIds: [] }, owners: [{ id: 'owner' }] }
-  const access = { mode: 'Authenticated' as const, authorization: { defaultAction: 'Allow' as const, ruleCount: 0, external: { appInstallation: 'builder-console', path: '/authz' } } }
+  const access = publishAccessOf({ mode: 'Authenticated', authorization: { defaultAction: 'Allow', ruleCount: 0, external: { appInstallation: 'builder-console', path: '/authz' } } })
   try {
     setLanguage('ja')
     expect(shareSentence(app.share, groups)).toBe('Sales・Support に公開')
