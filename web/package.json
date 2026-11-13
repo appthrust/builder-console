@@ -10,6 +10,8 @@
     "build:image": "vite build",
     "typecheck": "tsc --noEmit",
     "check:response-boundaries": "bun src/api/testing/check-response-boundaries.ts",
+    "generate:console-schema": "bun src/api/contracts/console/schema/generate.ts",
+    "check:console-schema": "bun src/api/contracts/console/schema/generate.ts --check",
     "test": "bun test src",
     "typecheck:e2e": "tsc --noEmit -p e2e/tsconfig.json",
     "test:e2e": "playwright test --config e2e/playwright.config.ts",

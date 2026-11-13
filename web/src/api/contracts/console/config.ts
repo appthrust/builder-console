@@ -3,6 +3,8 @@
 // Dashboard link the config cannot vouch for (not an absolute http(s) URL) is
 // dropped, since it is only a link to render.
 import { z } from 'zod'
+import { config } from './schema/schemas'
+import { operations } from './schema/operations'
 import type { ConsoleConfig } from '../../../model/contracts/console'
 import { consoleContract } from '../define'
 
@@ -17,9 +19,7 @@ function httpUrl(value: unknown): string | undefined {
   }
 }
 
-const configReader: z.ZodType<ConsoleConfig> = z
-  .object({
-    projectId: z.string().max(63).regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/),
+const configReader: z.ZodType<ConsoleConfig> = config.strip().extend({
     dashboardUrl: z.unknown().optional(),
   })
   .transform((config): ConsoleConfig => {
@@ -28,11 +28,8 @@ const configReader: z.ZodType<ConsoleConfig> = z
   })
 
 export const configContract = consoleContract({
-  operationId: 'consoleGetConfig',
+  ...operations.config,
   source: 'config',
-  method: 'GET',
-  routeTemplate: '/config',
-  successStatuses: [200],
   reader: configReader,
   request: () => ({ method: 'GET', path: '/config', cache: 'no-store' }),
 })

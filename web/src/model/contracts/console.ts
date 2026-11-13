@@ -70,6 +70,98 @@ export interface ConsoleConfig {
   dashboardUrl?: string
 }
 
+/** Unknown states carry no wire string and never grant permission. */
+export type ConsoleValue<K extends string> = { kind: 'known'; value: K } | { kind: 'unknown' }
+export interface Screenshot { id: string; caption: string; width: number; height: number }
+export interface AppGroup { id: string; path: string; name: string }
+export interface SharePolicy {
+  scope: ConsoleValue<'private' | 'group' | 'company' | 'public'>
+  groupIds: string[]
+  extraPersonIds: string[]
+}
+export interface BusinessApp {
+  id: string
+  slug: string
+  displayName: string
+  description: string
+  icon: string
+  tags: string[]
+  guide: string
+  capabilities: string[]
+  screenshots: Screenshot[]
+  group: AppGroup
+  owners: PersonRef[]
+  stackId: string | null
+  appName: string | null
+  share: SharePolicy
+  createdBy: PersonRef
+  createdAt: string
+  updatedAt: string
+}
+export interface DirectoryEntry {
+  id: string
+  path: string
+  displayName: string
+  description: string
+  icon: string
+  tags: string[]
+  capabilities: string[]
+  screenshots: Screenshot[]
+  group: AppGroup
+  owners: PersonRef[]
+  stackId: string | null
+  appName: string | null
+  createdAt: string
+  updatedAt: string
+  canOpen: boolean
+}
+export interface PersonProfile {
+  person: Person
+  memberships: { group: AppGroup; role: ConsoleValue<'member' | 'manager'>; inheritedFrom: string | null }[]
+}
+export interface Membership {
+  groupId: string
+  person: Person
+  role: ConsoleValue<'member' | 'manager'>
+  inheritedFrom: string | null
+}
+export interface DirectoryUser { id: string; email: string; displayName: string }
+export interface DirectoryMigrationResult {
+  imported: { people: number; groups: number; memberships: number }
+  conflicts: { entity: string; id: string; reason: string }[]
+  merged: { id: string; replaced: string }[]
+}
+export interface AccessRequest {
+  id: string
+  appId: string
+  requester: PersonRef
+  message: string
+  status: ConsoleValue<'pending' | 'approved' | 'declined'>
+  requestedAt: string
+  decidedAt: string | null
+  decidedBy: PersonRef | null
+}
+export type MyAccessRequest =
+  | { appName: string; exists: false }
+  | { appName: string; exists: true; state: ConsoleValue<'none' | 'granted' | 'pending' | 'declined'>; requestedAt?: string; decidedAt?: string }
+export type CreatedAccessRequest =
+  | { kind: 'supported'; value: { state: 'granted' } | { state: 'pending'; requestedAt: string } }
+  | { kind: 'unsupported'; identity: Record<string, never> }
+export type Resolved =
+  | { kind: 'supported'; value: { kind: 'group' | 'app' | 'entry'; id: string; currentPath: string } }
+  | { kind: 'unsupported'; identity: { id: string; currentPath: string } }
+export interface AppTool { slug: string; name: string; description: string; url: string; liveReleaseNumber: number }
+export type AppTools =
+  | { available: false; pending?: boolean }
+  | { available: true; tools: AppTool[]; editUrl?: string; error?: ConsoleValue<'tools_unavailable'> }
+export interface PlatformSettings {
+  projectId: string
+  teamSlug?: string | null
+  github: { connected: boolean; connectionId: string | null }
+  registry: { connected: boolean; connectionId: string | null }
+  defaultTemplateId: string
+}
+
 /** Group tree built from the flat `GET /groups` list, siblings sorted by name. */
 export type GroupNode = Group & { children: GroupNode[]; depth: number }
 

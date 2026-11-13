@@ -6,6 +6,7 @@
 // with the safe issues). Every rejection is also checked for redaction: no
 // string from the wire may appear in the error or its report.
 import { contractFailureReport, decodeResponse, RESPONSE_CONTRACT_MESSAGE, type ResponseContract, type ResponseIssue } from '../boundary'
+import { isDeclaredResponsePath } from '../boundary/contract'
 
 export type WireVariant = 'absent' | 'empty' | 'present' | 'null' | 'unknown'
 
@@ -45,6 +46,7 @@ function wireStrings(value: unknown, into: { values: Set<string>; keys: Set<stri
  */
 export function assertWireContractCases<D>(contract: ResponseContract<D>, cases: readonly WireContractCase<D>[]): void {
   const problems: string[] = []
+  const identity = { operationId: contract.operationId, routeTemplate: contract.routeTemplate }
   for (const policy of contract.fieldPolicies) {
     const at = cases.filter((item) => item.path === policy.path)
     if (!at.some((item) => item.variant === 'absent' && item.expect.accept)) problems.push(`${policy.path}: registered ${policy.presence} field has no accepted 'absent' case`)
@@ -77,14 +79,20 @@ export function assertWireContractCases<D>(contract: ResponseContract<D>, cases:
       }
     }
     if (result.error.message !== RESPONSE_CONTRACT_MESSAGE) problems.push(`${label}: error message is not the fixed contract message`)
-    // Free-text slots of the report; code, source, method and outcome are closed sets. Object keys that are
-    // reported path segments are schema field names (safe paths name declared fields only); values never are.
+    // A schema-declared segment is not payload, even if a value happens to
+    // equal it ("person") or another key is its substring ("about"). Compare
+    // whole path prefixes against the reader, never trust wire keys as declarations.
     const report = contractFailureReport(result.error)
-    const slots = [report.operationId, report.routeTemplate, ...report.issues.map((issue) => issue.path)]
-    const segments = new Set(report.issues.flatMap((issue) => issue.path.split('/')))
+    const untrustedPaths = report.issues.map(({ path }) => {
+      const segments = path.split('/')
+      return segments.map((segment, index) =>
+        isDeclaredResponsePath(contract, segments.slice(0, index + 1).join('/')) ? '' : segment,
+      ).join('/')
+    })
+    const slots = [report.operationId, report.routeTemplate, ...untrustedPaths]
     const secrets = wireStrings(item.wire, { values: new Set(), keys: new Set() })
-    const leaked = [...secrets.values, ...[...secrets.keys].filter((key) => !segments.has(key))]
-      .filter((text) => !contract.operationId.includes(text) && !contract.routeTemplate.includes(text))
+    const leaked = [...secrets.values, ...secrets.keys]
+      .filter((text) => !identity.operationId.includes(text) && !identity.routeTemplate.includes(text))
       .filter((text) => slots.some((slot) => slot.includes(text)))
     if (leaked.length > 0) problems.push(`${label}: ${leaked.length} wire string(s) leaked into the error report`)
   }

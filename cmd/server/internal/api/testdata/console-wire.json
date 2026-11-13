@@ -1,0 +1,722 @@
+[
+  {
+    "name": "resolved-person",
+    "schema": "Person",
+    "body": {
+      "id": "person",
+      "email": "person@example.test",
+      "displayName": "Person",
+      "avatarVersion": null,
+      "subject": "subject",
+      "pending": false
+    }
+  },
+  {
+    "name": "pending-person",
+    "schema": "Person",
+    "body": {
+      "id": "invited",
+      "email": "invited@example.test",
+      "displayName": "Invited",
+      "avatarVersion": null,
+      "subject": null,
+      "pending": true
+    }
+  },
+  {
+    "name": "unknown-person",
+    "schema": "UnknownPerson",
+    "body": {
+      "id": "removed",
+      "displayName": "",
+      "unknown": true
+    }
+  },
+  {
+    "name": "app",
+    "schema": "App",
+    "body": {
+      "id": "app",
+      "slug": "app",
+      "displayName": "",
+      "description": "",
+      "icon": "",
+      "tags": [],
+      "guide": "",
+      "capabilities": [],
+      "screenshots": [],
+      "group": {
+        "id": "group",
+        "path": "group",
+        "name": "Group"
+      },
+      "owners": [
+        {
+          "id": "person",
+          "email": "person@example.test",
+          "displayName": "Person",
+          "avatarVersion": null,
+          "subject": "subject",
+          "pending": false
+        },
+        {
+          "id": "removed",
+          "displayName": "",
+          "unknown": true
+        }
+      ],
+      "stackId": null,
+      "appName": null,
+      "share": {
+        "scope": "private",
+        "groupIds": [],
+        "extraPersonIds": []
+      },
+      "createdBy": {
+        "id": "person",
+        "email": "person@example.test",
+        "displayName": "Person",
+        "avatarVersion": null,
+        "subject": "subject",
+        "pending": false
+      },
+      "createdAt": "2026-11-01T00:00:00Z",
+      "updatedAt": "2026-11-01T00:00:00Z"
+    }
+  },
+  {
+    "name": "app-list",
+    "schema": "AppList",
+    "body": {
+      "items": [
+        {
+          "id": "app",
+          "slug": "app",
+          "displayName": "",
+          "description": "",
+          "icon": "",
+          "tags": [],
+          "guide": "",
+          "capabilities": [],
+          "screenshots": [],
+          "group": {
+            "id": "group",
+            "path": "group",
+            "name": "Group"
+          },
+          "owners": [
+            {
+              "id": "person",
+              "email": "person@example.test",
+              "displayName": "Person",
+              "avatarVersion": null,
+              "subject": "subject",
+              "pending": false
+            },
+            {
+              "id": "removed",
+              "displayName": "",
+              "unknown": true
+            }
+          ],
+          "stackId": null,
+          "appName": null,
+          "share": {
+            "scope": "private",
+            "groupIds": [],
+            "extraPersonIds": []
+          },
+          "createdBy": {
+            "id": "person",
+            "email": "person@example.test",
+            "displayName": "Person",
+            "avatarVersion": null,
+            "subject": "subject",
+            "pending": false
+          },
+          "createdAt": "2026-11-01T00:00:00Z",
+          "updatedAt": "2026-11-01T00:00:00Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "empty-app-list",
+    "schema": "AppList",
+    "body": {
+      "items": []
+    }
+  },
+  {
+    "name": "directory-entry",
+    "schema": "DirectoryEntry",
+    "body": {
+      "id": "app",
+      "path": "group/app",
+      "displayName": "",
+      "description": "",
+      "icon": "",
+      "tags": [],
+      "capabilities": [],
+      "screenshots": [],
+      "group": {
+        "id": "group",
+        "path": "group",
+        "name": "Group"
+      },
+      "owners": [
+        {
+          "id": "person",
+          "email": "person@example.test",
+          "displayName": "Person",
+          "avatarVersion": null,
+          "subject": "subject",
+          "pending": false
+        },
+        {
+          "id": "removed",
+          "displayName": "",
+          "unknown": true
+        }
+      ],
+      "appName": null,
+      "stackId": null,
+      "createdAt": "2026-11-01T00:00:00Z",
+      "updatedAt": "2026-11-01T00:00:00Z",
+      "canOpen": false
+    }
+  },
+  {
+    "name": "empty-entry-collections",
+    "schema": "DirectoryEntry",
+    "body": {
+      "id": "empty",
+      "path": "group/",
+      "displayName": "",
+      "description": "",
+      "icon": "",
+      "tags": [],
+      "capabilities": [],
+      "screenshots": [],
+      "group": {
+        "id": "group",
+        "path": "group",
+        "name": "Group"
+      },
+      "owners": [],
+      "appName": null,
+      "stackId": null,
+      "createdAt": "0001-01-01T00:00:00Z",
+      "updatedAt": "0001-01-01T00:00:00Z",
+      "canOpen": false
+    }
+  },
+  {
+    "name": "directory-list",
+    "schema": "DirectoryEntryList",
+    "body": {
+      "items": [
+        {
+          "id": "app",
+          "path": "group/app",
+          "displayName": "",
+          "description": "",
+          "icon": "",
+          "tags": [],
+          "capabilities": [],
+          "screenshots": [],
+          "group": {
+            "id": "group",
+            "path": "group",
+            "name": "Group"
+          },
+          "owners": [
+            {
+              "id": "person",
+              "email": "person@example.test",
+              "displayName": "Person",
+              "avatarVersion": null,
+              "subject": "subject",
+              "pending": false
+            },
+            {
+              "id": "removed",
+              "displayName": "",
+              "unknown": true
+            }
+          ],
+          "appName": null,
+          "stackId": null,
+          "createdAt": "2026-11-01T00:00:00Z",
+          "updatedAt": "2026-11-01T00:00:00Z",
+          "canOpen": false
+        }
+      ]
+    }
+  },
+  {
+    "name": "empty-directory-list",
+    "schema": "DirectoryEntryList",
+    "body": {
+      "items": []
+    }
+  },
+  {
+    "name": "groups",
+    "schema": "GroupList",
+    "body": {
+      "items": [
+        {
+          "about": "",
+          "aboutUpdatedAt": null,
+          "aboutUpdatedBy": null,
+          "createdAt": "2026-11-01T00:00:00Z",
+          "description": "",
+          "id": "group",
+          "memberCount": 0,
+          "name": "Group",
+          "parentId": null,
+          "path": "group",
+          "slug": "group",
+          "subgroupCount": 0,
+          "updatedAt": "2026-11-01T00:00:00Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "empty-groups",
+    "schema": "GroupList",
+    "body": {
+      "items": []
+    }
+  },
+  {
+    "name": "people",
+    "schema": "PersonList",
+    "body": {
+      "items": [
+        {
+          "avatarVersion": null,
+          "displayName": "Person",
+          "email": "person@example.test",
+          "id": "person",
+          "pending": false,
+          "subject": "subject"
+        }
+      ]
+    }
+  },
+  {
+    "name": "empty-people",
+    "schema": "PersonList",
+    "body": {
+      "items": []
+    }
+  },
+  {
+    "name": "profile",
+    "schema": "PersonProfile",
+    "body": {
+      "memberships": [],
+      "person": {
+        "avatarVersion": null,
+        "displayName": "Person",
+        "email": "person@example.test",
+        "id": "person",
+        "pending": false,
+        "subject": "subject"
+      },
+      "talent": {
+        "aspirations": "",
+        "skills": [],
+        "strengths": "",
+        "updatedAt": null
+      }
+    }
+  },
+  {
+    "name": "members",
+    "schema": "MembershipList",
+    "body": {
+      "items": [
+        {
+          "groupId": "group",
+          "inheritedFrom": null,
+          "person": {
+            "avatarVersion": null,
+            "displayName": "Person",
+            "email": "person@example.test",
+            "id": "person",
+            "pending": false,
+            "subject": "subject"
+          },
+          "role": "member"
+        }
+      ]
+    }
+  },
+  {
+    "name": "empty-members",
+    "schema": "MembershipList",
+    "body": {
+      "items": []
+    }
+  },
+  {
+    "name": "directory-users",
+    "schema": "DirectoryUserList",
+    "body": {
+      "items": [
+        {
+          "displayName": "Person",
+          "email": "person@example.test",
+          "id": "realm-person"
+        }
+      ]
+    }
+  },
+  {
+    "name": "migration",
+    "schema": "MigrationResult",
+    "body": {
+      "conflicts": [],
+      "imported": {
+        "groups": 0,
+        "memberships": 0,
+        "people": 0
+      },
+      "merged": []
+    }
+  },
+  {
+    "name": "me",
+    "schema": "Me",
+    "body": {
+      "person": {
+        "id": "person",
+        "email": "person@example.test",
+        "displayName": "Person",
+        "avatarVersion": null,
+        "subject": "subject",
+        "pending": false
+      },
+      "isConsoleAdmin": false,
+      "canCreateApps": false,
+      "effectiveGroupIds": [],
+      "managedGroupIds": [],
+      "projectId": "project",
+      "directoryPublicURL": "",
+      "migration": {
+        "pending": false,
+        "groups": 0,
+        "memberships": 0,
+        "people": 0
+      }
+    }
+  },
+  {
+    "name": "me-degraded",
+    "schema": "Me",
+    "body": {
+      "person": {
+        "id": "person",
+        "email": "person@example.test",
+        "displayName": "Person",
+        "avatarVersion": null,
+        "subject": "subject",
+        "pending": false
+      },
+      "isConsoleAdmin": false,
+      "canCreateApps": false,
+      "effectiveGroupIds": [],
+      "managedGroupIds": [],
+      "projectId": "project",
+      "platformUnavailable": true,
+      "notMember": true,
+      "teamSlug": "team",
+      "directoryPublicURL": "",
+      "migration": {
+        "pending": false,
+        "groups": 0,
+        "memberships": 0,
+        "people": 0
+      }
+    }
+  },
+  {
+    "name": "config",
+    "schema": "Config",
+    "body": {
+      "dashboardUrl": "https://dashboard.example.test/dashboard/settings",
+      "projectId": "project"
+    }
+  },
+  {
+    "name": "comment",
+    "schema": "Comment",
+    "body": {
+      "id": "comment",
+      "appId": "app",
+      "author": {
+        "id": "removed",
+        "displayName": "",
+        "unknown": true
+      },
+      "body": "Comment",
+      "createdAt": "2026-11-01T00:00:00Z"
+    }
+  },
+  {
+    "name": "comments",
+    "schema": "CommentList",
+    "body": [
+      {
+        "id": "comment",
+        "appId": "app",
+        "author": {
+          "id": "removed",
+          "displayName": "",
+          "unknown": true
+        },
+        "body": "Comment",
+        "createdAt": "2026-11-01T00:00:00Z"
+      }
+    ]
+  },
+  {
+    "name": "empty-comments",
+    "schema": "CommentList",
+    "body": []
+  },
+  {
+    "name": "screenshot",
+    "schema": "Screenshot",
+    "body": {
+      "id": "screenshot",
+      "caption": "",
+      "width": 2,
+      "height": 3
+    }
+  },
+  {
+    "name": "screenshots",
+    "schema": "ScreenshotList",
+    "body": [
+      {
+        "id": "screenshot",
+        "caption": "",
+        "width": 2,
+        "height": 3
+      }
+    ]
+  },
+  {
+    "name": "empty-screenshots",
+    "schema": "ScreenshotList",
+    "body": []
+  },
+  {
+    "name": "requests",
+    "schema": "AccessRequestList",
+    "body": [
+      {
+        "id": "request",
+        "appId": "app",
+        "requester": {
+          "id": "removed",
+          "displayName": "",
+          "unknown": true
+        },
+        "message": "",
+        "status": "pending",
+        "requestedAt": "2026-11-01T00:00:00Z",
+        "decidedAt": null,
+        "decidedBy": null
+      }
+    ]
+  },
+  {
+    "name": "empty-requests",
+    "schema": "AccessRequestList",
+    "body": []
+  },
+  {
+    "name": "missing-access",
+    "schema": "MyAccessRequest",
+    "body": {
+      "appName": "app",
+      "exists": false
+    }
+  },
+  {
+    "name": "pending-access",
+    "schema": "MyAccessRequest",
+    "body": {
+      "appName": "app",
+      "exists": true,
+      "state": "pending",
+      "requestedAt": "2026-11-01T00:00:00Z"
+    }
+  },
+  {
+    "name": "granted-access",
+    "schema": "CreateAccessRequest",
+    "body": {
+      "state": "granted"
+    }
+  },
+  {
+    "name": "created-access",
+    "schema": "CreateAccessRequest",
+    "body": {
+      "state": "pending",
+      "requestedAt": "2026-11-01T00:00:00Z"
+    }
+  },
+  {
+    "name": "approve-access",
+    "schema": "ApproveAccessRequest",
+    "body": {
+      "request": {
+        "id": "request",
+        "appId": "app",
+        "requester": {
+          "id": "removed",
+          "displayName": "",
+          "unknown": true
+        },
+        "message": "",
+        "status": "pending",
+        "requestedAt": "2026-11-01T00:00:00Z",
+        "decidedAt": null,
+        "decidedBy": null
+      },
+      "app": {
+        "id": "app",
+        "slug": "app",
+        "displayName": "",
+        "description": "",
+        "icon": "",
+        "tags": [],
+        "guide": "",
+        "capabilities": [],
+        "screenshots": [],
+        "group": {
+          "id": "group",
+          "path": "group",
+          "name": "Group"
+        },
+        "owners": [
+          {
+            "id": "person",
+            "email": "person@example.test",
+            "displayName": "Person",
+            "avatarVersion": null,
+            "subject": "subject",
+            "pending": false
+          },
+          {
+            "id": "removed",
+            "displayName": "",
+            "unknown": true
+          }
+        ],
+        "stackId": null,
+        "appName": null,
+        "share": {
+          "scope": "private",
+          "groupIds": [],
+          "extraPersonIds": []
+        },
+        "createdBy": {
+          "id": "person",
+          "email": "person@example.test",
+          "displayName": "Person",
+          "avatarVersion": null,
+          "subject": "subject",
+          "pending": false
+        },
+        "createdAt": "2026-11-01T00:00:00Z",
+        "updatedAt": "2026-11-01T00:00:00Z"
+      }
+    }
+  },
+  {
+    "name": "decline-access",
+    "schema": "DeclineAccessRequest",
+    "body": {
+      "request": {
+        "id": "request",
+        "appId": "app",
+        "requester": {
+          "id": "removed",
+          "displayName": "",
+          "unknown": true
+        },
+        "message": "",
+        "status": "pending",
+        "requestedAt": "2026-11-01T00:00:00Z",
+        "decidedAt": null,
+        "decidedBy": null
+      }
+    }
+  },
+  {
+    "name": "resolved-path",
+    "schema": "Resolved",
+    "body": {
+      "kind": "app",
+      "id": "app",
+      "currentPath": "/group/app"
+    }
+  },
+  {
+    "name": "settings",
+    "schema": "Settings",
+    "body": {
+      "projectId": "project",
+      "github": {
+        "connected": false,
+        "connectionId": null
+      },
+      "registry": {
+        "connected": false,
+        "connectionId": null
+      },
+      "defaultTemplateId": "nextjs-postgres"
+    }
+  },
+  {
+    "name": "empty-tools",
+    "schema": "Tools",
+    "body": {
+      "available": true,
+      "tools": []
+    }
+  },
+  {
+    "name": "absent-tools",
+    "schema": "Tools",
+    "body": {
+      "available": false
+    }
+  },
+  {
+    "name": "unavailable-tools",
+    "schema": "Tools",
+    "body": {
+      "available": true,
+      "tools": [],
+      "error": "tools_unavailable"
+    }
+  },
+  {
+    "name": "http-error",
+    "schema": "Error",
+    "body": {
+      "error": "forbidden",
+      "message": "You do not have permission for this action"
+    }
+  }
+]
