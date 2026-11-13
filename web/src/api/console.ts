@@ -57,6 +57,8 @@ export interface ConsoleRequest {
   /** JSON body; a `FormData` body is sent as multipart (the browser sets the boundary). */
   body?: unknown
   cache?: RequestCache
+  /** Request preconditions (`Idempotency-Key`, `If-Match`); never logged. */
+  headers?: Readonly<Record<string, string>>
 }
 
 /** A success body: JSON (still unknown), nothing at all, or bytes that are not JSON. */
@@ -90,7 +92,7 @@ async function readBody(response: Response): Promise<ConsoleBody> {
 
 export function createConsoleTransport(fetcher: Fetcher = (input, init) => fetch(input, init)): ConsoleTransport {
   return {
-    async send({ method, path, body, cache }) {
+    async send({ method, path, body, cache, headers }) {
       assertSessionActive()
       const read = method === 'GET'
       const form = body instanceof FormData
@@ -99,7 +101,7 @@ export function createConsoleTransport(fetcher: Fetcher = (input, init) => fetch
       try {
         response = await fetcher(path, {
           method,
-          headers: json ? { Accept: 'application/json', 'Content-Type': 'application/json' } : { Accept: 'application/json' },
+          headers: { ...headers, ...(json ? { Accept: 'application/json', 'Content-Type': 'application/json' } : { Accept: 'application/json' }) },
           body: form ? body : json ? JSON.stringify(body) : undefined,
           credentials: 'same-origin',
           redirect: 'manual',
