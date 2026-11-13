@@ -303,11 +303,9 @@ navigation scope covers each test-driven `page.goto`, `reload`, `goBack` and
 `goForward` (until the call returns) and each main-frame document load such as a
 followed link (until the new document commits): a GET/HEAD the replaced document
 started before the navigation landed may be cut off during it. A GET of an iframe
-the page removed while it loaded is not a failure either, nor a read the page
-aborted without a timeout reason (TanStack Query cancelling a query whose
-component unmounted). Preview probes are excluded from that last rule because
-their own four-second timer aborts the same way. A probe aborted by its timer, a
-read timeout, an aborted write and any other `net::ERR_ABORTED` is a problem
+the page removed while it loaded is not a failure either. A probe aborted by its
+timer, a read timeout, a read cancelled when its component unmounted, an aborted
+write, a failed document load and any other `net::ERR_ABORTED` is a problem
 unless declared.
 
 A story that provokes a failure on purpose declares it around the action that
@@ -331,8 +329,10 @@ await withExpectedFailures([{
 `path` is the URL pathname with `{name}` for one segment (or a RegExp). The
 declaration is one test step and applies only while its action runs: exactly
 `count` matching responses must occur inside it (one missing or one extra fails
-the step), and the same failure outside it is a problem. Make the action wait
-for the UI that shows the failure. Console errors and other failures inside the
+the step), and the same failure outside it is a problem. After the action the
+scope stays open until each declared response has arrived (up to 10 s), so the
+count never depends on the UI rendering before the response event; make the
+action wait for the UI that shows the failure. Console errors and other failures inside the
 step still fail the test. Polling failures need a deterministic count: hold or
 release the route explicitly instead of counting timer ticks.
 

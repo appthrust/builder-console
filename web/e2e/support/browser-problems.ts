@@ -57,8 +57,7 @@ export interface BrowserProblemSummary {
   expected: { reason: string; operation: string; failure: string; count: number }[]
   /**
    * `net::ERR_ABORTED` GETs the page ended itself: aborted in the task that
-   * started them (StrictMode's double effect), body cancelled after the
-   * response, or cancelled without a timeout after their component unmounted.
+   * started them (StrictMode's double effect) or body cancelled after the response.
    */
   pageCancelled: Record<CancelCause, number>
   /** Reads a story navigation cut off (in flight on that page when it started). */
@@ -81,6 +80,9 @@ const RENDERED_TOKENS = /\b(undefined|NaN)\b/
 
 /** Maximum characters kept from any browser-provided message. */
 const MESSAGE_LIMIT = 500
+
+/** How long a `withExpectedFailures` scope waits after its action for declared responses still in flight. */
+const SETTLE_MS = 10_000
 
 const BINDING = '__consoleE2EProblem'
 
@@ -134,10 +136,6 @@ const PAGE_OBSERVER = `(() => {
       channel.port2.postMessage(0)
       signal.addEventListener('abort', () => {
         if (startingTask) send({ kind: 'fetch-cancelled', cause: 'strict-mode', method, url })
-        // TanStack Query cancels a read whose last observer unmounted (route change).
-        // Timeouts carry TimeoutError; the preview probe's own four-second timer
-        // aborts without one, so preview probes never count as cancelled.
-        else if (signal.reason?.name !== 'TimeoutError' && !url.includes('/proxy/preview/')) send({ kind: 'fetch-cancelled', cause: 'unmounted', method, url })
       }, { once: true })
     }
     return fetch.apply(this, arguments).then((response) => {
@@ -191,7 +189,7 @@ function requestPage(request: Request): string | undefined {
 }
 
 type TransportProblem = Extract<BrowserProblem, { kind: 'transport-failure' }>
-type CancelCause = 'strict-mode' | 'body' | 'unmounted'
+type CancelCause = 'strict-mode' | 'body'
 /** One navigation of a page: test-driven (ends when the call returns) or a document request (ends at commit). */
 type NavigationWindow = { start: number; end?: number; byDocument: boolean }
 
@@ -323,8 +321,10 @@ export class BrowserProblemCollector {
 
   /**
    * Runs `action` with `expected` failures allowed. Matching responses inside
-   * the action are attributed to the declaration instead of being problems;
-   * afterwards every entry must have been observed exactly `count` times.
+   * the action are attributed to the declaration instead of being problems.
+   * The scope then stays open until every entry has its declared count (at most
+   * `SETTLE_MS`), so a count never depends on whether the UI rendered before the
+   * response event arrived; afterwards every entry must match exactly.
    */
   async expectFailures(expected: readonly ExpectedFailure[], action: () => Promise<void>): Promise<void> {
     if (expected.length === 0) throw new Error('withExpectedFailures needs at least one expected failure')
@@ -339,6 +339,10 @@ export class BrowserProblemCollector {
     this.windows.push(window)
     try {
       await action()
+      const deadline = Date.now() + SETTLE_MS
+      while (window.entries.some((entry) => entry.observed.length < entry.failure.count) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
     } finally {
       this.windows.splice(this.windows.indexOf(window), 1)
     }
@@ -361,7 +365,7 @@ export class BrowserProblemCollector {
       if (page.isClosed()) continue
       for (const frame of page.frames()) await this.scanRenderedText(frame)
     }
-    const pageCancelled: Record<CancelCause, number> = { 'strict-mode': 0, body: 0, unmounted: 0 }
+    const pageCancelled: Record<CancelCause, number> = { 'strict-mode': 0, body: 0 }
     const unmatchedAborts = this.abortedReads.filter((read) => {
       const cause = this.cancellations.get(`${read.method} ${read.url}`)?.shift()
       if (!cause) return true
@@ -385,7 +389,7 @@ export class BrowserProblemCollector {
     if (!payload || typeof payload !== 'object' || !('kind' in payload)) return
     if (payload.kind === 'fetch-cancelled') {
       const { cause, method, url } = payload as { cause?: unknown; method?: unknown; url?: unknown }
-      if (cause !== 'strict-mode' && cause !== 'body' && cause !== 'unmounted') return
+      if (cause !== 'strict-mode' && cause !== 'body') return
       const key = `${String(method)} ${String(url)}`
       const causes = this.cancellations.get(key)
       if (causes) causes.push(cause)

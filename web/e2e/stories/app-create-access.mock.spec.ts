@@ -15,7 +15,7 @@ test('creation retries delivery_pending with one key and completes sharing only 
   })
   try {
     await openCreateWizard(page)
-    await withExpectedFailures([freeUrlNameChecks(2)], async () => {
+    await withExpectedFailures([freeUrlNameChecks(3)], async () => {
       await pickImage(page, 'ghcr.io/acme/demo:1.0.0')
       await fillAppDetails(page, { displayName: 'Access proof' })
       expect(await continueToShare(page)).toBe('access-proof')
@@ -56,7 +56,7 @@ test('creation retries delivery_pending with one key and completes sharing only 
 test('a rejected creation access write stays unfinished until sharing is successfully applied @mock @story', async ({ page, mock }) => {
   await mock.platform('access-forbidden', { forbidden: true })
   await openCreateWizard(page)
-  await withExpectedFailures([freeUrlNameChecks(2)], async () => {
+  await withExpectedFailures([freeUrlNameChecks(3)], async () => {
     await pickImage(page, 'ghcr.io/acme/demo:1.0.0')
     await fillAppDetails(page, { displayName: 'Access recovery' })
     await continueToShare(page)

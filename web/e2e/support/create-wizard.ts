@@ -30,7 +30,15 @@ export async function pickImage(page: Page, imageRef: string) {
 }
 
 export async function fillAppDetails(page: Page, details: { displayName?: string; description?: string; tags?: readonly string[] }) {
-  if (details.displayName !== undefined) await page.getByRole('textbox', { name: 'アプリの名前 必須', exact: true }).fill(details.displayName)
+  if (details.displayName !== undefined) {
+    const name = page.getByRole('textbox', { name: 'アプリの名前 必須', exact: true })
+    await name.fill(details.displayName)
+    // Leaving the name checks the URL name. Let that check answer, so 次へ always
+    // sends its own check instead of sometimes joining this one.
+    const checked = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/console/resolve')
+    await name.blur()
+    await checked
+  }
   if (details.description !== undefined) await page.getByLabel('説明（任意）', { exact: true }).fill(details.description)
   for (const tag of details.tags ?? []) {
     await page.getByLabel('タグ（任意）', { exact: true }).fill(tag)

@@ -21,10 +21,7 @@ test.describe('App create from a container image @create', () => {
     let slug = ''
     await withExpectedFailures([freeUrlNameChecks(3)], async () => {
       await pickImage(page, imageRef)
-      // The name field's blur check must answer before 次へ, or 次へ joins it instead of checking again.
-      const blurCheck = page.waitForResponse((response) => response.url().includes('/api/console/resolve?path=') && response.url().endsWith('%2Fimage-demo'))
       await fillAppDetails(page, { displayName, description, tags })
-      await blurCheck
       slug = await continueToShare(page)
     })
     expect(slug).toBe('image-demo')
