@@ -1,0 +1,1137 @@
+[
+  {
+    "name": "APT-752-question-answer",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"利用可能なカタログを確認して選びます。Rust の採用は保証できません。\",\"summary\":\"\",\"changes\":[],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "APT-792-concrete-candidates",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"名前の候補です。好みに合うものを選べます。\",\"summary\":\"\",\"changes\":[],\"candidates\":[{\"id\":\"request-note\",\"label\":\"申請ノート\",\"description\":\"申請を一か所で管理する名前です。\"},{\"id\":\"approval-guide\",\"label\":\"承認ガイド\",\"description\":\"承認の流れを案内する名前です。\"}],\"openDecisions\":[],\"nextQuestion\":\"どちらが好みに近いですか？\",\"suggestedReplies\":[{\"id\":\"choose-note\",\"label\":\"申請ノートにする\",\"message\":\"申請ノートを選びます\"}],\"specChanged\":false}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "APT-792-undecided-name",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"今の名前は変えずに、別の名前を一緒に考えましょう。\",\"summary\":\"\",\"changes\":[],\"candidates\":[],\"openDecisions\":[{\"topic\":\"アプリ名\",\"wish\":\"ほかの名前にしたい\"}],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "mixed-question-edit-proposal",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"Rust の採用は保証できません。承認を二段階にする変更案を示します。\",\"summary\":\"承認を二段階に変更\",\"changes\":[\"承認を二段階にする\"],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":true}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "context-question",
+    "schema": "BuildReplyValidation",
+    "raw": "{\"expected\":{\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"intent\":\"question\"},\"reply\":{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"利用可能なカタログを確認して選びます。Rust の採用は保証できません。\",\"summary\":\"\",\"changes\":[],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false},\"inputSpec\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\",\"outputSpec\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "context-suggestions",
+    "schema": "BuildReplyValidation",
+    "raw": "{\"expected\":{\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"intent\":\"suggestions\"},\"reply\":{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"名前の候補です。好みに合うものを選べます。\",\"summary\":\"\",\"changes\":[],\"candidates\":[{\"id\":\"request-note\",\"label\":\"申請ノート\",\"description\":\"申請を一か所で管理する名前です。\"},{\"id\":\"approval-guide\",\"label\":\"承認ガイド\",\"description\":\"承認の流れを案内する名前です。\"}],\"openDecisions\":[],\"nextQuestion\":\"どちらが好みに近いですか？\",\"suggestedReplies\":[{\"id\":\"choose-note\",\"label\":\"申請ノートにする\",\"message\":\"申請ノートを選びます\"}],\"specChanged\":false},\"inputSpec\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\",\"outputSpec\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "context-undecided",
+    "schema": "BuildReplyValidation",
+    "raw": "{\"expected\":{\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"intent\":\"undecided\"},\"reply\":{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"今の名前は変えずに、別の名前を一緒に考えましょう。\",\"summary\":\"\",\"changes\":[],\"candidates\":[],\"openDecisions\":[{\"topic\":\"アプリ名\",\"wish\":\"ほかの名前にしたい\"}],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false},\"inputSpec\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\",\"outputSpec\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "context-mixed",
+    "schema": "BuildReplyValidation",
+    "raw": "{\"expected\":{\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"intent\":\"auto\"},\"reply\":{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"Rust の採用は保証できません。承認を二段階にする変更案を示します。\",\"summary\":\"承認を二段階に変更\",\"changes\":[\"承認を二段階にする\"],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":true},\"inputSpec\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\",\"outputSpec\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n二段階で承認します。\\n\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "missing-answer",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"summary\":\"\",\"changes\":[],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false}",
+    "expected": {
+      "accept": false,
+      "path": "/answer"
+    }
+  },
+  {
+    "name": "reply-answer-9",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"\",\"summary\":\"\",\"changes\":[],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false}",
+    "expected": {
+      "accept": false,
+      "path": "/answer"
+    }
+  },
+  {
+    "name": "reply-answer-10",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"  \\t\",\"summary\":\"\",\"changes\":[],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false}",
+    "expected": {
+      "accept": false,
+      "path": "/answer"
+    }
+  },
+  {
+    "name": "reply-answer-11",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"summary\":\"\",\"changes\":[],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false}",
+    "expected": {
+      "accept": false,
+      "path": "/answer"
+    }
+  },
+  {
+    "name": "reply-summary-12",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"利用可能なカタログを確認して選びます。Rust の採用は保証できません。\",\"summary\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"changes\":[],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false}",
+    "expected": {
+      "accept": false,
+      "path": "/summary"
+    }
+  },
+  {
+    "name": "reply-attempt-13",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":2,\"baseSpecRevision\":0,\"answer\":\"利用可能なカタログを確認して選びます。Rust の採用は保証できません。\",\"summary\":\"\",\"changes\":[],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false}",
+    "expected": {
+      "accept": false,
+      "path": "/attempt"
+    }
+  },
+  {
+    "name": "reply-baseSpecRevision-14",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":-1,\"answer\":\"利用可能なカタログを確認して選びます。Rust の採用は保証できません。\",\"summary\":\"\",\"changes\":[],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false}",
+    "expected": {
+      "accept": false,
+      "path": "/baseSpecRevision"
+    }
+  },
+  {
+    "name": "reply-turnId-15",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"not-uuid\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"利用可能なカタログを確認して選びます。Rust の採用は保証できません。\",\"summary\":\"\",\"changes\":[],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false}",
+    "expected": {
+      "accept": false,
+      "path": "/turnId"
+    }
+  },
+  {
+    "name": "reply-schemaVersion-16",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":2,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"利用可能なカタログを確認して選びます。Rust の採用は保証できません。\",\"summary\":\"\",\"changes\":[],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false}",
+    "expected": {
+      "accept": false,
+      "path": "/schemaVersion"
+    }
+  },
+  {
+    "name": "reply-nextQuestion-17",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"利用可能なカタログを確認して選びます。Rust の採用は保証できません。\",\"summary\":\"\",\"changes\":[],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":\"\",\"suggestedReplies\":[],\"specChanged\":false}",
+    "expected": {
+      "accept": false,
+      "path": "/nextQuestion"
+    }
+  },
+  {
+    "name": "reply-changes-18",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"利用可能なカタログを確認して選びます。Rust の採用は保証できません。\",\"summary\":\"\",\"changes\":[\"a\",\"a\"],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false}",
+    "expected": {
+      "accept": false,
+      "path": "/changes"
+    }
+  },
+  {
+    "name": "reply-summary-19",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"利用可能なカタログを確認して選びます。Rust の採用は保証できません。\",\"summary\":\"changed without flag\",\"changes\":[],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false}",
+    "expected": {
+      "accept": false,
+      "path": "/summary"
+    }
+  },
+  {
+    "name": "unknown-reply-field",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"利用可能なカタログを確認して選びます。Rust の採用は保証できません。\",\"summary\":\"\",\"changes\":[],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false,\"command\":\"rm -rf /\"}",
+    "expected": {
+      "accept": false,
+      "path": "/command"
+    }
+  },
+  {
+    "name": "nonempty-changes-without-change",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"利用可能なカタログを確認して選びます。Rust の採用は保証できません。\",\"summary\":\"\",\"changes\":[\"new\"],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false}",
+    "expected": {
+      "accept": false,
+      "path": "/changes"
+    }
+  },
+  {
+    "name": "changed-missing-summary",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"Rust の採用は保証できません。承認を二段階にする変更案を示します。\",\"summary\":\"\",\"changes\":[\"承認を二段階にする\"],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":true}",
+    "expected": {
+      "accept": false,
+      "path": "/summary"
+    }
+  },
+  {
+    "name": "changed-missing-changes",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"Rust の採用は保証できません。承認を二段階にする変更案を示します。\",\"summary\":\"承認を二段階に変更\",\"changes\":[],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":true}",
+    "expected": {
+      "accept": false,
+      "path": "/changes"
+    }
+  },
+  {
+    "name": "duplicate-candidate-id",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"名前の候補です。好みに合うものを選べます。\",\"summary\":\"\",\"changes\":[],\"candidates\":[{\"id\":\"request-note\",\"label\":\"申請ノート\",\"description\":\"申請を一か所で管理する名前です。\"},{\"id\":\"request-note\",\"label\":\"承認ガイド\",\"description\":\"承認の流れを案内する名前です。\"}],\"openDecisions\":[],\"nextQuestion\":\"どちらが好みに近いですか？\",\"suggestedReplies\":[{\"id\":\"choose-note\",\"label\":\"申請ノートにする\",\"message\":\"申請ノートを選びます\"}],\"specChanged\":false}",
+    "expected": {
+      "accept": false,
+      "path": "/candidates/1/id"
+    }
+  },
+  {
+    "name": "duplicate-candidate-label",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"名前の候補です。好みに合うものを選べます。\",\"summary\":\"\",\"changes\":[],\"candidates\":[{\"id\":\"request-note\",\"label\":\"申請ノート\",\"description\":\"申請を一か所で管理する名前です。\"},{\"id\":\"approval-guide\",\"label\":\"申請ノート\",\"description\":\"承認の流れを案内する名前です。\"}],\"openDecisions\":[],\"nextQuestion\":\"どちらが好みに近いですか？\",\"suggestedReplies\":[{\"id\":\"choose-note\",\"label\":\"申請ノートにする\",\"message\":\"申請ノートを選びます\"}],\"specChanged\":false}",
+    "expected": {
+      "accept": false,
+      "path": "/candidates/1/label"
+    }
+  },
+  {
+    "name": "duplicate-suggested-label",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"名前の候補です。好みに合うものを選べます。\",\"summary\":\"\",\"changes\":[],\"candidates\":[{\"id\":\"request-note\",\"label\":\"申請ノート\",\"description\":\"申請を一か所で管理する名前です。\"},{\"id\":\"approval-guide\",\"label\":\"承認ガイド\",\"description\":\"承認の流れを案内する名前です。\"}],\"openDecisions\":[],\"nextQuestion\":\"どちらが好みに近いですか？\",\"suggestedReplies\":[{\"id\":\"choose-note\",\"label\":\"申請ノートにする\",\"message\":\"申請ノートを選びます\"},{\"id\":\"second\",\"label\":\"申請ノートにする\",\"message\":\"はい\"}],\"specChanged\":false}",
+    "expected": {
+      "accept": false,
+      "path": "/suggestedReplies/1/label"
+    }
+  },
+  {
+    "name": "too-many-candidates",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"利用可能なカタログを確認して選びます。Rust の採用は保証できません。\",\"summary\":\"\",\"changes\":[],\"candidates\":[{\"id\":\"c-0\",\"label\":\"0\",\"description\":\"説明\"},{\"id\":\"c-1\",\"label\":\"1\",\"description\":\"説明\"},{\"id\":\"c-2\",\"label\":\"2\",\"description\":\"説明\"},{\"id\":\"c-3\",\"label\":\"3\",\"description\":\"説明\"},{\"id\":\"c-4\",\"label\":\"4\",\"description\":\"説明\"}],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false}",
+    "expected": {
+      "accept": false,
+      "path": "/candidates"
+    }
+  },
+  {
+    "name": "too-many-open-decisions",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"利用可能なカタログを確認して選びます。Rust の採用は保証できません。\",\"summary\":\"\",\"changes\":[],\"candidates\":[],\"openDecisions\":[{\"topic\":\"名前\",\"wish\":\"相談\"},{\"topic\":\"名前\",\"wish\":\"相談\"},{\"topic\":\"名前\",\"wish\":\"相談\"},{\"topic\":\"名前\",\"wish\":\"相談\"},{\"topic\":\"名前\",\"wish\":\"相談\"},{\"topic\":\"名前\",\"wish\":\"相談\"},{\"topic\":\"名前\",\"wish\":\"相談\"},{\"topic\":\"名前\",\"wish\":\"相談\"},{\"topic\":\"名前\",\"wish\":\"相談\"}],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false}",
+    "expected": {
+      "accept": false,
+      "path": "/openDecisions"
+    }
+  },
+  {
+    "name": "too-many-suggested-replies",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"利用可能なカタログを確認して選びます。Rust の採用は保証できません。\",\"summary\":\"\",\"changes\":[],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[{\"id\":\"r-0\",\"label\":\"0\",\"message\":\"はい\"},{\"id\":\"r-1\",\"label\":\"1\",\"message\":\"はい\"},{\"id\":\"r-2\",\"label\":\"2\",\"message\":\"はい\"},{\"id\":\"r-3\",\"label\":\"3\",\"message\":\"はい\"},{\"id\":\"r-4\",\"label\":\"4\",\"message\":\"はい\"}],\"specChanged\":false}",
+    "expected": {
+      "accept": false,
+      "path": "/suggestedReplies"
+    }
+  },
+  {
+    "name": "total-display-text-limit",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"summary\":\"\",\"changes\":[],\"candidates\":[{\"id\":\"request-note\",\"label\":\"申請ノート\",\"description\":\"申請を一か所で管理する名前です。\"},{\"id\":\"approval-guide\",\"label\":\"承認ガイド\",\"description\":\"承認の流れを案内する名前です。\"}],\"openDecisions\":[],\"nextQuestion\":\"どちらが好みに近いですか？\",\"suggestedReplies\":[{\"id\":\"choose-note\",\"label\":\"申請ノートにする\",\"message\":\"申請ノートを選びます\"}],\"specChanged\":false}",
+    "expected": {
+      "accept": false,
+      "path": "/"
+    }
+  },
+  {
+    "name": "unicode-scalar-boundary",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\",\"summary\":\"\",\"changes\":[],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "unicode-scalar-overflow",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀\",\"summary\":\"\",\"changes\":[],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false}",
+    "expected": {
+      "accept": false,
+      "path": "/answer"
+    }
+  },
+  {
+    "name": "duplicate-answer-key",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"利用可能なカタログを確認して選びます。Rust の採用は保証できません。\",\"summary\":\"\",\"changes\":[],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false,\"answer\":\"another\"}",
+    "expected": {
+      "accept": false,
+      "path": "/answer"
+    }
+  },
+  {
+    "name": "escaped-duplicate-key",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"利用可能なカタログを確認して選びます。Rust の採用は保証できません。\",\"summary\":\"\",\"changes\":[],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false,\"\\u0061nswer\":\"another\"}",
+    "expected": {
+      "accept": false,
+      "path": "/answer"
+    }
+  },
+  {
+    "name": "trailing-json",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"利用可能なカタログを確認して選びます。Rust の採用は保証できません。\",\"summary\":\"\",\"changes\":[],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false} {}",
+    "expected": {
+      "accept": false,
+      "path": "/"
+    }
+  },
+  {
+    "name": "reply-byte-limit",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"利用可能なカタログを確認して選びます。Rust の採用は保証できません。\",\"summary\":\"\",\"changes\":[],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false}                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                ",
+    "expected": {
+      "accept": false,
+      "path": "/"
+    }
+  },
+  {
+    "name": "invalid-json",
+    "schema": "BuildReply",
+    "raw": "```json\n{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"利用可能なカタログを確認して選びます。Rust の採用は保証できません。\",\"summary\":\"\",\"changes\":[],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false}\n```",
+    "expected": {
+      "accept": false,
+      "path": "/"
+    }
+  },
+  {
+    "name": "reply-not-object",
+    "schema": "BuildReply",
+    "raw": "[]",
+    "expected": {
+      "accept": false,
+      "path": "/"
+    }
+  },
+  {
+    "name": "unpaired-surrogate",
+    "schema": "BuildReply",
+    "raw": "{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"\\ud800\",\"summary\":\"\",\"changes\":[],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false}",
+    "expected": {
+      "accept": false,
+      "path": "/answer"
+    }
+  },
+  {
+    "name": "depth-limit",
+    "schema": "BuildReply",
+    "raw": "{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":{\"a\":0}}}}}}}}}",
+    "expected": {
+      "accept": false,
+      "path": "/a/a/a/a/a/a/a/a"
+    }
+  },
+  {
+    "name": "suggestions-not-a-promise",
+    "schema": "BuildReplyValidation",
+    "raw": "{\"expected\":{\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"intent\":\"suggestions\"},\"reply\":{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"利用可能なカタログを確認して選びます。Rust の採用は保証できません。\",\"summary\":\"\",\"changes\":[],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false},\"inputSpec\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\",\"outputSpec\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"}",
+    "expected": {
+      "accept": false,
+      "path": "/reply/candidates"
+    }
+  },
+  {
+    "name": "unchanged-spec-byte-mismatch",
+    "schema": "BuildReplyValidation",
+    "raw": "{\"expected\":{\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"intent\":\"question\"},\"reply\":{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"利用可能なカタログを確認して選びます。Rust の採用は保証できません。\",\"summary\":\"\",\"changes\":[],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false},\"inputSpec\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\",\"outputSpec\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\\n\"}",
+    "expected": {
+      "accept": false,
+      "path": "/outputSpec"
+    }
+  },
+  {
+    "name": "reply-attempt-mismatch",
+    "schema": "BuildReplyValidation",
+    "raw": "{\"expected\":{\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":1,\"baseSpecRevision\":0,\"intent\":\"question\"},\"reply\":{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"利用可能なカタログを確認して選びます。Rust の採用は保証できません。\",\"summary\":\"\",\"changes\":[],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":false},\"inputSpec\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\",\"outputSpec\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"}",
+    "expected": {
+      "accept": false,
+      "path": "/reply/attempt"
+    }
+  },
+  {
+    "name": "question-cannot-edit",
+    "schema": "BuildReplyValidation",
+    "raw": "{\"expected\":{\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"intent\":\"question\"},\"reply\":{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"Rust の採用は保証できません。承認を二段階にする変更案を示します。\",\"summary\":\"承認を二段階に変更\",\"changes\":[\"承認を二段階にする\"],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":true},\"inputSpec\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\",\"outputSpec\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\\n\"}",
+    "expected": {
+      "accept": false,
+      "path": "/reply/specChanged"
+    }
+  },
+  {
+    "name": "changed-requires-actual-difference",
+    "schema": "BuildReplyValidation",
+    "raw": "{\"expected\":{\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"intent\":\"change\"},\"reply\":{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"Rust の採用は保証できません。承認を二段階にする変更案を示します。\",\"summary\":\"承認を二段階に変更\",\"changes\":[\"承認を二段階にする\"],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":true},\"inputSpec\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\",\"outputSpec\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"}",
+    "expected": {
+      "accept": false,
+      "path": "/outputSpec"
+    }
+  },
+  {
+    "name": "session",
+    "schema": "BuildSession",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000001\",\"kind\":\"new-app\",\"engine\":\"console-v1\",\"version\":1,\"lifecycle\":\"specifying\",\"groupId\":\"directory/group-opaque\",\"locale\":\"ja\",\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"specification\":{\"revision\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"},\"projection\":{\"state\":\"not_requested\",\"appliedRevision\":0},\"capabilities\":{\"canConverse\":true,\"canRequestPlan\":true},\"nextAction\":\"none\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "session-all-observations",
+    "schema": "BuildSession",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000001\",\"kind\":\"new-app\",\"engine\":\"console-v1\",\"version\":1,\"lifecycle\":\"specifying\",\"groupId\":\"directory/group-opaque\",\"locale\":\"ja\",\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"specification\":{\"revision\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"},\"projection\":{\"state\":\"not_requested\",\"appliedRevision\":0},\"capabilities\":{\"canConverse\":true,\"canRequestPlan\":true},\"nextAction\":\"none\",\"archivedAt\":\"2026-11-12T00:00:00Z\",\"draftId\":\"draft-opaque\",\"activeTurnId\":\"89c00000-0000-4000-8000-000000000002\",\"pollAfterMs\":5000,\"failure\":{\"error\":\"version_conflict\",\"message\":\"別の操作で更新されました。\",\"details\":{\"currentVersion\":2}}}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "session-initializing",
+    "schema": "BuildSession",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000001\",\"kind\":\"new-app\",\"engine\":\"console-v1\",\"version\":1,\"lifecycle\":\"initializing\",\"groupId\":\"directory/group-opaque\",\"locale\":\"ja\",\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"specification\":{\"revision\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"},\"projection\":{\"state\":\"not_requested\",\"appliedRevision\":0},\"capabilities\":{\"canConverse\":true,\"canRequestPlan\":true},\"nextAction\":\"none\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "session-planning",
+    "schema": "BuildSession",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000001\",\"kind\":\"new-app\",\"engine\":\"console-v1\",\"version\":1,\"lifecycle\":\"planning\",\"groupId\":\"directory/group-opaque\",\"locale\":\"ja\",\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"specification\":{\"revision\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"},\"projection\":{\"state\":\"not_requested\",\"appliedRevision\":0},\"capabilities\":{\"canConverse\":true,\"canRequestPlan\":true},\"nextAction\":\"none\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "session-planned",
+    "schema": "BuildSession",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000001\",\"kind\":\"new-app\",\"engine\":\"console-v1\",\"version\":1,\"lifecycle\":\"planned\",\"groupId\":\"directory/group-opaque\",\"locale\":\"ja\",\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"specification\":{\"revision\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"},\"projection\":{\"state\":\"not_requested\",\"appliedRevision\":0},\"capabilities\":{\"canConverse\":true,\"canRequestPlan\":true},\"nextAction\":\"none\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "session-created",
+    "schema": "BuildSession",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000001\",\"kind\":\"new-app\",\"engine\":\"console-v1\",\"version\":1,\"lifecycle\":\"created\",\"groupId\":\"directory/group-opaque\",\"locale\":\"ja\",\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"specification\":{\"revision\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"},\"projection\":{\"state\":\"not_requested\",\"appliedRevision\":0},\"capabilities\":{\"canConverse\":true,\"canRequestPlan\":true},\"nextAction\":\"none\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "session-archived",
+    "schema": "BuildSession",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000001\",\"kind\":\"new-app\",\"engine\":\"console-v1\",\"version\":1,\"lifecycle\":\"archived\",\"groupId\":\"directory/group-opaque\",\"locale\":\"ja\",\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"specification\":{\"revision\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"},\"projection\":{\"state\":\"not_requested\",\"appliedRevision\":0},\"capabilities\":{\"canConverse\":true,\"canRequestPlan\":true},\"nextAction\":\"none\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "session-invalid-version",
+    "schema": "BuildSession",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000001\",\"kind\":\"new-app\",\"engine\":\"console-v1\",\"version\":0,\"lifecycle\":\"specifying\",\"groupId\":\"directory/group-opaque\",\"locale\":\"ja\",\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"specification\":{\"revision\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"},\"projection\":{\"state\":\"not_requested\",\"appliedRevision\":0},\"capabilities\":{\"canConverse\":true,\"canRequestPlan\":true},\"nextAction\":\"none\"}",
+    "expected": {
+      "accept": false,
+      "path": "/version"
+    }
+  },
+  {
+    "name": "session-unsafe-version",
+    "schema": "BuildSession",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000001\",\"kind\":\"new-app\",\"engine\":\"console-v1\",\"version\":9007199254740992,\"lifecycle\":\"specifying\",\"groupId\":\"directory/group-opaque\",\"locale\":\"ja\",\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"specification\":{\"revision\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"},\"projection\":{\"state\":\"not_requested\",\"appliedRevision\":0},\"capabilities\":{\"canConverse\":true,\"canRequestPlan\":true},\"nextAction\":\"none\"}",
+    "expected": {
+      "accept": false,
+      "path": "/version"
+    }
+  },
+  {
+    "name": "session-invalid-lifecycle",
+    "schema": "BuildSession",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000001\",\"kind\":\"new-app\",\"engine\":\"console-v1\",\"version\":1,\"lifecycle\":\"future\",\"groupId\":\"directory/group-opaque\",\"locale\":\"ja\",\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"specification\":{\"revision\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"},\"projection\":{\"state\":\"not_requested\",\"appliedRevision\":0},\"capabilities\":{\"canConverse\":true,\"canRequestPlan\":true},\"nextAction\":\"none\"}",
+    "expected": {
+      "accept": false,
+      "path": "/lifecycle"
+    }
+  },
+  {
+    "name": "session-invalid-engine",
+    "schema": "BuildSession",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000001\",\"kind\":\"new-app\",\"engine\":\"platform-v1\",\"version\":1,\"lifecycle\":\"specifying\",\"groupId\":\"directory/group-opaque\",\"locale\":\"ja\",\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"specification\":{\"revision\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"},\"projection\":{\"state\":\"not_requested\",\"appliedRevision\":0},\"capabilities\":{\"canConverse\":true,\"canRequestPlan\":true},\"nextAction\":\"none\"}",
+    "expected": {
+      "accept": false,
+      "path": "/engine"
+    }
+  },
+  {
+    "name": "session-invalid-createdAt",
+    "schema": "BuildSession",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000001\",\"kind\":\"new-app\",\"engine\":\"console-v1\",\"version\":1,\"lifecycle\":\"specifying\",\"groupId\":\"directory/group-opaque\",\"locale\":\"ja\",\"createdAt\":\"2026-11-12T00:00:00+09:00\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"specification\":{\"revision\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"},\"projection\":{\"state\":\"not_requested\",\"appliedRevision\":0},\"capabilities\":{\"canConverse\":true,\"canRequestPlan\":true},\"nextAction\":\"none\"}",
+    "expected": {
+      "accept": false,
+      "path": "/createdAt"
+    }
+  },
+  {
+    "name": "session-reader-future-lifecycle",
+    "schema": "BuildSessionRead",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000001\",\"kind\":\"new-app\",\"engine\":\"console-v1\",\"version\":1,\"lifecycle\":\"future\",\"groupId\":\"directory/group-opaque\",\"locale\":\"ja\",\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"specification\":{\"revision\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"},\"projection\":{\"state\":\"not_requested\",\"appliedRevision\":0},\"capabilities\":{\"canConverse\":true,\"canRequestPlan\":true},\"nextAction\":\"none\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "session-reader-malformed-version",
+    "schema": "BuildSessionRead",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000001\",\"kind\":\"new-app\",\"engine\":\"console-v1\",\"version\":\"1\",\"lifecycle\":\"specifying\",\"groupId\":\"directory/group-opaque\",\"locale\":\"ja\",\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"specification\":{\"revision\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"},\"projection\":{\"state\":\"not_requested\",\"appliedRevision\":0},\"capabilities\":{\"canConverse\":true,\"canRequestPlan\":true},\"nextAction\":\"none\"}",
+    "expected": {
+      "accept": false,
+      "path": "/version"
+    }
+  },
+  {
+    "name": "turn-running",
+    "schema": "BuildTurn",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000002\",\"ordinal\":1,\"kind\":\"conversation\",\"state\":\"running\",\"baseSpecRevision\":0,\"sessionVersion\":2,\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"request\":{\"kind\":\"conversation\",\"message\":\"Rust で作れますか？\",\"intent\":\"question\",\"baseSpecRevision\":0},\"attempt\":0,\"promptVersion\":\"new-app-conversation/1.0.0\",\"progress\":{\"stage\":\"thinking\",\"observedAt\":\"2026-11-12T00:00:00Z\",\"activity\":[]},\"nextAction\":\"observe\",\"pollAfterMs\":2000}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "conversation-turn",
+    "schema": "BuildConversationTurn",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000002\",\"ordinal\":1,\"kind\":\"conversation\",\"state\":\"running\",\"baseSpecRevision\":0,\"sessionVersion\":2,\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"request\":{\"kind\":\"conversation\",\"message\":\"Rust で作れますか？\",\"intent\":\"question\",\"baseSpecRevision\":0},\"attempt\":0,\"promptVersion\":\"new-app-conversation/1.0.0\",\"progress\":{\"stage\":\"thinking\",\"observedAt\":\"2026-11-12T00:00:00Z\",\"activity\":[]},\"nextAction\":\"observe\",\"pollAfterMs\":2000}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "turn-repair-required",
+    "schema": "BuildTurn",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000002\",\"ordinal\":1,\"kind\":\"conversation\",\"state\":\"repair_required\",\"baseSpecRevision\":0,\"sessionVersion\":2,\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"request\":{\"kind\":\"conversation\",\"message\":\"Rust で作れますか？\",\"intent\":\"question\",\"baseSpecRevision\":0},\"attempt\":0,\"promptVersion\":\"new-app-conversation/1.0.0\",\"progress\":{\"stage\":\"repair_required\",\"observedAt\":\"2026-11-12T00:00:00Z\",\"activity\":[]},\"nextAction\":\"advance\",\"pollAfterMs\":2000}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "turn-confirmation-no-new-revision",
+    "schema": "BuildTurn",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000002\",\"ordinal\":1,\"kind\":\"conversation\",\"state\":\"awaiting_confirmation\",\"baseSpecRevision\":0,\"sessionVersion\":2,\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"request\":{\"kind\":\"conversation\",\"message\":\"Rust で作れますか？\",\"intent\":\"question\",\"baseSpecRevision\":0},\"attempt\":0,\"promptVersion\":\"new-app-conversation/1.0.0\",\"progress\":{\"stage\":\"awaiting_confirmation\",\"observedAt\":\"2026-11-12T00:00:00Z\",\"activity\":[]},\"nextAction\":\"confirm\",\"pollAfterMs\":2000,\"reply\":{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"Rust の採用は保証できません。承認を二段階にする変更案を示します。\",\"summary\":\"承認を二段階に変更\",\"changes\":[\"承認を二段階にする\"],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":true},\"proposedSpec\":{\"sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\\n\"}}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "turn-explicit-keep",
+    "schema": "BuildTurn",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000002\",\"ordinal\":1,\"kind\":\"conversation\",\"state\":\"succeeded\",\"baseSpecRevision\":0,\"sessionVersion\":2,\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"request\":{\"kind\":\"conversation\",\"message\":\"Rust で作れますか？\",\"intent\":\"question\",\"baseSpecRevision\":0},\"attempt\":0,\"promptVersion\":\"new-app-conversation/1.0.0\",\"progress\":{\"stage\":\"awaiting_confirmation\",\"observedAt\":\"2026-11-12T00:00:00Z\",\"activity\":[]},\"nextAction\":\"none\",\"pollAfterMs\":2000,\"reply\":{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"Rust の採用は保証できません。承認を二段階にする変更案を示します。\",\"summary\":\"承認を二段階に変更\",\"changes\":[\"承認を二段階にする\"],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":true},\"proposedSpec\":{\"sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\\n\"},\"resolution\":{\"decision\":\"keep_spec\"}}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "turn-explicit-accept",
+    "schema": "BuildTurn",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000002\",\"ordinal\":1,\"kind\":\"conversation\",\"state\":\"succeeded\",\"baseSpecRevision\":0,\"sessionVersion\":3,\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"request\":{\"kind\":\"conversation\",\"message\":\"Rust で作れますか？\",\"intent\":\"question\",\"baseSpecRevision\":0},\"attempt\":0,\"promptVersion\":\"new-app-conversation/1.0.0\",\"progress\":{\"stage\":\"awaiting_confirmation\",\"observedAt\":\"2026-11-12T00:00:00Z\",\"activity\":[]},\"nextAction\":\"none\",\"pollAfterMs\":2000,\"reply\":{\"schemaVersion\":1,\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"answer\":\"Rust の採用は保証できません。承認を二段階にする変更案を示します。\",\"summary\":\"承認を二段階に変更\",\"changes\":[\"承認を二段階にする\"],\"candidates\":[],\"openDecisions\":[],\"nextQuestion\":null,\"suggestedReplies\":[],\"specChanged\":true},\"proposedSpec\":{\"sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\\n\"},\"resolution\":{\"decision\":\"accept_spec\"}}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "turn-one-repair-only",
+    "schema": "BuildTurn",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000002\",\"ordinal\":1,\"kind\":\"conversation\",\"state\":\"failed\",\"baseSpecRevision\":0,\"sessionVersion\":2,\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"request\":{\"kind\":\"conversation\",\"message\":\"Rust で作れますか？\",\"intent\":\"question\",\"baseSpecRevision\":0},\"attempt\":1,\"promptVersion\":\"new-app-conversation/1.0.0\",\"progress\":{\"stage\":\"thinking\",\"observedAt\":\"2026-11-12T00:00:00Z\",\"activity\":[]},\"nextAction\":\"none\",\"pollAfterMs\":2000,\"failure\":{\"error\":\"version_conflict\",\"message\":\"別の操作で更新されました。\",\"details\":{\"currentVersion\":2}}}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "plan-turn",
+    "schema": "BuildTurn",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000002\",\"ordinal\":1,\"kind\":\"request_plan\",\"state\":\"planning\",\"baseSpecRevision\":0,\"sessionVersion\":2,\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"nextAction\":\"observe\",\"pollAfterMs\":2000,\"specRevision\":0,\"platformGenerationId\":\"generation-opaque\",\"projection\":{\"state\":\"applied\",\"appliedRevision\":0}}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "plan-turn-typed",
+    "schema": "BuildPlanTurn",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000002\",\"ordinal\":1,\"kind\":\"request_plan\",\"state\":\"planning\",\"baseSpecRevision\":0,\"sessionVersion\":2,\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"nextAction\":\"observe\",\"pollAfterMs\":2000,\"specRevision\":0,\"platformGenerationId\":\"generation-opaque\",\"projection\":{\"state\":\"applied\",\"appliedRevision\":0}}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "turn-unknown-kind",
+    "schema": "BuildTurn",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000002\",\"ordinal\":1,\"kind\":\"future\",\"state\":\"running\",\"baseSpecRevision\":0,\"sessionVersion\":2,\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"request\":{\"kind\":\"conversation\",\"message\":\"Rust で作れますか？\",\"intent\":\"question\",\"baseSpecRevision\":0},\"attempt\":0,\"promptVersion\":\"new-app-conversation/1.0.0\",\"progress\":{\"stage\":\"thinking\",\"observedAt\":\"2026-11-12T00:00:00Z\",\"activity\":[]},\"nextAction\":\"observe\",\"pollAfterMs\":2000}",
+    "expected": {
+      "accept": false,
+      "path": "/kind"
+    }
+  },
+  {
+    "name": "turn-unknown-state",
+    "schema": "BuildConversationTurn",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000002\",\"ordinal\":1,\"kind\":\"conversation\",\"state\":\"future\",\"baseSpecRevision\":0,\"sessionVersion\":2,\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"request\":{\"kind\":\"conversation\",\"message\":\"Rust で作れますか？\",\"intent\":\"question\",\"baseSpecRevision\":0},\"attempt\":0,\"promptVersion\":\"new-app-conversation/1.0.0\",\"progress\":{\"stage\":\"thinking\",\"observedAt\":\"2026-11-12T00:00:00Z\",\"activity\":[]},\"nextAction\":\"observe\",\"pollAfterMs\":2000}",
+    "expected": {
+      "accept": false,
+      "path": "/state"
+    }
+  },
+  {
+    "name": "turn-attempt-overflow",
+    "schema": "BuildConversationTurn",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000002\",\"ordinal\":1,\"kind\":\"conversation\",\"state\":\"running\",\"baseSpecRevision\":0,\"sessionVersion\":2,\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"request\":{\"kind\":\"conversation\",\"message\":\"Rust で作れますか？\",\"intent\":\"question\",\"baseSpecRevision\":0},\"attempt\":2,\"promptVersion\":\"new-app-conversation/1.0.0\",\"progress\":{\"stage\":\"thinking\",\"observedAt\":\"2026-11-12T00:00:00Z\",\"activity\":[]},\"nextAction\":\"observe\",\"pollAfterMs\":2000}",
+    "expected": {
+      "accept": false,
+      "path": "/attempt"
+    }
+  },
+  {
+    "name": "turn-activity-limit",
+    "schema": "BuildConversationTurn",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000002\",\"ordinal\":1,\"kind\":\"conversation\",\"state\":\"running\",\"baseSpecRevision\":0,\"sessionVersion\":2,\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"request\":{\"kind\":\"conversation\",\"message\":\"Rust で作れますか？\",\"intent\":\"question\",\"baseSpecRevision\":0},\"attempt\":0,\"promptVersion\":\"new-app-conversation/1.0.0\",\"progress\":{\"stage\":\"thinking\",\"observedAt\":\"2026-11-12T00:00:00Z\",\"activity\":[\"a\",\"b\",\"c\",\"d\"]},\"nextAction\":\"observe\",\"pollAfterMs\":2000}",
+    "expected": {
+      "accept": false,
+      "path": "/progress/activity"
+    }
+  },
+  {
+    "name": "turn-stage-unknown-writer",
+    "schema": "BuildConversationTurn",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000002\",\"ordinal\":1,\"kind\":\"conversation\",\"state\":\"running\",\"baseSpecRevision\":0,\"sessionVersion\":2,\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"request\":{\"kind\":\"conversation\",\"message\":\"Rust で作れますか？\",\"intent\":\"question\",\"baseSpecRevision\":0},\"attempt\":0,\"promptVersion\":\"new-app-conversation/1.0.0\",\"progress\":{\"stage\":\"future\",\"observedAt\":\"2026-11-12T00:00:00Z\",\"activity\":[]},\"nextAction\":\"observe\",\"pollAfterMs\":2000}",
+    "expected": {
+      "accept": false,
+      "path": "/progress/stage"
+    }
+  },
+  {
+    "name": "turn-stage-unknown-reader",
+    "schema": "BuildTurnRead",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000002\",\"ordinal\":1,\"kind\":\"conversation\",\"state\":\"running\",\"baseSpecRevision\":0,\"sessionVersion\":2,\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"request\":{\"kind\":\"conversation\",\"message\":\"Rust で作れますか？\",\"intent\":\"question\",\"baseSpecRevision\":0},\"attempt\":0,\"promptVersion\":\"new-app-conversation/1.0.0\",\"progress\":{\"stage\":\"future\",\"observedAt\":\"2026-11-12T00:00:00Z\",\"activity\":[]},\"nextAction\":\"observe\",\"pollAfterMs\":2000}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "turn-state-unknown-reader",
+    "schema": "BuildTurnRead",
+    "raw": "{\"id\":\"89c00000-0000-4000-8000-000000000002\",\"ordinal\":1,\"kind\":\"conversation\",\"state\":\"future\",\"baseSpecRevision\":0,\"sessionVersion\":2,\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"request\":{\"kind\":\"conversation\",\"message\":\"Rust で作れますか？\",\"intent\":\"question\",\"baseSpecRevision\":0},\"attempt\":0,\"promptVersion\":\"new-app-conversation/1.0.0\",\"progress\":{\"stage\":\"thinking\",\"observedAt\":\"2026-11-12T00:00:00Z\",\"activity\":[]},\"nextAction\":\"future\",\"pollAfterMs\":2000}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "error",
+    "schema": "BuildError",
+    "raw": "{\"error\":\"version_conflict\",\"message\":\"別の操作で更新されました。\",\"details\":{\"currentVersion\":2}}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "error-all-details",
+    "schema": "BuildError",
+    "raw": "{\"error\":\"failed_precondition\",\"message\":\"ポリシーを確認してください。\",\"details\":{\"field\":\"/intent\",\"reason\":\"PolicyPending\",\"policy\":\"unattended\",\"currentVersion\":2,\"resource\":\"workspace\",\"retryable\":false,\"limit\":\"bytes\",\"observedAt\":\"2026-11-12T00:00:00Z\"}}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "error-unknown-code",
+    "schema": "BuildError",
+    "raw": "{\"error\":\"future\",\"message\":\"別の操作で更新されました。\",\"details\":{\"currentVersion\":2}}",
+    "expected": {
+      "accept": false,
+      "path": "/error"
+    }
+  },
+  {
+    "name": "error-unknown-reader",
+    "schema": "BuildErrorRead",
+    "raw": "{\"error\":\"future\",\"message\":\"別の操作で更新されました。\",\"details\":{\"currentVersion\":2}}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "error-missing-message",
+    "schema": "BuildError",
+    "raw": "{\"error\":\"version_conflict\",\"details\":{\"currentVersion\":2}}",
+    "expected": {
+      "accept": false,
+      "path": "/message"
+    }
+  },
+  {
+    "name": "error-detail-invalid-version",
+    "schema": "BuildError",
+    "raw": "{\"error\":\"version_conflict\",\"message\":\"別の操作で更新されました。\",\"details\":{\"currentVersion\":0}}",
+    "expected": {
+      "accept": false,
+      "path": "/details/currentVersion"
+    }
+  },
+  {
+    "name": "etag-82",
+    "schema": "BuildETag",
+    "raw": "\"\\\"bs-1\\\"\"",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "etag-83",
+    "schema": "BuildETag",
+    "raw": "\"\\\"bs-9007199254740991\\\"\"",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "etag-84",
+    "schema": "BuildETag",
+    "raw": "\"bs-1\"",
+    "expected": {
+      "accept": false,
+      "path": "/"
+    }
+  },
+  {
+    "name": "etag-85",
+    "schema": "BuildETag",
+    "raw": "\"W/\\\"bs-1\\\"\"",
+    "expected": {
+      "accept": false,
+      "path": "/"
+    }
+  },
+  {
+    "name": "etag-86",
+    "schema": "BuildETag",
+    "raw": "\"\\\"bs-0\\\"\"",
+    "expected": {
+      "accept": false,
+      "path": "/"
+    }
+  },
+  {
+    "name": "etag-87",
+    "schema": "BuildETag",
+    "raw": "\"\\\"bs-01\\\"\"",
+    "expected": {
+      "accept": false,
+      "path": "/"
+    }
+  },
+  {
+    "name": "etag-88",
+    "schema": "BuildETag",
+    "raw": "\"\\\"bs-9007199254740992\\\"\"",
+    "expected": {
+      "accept": false,
+      "path": "/"
+    }
+  },
+  {
+    "name": "etag-89",
+    "schema": "BuildETag",
+    "raw": "\"*\"",
+    "expected": {
+      "accept": false,
+      "path": "/"
+    }
+  },
+  {
+    "name": "create-headers",
+    "schema": "BuildCreateHeaders",
+    "raw": "{\"Idempotency-Key\":\"bs/session/create\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "mutation-headers",
+    "schema": "BuildMutationHeaders",
+    "raw": "{\"Idempotency-Key\":\"bs/session/turn\",\"If-Match\":\"\\\"bs-2\\\"\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "headers-missing-precondition",
+    "schema": "BuildMutationHeaders",
+    "raw": "{\"Idempotency-Key\":\"key\"}",
+    "expected": {
+      "accept": false,
+      "path": "/If-Match"
+    }
+  },
+  {
+    "name": "invalid-key-93",
+    "schema": "BuildCreateHeaders",
+    "raw": "{\"Idempotency-Key\":\"\"}",
+    "expected": {
+      "accept": false,
+      "path": "/Idempotency-Key"
+    }
+  },
+  {
+    "name": "invalid-key-94",
+    "schema": "BuildCreateHeaders",
+    "raw": "{\"Idempotency-Key\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}",
+    "expected": {
+      "accept": false,
+      "path": "/Idempotency-Key"
+    }
+  },
+  {
+    "name": "invalid-key-95",
+    "schema": "BuildCreateHeaders",
+    "raw": "{\"Idempotency-Key\":\"é\"}",
+    "expected": {
+      "accept": false,
+      "path": "/Idempotency-Key"
+    }
+  },
+  {
+    "name": "invalid-key-96",
+    "schema": "BuildCreateHeaders",
+    "raw": "{\"Idempotency-Key\":\"line\\nfeed\"}",
+    "expected": {
+      "accept": false,
+      "path": "/Idempotency-Key"
+    }
+  },
+  {
+    "name": "create-session-input",
+    "schema": "BuildCreateSession",
+    "raw": "{\"kind\":\"new-app\",\"groupId\":\"directory-opaque\",\"intent\":\"申請を管理したい\",\"locale\":\"ja\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "initial-intent-byte-overflow",
+    "schema": "BuildCreateSession",
+    "raw": "{\"kind\":\"new-app\",\"groupId\":\"directory-opaque\",\"intent\":\"ああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああああ\",\"locale\":\"ja\"}",
+    "expected": {
+      "accept": false,
+      "path": "/intent"
+    }
+  },
+  {
+    "name": "conversation-input",
+    "schema": "BuildConversationRequest",
+    "raw": "{\"kind\":\"conversation\",\"message\":\"Rust で作れますか？\",\"intent\":\"question\",\"baseSpecRevision\":0}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "turn-request-conversation",
+    "schema": "BuildTurnRequest",
+    "raw": "{\"kind\":\"conversation\",\"message\":\"Rust で作れますか？\",\"intent\":\"question\",\"baseSpecRevision\":0}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "plan-input",
+    "schema": "BuildPlanRequest",
+    "raw": "{\"kind\":\"request_plan\",\"specRevision\":0}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "turn-request-plan",
+    "schema": "BuildTurnRequest",
+    "raw": "{\"kind\":\"request_plan\",\"specRevision\":0}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "plan-forbids-message",
+    "schema": "BuildPlanRequest",
+    "raw": "{\"kind\":\"request_plan\",\"specRevision\":0,\"message\":\"提案して\"}",
+    "expected": {
+      "accept": false,
+      "path": "/message"
+    }
+  },
+  {
+    "name": "APT-792-free-text-not-plan",
+    "schema": "BuildTurnRequest",
+    "raw": "{\"kind\":\"conversation\",\"message\":\"この内容で提案して\",\"intent\":\"auto\",\"baseSpecRevision\":0}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "resolve-console",
+    "schema": "BuildResolve",
+    "raw": "{\"engine\":\"console-v1\",\"sessionId\":\"89c00000-0000-4000-8000-000000000001\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "resolve-legacy",
+    "schema": "BuildResolve",
+    "raw": "{\"engine\":\"platform-v1\",\"draftId\":\"draft-opaque\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "publish-private",
+    "schema": "BuildPublishInput",
+    "raw": "{\"name\":\"申請ノート\",\"shareScope\":\"private\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "publish-group",
+    "schema": "BuildPublishInput",
+    "raw": "{\"name\":\"申請ノート\",\"shareScope\":\"group\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "publish-company",
+    "schema": "BuildPublishInput",
+    "raw": "{\"name\":\"申請ノート\",\"shareScope\":\"company\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "publish-reject-public",
+    "schema": "BuildPublishInput",
+    "raw": "{\"name\":\"申請\",\"shareScope\":\"public\"}",
+    "expected": {
+      "accept": false,
+      "path": "/shareScope"
+    }
+  },
+  {
+    "name": "publish-reject-long",
+    "schema": "BuildPublishInput",
+    "raw": "{\"name\":\"あああああああああああああああああああああああああああああああああああああああああ\",\"shareScope\":\"private\"}",
+    "expected": {
+      "accept": false,
+      "path": "/name"
+    }
+  },
+  {
+    "name": "publish-reject-multiline",
+    "schema": "BuildPublishInput",
+    "raw": "{\"name\":\"申請\\nノート\",\"shareScope\":\"private\"}",
+    "expected": {
+      "accept": false,
+      "path": "/name"
+    }
+  },
+  {
+    "name": "publish-pending",
+    "schema": "BuildPublishResult",
+    "raw": "{\"desired\":{\"name\":\"申請ノート\",\"shareScope\":\"group\"},\"sessionVersion\":3,\"sync\":{\"state\":\"pending\"}}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "publish-failed",
+    "schema": "BuildPublishResult",
+    "raw": "{\"desired\":{\"name\":\"申請ノート\",\"shareScope\":\"group\"},\"sessionVersion\":3,\"sync\":{\"state\":\"failed\",\"failure\":{\"error\":\"version_conflict\",\"message\":\"別の操作で更新されました。\",\"details\":{\"currentVersion\":2}}}}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "accept-spec",
+    "schema": "BuildResolution",
+    "raw": "{\"decision\":\"accept_spec\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "keep-spec",
+    "schema": "BuildResolution",
+    "raw": "{\"decision\":\"keep_spec\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "no-cancel",
+    "schema": "BuildResolution",
+    "raw": "{\"decision\":\"cancel\"}",
+    "expected": {
+      "accept": false,
+      "path": "/decision"
+    }
+  },
+  {
+    "name": "specification",
+    "schema": "BuildSpecification",
+    "raw": "{\"revision\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "proposed-spec",
+    "schema": "BuildProposedSpec",
+    "raw": "{\"sha256\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\\n\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "initial-spec-revision",
+    "schema": "BuildSpecRevision",
+    "raw": "{\"revision\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\",\"sourceTurnId\":null,\"createdAt\":\"2026-11-12T00:00:00Z\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "confirmed-spec-revision",
+    "schema": "BuildSpecRevision",
+    "raw": "{\"revision\":1,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\",\"sourceTurnId\":\"89c00000-0000-4000-8000-000000000002\",\"createdAt\":\"2026-11-12T00:00:00Z\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "confirmed-revision-needs-source",
+    "schema": "BuildSpecRevision",
+    "raw": "{\"revision\":1,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\",\"sourceTurnId\":null,\"createdAt\":\"2026-11-12T00:00:00Z\"}",
+    "expected": {
+      "accept": false,
+      "path": "/sourceTurnId"
+    }
+  },
+  {
+    "name": "reply-context",
+    "schema": "BuildReplyContext",
+    "raw": "{\"turnId\":\"89c00000-0000-4000-8000-000000000002\",\"attempt\":0,\"baseSpecRevision\":0,\"intent\":\"auto\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "session-page",
+    "schema": "BuildSessionList",
+    "raw": "{\"items\":[{\"id\":\"89c00000-0000-4000-8000-000000000001\",\"kind\":\"new-app\",\"engine\":\"console-v1\",\"version\":1,\"lifecycle\":\"specifying\",\"groupId\":\"directory/group-opaque\",\"locale\":\"ja\",\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"specification\":{\"revision\":0,\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"markdown\":\"---\\nspec:\\n  name: 申請アプリ\\n  oneLine: 申請を管理する\\n  users: 社員\\n  screens: []\\n  records: []\\n  rules: []\\n  approval: none\\n  importFrom: none\\n---\\n申請を管理します。\\n\"},\"projection\":{\"state\":\"not_requested\",\"appliedRevision\":0},\"capabilities\":{\"canConverse\":true,\"canRequestPlan\":true},\"nextAction\":\"none\"}],\"nextCursor\":\"opaque-cursor\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "empty-session-page",
+    "schema": "BuildSessionList",
+    "raw": "{\"items\":[]}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "turn-page",
+    "schema": "BuildTurnList",
+    "raw": "{\"items\":[{\"id\":\"89c00000-0000-4000-8000-000000000002\",\"ordinal\":1,\"kind\":\"conversation\",\"state\":\"running\",\"baseSpecRevision\":0,\"sessionVersion\":2,\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"request\":{\"kind\":\"conversation\",\"message\":\"Rust で作れますか？\",\"intent\":\"question\",\"baseSpecRevision\":0},\"attempt\":0,\"promptVersion\":\"new-app-conversation/1.0.0\",\"progress\":{\"stage\":\"thinking\",\"observedAt\":\"2026-11-12T00:00:00Z\",\"activity\":[]},\"nextAction\":\"observe\",\"pollAfterMs\":2000},{\"id\":\"89c00000-0000-4000-8000-000000000002\",\"ordinal\":1,\"kind\":\"request_plan\",\"state\":\"planning\",\"baseSpecRevision\":0,\"sessionVersion\":2,\"createdAt\":\"2026-11-12T00:00:00Z\",\"updatedAt\":\"2026-11-12T00:00:00Z\",\"nextAction\":\"observe\",\"pollAfterMs\":2000,\"specRevision\":0,\"platformGenerationId\":\"generation-opaque\",\"projection\":{\"state\":\"applied\",\"appliedRevision\":0}}],\"nextCursor\":\"opaque-cursor\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "empty-turn-page",
+    "schema": "BuildTurnList",
+    "raw": "{\"items\":[]}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "page-query",
+    "schema": "BuildListQuery",
+    "raw": "{\"cursor\":\"opaque\",\"limit\":50}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "default-page-query",
+    "schema": "BuildListQuery",
+    "raw": "{}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "page-too-large",
+    "schema": "BuildListQuery",
+    "raw": "{\"limit\":51}",
+    "expected": {
+      "accept": false,
+      "path": "/limit"
+    }
+  },
+  {
+    "name": "empty-mutation",
+    "schema": "BuildEmptyInput",
+    "raw": "{}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "empty-mutation-extra-field",
+    "schema": "BuildEmptyInput",
+    "raw": "{\"cancel\":true}",
+    "expected": {
+      "accept": false,
+      "path": "/cancel"
+    }
+  }
+]

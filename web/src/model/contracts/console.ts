@@ -2,6 +2,14 @@
 // (api/contracts/console/*), and the pure operations on them. Feature code
 // reads these types, never the wire.
 
+// Inferred at the canonical boundary; no parallel handwritten conversation
+// domain declarations. Features import these types, never the raw schemas.
+export type {
+  BuildSession, BuildTurn, BuildReply, BuildSpecification, BuildSpecRevision, BuildError,
+  BuildCreateSessionInput, BuildTurnInput, BuildResolutionInput, BuildPublishInput,
+  BuildPublishResult, BuildResolveResult, BuildListQuery, BuildMutationHeaders, BuildCreateHeaders, BuildETag,
+} from '../../api/contracts/console/build-sessions'
+
 /** A Directory person. `avatarVersion`: null without a profile picture, else when it last changed (the image URL's cache-buster). */
 export type Person = { id: string; subject: string | null; pending: boolean; email: string; displayName: string; avatarVersion: string | null }
 

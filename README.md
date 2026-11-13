@@ -134,6 +134,118 @@ feature/model imports of the canonical schema directory, including type-only
 imports, barrels, and assertions. PostgreSQL handler contract tests use the same
 opt-in DSN and isolated-schema cleanup as the other server integration tests.
 
+### NEW-APP conversation contracts (APT-753 / S4-0)
+
+The same canonical schema directory now owns `build-sessions.ts` and
+`build-session-operations.ts`. `api/contracts/console/build-sessions.ts` exposes
+response boundaries and inferred input/domain types; `model/contracts/console.ts`
+exports the domain types. Features must not import raw schemas. These are
+declarations only: no v1 handlers, client, database, prompts or UI are registered.
+
+The existing generator also emits `cmd/server/internal/domain/build-reply.schema.json`
+(JSON Schema 2020-12, `urn:appthrust:builder-console:reply:1`, at most 8 KiB).
+Go embeds it through `domain.BuildReplySchema()` for the later AgentTurn input. Both
+artifacts are covered by `check:console-schema`. The served `openapi.json` is
+unchanged. This deliberately replaces the design's proposed independent
+`contracts/conversation` package and public-document edits with the established
+SPA canonical-source/internal-document convention.
+
+Go HTTP DTOs remain in `api/build_session_dto.go`; reusable Reply types and
+the raw validator input live in `domain/build_reply.go`, following the existing
+API-to-domain response ownership. A conversation service can therefore consume
+them without depending on its HTTP handlers or creating an import cycle.
+
+All paths below have prefix `/api/console/v1`. All responses, including errors,
+require `Cache-Control: no-store`. `K` means required `Idempotency-Key`
+(1–128 printable ASCII characters); `V` means required strong `If-Match:
+"bs-<version>"`. Replay lookup precedes version checks; missing preconditions are
+428 `precondition_required`, mismatches 412 `version_conflict` with
+`details.currentVersion`, and key/body conflicts 409 `idempotency_conflict`.
+
+| Method/path | Body/query | Success resource | Request headers |
+| --- | --- | --- | --- |
+| POST `/build-sessions` | `kind: new-app`, `groupId`, `intent`, `locale: ja/en` | 202 Session | K |
+| GET `/build-sessions` | `cursor?`, `limit?` (1–50; default 20) | 200 `{items,nextCursor?}` | — |
+| GET `/build-sessions/{id}` | — | 200 Session | — |
+| GET `/build-sessions/resolve` | required `draftId` | 200 console-v1/sessionId or platform-v1/draftId | — |
+| POST `/build-sessions/{id}/advance` | `{}` | 202 Session | K, V |
+| POST `/build-sessions/{id}/turns` | conversation or request_plan union | 202 Turn | K, V |
+| GET `/build-sessions/{id}/turns` | `cursor?`, `limit?` (1–50; default 20), ordinal order | 200 `{items,nextCursor?}` | — |
+| GET `/build-sessions/{id}/turns/{turnId}` | — | 200 Turn | — |
+| POST `/build-sessions/{id}/turns/{turnId}/resolution` | `decision: accept_spec/keep_spec` | 200 Turn | K, V |
+| GET `/build-sessions/{id}/spec-revisions/{n}` | nonnegative revision | 200 SpecRevision | — |
+| PATCH `/build-sessions/{id}/publish-preferences` | `name`, `shareScope: private/group/company` | 202 PublishResult | K, V |
+| POST `/build-sessions/{id}/archive` | `{}` | 202 Session | K, V |
+
+Session/Turn resource responses and PublishResult return the session `ETag`;
+Turn creation also returns `Location`. Turns always include `sessionVersion`,
+so resolution returns the updated version without introducing a wrapper.
+PublishResult is `{desired:{name,shareScope},sessionVersion,sync:{state,failure?}}`.
+There is no cancel operation and no public share scope in this flow.
+
+Contract choices where the design left a shape or bound implicit:
+
+- Session requires `groupId`, `locale`, `createdAt`, `updatedAt` in addition to
+  its illustrated fields; `archivedAt`, `draftId`, `activeTurnId`, `failure`,
+  and `pollAfterMs` are optional observations. Dates are RFC3339 UTC (`Z`).
+  Generated session/turn IDs are UUIDs; Directory and Platform IDs remain opaque.
+- Versions/ordinals are positive and revisions nonnegative safe JSON integers
+  (maximum 9007199254740991), including ETags. Revision zero has explicit
+  `sourceTurnId: null`; all subsequent revisions require a UUID source.
+- `nextAction` is `none/observe/advance/confirm/resume`. Projection state is
+  `not_requested/pending/syncing/applied/conflict/failed`; publish sync is
+  `pending/syncing/applied/failed`. `appliedRevision` is optional, not fabricated.
+  Unknown observed enums become explicit unknown domain values. Writer enums
+  and command unions remain closed; unknown Turn kinds are rejected.
+- The publish name is nonblank, at most 40 Unicode scalars and one line
+  (CR/LF/NEL/Unicode line separators are rejected); it is never inferred.
+  Human text bounds use Unicode scalars, not UTF-16 units. Initial intent is
+  also limited to 4000 UTF-8 bytes and conversation messages to 16 KiB.
+- Reply has exactly the fields of design §6. Text totals include answer,
+  summary, changes, option labels/descriptions/messages, open topics/wishes,
+  and nextQuestion, excluding IDs. Both option arrays require unique IDs and
+  labels. Empty summary is allowed only when `specChanged=false`; required
+  human text is nonblank. A changed spec is a proposal, not a committed revision.
+- Error envelopes stay `{error,message,details?}`. Typed details may contain
+  `field` (JSON pointer), `reason`, `policy`, `currentVersion`, `resource`
+  (`session/operation/workspace/artifact`), `retryable`, storage `limit`
+  (`files/bytes/entries/depth`), and `observedAt`. Upstream reason strings such
+  as `AgentTurnActive`, `WorkspaceNotRunning`, `PolicyPending`,
+  `DraftVersionChanged` and `DraftSpecChanged` stay reasons, not error codes.
+  Failure codes cover every row in the design's error table plus its
+  precondition/session/input/status errors. Optional short text caps are
+  128 for reason/policy/prompt version, 256 for field, 512 for opaque IDs,
+  2048 for cursors, and 200 for each of at most three safe progress activities.
+
+`cmd/server/internal/api/testdata/build-conversation.json` is the single shared
+corpus. Bun and Go enumerate every case (no per-language fixture allowlist),
+require every registered Build schema to be represented, and check identical
+accept/reject and JSON-pointer paths. It includes APT-752/792 answers/candidates,
+mixed edits, undecided names, explicit decisions, repair, open reader enums,
+duplicate JSON keys, byte/scalar limits and ETags. Go also decodes accepted
+wires into the actual DTOs, marshals them back losslessly, and validates the
+writer against the generated schema; adding a schema without a DTO/corpus case
+fails. `jsonschema/v6` remains test-only.
+
+Standard JSON Schema cannot express UTF-8 byte totals, keyed uniqueness,
+display-text sums or comparison with request/spec bytes. The canonical schema
+records those as `x-*` assertions; Zod applies them and the Go parity test
+interprets them. `BuildReplyValidationInput` retains the original reply/spec
+bytes and typed expected context for S4-2. The strict JSON contract parser
+rejects duplicate keys, invalid UTF-8, trailing JSON and depth above eight.
+The S4-2 production validator must still enforce YAML/BuildSpec validity,
+artifact provenance/digests and semantic evaluation; this slice does not
+claim that schema validation proves natural-language correctness. S4-1/3
+must enforce lifecycle transitions, one active Turn, authorization, replay
+precedence, immutable attempts and transactional confirmation.
+
+Run the web checks listed in `web/package.json`, then the server tests/vet,
+gofmt on the three new Go files, and `go mod tidy -diff`. The known APT-845
+DSN-only startup tests (`TestPublicURLEnvStartup` and
+`TestConsoleMountPrecedesProxyAndMissingDatabase`) are unrelated to these
+contracts; excluding them does not prove database integration.
+
+
 
 ## Container and runtime
 
