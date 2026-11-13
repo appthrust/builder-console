@@ -24,6 +24,35 @@ jobs:
       - run: go test ./...
       - run: go build ./...
 
+  # The store, API and domain tests that need PostgreSQL skip without a DSN, so the
+  # `server` job alone never executes them. cmd/server's own DSN-only startup tests
+  # are not included until APT-845 is resolved.
+  server-db:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: console-ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16
+        with:
+          go-version-file: go.mod
+      - run: go test ./cmd/server/internal/... -count=1
+        env:
+          BUILDER_CONSOLE_TEST_DATABASE_URL: postgres://postgres:console-ci@127.0.0.1:5432/postgres?sslmode=disable
+
   web:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -137,7 +166,7 @@ jobs:
   # A failed, cancelled or skipped child fails it. Add new CI jobs to `needs`.
   console-verification:
     if: always()
-    needs: [server, web, publisher, console-mock-stories]
+    needs: [server, server-db, web, publisher, console-mock-stories]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -146,7 +175,7 @@ jobs:
           RESULTS: ${{ toJSON(needs) }}
         run: |
           jq -r 'to_entries[] | "\(.key)=\(.value.result)"' <<<"$RESULTS"
-          jq -e 'length == 4 and all(.[]; .result == "success")' <<<"$RESULTS" >/dev/null || {
-            echo "::error::console-verification requires server, web, publisher and console-mock-stories to succeed"
+          jq -e 'length == 5 and all(.[]; .result == "success")' <<<"$RESULTS" >/dev/null || {
+            echo "::error::console-verification requires server, server-db, web, publisher and console-mock-stories to succeed"
             exit 1
           }
