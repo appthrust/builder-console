@@ -38,7 +38,7 @@ test('generated plans skip taken application names and URLs consistently without
     expect((await call('POST', `${project}/application-stacks`, {
       templateId: 'nextjs-postgres', application: { name }, source: { kind: 'sample-image', imageRef: 'ghcr.io/acme/sample:latest' },
       publish: { enabled: true, customDomain: 'commerce.appthrust.test', hostnamePattern: 'wildcard', subdomain },
-    })).status).toBe(201)
+    })).status).toBe(202)
   }
   await call('POST', `${path}/creation-plan-generations`)
   for (let i = 0; i < 4; i++) await call('POST', '/api/v1/__mock/advance')
@@ -117,7 +117,7 @@ test('rename rejects invalid, taken and created destinations without changing st
     expect((await call('POST', `${project}/application-stacks`, {
       templateId: 'nextjs-postgres', application: { name }, source: { kind: 'sample-image', imageRef: 'ghcr.io/acme/sample:latest' },
       publish: { enabled: true, customDomain: 'commerce.appthrust.test', hostnamePattern: 'wildcard', subdomain },
-    })).status).toBe(201)
+    })).status).toBe(202)
   }
   for (const name of ['taken-app', 'taken-url']) {
     const response = await call('PATCH', path, { title: 'must not apply', renameApplication: { name } })

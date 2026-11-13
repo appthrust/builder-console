@@ -1,11 +1,10 @@
-import { afterEach, beforeEach, expect, mock, spyOn, test, type Mock } from 'bun:test'
+import { afterEach, beforeEach, expect, mock, test, type Mock } from 'bun:test'
 import type { ApplicationDraft } from '@appthrust/api-schema/platform-api'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act } from 'react'
 import { draftOf } from '../../api/testing/build-domain'
 import { createRoot, type Root } from 'react-dom/client'
 import { ConsoleApiError } from '../../api/console'
-import { consoleApi } from '../../api/console-unverified'
 import { classifyBuildFailure } from '../../model/build/failure'
 import { useNameSuggestion } from './use-name-suggestion'
 
@@ -25,15 +24,25 @@ let queryClient: QueryClient
 let root: Root
 let container: HTMLDivElement
 let fetch: Mock<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>
-let resolve: Mock<typeof consoleApi.resolve>
+/** The Console's answer for a path (a throw is its 404); reached through the real transport and gateway. */
+let resolve: Mock<(path: string) => Promise<unknown>>
 const storageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage')
 const originalFetch = globalThis.fetch
 
 beforeEach(() => {
   Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: window.sessionStorage })
   fetch = mock<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async () => Response.json({ data: [], meta: { total: 0 } }))
-  globalThis.fetch = fetch as unknown as typeof globalThis.fetch
-  resolve = spyOn(consoleApi, 'resolve').mockRejectedValue(new ConsoleApiError(404, { error: 'not_found', message: 'not found' }))
+  resolve = mock<(path: string) => Promise<unknown>>(async () => { throw new ConsoleApiError(404, { error: 'not_found', message: 'not found' }) })
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(new URL(String(input), 'http://console.test'), init)
+    const url = new URL(request.url)
+    if (url.pathname !== '/api/console/resolve') return fetch(request)
+    try {
+      return Response.json(await resolve(url.searchParams.get('path') ?? ''))
+    } catch {
+      return Response.json({ error: 'not_found', message: 'not found' }, { status: 404 })
+    }
+  }) as typeof globalThis.fetch
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } })
   container = document.createElement('div')
   document.body.append(container)
@@ -44,7 +53,6 @@ afterEach(async () => {
   queryClient.clear()
   container.remove()
   globalThis.fetch = originalFetch
-  resolve.mockRestore()
   if (storageDescriptor) Object.defineProperty(globalThis, 'sessionStorage', storageDescriptor)
   else Reflect.deleteProperty(globalThis, 'sessionStorage')
 })

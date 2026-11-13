@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test'
-import { ApplicationTemplateSummary, GitHubSourceConnection } from '@appthrust/api-schema/platform-api'
+import { decodeResponse } from '../../api/boundary'
+import { listSourceConnectionsContract, listTemplatesContract } from '../../api/contracts/platform/catalog'
+import { definitionOf, registryOf, sourceConnectionOf, templateOf } from '../../api/testing/catalog-domain'
 import { MOCK_PROJECT_ID, platformRoutes } from '../../dev/mock-platform'
 import { buildSourceRepositoryRequest, resolveCreateCatalog, templateSourceProblem, templateUsableFor } from '../../model/create'
 import { businessTemplates, joinBusinessTemplates } from './templates'
 
-const rows: ApplicationTemplateSummary[] = businessTemplates.map((metadata, index) => ({
+const wireRows = businessTemplates.map((metadata, index) => ({
   id: metadata.id, displayName: metadata.name, category: 'business', generatedKind: 'ApplicationStack',
   sourceKinds: ['sample-image', 'github-template'], components: [{ id: 'web', displayName: 'Web app', kind: 'web' }],
   githubTemplate: { repository: `appthrust/template-biz-${metadata.id.split('-')[1]}`, repositoryUrl: `https://github.com/appthrust/template-biz-${metadata.id.split('-')[1]}`, branch: 'main' },
@@ -16,6 +18,7 @@ const rows: ApplicationTemplateSummary[] = businessTemplates.map((metadata, inde
     ],
   },
 }))
+const rows = wireRows.map(templateOf)
 
 describe('business template × platform catalog', () => {
   test('keeps known business ids only, in metadata order, with three included parts', () => {
@@ -27,16 +30,20 @@ describe('business template × platform catalog', () => {
     expect(templateUsableFor(cards[3]!, 'github-template')).toBe(false)
     expect(templateUsableFor(cards[0]!, 'github-template')).toBe(true)
     expect(joinBusinessTemplates(rows.slice(1))).toHaveLength(3)
-    expect(joinBusinessTemplates([{ ...rows[0]!, category: 'framework' }])).toEqual([])
-    expect(joinBusinessTemplates([{ ...rows[0]!, id: 'not-console-metadata' }])).toEqual([])
+    expect(joinBusinessTemplates([templateOf({ ...wireRows[0]!, category: 'framework' })])).toEqual([])
+    expect(joinBusinessTemplates([templateOf({ ...wireRows[0]!, id: 'not-console-metadata' })])).toEqual([])
+  })
+
+  test('a business card needs the known business category: an unknown one is not offered', () => {
+    expect(joinBusinessTemplates([templateOf({ ...wireRows[0]!, category: 'premium' })])).toEqual([])
   })
 
   test('the selected business template controls the source repository; unavailable ids never fall back', () => {
-    const definitions = [{ id: 'web', title: 'Web', category: 'application', components: [{ id: 'web', definitionRef: { name: 'web' } }] }]
+    const definitions = [definitionOf({ id: 'web', title: 'Web', category: 'application', components: [{ id: 'web', definitionRef: { name: 'web' } }] })]
     const catalog = resolveCreateCatalog(rows, definitions, 'github-template', 'biz-master-postgres')!
     const request = buildSourceRepositoryRequest('customer-book', catalog, {
-      source: { id: 'github', displayName: 'GitHub', account: { login: 'acme', type: 'Organization' }, capabilities: ['createRepositories'], status: 'ready', source: 'github-source-connection-cr' },
-      registry: { id: 'registry', displayName: 'Registry', registryHost: 'ghcr.io', registryType: 'ghcr', status: 'ready', source: 'registry-connection-cr' },
+      source: sourceConnectionOf({ id: 'github', displayName: 'GitHub', account: { login: 'acme', type: 'Organization' }, capabilities: ['createRepositories'], status: 'ready', source: 'github-source-connection-cr' }),
+      registry: registryOf({ id: 'registry', displayName: 'Registry', registryHost: 'ghcr.io', registryType: 'ghcr', status: 'ready', source: 'registry-connection-cr' }),
     })
     expect(request.template).toEqual({ repository: 'appthrust/template-biz-master', ref: 'main' })
     expect(resolveCreateCatalog(rows, definitions, 'github-template', 'biz-reservation-postgres')).toBeUndefined()
@@ -48,8 +55,11 @@ describe('business template × platform catalog', () => {
     const sourcesUrl = new URL(`/api/v1/projects/${MOCK_PROJECT_ID}/source-connections`, 'http://mock.test')
     const templatesResponse = await platformRoutes(new Request(templatesUrl), templatesUrl)
     const sourcesResponse = await platformRoutes(new Request(sourcesUrl), sourcesUrl)
-    const catalog = ApplicationTemplateSummary.array().parse((await templatesResponse!.json()).data)
-    const sources = GitHubSourceConnection.array().parse((await sourcesResponse!.json()).data)
+    const decodedTemplates = decodeResponse(listTemplatesContract, await templatesResponse!.json())
+    const decodedSources = decodeResponse(listSourceConnectionsContract, await sourcesResponse!.json())
+    if (!decodedTemplates.ok || !decodedSources.ok) throw new Error('the mock catalog does not match its contracts')
+    const catalog = decodedTemplates.value.data
+    const sources = decodedSources.value.data
     const approval = catalog.find((item) => item.id === 'biz-approval-postgres')!
     const framework = catalog.find((item) => item.id === 'nextjs-postgres')!
     expect(templateUsableFor(approval, 'github-template')).toBe(false)

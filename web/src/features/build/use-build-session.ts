@@ -5,7 +5,7 @@ import { useCreateStore, useSelector } from '@tanstack/react-store'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../../api/build'
 import { buildDraftOptions, readDraft } from '../../api/queries/build'
-import { consoleApi, type BusinessApp } from '../../api/console-unverified'
+import { type BusinessApp } from '../../api/console-unverified'
 import { isConsoleError } from '../../api/console'
 import { type Me } from '../../model/contracts/console'
 import { platformErrorEnvelope } from '../../api/platform-error'
@@ -21,6 +21,7 @@ import type { BuildFailure, BuildMessage } from '../../model/build/types'
 import { pickCreateEnvironment, summarizeCreationPlan } from '../../model/create'
 import { withDefaultPublish } from '../../model/build/plan'
 import { bindCreatedConsoleApp, ConsoleAppCreationError } from './bind-created-console-app'
+import { createApi } from '../../api/create'
 import { implemented, useImplementation } from './implement'
 import { acknowledgeReply, initialSession, queueReply, readBuildSession, saveBuildSession, startConversation, startPrepareConversation, type BuildSession } from './session'
 import { text } from './copy'
@@ -360,9 +361,11 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
         const kept = await bindCreatedConsoleApp(
           { projectId, displayName: answers.name ?? spec.name ?? draft.title, description: spec.oneLine ?? '', tags: [], groupId: store.state.groupId, urlName: appName ?? '', share: { scope: 'private', groupIds: [], extraPersonIds: [] } },
           { stackId: draft.createdApplicationStackId!, createdAppId: store.state.createdAppId },
-          { console: consoleApi.apps, onCreatedAppId: (createdAppId) => patch({ createdAppId }) },
+          { api: createApi, onCreatedAppId: (createdAppId) => patch({ createdAppId }) },
         )
         patch({ createdAppId: kept.id, prepareRequested: false })
+        // The decoded bind answer is the app; a read that started before the bind must not overwrite it.
+        await queryClient.cancelQueries({ queryKey: consoleKeys.app(kept.id) })
         queryClient.setQueryData(consoleKeys.app(kept.id), kept)
         await queryClient.invalidateQueries({ queryKey: ['console', 'apps'] })
       } catch (error) { bindingFailed.current = true; throw error }

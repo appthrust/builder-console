@@ -84,50 +84,11 @@
     "raw-console-api": 1,
     "wire-schema-import": 1
   },
-  "features/build/bind-created-console-app.ts": {
-    "raw-console-api": 1
-  },
   "features/build/publish-step.tsx": {
     "raw-console-api": 1
   },
   "features/build/use-build-session.ts": {
     "raw-console-api": 1
-  },
-  "features/build/use-name-suggestion.ts": {
-    "raw-console-api": 1,
-    "raw-platform-client": 1
-  },
-  "features/create/access.ts": {
-    "raw-console-api": 1,
-    "wire-schema-import": 1
-  },
-  "features/create/availability.ts": {
-    "raw-console-api": 1,
-    "raw-platform-client": 1
-  },
-  "features/create/form.ts": {
-    "raw-console-api": 1
-  },
-  "features/create/new-app-page.tsx": {
-    "raw-console-api": 1,
-    "raw-platform-client": 1
-  },
-  "features/create/persistence.ts": {
-    "raw-console-api": 1
-  },
-  "features/create/steps/share-step.tsx": {
-    "raw-console-api": 1
-  },
-  "features/create/steps/start-step.tsx": {
-    "wire-schema-import": 1
-  },
-  "features/create/submit.ts": {
-    "raw-console-api": 1,
-    "raw-platform-client": 1,
-    "wire-schema-import": 1
-  },
-  "features/create/templates.ts": {
-    "wire-schema-import": 1
   },
   "features/discover/app-list.tsx": {
     "raw-console-api": 1
@@ -205,9 +166,6 @@
   },
   "model/app.ts": {
     "raw-console-api": 1,
-    "wire-schema-import": 1
-  },
-  "model/create.ts": {
     "wire-schema-import": 1
   },
   "model/data-catalog.ts": {

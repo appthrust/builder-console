@@ -1,4 +1,5 @@
-import type { ApplicationTemplateSummary } from '@appthrust/api-schema/platform-api'
+import { isOneOf } from '../../model/contracts/build'
+import type { TemplateSummary } from '../../model/contracts/catalog'
 import { CalendarDays, ClipboardCheck, Package, TableProperties, type LucideIcon } from 'lucide-react'
 import { text } from './copy'
 
@@ -38,9 +39,9 @@ export function businessTemplateById(id: string | undefined): BusinessTemplate |
 }
 
 /** The platform catalog is authoritative: absent cards disappear, unavailable ones explain why. */
-export function joinBusinessTemplates(catalog: readonly ApplicationTemplateSummary[]) {
+export function joinBusinessTemplates(catalog: readonly TemplateSummary[]) {
   return businessTemplates.flatMap((metadata) => {
-    const template = catalog.find((item) => item.id === metadata.id && item.category === 'business')
+    const template = catalog.find((item) => item.id === metadata.id && isOneOf(item.category, 'business'))
     return template ? [{ ...metadata, availability: template.availability, sourceKinds: template.sourceKinds, githubTemplate: template.githubTemplate }] : []
   })
 }

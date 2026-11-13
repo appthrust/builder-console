@@ -1,12 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import type {
-  ApplicationDraftCreationPlan,
-  ApplicationStackDefinition,
-  ApplicationTemplateSummary,
-  Domain,
-  GitHubSourceConnection,
-  RegistryConnection,
-} from '@appthrust/api-schema/platform-api'
+import { definitionOf, domainOf, registryOf, sourceConnectionOf, templateOf } from '../api/testing/catalog-domain'
+import type { CreationPlan } from './contracts/build'
 import {
   appUrl,
   buildCreateStackRequest,
@@ -28,9 +22,11 @@ import {
   urlNameFromRepository,
 } from './create'
 
-const template: ApplicationTemplateSummary = {
+// Wire fixtures as Platform answers them; tests read them through the production readers.
+const wireTemplate = {
   id: 'nextjs-postgres',
   displayName: 'Next.js + PostgreSQL',
+  category: 'framework',
   generatedKind: 'ApplicationStack',
   sourceKinds: ['sample-image', 'github-template'],
   defaultPort: 3000,
@@ -45,16 +41,11 @@ const template: ApplicationTemplateSummary = {
   ],
   availability: { available: true, sources: [{ kind: 'sample-image', available: true }, { kind: 'github-template', available: true }] },
 }
+const templateWith = (patch: Record<string, unknown>) => templateOf({ ...wireTemplate, ...patch })
+const template = templateOf(wireTemplate)
+const remix = templateWith({ id: 'remix-postgres', displayName: 'Remix + PostgreSQL', sourceKinds: ['github-template'], githubTemplate: undefined })
 
-const remix: ApplicationTemplateSummary = {
-  ...template,
-  id: 'remix-postgres',
-  displayName: 'Remix + PostgreSQL',
-  sourceKinds: ['github-template'],
-  githubTemplate: undefined,
-}
-
-const definition: ApplicationStackDefinition = {
+const wireDefinition = {
   id: 'web-postgres',
   title: 'Web + PostgreSQL',
   category: 'application',
@@ -65,8 +56,9 @@ const definition: ApplicationStackDefinition = {
   ],
   connections: [{ name: 'database', from: 'web', to: 'database' }],
 }
+const definition = definitionOf(wireDefinition)
 
-const sourceConnection: GitHubSourceConnection = {
+const wireSourceConnection = {
   id: 'github-source-207cb7ce',
   displayName: 'Acme GitHub',
   account: { login: 'Acme', type: 'Organization' },
@@ -74,8 +66,10 @@ const sourceConnection: GitHubSourceConnection = {
   status: 'ready',
   source: 'github-source-connection-cr',
 }
+const sourceWith = (patch: Record<string, unknown>) => sourceConnectionOf({ ...wireSourceConnection, ...patch })
+const sourceConnection = sourceConnectionOf(wireSourceConnection)
 
-const registryConnection: RegistryConnection = {
+const wireRegistry = {
   id: 'ghcr-acme',
   displayName: 'GHCR',
   registryHost: 'ghcr.io',
@@ -83,8 +77,9 @@ const registryConnection: RegistryConnection = {
   status: 'ready',
   source: 'registry-connection-cr',
 }
+const registryConnection = registryOf(wireRegistry)
 
-const seedDomain: Domain = {
+const wireSeedDomain = {
   id: 'pj-eee7fa8eabbc.appthrust.ink',
   projectId: 'pj-eee7fa8eabbc',
   name: 'pj-eee7fa8eabbc.appthrust.ink',
@@ -98,14 +93,8 @@ const seedDomain: Domain = {
   externalDnsManaged: true,
   usedBy: [],
 }
-
-const customDomain: Domain = {
-  ...seedDomain,
-  id: 'acme.dev',
-  name: 'acme.dev',
-  source: 'hostedZone',
-  deletable: true,
-}
+const seedDomain = domainOf(wireSeedDomain)
+const customDomain = domainOf({ ...wireSeedDomain, id: 'acme.dev', name: 'acme.dev', source: 'hostedZone', deletable: true })
 
 describe('URL name', () => {
   test('follows the DNS label rule and rejects console reserved words', () => {
@@ -156,44 +145,56 @@ describe('catalog', () => {
   })
 
   test('source availability, not the aggregate, gates templates and explicit catalog choices', () => {
-    const imageOnly: ApplicationTemplateSummary = {
-      ...template,
+    const imageOnly = templateWith({
       availability: { available: true, sources: [{ kind: 'sample-image', available: true }, { kind: 'github-template', available: false }] },
-    }
+    })
     expect(templateUsableFor(imageOnly, 'github-template')).toBe(false)
     expect(templateUsableFor(imageOnly, 'sample-image')).toBe(true)
-    expect(templateUsableFor({ ...template, sourceKinds: ['sample-image'] }, 'github-template')).toBe(false)
+    expect(templateUsableFor(templateWith({ sourceKinds: ['sample-image'] }), 'github-template')).toBe(false)
     expect(templatesFor([imageOnly], 'github-template')).toEqual([])
     expect(resolveCreateCatalog([imageOnly], [definition], 'github-template', template.id)).toBeUndefined()
     expect(resolveCreateCatalog([imageOnly], [definition], 'sample-image')?.template).toBe(imageOnly)
   })
 
   test('marketplace definitions are never paired with a template, even when listed first with the same shape', () => {
-    const marketplace: ApplicationStackDefinition = { ...definition, id: 'builder-console', catalogSource: 'appthrust' }
+    const marketplace = definitionOf({ ...wireDefinition, id: 'builder-console', catalogSource: 'appthrust' })
     expect(resolveCreateCatalog([template], [marketplace, definition], 'github-template')?.definitionRef?.name).toBe(definition.id)
     expect(resolveCreateCatalog([template], [marketplace], 'github-template')).toBeUndefined()
   })
 
   test('template allowlists trim and ignore case like the Platform validator; empty allowlists admit all templates', () => {
-    const blocked = { ...sourceConnection, allowedRepositories: ['appthrust/template-other'] }
+    const blocked = sourceWith({ allowedRepositories: ['appthrust/template-other'] })
     expect(templateSourceProblem(template, [blocked])).toBe('not-admitted')
     expect(pickSourceConnection([blocked], template)).toBeUndefined()
-    expect(templateSourceProblem(template, [{ ...blocked, allowedRepositories: [] }])).toBeUndefined()
+    expect(templateSourceProblem(template, [sourceWith({ allowedRepositories: [] })])).toBeUndefined()
     expect(templateSourceProblem(template, [sourceConnection])).toBeUndefined()
-    expect(templateSourceProblem(template, [{ ...blocked, allowedRepositories: [' AppThrust/Template-Nextjs '] }])).toBeUndefined()
-    expect(templateSourceProblem({
-      ...template,
-      githubTemplate: { ...template.githubTemplate!, repository: ' APPTHRUST/template-nextjs ' },
-    }, [{ ...blocked, allowedRepositories: ['appthrust/template-nextjs'] }])).toBeUndefined()
+    expect(templateSourceProblem(template, [sourceWith({ allowedRepositories: [' AppThrust/Template-Nextjs '] })])).toBeUndefined()
+    expect(templateSourceProblem(templateWith({
+      githubTemplate: { ...wireTemplate.githubTemplate, repository: ' APPTHRUST/template-nextjs ' },
+    }), [sourceWith({ allowedRepositories: ['appthrust/template-nextjs'] })])).toBeUndefined()
     expect(templateSourceProblem(template, [])).toBe('no-connection')
-    expect(templateSourceProblem(template, [{ ...sourceConnection, status: 'incomplete' }])).toBe('no-connection')
-    expect(templateSourceProblem(template, [{ ...sourceConnection, capabilities: ['createRepositories'] }])).toBe('no-connection')
+    expect(templateSourceProblem(template, [sourceWith({ status: 'incomplete' })])).toBe('no-connection')
+    expect(templateSourceProblem(template, [sourceWith({ capabilities: ['createRepositories'] })])).toBe('no-connection')
     expect(pickSourceConnection([blocked])).toBe(blocked)
   })
 
+  test('an unknown connection status or capability is never ready and never a capability', () => {
+    expect(pickSourceConnection([sourceWith({ status: 'verified-later' })])).toBeUndefined()
+    expect(templateSourceProblem(template, [sourceWith({ capabilities: ['createRepositories', 'readEverything'] })])).toBe('no-connection')
+    expect(pickCreateEnvironment([sourceConnection], [registryOf({ ...wireRegistry, status: 'warming' })], [seedDomain]).registry).toBeUndefined()
+    expect(templateUsableFor(templateWith({ sourceKinds: ['gitlab-template'], availability: { available: true, sources: [{ kind: 'gitlab-template', available: true }] } }), 'github-template')).toBe(false)
+    expect(pickPublishDomain([customDomain, domainOf({ ...wireSeedDomain, source: 'future-source' })])).toBe('acme.dev')
+  })
+
+  test('only an explicitly served version is pinned (Platform omits served: false)', () => {
+    const omitted = definitionOf({ ...wireDefinition, versions: [{ name: 'v2', default: true }, { name: 'v1', served: true }] })
+    expect(resolveCreateCatalog([template], [omitted], 'github-template')?.definitionRef).toEqual({ name: 'web-postgres', version: 'v1' })
+    expect(resolveCreateCatalog([template], [definitionOf({ ...wireDefinition, versions: [{ name: 'v2' }] })], 'github-template')?.definitionRef).toEqual({ name: 'web-postgres' })
+  })
+
   test('a later admitting connection supplies the source repository request id', () => {
-    const blocked = { ...sourceConnection, allowedRepositories: ['appthrust/template-other'] }
-    const admitted = { ...sourceConnection, id: 'github-admitted', allowedRepositories: ['appthrust/template-nextjs'] }
+    const blocked = sourceWith({ allowedRepositories: ['appthrust/template-other'] })
+    const admitted = sourceWith({ id: 'github-admitted', allowedRepositories: ['appthrust/template-nextjs'] })
     const sources = [blocked, admitted]
     expect(pickSourceConnection(sources, template)).toBe(admitted)
     expect(templateSourceProblem(template, sources)).toBeUndefined()
@@ -201,7 +202,7 @@ describe('catalog', () => {
     const connections = sourceConnectionsOf(environment)!
     const catalog = resolveCreateCatalog([template], [definition], 'github-template')!
     expect(buildSourceRepositoryRequest('my-app', catalog, connections).sourceConnectionId).toBe(admitted.id)
-    expect(pickSourceConnection([{ ...admitted, capabilities: ['createRepositories'] }, admitted], template)).toBe(admitted)
+    expect(pickSourceConnection([sourceWith({ id: 'github-admitted', allowedRepositories: ['appthrust/template-nextjs'], capabilities: ['createRepositories'] }), admitted], template)).toBe(admitted)
   })
 
   test('honours an explicit template choice and pairs the definition structurally', () => {
@@ -215,17 +216,17 @@ describe('catalog', () => {
     const ready = pickCreateEnvironment([sourceConnection], [registryConnection], [seedDomain])
     expect(ready).toEqual({ source: sourceConnection, registry: registryConnection, domain: seedDomain.name })
     expect(sourceConnectionsOf(ready)).toEqual({ source: sourceConnection, registry: registryConnection })
-    expect(pickCreateEnvironment([{ ...sourceConnection, status: 'incomplete' }], [registryConnection], []).source).toBeUndefined()
+    expect(pickCreateEnvironment([sourceWith({ status: 'incomplete' })], [registryConnection], []).source).toBeUndefined()
     expect(
-      pickCreateEnvironment([{ ...sourceConnection, capabilities: ['readPackages'] }], [registryConnection], []).source
+      pickCreateEnvironment([sourceWith({ capabilities: ['readPackages'] })], [registryConnection], []).source
     ).toBeUndefined()
     expect(sourceConnectionsOf(pickCreateEnvironment([sourceConnection], [], []))).toBeUndefined()
   })
 
   test('publish domain: usableForPublish only, the project seed domain preferred', () => {
     expect(pickPublishDomain([customDomain, seedDomain])).toBe('pj-eee7fa8eabbc.appthrust.ink')
-    expect(pickPublishDomain([{ ...seedDomain, usableForPublish: false }, customDomain])).toBe('acme.dev')
-    expect(pickPublishDomain([{ ...seedDomain, usableForPublish: false }])).toBeUndefined()
+    expect(pickPublishDomain([domainOf({ ...wireSeedDomain, usableForPublish: false }), customDomain])).toBe('acme.dev')
+    expect(pickPublishDomain([domainOf({ ...wireSeedDomain, usableForPublish: false })])).toBeUndefined()
     expect(pickPublishDomain([])).toBeUndefined()
     expect(appUrl('mitsumori', 'pj-eee7fa8eabbc.appthrust.ink')).toBe('https://mitsumori.pj-eee7fa8eabbc.appthrust.ink')
   })
@@ -235,7 +236,7 @@ describe('catalog', () => {
       expect(missingPrerequisites({}, entry)).toEqual(['github', 'registry', 'domain'])
     }
     expect(missingPrerequisites({}, 'image')).toEqual(['registry', 'domain'])
-    const noRegistry = pickCreateEnvironment([sourceConnection], [{ ...registryConnection, status: 'incomplete' }], [seedDomain])
+    const noRegistry = pickCreateEnvironment([sourceConnection], [registryOf({ ...wireRegistry, status: 'incomplete' })], [seedDomain])
     expect(missingPrerequisites(noRegistry, 'existing')).toEqual(['registry'])
     expect(missingPrerequisites(noRegistry, 'image')).toEqual(['registry'])
     const ready = pickCreateEnvironment([sourceConnection], [registryConnection], [seedDomain])
@@ -304,13 +305,13 @@ describe('platform requests', () => {
   })
 
   test('no create path sends a port, even when the catalog still advertises one', () => {
-    const advertised: ApplicationStackDefinition = {
-      ...definition,
+    const advertised = definitionOf({
+      ...wireDefinition,
       components: [
         { id: 'web', definitionRef: { name: 'web-service', version: 'v1' }, defaultValues: { port: 3000 } },
         { id: 'database', definitionRef: { name: 'postgresql', version: 'v1' } },
       ],
-    }
+    })
     const sources = [
       { kind: 'application-source-repository', sourceRepositoryId: 'mitsumori-src' },
       { kind: 'sample-image', imageRef: 'ghcr.io/a/b:1' },
@@ -353,7 +354,7 @@ describe('AI の計画', () => {
     resolveCreateCatalog([template], [definition], 'github-template')!,
     'pj.appthrust.test'
   )
-  const plan: ApplicationDraftCreationPlan = {
+  const plan: CreationPlan = {
     summary: '見積書を作って PDF で出すアプリ',
     representation: ['SourceRepository', 'ApplicationStack'],
     markdown: '# plan',

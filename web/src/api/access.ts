@@ -1,6 +1,7 @@
 import { ORPCError } from '@orpc/client'
-import type { ShareScope } from './console-unverified'
-import { client } from './client'
+import type { ConfirmedPublishAccess, ShareScope } from '../model/contracts/catalog'
+import { putPublishAccessContract } from './contracts/platform/catalog'
+import { apiGateway } from './gateway'
 import { platformErrorEnvelope } from './platform-error'
 import { isPublishPreparationPending, publishPreparationRetryDelay } from './publish-retry'
 import { sharingCopy } from '../copy/sharing'
@@ -23,9 +24,15 @@ export function createdAppAccessRetryDelay(failureCount: number, error: unknown)
   return isPublishPreparationPending(error) ? publishPreparationRetryDelay(failureCount) : 3_000
 }
 
-export async function putAppAccess(projectId: string, publishId: string, scope: ShareScope, idempotencyKey: string) {
+/**
+ * Writes the publish's URL access for a share scope, under the caller's
+ * idempotency key (a retry with the same key is replayed, never applied
+ * twice). Resolves to the observed access the Platform answered with; an
+ * unreadable answer rejects with a ResponseContractError (never retried).
+ */
+export async function putAppAccess(projectId: string, publishId: string, scope: ShareScope, idempotencyKey: string): Promise<ConfirmedPublishAccess> {
   try {
-    return await client.platformApiPutPublishAccess({
+    return await apiGateway.platform(putPublishAccessContract, {
       params: { projectId, publishId },
       headers: { 'Idempotency-Key': idempotencyKey },
       body: accessRequest(scope),

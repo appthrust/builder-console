@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { buildKeys } from '../../api/queries/build'
-import { client } from '../../api/client'
-import { consoleApi } from '../../api/console-unverified'
+import { createApi } from '../../api/create'
 import type { BuildFailure } from '../../model/build/types'
 import type { BuildDraft } from '../../model/contracts/build'
 import { suggestFreeUrlName } from '../create/availability'
@@ -16,7 +15,7 @@ export function useNameSuggestion(draft: BuildDraft, failure: BuildFailure | und
     queryFn: async ({ signal }) => await suggestFreeUrlName({
       projectId: draft.projectId, groupPath: groupPath!, urlName: urlName!, entry: undefined,
       own: { stackId: draft.createdApplicationStackId },
-    }, { resolve: consoleApi.resolve, platform: client, signal }) ?? null,
+    }, { api: createApi, signal }) ?? null,
   })
   return enabled ? suggestion.data ?? undefined : undefined
 }

@@ -333,7 +333,7 @@ test('AI plans can omit publish and the created app can be repaired through the 
   expect(before.some((publish: { applicationId: string }) => publish.applicationId === applicationId)).toBe(false)
   const body = { applicationId, branchId: 'production', componentId: `${applicationId}-web`, destination: { type: 'gateway' }, customDomain: 'commerce.appthrust.test', hostnamePattern: 'wildcard', subdomain: applicationId, idempotencyKey: 'repair-test' }
   const repaired = await call('POST', `${project}/publishes`, body)
-  expect(repaired).toMatchObject({ status: 201, body: { applicationId, branchId: 'production', componentId: `${applicationId}-web`, publicUrl: `https://${applicationId}.commerce.appthrust.test/` } })
+  expect(repaired).toMatchObject({ status: 202, body: { applicationId, branchId: 'production', componentId: `${applicationId}-web`, publicUrl: `https://${applicationId}.commerce.appthrust.test/` } })
   const after = (await call('GET', `${project}/publishes`)).body.data
   expect(after).toHaveLength(before.length + 1)
   expect(after.filter((publish: { applicationId: string }) => publish.applicationId !== applicationId)).toEqual(before)

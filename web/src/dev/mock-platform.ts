@@ -1824,7 +1824,7 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
         const repository = adoptedRepository({ ...body, existing: body.existing })
         if (state.repositories.has(repository.id)) return error(409, 'conflict', 'repository is already adopted')
         state.repositories.set(repository.id, repository)
-        return json(mutation('ApplicationSourceRepository', repository.id, repository), 201)
+        return json(mutation('ApplicationSourceRepository', repository.id, repository), 202)
       }
       const name = body.destination?.repositoryName
       const problem = nameProblem(name)
@@ -1833,7 +1833,7 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
       state.githubRepositoryNames.add(name)
       const repository = repositoryFor(name, 'pending')
       state.repositories.set(repository.id, repository)
-      return json(mutation('ApplicationSourceRepository', repository.id, repository), 201)
+      return json(mutation('ApplicationSourceRepository', repository.id, repository), 202)
     },
   ],
   ['GET', new RegExp(`^${P}/application-drafts/creation-tools$`), () => json(creationTools())],
@@ -2398,7 +2398,7 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
       })
       state.stacks.set(stack.id, stack)
       const resource = { ...toStack(stack), applicationId: name, branchId: 'production', branch: { applicationId: name, branchId: 'production', management: { source: 'applicationStack', mutableFields: [] }, state: 'pending' } }
-      return json(mutation('ApplicationStack', stack.id, resource), 201)
+      return json(mutation('ApplicationStack', stack.id, resource), 202)
     },
   ],
   [
@@ -2450,7 +2450,9 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
       if (problem === PUBLISH_URL_TAKEN) return error(409, 'conflict', 'publish endpoint is already owned by another publish', { reason: 'publish_url_conflict' })
       if (body.destination?.type !== 'gateway' || problem) return error(400, 'invalid_argument', problem ?? 'gateway destination is required')
       stack.host = body.hostnamePattern === 'wildcard' ? `${body.subdomain}.${body.customDomain}` : body.customDomain!
-      return json(toPublish(stack), 201)
+      // Like the platform (internal/handler/publish.go:1631): 202 with the mutation envelope.
+      const publish = toPublish(stack)
+      return json(mutation('HTTPPublish', publish.id, publish), 202)
     },
   ],
   [

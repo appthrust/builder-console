@@ -6,6 +6,7 @@ import { act, useLayoutEffect, useSyncExternalStore } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import * as api from '../../api/build'
 import { draftOf, turnOf, generationOf } from '../../api/testing/build-domain'
+import { appOf } from '../../api/testing/catalog-domain'
 import type { BuildDraft } from '../../model/contracts/build'
 import { buildKeys } from '../../api/queries/build'
 import { consoleKeys } from '../../api/queries/console'
@@ -543,7 +544,7 @@ const publishedApp: BusinessApp = {
 }
 
 async function mountPublished(current = publishedDraft, session = initial) {
-  const bind = spyOn(binding, 'bindCreatedConsoleApp').mockResolvedValue(publishedApp)
+  const bind = spyOn(binding, 'bindCreatedConsoleApp').mockResolvedValue(appOf(publishedApp))
   restore.push(() => bind.mockRestore())
   await mount(current, session)
 }

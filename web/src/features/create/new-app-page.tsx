@@ -4,9 +4,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useCreateStore, useSelector } from '@tanstack/react-store'
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { buildGroupTree, flattenGroupTree, membershipRoots } from '../../model/contracts/console'
-import { consoleApi, type BusinessApp, type SharePolicy } from '../../api/console-unverified'
-import { client } from '../../api/client'
+import { buildGroupTree, flattenGroupTree, membershipRoots, type BusinessApp } from '../../model/contracts/console'
+import type { ShareChoice } from '../../model/contracts/catalog'
+import { createApi } from '../../api/create'
 import { useCreateCatalog, useCreateConnections, useCreationTools } from '../../api/queries/catalog'
 import { copy } from '../../copy'
 import { aiPolicyExplanation } from '../../copy/ai-policy'
@@ -30,7 +30,7 @@ import { Button, Card, CardBody, focusHeading, LoadFailed, Notice, PageHeader, S
 import { checkNameAvailability, suggestFreeUrlName, type AvailabilityRequest, type NameAvailability } from './availability'
 import { text } from './copy'
 import { effectiveShareGroupIds, stepFields, syncUrlName, useCreateForm, type CreateValues } from './form'
-import { CreatingPanel, FailureNotice, FieldFailureNotice } from './run-status'
+import { CreatingPanel, FailureNotice, FieldFailureNotice, StaleCatalogNotice, UnconfirmedCreateNotice } from './run-status'
 import { beginBuild, resolveBuildGroup } from '../build/entry'
 import { text as buildText } from '../build/copy'
 import { clearCreateSession, createSteps, readCreateSession, restoreCreateDraft, saveCreateSession, type Step } from './persistence'
@@ -40,6 +40,7 @@ import { DetailsStep, type TakenUrlName } from './steps/details-step'
 import { ShareStep } from './steps/share-step'
 import { StartStep, type EntryBlocks } from './steps/start-step'
 import {
+  confirmCreate,
   CreateFailed,
   submitCreate,
   type CreatePath,
@@ -68,8 +69,9 @@ type CreateSearch = { group?: string; resume?: string; template?: string; intent
 export function NewAppPage({ defaultGroupPath }: { defaultGroupPath?: string }) {
   const search: CreateSearch = useSearch({ from: '/new' })
   const draft = useQuery({
-    queryKey: ['console', 'app', search.resume],
-    queryFn: () => consoleApi.apps.get(search.resume!),
+    // The wizard's own read of the draft it resumes (not the app page's cache).
+    queryKey: ['create', 'resume', search.resume],
+    queryFn: () => createApi.app(search.resume!),
     enabled: Boolean(search.resume),
   })
   if (search.resume && draft.isPending) return <Notice>{text.loadingDraft}</Notice>
@@ -151,7 +153,7 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
   }, [])
 
   const ownerGroup = groupRows.find((group) => group.id === values.groupId)
-  const share: SharePolicy = {
+  const share: ShareChoice = {
     scope: values.scope,
     groupIds: values.scope === 'group' ? effectiveShareGroupIds(values) : [],
     extraPersonIds: draft?.share.extraPersonIds ?? saved?.progress.draft?.share.extraPersonIds ?? [],
@@ -196,7 +198,17 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
   const setupLink =
     me.isConsoleAdmin && (['existing', 'template', 'ai', 'image'] as const).some((entry) => missingSetupFor(entry).length > 0)
   const catalogLoading = connections.isPending || templates.isPending || definitions.isPending || tools.isPending
-  const catalogFailed = templates.isError || definitions.isError || connections.isError
+  // The catalog is the evidence that creating is allowed. A first read that failed is this panel's failure; a
+  // re-read that failed keeps what was shown, says so, and holds every create entry until a read succeeds.
+  const catalogQueries = [templates, definitions, connections]
+  const catalogFailed = catalogQueries.some((query) => query.data === undefined && query.isError)
+  const catalogStale = !catalogFailed && catalogQueries.some((query) => query.data !== undefined && query.isError)
+  const catalogReadAt = Math.min(...catalogQueries.map((query) => query.dataUpdatedAt))
+  const retryCatalog = () => {
+    void templates.refetch()
+    void definitions.refetch()
+    void connections.refetch()
+  }
   const canCreate = me.canCreateApps
   const sourceProblem = values.entry === 'template' && selectedTemplate
     ? templateSourceProblem(selectedTemplate, connections.data?.sources ?? [])
@@ -211,7 +223,7 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
           ? copy.create.start.templateUnavailable
           : undefined
   const entryReady = (entry: CreateEntry | undefined) =>
-    entry !== undefined && canCreate && !catalogLoading && !catalogFailed && !blocked[entry] && (entry !== 'template' || (Boolean(templateCatalog) && !templateProblem))
+    entry !== undefined && canCreate && !catalogLoading && !catalogFailed && !catalogStale && !blocked[entry] && (entry !== 'template' || (Boolean(templateCatalog) && !templateProblem))
 
   const catalog = values.entry === 'image' ? imageCatalog : templateCatalog
   const url = domain && isValidAppName(values.urlName) ? appUrl(values.urlName, domain) : undefined
@@ -318,7 +330,7 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
     running?.controller.abort()
     const controller = new AbortController()
     patch({ checkingName: true })
-    const result = checkNameAvailability(availabilityRequest(urlName), { resolve: consoleApi.resolve, platform: client, signal: controller.signal })
+    const result = checkNameAvailability(availabilityRequest(urlName), { api: createApi, signal: controller.signal })
       .then((answer) => {
         if (controller.signal.aborted || form.state.values.urlName !== urlName) return undefined
         // A name the create itself reported taken stays taken, whatever the check says.
@@ -400,7 +412,7 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
         const urlName = form.state.values.urlName
         patch({ resume: failed.progress, step: 1, nameTaken: { urlName, reported: true } })
         focusTakenName()
-        void suggestFreeUrlName(availabilityRequest(urlName), { resolve: consoleApi.resolve, platform: client }).then((suggestion) => {
+        void suggestFreeUrlName(availabilityRequest(urlName), { api: createApi }).then((suggestion) => {
           const current = run.state.nameTaken
           if (!suggestion || !current?.reported || current.urlName !== urlName) return
           patch({ nameTaken: { ...current, suggestion } })
@@ -449,20 +461,24 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
     void startBuild(search.intent)
   }, [search.intent, catalogLoading, catalogFailed, tools.data, canCreate, aiGroupId])
 
+  const createPath = (): CreatePath | undefined =>
+    values.entry === 'template'
+      ? { kind: 'template' }
+      : values.entry === 'existing' && values.repository
+        ? { kind: 'existing', repository: values.repository }
+        : values.entry === 'image'
+          ? { kind: 'image', imageRef: values.imageRef.trim() }
+          : undefined
+
+  // An unconfirmed step blocks every create until the readback below has run, also after a reload.
+  const unconfirmed = run.state.resume.unconfirmed !== undefined
+
   const submitApp = () => {
-    const path: CreatePath | undefined =
-      values.entry === 'template'
-        ? { kind: 'template' }
-        : values.entry === 'existing' && values.repository
-          ? { kind: 'existing', repository: values.repository }
-          : values.entry === 'image'
-            ? { kind: 'image', imageRef: values.imageRef.trim() }
-            : undefined
-    if (!path || !catalog || !values.groupId || !domain || templateProblem || run.state.phase) return
+    const path = createPath()
+    if (!path || !catalog || !values.groupId || !domain || templateProblem || run.state.phase || run.state.resume.unconfirmed) return
     void attempt(async () => {
       const app = await submitCreate({ ...details, path }, run.state.resume, {
-        console: consoleApi.apps,
-        platform: client,
+        api: createApi,
         catalog,
         domain,
         connections: sourceConnections,
@@ -473,10 +489,28 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
     })
   }
 
+  const [confirming, setConfirming] = useState(false)
+  const [stillUnknown, setStillUnknown] = useState(false)
+  /** 「最新の状態を確認する」: read back what the unconfirmed step may have made; never resends it. */
+  const confirmLatest = async () => {
+    const path = createPath()
+    if (confirming || !path || !catalog) return
+    setConfirming(true)
+    setStillUnknown(false)
+    try {
+      const confirmed = await confirmCreate({ ...details, path }, run.state.resume, { api: createApi, catalog, connections: sourceConnections })
+      patch({ resume: confirmed.progress, failure: undefined })
+      if (confirmed.app) await finish(confirmed.app)
+    } catch {
+      setStillUnknown(true)
+    } finally {
+      setConfirming(false)
+    }
+  }
 
   const busy = phase !== undefined || startingBuild
   const retrying = failure !== undefined && !failure.forbidden
-  const blockedSubmit = !canCreate || busy || failure?.forbidden === true
+  const blockedSubmit = !canCreate || busy || failure?.forbidden === true || unconfirmed
   const primary =
     step === 0
       ? { label: copy.create.next, disabled: !entryReady(values.entry) }
@@ -490,6 +524,9 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
     else submitApp()
   }
 
+  const staleCatalog = catalogStale
+    ? <StaleCatalogNotice readAt={catalogReadAt} retrying={catalogQueries.some((query) => query.isFetching)} onRetry={retryCatalog} />
+    : null
   const stepLabels = copy.create.steps
   const detailsTitle = values.entry === 'existing' ? copy.create.existing.title : copy.create.details.title
   const stepTitle = [copy.create.start.title, detailsTitle, copy.create.share.title, copy.create.confirm.title][step]
@@ -534,11 +571,8 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
                 disabled={!canCreate || startingBuild}
                 loading={catalogLoading}
                 catalogFailed={catalogFailed}
-                onRetryCatalog={() => {
-                  void templates.refetch()
-                  void definitions.refetch()
-                  void connections.refetch()
-                }}
+                onRetryCatalog={retryCatalog}
+                stale={staleCatalog}
                 blocked={blocked}
                 setupLink={setupLink}
                 catalog={templateRows}
@@ -570,6 +604,7 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
               <ShareStep form={form} groups={flatGroups} isConsoleAdmin={me.isConsoleAdmin} shareText={shareText} />
             ) : step === 3 ? (
               <div className="space-y-6">
+                {staleCatalog}
                 <ConfirmStep
                   form={form}
                   url={url}
@@ -587,7 +622,11 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
               <Notice tone="error">{copy.common.loadFailed}</Notice>
             )}
 
-            {failure && !failure.field ? (
+            {unconfirmed ? (
+              <div id="create-failure" tabIndex={-1} className="mt-6 focus:outline-none">
+                <UnconfirmedCreateNotice confirming={confirming} stillUnknown={stillUnknown} disabled={!catalog || !createPath()} onConfirm={() => void confirmLatest()} />
+              </div>
+            ) : failure && !failure.field ? (
               <div id="create-failure" tabIndex={-1} className="mt-6 focus:outline-none">
                 <FailureNotice failure={failure} />
               </div>

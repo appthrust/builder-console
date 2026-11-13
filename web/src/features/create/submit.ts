@@ -4,17 +4,19 @@
 // instead of duplicating.
 // - ひな形 / 作ったコードから / イメージ: `submitCreate` (source repository →
 //   stack, or the stack alone for an image).
-import type {
-  ApplicationStackValidation,
-  CreateApplicationSourceRepositoryRequest,
-} from '@appthrust/api-schema/platform-api'
+// - A step whose 2xx answer cannot be read (a ResponseContractError) may have
+//   happened: the attempt stops with `progress.unconfirmed` set, nothing is
+//   resent, and only `confirmCreate` (a readback) clears it. The readback
+//   adopts what the unconfirmed step made, so the next attempt does not make
+//   it twice.
 import { ORPCError } from '@orpc/client'
+import { isResponseContractError } from '../../api/boundary'
 import { isConsoleError } from '../../api/console'
-import { type BusinessApp, type ConsoleApi, type SharePolicy } from '../../api/console-unverified'
-import type { PlatformApiClient } from '../../api/client'
+import type { CreateApi } from '../../api/create'
 import { platformErrorEnvelope } from '../../api/platform-error'
-import { queueCreatedAppAccess } from './access'
-import { text } from './copy'
+import { knownValue } from '../../model/contracts/build'
+import type { ShareChoice, SourceRepository, SourceRepositoryRequest, StackValidation } from '../../model/contracts/catalog'
+import type { BusinessApp } from '../../model/contracts/console'
 import {
   buildCreateStackRequest,
   buildExistingSourceRepositoryRequest,
@@ -24,6 +26,8 @@ import {
   type SourceConnections,
   type StackSource,
 } from '../../model/create'
+import { queueCreatedAppAccess } from './access'
+import { text } from './copy'
 
 export type CreatePath =
   | { kind: 'template' }
@@ -39,13 +43,19 @@ export interface AppDetails {
   groupId: string
   /** "URL になる名前": console slug and platform application name. */
   urlName: string
-  share: SharePolicy
+  share: ShareChoice
 }
 
 export interface CreateRequest extends AppDetails {
   path: CreatePath
 }
 
+export type SubmitPhase =
+  | 'draft'
+  | 'source'
+  | 'checking'
+  | 'platform'
+  | 'bind'
 
 /** What already exists from an earlier attempt. */
 export interface CreateProgress {
@@ -56,29 +66,27 @@ export interface CreateProgress {
   stackId?: string
   /** The URL name `stackId` was created with; bind follows at once, so a retry must keep it. */
   stackAppName?: string
+  /** The phase whose write answered with an unreadable 2xx: it may have happened. Only `confirmCreate` clears it. */
+  unconfirmed?: SubmitPhase
+  /**
+   * The Idempotency-Key of a platform create that was sent but whose resource is not recorded yet, with what it was
+   * sent for. A resend of the same request reuses it, so Platform replays the first write instead of making a second
+   * resource, even when a readback could not see the first one yet (Platform lists may lag an accepted write).
+   */
+  attempts?: { source?: SourceAttempt; stack?: StackAttempt }
 }
 
-export type SubmitPhase =
-  | 'draft'
-  | 'source'
-  | 'checking'
-  | 'platform'
-  | 'bind'
+export type SourceAttempt = { key: string; origin: { appName: string; kind: 'template' | 'existing'; repository?: string; templateId?: string } }
+export type StackAttempt = { key: string; appName: string; sourceRepositoryId?: string }
 
-type ConsoleCalls = Pick<ConsoleApi['apps'], 'create' | 'update' | 'bind' | 'remove'>
-
-type PlatformCalls = Pick<
-  PlatformApiClient,
-  | 'platformApiValidateApplicationSourceRepository'
-  | 'platformApiCreateApplicationSourceRepository'
-  | 'platformApiDeleteApplicationSourceRepository'
-  | 'platformApiValidateApplicationStack'
-  | 'platformApiCreateApplicationStack'
+type CreateCalls = Pick<CreateApi,
+  | 'createApp' | 'updateApp' | 'bindApp' | 'removeApp'
+  | 'validateSourceRepository' | 'createSourceRepository' | 'deleteSourceRepository'
+  | 'validateStack' | 'createStack'
 >
 
 export interface CreateDeps {
-  console: ConsoleCalls
-  platform: PlatformCalls
+  api: CreateCalls
   catalog: CreateCatalog
   /** Publish-ready domain base for the app URL. */
   domain: string
@@ -87,7 +95,6 @@ export interface CreateDeps {
   onPhase: (phase: SubmitPhase) => void
   onProgress?: (progress: CreateProgress) => void
 }
-
 
 export type ValidationSectionName = 'source' | 'runtime' | 'publish'
 
@@ -103,12 +110,15 @@ export interface ValidationIssue {
  * already used (console slug, platform application name or repository name);
  * the wizard sends the user back to the name. `retryable` = the same request
  * succeeds shortly: the platform's delivery was converging, or the console
- * did not answer (`transient`). Otherwise `progress` is what to resume from.
+ * did not answer (`transient`). `unconfirmed` = a step's answer could not be
+ * read: only a readback (`confirmCreate`) may follow, never a resend.
+ * Otherwise `progress` is what to resume from.
  */
 export class CreateFailed extends Error {
   readonly forbidden: boolean
   readonly nameTaken: boolean
   readonly retryable: boolean
+  readonly unconfirmed: boolean
   /** Quoted Platform API input field and the wizard step that owns it. */
   readonly field?: { path: string; step: 0 | 1 }
   /** No answer from the console (gateway 5xx, network); its message is `copy.errors.transient`. */
@@ -123,6 +133,7 @@ export class CreateFailed extends Error {
     super(cause instanceof Error ? cause.message : String(cause), { cause })
     this.name = 'CreateFailed'
     this.forbidden = forbidden
+    this.unconfirmed = isResponseContractError(cause)
     // Every Platform API 409 carries code `conflict`; the delivery-root
     // rejections (apierror.DeliveryBlocked) say `details.reason`
     // `delivery_pending` (converging, retry the same request) or
@@ -149,8 +160,8 @@ export class CreateFailed extends Error {
 function detailOf(error: unknown): string | undefined {
   if (error instanceof ValidationRejected) return error.message
   if (error instanceof ORPCError) return platformErrorEnvelope(error)?.message
-  // The transient text is the failure's title already.
-  if (isConsoleError(error) && error.transient) return undefined
+  // The transient text is the failure's title already; an unreadable answer has no detail to show.
+  if ((isConsoleError(error) && error.transient) || isResponseContractError(error)) return undefined
   return error instanceof Error ? error.message : undefined
 }
 
@@ -166,16 +177,21 @@ class ValidationRejected extends Error {
 
 const SECTIONS: readonly ValidationSectionName[] = ['source', 'runtime', 'publish']
 
-function stackIssues(validation: ApplicationStackValidation): ValidationIssue[] {
+function stackIssues(validation: StackValidation): ValidationIssue[] {
   return SECTIONS.flatMap((section) => {
     const result = validation[section]
     return result && !result.valid ? [{ section, message: result.message }] : []
   })
 }
 
+/** Whether the kept console app already says what `share` says (an unknown scope never does). */
+function sameShare(kept: BusinessApp['share'], share: ShareChoice): boolean {
+  return knownValue(kept.scope) === share.scope && JSON.stringify(kept.groupIds) === JSON.stringify(share.groupIds) &&
+    JSON.stringify(kept.extraPersonIds) === JSON.stringify(share.extraPersonIds)
+}
 
 /** Shared by the wizard and build sessions; keeps the console app across bind retries. */
-export async function ensureDraft(request: AppDetails, progress: CreateProgress, consoleApi: ConsoleCalls): Promise<BusinessApp> {
+export async function ensureDraft(request: AppDetails, progress: CreateProgress, api: Pick<CreateApi, 'createApp' | 'updateApp'>): Promise<BusinessApp> {
   const input = {
     displayName: request.displayName,
     description: request.description,
@@ -184,27 +200,64 @@ export async function ensureDraft(request: AppDetails, progress: CreateProgress,
     slug: request.urlName,
     share: request.share,
   }
-  if (!progress.draft) return consoleApi.create(input)
+  if (!progress.draft) return api.createApp(input)
   if (progress.draft.slug !== request.urlName || progress.draft.group.id !== request.groupId ||
       progress.draft.displayName !== input.displayName || progress.draft.description !== input.description ||
-      JSON.stringify(progress.draft.tags) !== JSON.stringify(input.tags) || JSON.stringify(progress.draft.share) !== JSON.stringify(input.share)) {
-    return consoleApi.update(progress.draft.id, input)
+      JSON.stringify(progress.draft.tags) !== JSON.stringify(input.tags) || !sameShare(progress.draft.share, input.share)) {
+    return api.updateApp(progress.draft.id, input)
   }
   return progress.draft
 }
 
 /**
  * A platform 403 before anything exists on the platform deletes the draft (it
- * would only be an orphan); every other failure keeps what was made.
+ * would only be an orphan); every other failure keeps what was made. An
+ * unreadable answer marks its phase unconfirmed.
  */
-async function failed(error: unknown, progress: CreateProgress, consoleApi: ConsoleCalls, platformTouched: boolean): Promise<never> {
+async function failed(error: unknown, progress: CreateProgress, phase: SubmitPhase, api: CreateCalls, platformTouched: boolean): Promise<never> {
   const forbidden = error instanceof ORPCError && error.status === 403
   if (forbidden && progress.draft && !platformTouched) {
-    await consoleApi.remove(progress.draft.id).catch(() => undefined)
+    await api.removeApp(progress.draft.id).catch(() => undefined)
     throw new CreateFailed(error, {}, true)
   }
-  throw new CreateFailed(error, progress, forbidden)
+  throw new CreateFailed(error, isResponseContractError(error) ? { ...progress, unconfirmed: phase } : progress, forbidden)
 }
+
+type SourcePath = Exclude<CreatePath, { kind: 'image' }>
+type SourceOrigin = NonNullable<CreateProgress['sourceRepositoryOrigin']>
+
+function sourceOrigin(appName: string, path: SourcePath, catalog: CreateCatalog): SourceOrigin {
+  return {
+    appName,
+    kind: path.kind,
+    ...(path.kind === 'existing' ? { repository: path.repository.fullName } : { templateId: catalog.template.id }),
+  }
+}
+
+function sourceRequest(appName: string, path: SourcePath, catalog: CreateCatalog, connections: SourceConnections): SourceRepositoryRequest {
+  return path.kind === 'existing'
+    ? buildExistingSourceRepositoryRequest(path.repository, connections)
+    : buildSourceRepositoryRequest(appName, catalog, connections)
+}
+
+const sameName = (a: string | undefined, b: string | undefined) => a !== undefined && b !== undefined && a.trim().toLowerCase() === b.trim().toLowerCase()
+
+/**
+ * The source repository `request` made. The adopted repository is named with
+ * its owner (`owner/name`). A new repository's name is unique per owner only,
+ * so it must also carry this request's owner: the same image path
+ * (`<registry>/<owner>/<name>`) and, when the record still names it, the same
+ * source connection. Anything less is not adopted (the resend replays instead).
+ */
+function madeBy(repository: SourceRepository, request: SourceRepositoryRequest): boolean {
+  if (repository.sourceConnectionId !== undefined && repository.sourceConnectionId !== request.sourceConnectionId) return false
+  return request.existing
+    ? sameName(repository.existing?.repository, request.existing.repository)
+    : sameName(repository.destination?.repositoryName, request.destination?.repositoryName) && sameName(repository.image.imagePath, request.image?.imagePath)
+}
+
+const sameOrigin = (a: SourceAttempt['origin'], b: SourceAttempt['origin']) =>
+  a.appName === b.appName && a.kind === b.kind && a.repository === b.repository && a.templateId === b.templateId
 
 export async function submitCreate(
   request: CreateRequest,
@@ -213,14 +266,21 @@ export async function submitCreate(
 ): Promise<BusinessApp> {
   const progress: CreateProgress = { ...resume }
   const appName = request.urlName
+  let phase: SubmitPhase = 'draft'
+  const enter = (next: SubmitPhase) => {
+    phase = next
+    deps.onPhase(next)
+  }
   try {
+    // An unread answer may have made something: only the readback may follow.
+    if (progress.unconfirmed) throw new Error(text.unconfirmed.title)
     // A kept stack is bound right after it is made, so only a failed bind
     // leaves one behind; binding it under another name would split the app.
     if (progress.stackId && progress.stackAppName !== appName) {
       throw new Error(text.alreadyCreated(progress.stackAppName ?? ''))
     }
-    deps.onPhase('draft')
-    progress.draft = await ensureDraft(request, progress, deps.console)
+    enter('draft')
+    progress.draft = await ensureDraft(request, progress, deps.api)
     deps.onProgress?.({ ...progress })
 
     if (!progress.stackId) {
@@ -229,11 +289,7 @@ export async function submitCreate(
         source = { kind: 'sample-image', imageRef: request.path.imageRef }
       } else {
         if (!deps.connections) throw new Error(text.sourceUnavailable)
-        const origin: NonNullable<CreateProgress['sourceRepositoryOrigin']> = {
-          appName,
-          kind: request.path.kind,
-          ...(request.path.kind === 'existing' ? { repository: request.path.repository.fullName } : { templateId: deps.catalog.template.id }),
-        }
+        const origin = sourceOrigin(appName, request.path, deps.catalog)
         const keptOrigin = progress.sourceRepositoryOrigin
         if (progress.sourceRepositoryId && (
           keptOrigin?.appName !== origin.appName ||
@@ -243,58 +299,116 @@ export async function submitCreate(
         )) {
           // The kept repository belongs to another name, entry, or picked
           // repository. Best effort: an orphan must not stop the new attempt.
-          deps.onPhase('source')
-          await deps.platform
-            .platformApiDeleteApplicationSourceRepository({ params: { projectId: request.projectId, id: progress.sourceRepositoryId } })
-            .catch(() => undefined)
+          enter('source')
+          await deps.api.deleteSourceRepository(request.projectId, progress.sourceRepositoryId).catch(() => undefined)
           progress.sourceRepositoryId = undefined
           progress.sourceRepositoryOrigin = undefined
           deps.onProgress?.({ ...progress })
         }
         if (!progress.sourceRepositoryId) {
-          deps.onPhase('source')
-          const body: CreateApplicationSourceRepositoryRequest & { projectId: string } = {
-            projectId: request.projectId,
-            ...(request.path.kind === 'existing'
-              ? buildExistingSourceRepositoryRequest(request.path.repository, deps.connections)
-              : buildSourceRepositoryRequest(appName, deps.catalog, deps.connections)),
-          }
-          const validation = await deps.platform.platformApiValidateApplicationSourceRepository(body)
+          enter('source')
+          const body = sourceRequest(appName, request.path, deps.catalog, deps.connections)
+          const validation = await deps.api.validateSourceRepository(request.projectId, body)
           if (!validation.valid) {
             const message = validation.message ?? ''
             throw new ValidationRejected(message, message ? [{ section: 'source', message }] : [])
           }
-          const repository = await deps.platform.platformApiCreateApplicationSourceRepository(body)
+          // The same origin reuses the key of an attempt that may already have been applied.
+          const kept = progress.attempts?.source
+          const attempt: SourceAttempt = kept && sameOrigin(kept.origin, origin) ? kept : { key: crypto.randomUUID(), origin }
+          progress.attempts = { ...progress.attempts, source: attempt }
+          deps.onProgress?.({ ...progress })
+          const repository = await deps.api.createSourceRepository(request.projectId, body, attempt.key)
           progress.sourceRepositoryId = repository.id
           progress.sourceRepositoryOrigin = origin
+          progress.attempts = { ...progress.attempts, source: undefined }
           deps.onProgress?.({ ...progress })
         }
         source = { kind: 'application-source-repository', sourceRepositoryId: progress.sourceRepositoryId }
       }
-      const stackRequest = {
-        projectId: request.projectId,
-        ...buildCreateStackRequest(appName, source, deps.catalog, deps.domain),
-      }
-      deps.onPhase('checking')
-      const validation = await deps.platform.platformApiValidateApplicationStack(stackRequest)
+      const stackRequest = buildCreateStackRequest(appName, source, deps.catalog, deps.domain)
+      enter('checking')
+      const validation = await deps.api.validateStack(request.projectId, stackRequest)
       if (!validation.valid) throw new ValidationRejected(validation.message, stackIssues(validation))
-      deps.onPhase('platform')
-      const stack = await deps.platform.platformApiCreateApplicationStack(stackRequest)
+      enter('platform')
+      const kept = progress.attempts?.stack
+      const attempt: StackAttempt = kept && kept.appName === appName && kept.sourceRepositoryId === progress.sourceRepositoryId
+        ? kept
+        : { key: crypto.randomUUID(), appName, sourceRepositoryId: progress.sourceRepositoryId }
+      progress.attempts = { ...progress.attempts, stack: attempt }
+      deps.onProgress?.({ ...progress })
+      const stack = await deps.api.createStack(request.projectId, stackRequest, attempt.key)
       progress.stackId = stack.id
       progress.stackAppName = appName
+      progress.attempts = { ...progress.attempts, stack: undefined }
       deps.onProgress?.({ ...progress })
     }
 
-    deps.onPhase('bind')
-    return await bindCreatedApp(deps.console, progress.draft, progress.stackId, appName)
+    enter('bind')
+    return await bindCreatedApp(deps.api, progress.draft, progress.stackId, appName)
   } catch (error) {
-    return failed(error, progress, deps.console, Boolean(progress.sourceRepositoryId || progress.stackId))
+    return failed(error, progress, phase, deps.api, Boolean(progress.sourceRepositoryId || progress.stackId))
   }
 }
 
+/** What the readback found: the progress to resume from, and the finished app when the bind had happened. */
+export interface ConfirmedCreate {
+  progress: CreateProgress
+  app?: BusinessApp
+}
+
+/**
+ * The only action after an unconfirmed step: read back what that step may
+ * have made and adopt it, so the next attempt resumes instead of making it
+ * twice. Reads only; never resends. Only the unconfirmed phase's resource is
+ * looked up (a same-named resource found for another phase is not this
+ * attempt's). A failed read rejects and leaves the step unconfirmed.
+ *
+ * A Platform list that does not show the resource is not proof it was not
+ * made (an accepted write may not be listed yet). The next attempt therefore
+ * keeps the step's recorded attempt key: Platform replays the first write for
+ * it instead of making a second resource. The Console reads its own store, so
+ * an app it does not list was not made.
+ */
+export async function confirmCreate(
+  request: CreateRequest,
+  resume: CreateProgress,
+  deps: { api: Pick<CreateApi, 'app' | 'myApps' | 'sourceRepositories' | 'stacks'>; catalog: CreateCatalog; connections?: SourceConnections }
+): Promise<ConfirmedCreate> {
+  const progress: CreateProgress = { ...resume, unconfirmed: undefined }
+  const phase = resume.unconfirmed
+  const appName = request.urlName
+  if (progress.draft) {
+    progress.draft = await deps.api.app(progress.draft.id)
+  } else if (phase === 'draft') {
+    progress.draft = (await deps.api.myApps()).find((app) => app.slug === appName && app.group.id === request.groupId && !app.stackId)
+  }
+  const draft = progress.draft
+  if (draft?.stackId && draft.appName === appName && (!progress.stackId || progress.stackId === draft.stackId)) {
+    return { progress: { ...progress, stackId: draft.stackId, stackAppName: appName }, app: draft }
+  }
+  if (phase === 'source' && request.path.kind !== 'image' && !progress.sourceRepositoryId && deps.connections) {
+    const body = sourceRequest(appName, request.path, deps.catalog, deps.connections)
+    const made = (await deps.api.sourceRepositories(request.projectId)).data.find((repository) => madeBy(repository, body))
+    if (made) {
+      progress.sourceRepositoryId = made.id
+      progress.sourceRepositoryOrigin = sourceOrigin(appName, request.path, deps.catalog)
+    }
+  }
+  if (phase === 'platform' && !progress.stackId) {
+    const made = (await deps.api.stacks(request.projectId)).find((stack) =>
+      stack.applicationName === appName && stack.templateId === deps.catalog.template.id && stack.sourceRepositoryRefName === progress.sourceRepositoryId)
+    if (made) {
+      progress.stackId = made.id
+      progress.stackAppName = appName
+    }
+  }
+  return { progress }
+}
+
 /** Both creation paths bind the console app to the actual platform name and stack. */
-export async function bindCreatedApp(consoleApi: ConsoleCalls, app: BusinessApp, stackId: string, appName: string): Promise<BusinessApp> {
+export async function bindCreatedApp(api: Pick<CreateApi, 'bindApp'>, app: BusinessApp, stackId: string, appName: string): Promise<BusinessApp> {
   if (app.stackId === stackId && app.appName === appName) return app
   queueCreatedAppAccess(app.id)
-  return consoleApi.bind(app.id, { stackId, appName })
+  return api.bindApp(app.id, { stackId, appName })
 }

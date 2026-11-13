@@ -9,6 +9,8 @@ import { groupsContract } from '../../api/contracts/console/groups'
 import { meContract } from '../../api/contracts/console/me'
 import { type Group } from '../../model/contracts/console'
 import { createConnectionsQuery, creationToolsQuery } from '../../api/queries/catalog'
+import { decodeResponse, type ResponseContract } from '../../api/boundary'
+import { creationToolsContract, listDomainsContract, listRegistryConnectionsContract, listSourceConnectionsContract, listStackDefinitionsContract, listTemplatesContract } from '../../api/contracts/platform/catalog'
 import { copy } from '../../copy'
 import { aiPolicyExplanation } from '../../copy/ai-policy'
 import { consoleRoutes } from '../../dev/mock-console'
@@ -70,10 +72,16 @@ async function renderPage(path: '/new' | '/-/build/draft-1', hasGroup: boolean, 
       `${project}/source-connections`, '/api/v1/registry-connections',
       `${project}/domains`, `${project}/application-drafts/creation-tools`,
     ].map(async (url) => (await fixture(url)).json()))
-    client.setQueryData(['application-templates', me.projectId], templates)
-    client.setQueryData(['application-stack-definitions'], definitions)
-    client.setQueryData(createConnectionsQuery(me.projectId).queryKey, { sources: sources.data, registries: registries.data, domains: domains.data })
-    client.setQueryData(creationToolsQuery(me.projectId).queryKey, { ...tools, ...availability })
+    // The cache holds what the gateway would: each wire answer decoded by its contract.
+    const read = <D,>(contract: ResponseContract<D>, wire: unknown): D => {
+      const result = decodeResponse(contract, wire)
+      if (!result.ok) throw new Error(`${contract.operationId} fixture does not match its contract`)
+      return result.value
+    }
+    client.setQueryData(['application-templates', me.projectId], read(listTemplatesContract, templates))
+    client.setQueryData(['application-stack-definitions'], read(listStackDefinitionsContract, definitions))
+    client.setQueryData(createConnectionsQuery(me.projectId).queryKey, { sources: read(listSourceConnectionsContract, sources).data, registries: read(listRegistryConnectionsContract, registries).data, domains: read(listDomainsContract, domains).data })
+    client.setQueryData(creationToolsQuery(me.projectId).queryKey, read(creationToolsContract, { ...tools, ...availability }))
   }
   const root = createRootRoute()
   const newRoute = createRoute({ getParentRoute: () => root, path: '/new', component: NewAppPage })
