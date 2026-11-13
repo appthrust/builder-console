@@ -73,7 +73,7 @@ test('all SPA facade operations have a registered HTTP success contract', async 
     resolve: ['/group/app'], 'apps.list': [{}], 'apps.byPath': ['group', 'app'],
     'apps.create': [{ displayName: 'App', groupId: 'group' }], 'apps.bind': ['app', { stackId: 'stack', appName: 'app' }],
     'apps.remove': ['app'], 'apps.directory': [{}], 'apps.directoryEntry': ['app'], 'apps.tools': ['app'],
-    'directory.searchPeople': ['person'], 'directory.personBySubject': ['subject'], 'directory.people': [['person']],
+    'directory.searchPeople': ['person'], 'directory.people': [['person']],
     'directory.person': ['person'], 'directory.createPerson': [{ email: 'person@example.test', displayName: 'Person' }],
     'directory.members': ['group'], 'directory.users': ['person'],
     'screenshots.upload': ['app', new File(['bytes'], 'screen.png')], 'screenshots.remove': ['app', 'shot'], 'screenshots.reorder': ['app', []],

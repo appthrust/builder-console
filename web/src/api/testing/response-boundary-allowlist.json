@@ -8,21 +8,6 @@
     "raw-platform-client": 1,
     "wire-schema-import": 1
   },
-  "features/discover/drafts.tsx": {
-    "wire-schema-import": 1
-  },
-  "features/proposals/copy.ts": {
-    "wire-schema-import": 1
-  },
-  "features/proposals/model.ts": {
-    "wire-schema-import": 1
-  },
-  "features/proposals/proposal-page.tsx": {
-    "wire-schema-import": 1
-  },
-  "features/proposals/proposal-ui.tsx": {
-    "wire-schema-import": 1
-  },
   "model/data-catalog.ts": {
     "wire-schema-import": 1
   }

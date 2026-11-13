@@ -130,7 +130,6 @@ import { isFirstTurn, isKickoffReply, isPrepareTurn } from '../model/build/quest
 import { dataModeFailure, findTable, resetDatabaseData, selectRows, state as dataState, type DataMode } from './mock-database-data'
 import { dataWriteRoutes } from './mock-database-rows'
 import { mockOwnerSubjects, mockSubject } from './mock-console'
-import { proposalTerminal, proposalWaiting } from '../features/proposals/model'
 
 export const MOCK_PROJECT_ID = 'commerce'
 const TEAM_SLUG = 'commerce-team'
@@ -986,6 +985,10 @@ function advanceImplementation(draft: ApplicationDraft): boolean {
   draft.updatedAt = now
   return true
 }
+
+// The mock's own phase rule on its wire phases (the console's rule reads open values).
+const proposalTerminal = (phase: SourceChangeProposal['phase']) => phase === 'Applied' || phase === 'Rejected' || phase === 'Withdrawn' || phase === 'Expired'
+const proposalWaiting = (phase: SourceChangeProposal['phase']) => phase === 'Proposed' || phase === 'Accepted' || phase === 'Applying'
 
 function ensureImprovementProposal(draft: ApplicationDraft): SourceChangeProposal {
   const existing = draft.proposalId ? state.proposals.get(draft.proposalId) : undefined
@@ -1882,7 +1885,8 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
       setTimeout(advanceCurrent, 100)
       setTimeout(advanceCurrent, 1000)
     }
-    return json(mutation('SourceChangeProposal', proposal.id, proposal), 202)
+    // 200, like Platform (platform-api internal/handler/source_change_proposal.go:420).
+    return json(mutation('SourceChangeProposal', proposal.id, proposal), 200)
   }],
   ['POST', new RegExp(`^${P}/source-change-proposals/([^/]+)/submit$`), (m) => {
     const proposal = state.proposals.get(m[2]!)

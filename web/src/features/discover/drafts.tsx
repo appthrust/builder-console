@@ -7,7 +7,7 @@
 //   - AI improvement sessions (kind `improvement`, bound to a live app from
 //     the start): listed under the app's name with the session's state word.
 //   - Wizard apps: the caller's console apps that never got a platform binding.
-import type { SourceChangeProposal } from '@appthrust/api-schema/platform-api'
+import type { Proposal } from '../../model/contracts/proposal'
 import { isOneOf, type BuildDraft } from '../../model/contracts/build'
 import { useQuery } from '@tanstack/react-query'
 import { PencilLine } from 'lucide-react'
@@ -40,7 +40,7 @@ export type UnfinishedItem =
   | { kind: 'build'; id: string; name: string; stage: BuildStage; at: string; draft: BuildDraft }
   | { kind: 'improve'; id: string; name: string; state: string; working: boolean; at: string; draft: BuildDraft }
   | { kind: 'app'; id: string; name: string; at: string; app: BusinessApp }
-  | { kind: 'sent-proposal' | 'review-proposal'; id: string; name: string; at: string; proposal: SourceChangeProposal }
+  | { kind: 'sent-proposal' | 'review-proposal'; id: string; name: string; at: string; proposal: Proposal }
 
 function buildStage(draft: BuildDraft): BuildStage {
   const session = readBuildSession(draft.id)
