@@ -62,7 +62,8 @@ export interface BrowserProblemSummary {
   expected: { reason: string; operation: string; failure: string; count: number }[]
   /**
    * `net::ERR_ABORTED` GETs the page ended itself: aborted in the task that
-   * started them (StrictMode's double effect) or body cancelled after the response.
+   * started them (StrictMode's double effect), body cancelled after the response, or
+   * aborted through their own signal with no timeout (the page no longer needs them).
    */
   pageCancelled: Record<CancelCause, number>
   /** Reads a story navigation cut off (in flight on that page when it started). */
@@ -143,6 +144,11 @@ const PAGE_OBSERVER = `(() => {
       channel.port2.postMessage(0)
       signal.addEventListener('abort', () => {
         if (startingTask) send({ kind: 'fetch-cancelled', cause: 'strict-mode', method, url })
+        // The page aborted its own read through the request's signal with no timeout
+        // (a query cancelled when its last observer unmounted or before a cache write).
+        // It decided it no longer needs the answer. A timeout carries TimeoutError; the
+        // preview probe's four-second timer aborts without one, so probes never count.
+        else if (signal.reason?.name !== 'TimeoutError' && !url.includes('/proxy/preview/')) send({ kind: 'fetch-cancelled', cause: 'page-aborted', method, url })
       }, { once: true })
     }
     return fetch.apply(this, arguments).then((response) => {
@@ -211,7 +217,7 @@ function requestPage(request: Request): string | undefined {
 }
 
 type TransportProblem = Extract<BrowserProblem, { kind: 'transport-failure' }>
-type CancelCause = 'strict-mode' | 'body'
+type CancelCause = 'strict-mode' | 'body' | 'page-aborted'
 /** One navigation of a page: test-driven (ends when the call returns) or a document request (ends at commit). */
 type NavigationWindow = { start: number; end?: number; byDocument: boolean }
 
@@ -396,7 +402,7 @@ export class BrowserProblemCollector {
       if (page.isClosed()) continue
       for (const frame of page.frames()) await this.scanRenderedText(frame)
     }
-    const pageCancelled: Record<CancelCause, number> = { 'strict-mode': 0, body: 0 }
+    const pageCancelled: Record<CancelCause, number> = { 'strict-mode': 0, body: 0, 'page-aborted': 0 }
     const unmatchedAborts = this.abortedReads.filter((read) => {
       const cause = this.cancellations.get(`${read.method} ${read.url}`)?.shift()
       if (!cause) return true
@@ -420,7 +426,7 @@ export class BrowserProblemCollector {
     if (!payload || typeof payload !== 'object' || !('kind' in payload)) return
     if (payload.kind === 'fetch-cancelled') {
       const { cause, method, url } = payload as { cause?: unknown; method?: unknown; url?: unknown }
-      if (cause !== 'strict-mode' && cause !== 'body') return
+      if (cause !== 'strict-mode' && cause !== 'body' && cause !== 'page-aborted') return
       const key = `${String(method)} ${String(url)}`
       const causes = this.cancellations.get(key)
       if (causes) causes.push(cause)
