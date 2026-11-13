@@ -1,4 +1,4 @@
-import { test, expect, seed, captureWrite, freeUrlNameChecks, withExpectedFailures } from '../support/fixtures'
+import { test, expect, seed, captureWrite, withExpectedFailures } from '../support/fixtures'
 import { textJa } from '../../src/model/build/copy'
 import { numberedUrlName } from '../../src/model/create'
 
@@ -38,7 +38,8 @@ test('a creation URL conflict offers a checked name and retry creates the app @a
   })
   const conversation = page.getByRole('log', { name: 'AI との会話' })
   const choice = page.getByRole('button', { name: `${suggested} にする`, exact: true })
-  await withExpectedFailures([freeUrlNameChecks(1)], async () => {
+  // The build session checks its one suggestion once: resolve answers 404 for a free path.
+  await withExpectedFailures([{ method: 'GET', path: '/api/console/resolve', status: 404, count: 1, reason: `the suggested ${suggested} is checked free` }], async () => {
     await page.getByRole('button', { name: 'この内容で作る', exact: true }).click()
     await expect(conversation).toContainText(textJa.failure.urlNameTaken, { timeout: 20_000 })
     await expect(choice).toBeVisible()

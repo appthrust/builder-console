@@ -10,7 +10,7 @@
 //   `undefined`/`NaN` was collected. Deliberate failures are declared with
 //   `withExpectedFailures` inside the step that provokes them.
 import { expect, test as base, type APIRequestContext, type Page, type Request } from '@playwright/test'
-import { BrowserProblemCollector, formatBrowserProblems, type ExpectedFailure } from './browser-problems'
+import { BrowserProblemCollector, describeCount, formatBrowserProblems, type ExpectedFailure } from './browser-problems'
 
 export { expect }
 export type { ExpectedFailure }
@@ -105,18 +105,22 @@ export async function withExpectedFailures(expected: readonly ExpectedFailure[],
   const collector = activeCollector
   if (!collector) throw new Error('withExpectedFailures must run inside a story test')
   const title = expected
-    .map((failure) => `${failure.count}× ${failure.transportError ?? failure.status} ${failure.method} ${String(failure.path)}: ${failure.reason}`)
+    .map((failure) => `${describeCount(failure)}× ${failure.transportError ?? failure.status} ${failure.method} ${String(failure.path)}: ${failure.reason}`)
     .join('; ')
   await test.step(`expected failures: ${title}`, () => collector.expectFailures(expected, action), { box: true })
 }
 
 /**
- * The console's `GET /resolve` answers 404 for a path nobody uses: the create
- * wizard and the build session check a URL name that way (on blur, on 次へ, for
- * a suggestion). Declare the checks a step makes with their exact count.
+ * The create wizard's URL-name probe: the console's `GET /resolve` answers 404
+ * for a path nobody uses. The wizard checks when it proposes a generated name,
+ * when the name field is left and on 次へ, and 次へ joins a check of the same name
+ * still in flight, so how many checks happen depends on machine speed. This one
+ * probe is therefore a range: at least one, at most `moments` (the distinct
+ * moments the flow can check). `continueToShare` separately asserts that the
+ * final name itself was checked free before the wizard moved on.
  */
-export function freeUrlNameChecks(count: number): ExpectedFailure {
-  return { method: 'GET', path: '/api/console/resolve', status: 404, count, reason: 'the URL name is checked free (resolve answers 404)' }
+export function freeUrlNameChecks(moments: number): ExpectedFailure {
+  return { method: 'GET', path: '/api/console/resolve', status: 404, count: { min: 1, max: moments }, reason: 'the wizard checks the URL name is free (resolve answers 404)' }
 }
 
 /** A write the UI sent: the Playwright request plus its parsed JSON body (narrow before asserting). */

@@ -30,15 +30,7 @@ export async function pickImage(page: Page, imageRef: string) {
 }
 
 export async function fillAppDetails(page: Page, details: { displayName?: string; description?: string; tags?: readonly string[] }) {
-  if (details.displayName !== undefined) {
-    const name = page.getByRole('textbox', { name: 'アプリの名前 必須', exact: true })
-    await name.fill(details.displayName)
-    // Leaving the name checks the URL name. Let that check answer, so 次へ always
-    // sends its own check instead of sometimes joining this one.
-    const checked = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/console/resolve')
-    await name.blur()
-    await checked
-  }
+  if (details.displayName !== undefined) await page.getByRole('textbox', { name: 'アプリの名前 必須', exact: true }).fill(details.displayName)
   if (details.description !== undefined) await page.getByLabel('説明（任意）', { exact: true }).fill(details.description)
   for (const tag of details.tags ?? []) {
     await page.getByLabel('タグ（任意）', { exact: true }).fill(tag)
@@ -47,13 +39,22 @@ export async function fillAppDetails(page: Page, details: { displayName?: string
   }
 }
 
-/** Preserve the displayed suggestion, including a generated name for a Japanese-only title. */
+/**
+ * Preserve the displayed suggestion, including a generated name for a Japanese-only title.
+ * The wizard moves on only after this exact name was checked free (resolve 404), whether
+ * 次へ sent the check or joined the one leaving the name field had started.
+ */
 export async function continueToShare(page: Page): Promise<string> {
   const suggestion = page.getByTestId('url-name')
   await expect(suggestion).toHaveText(/^[a-z0-9][a-z0-9-]*$/)
   const slug = (await suggestion.innerText()).trim()
   await expect(page.getByLabel(/^所属グループ/)).toContainText(seed.groups.teamA.name)
+  const finalNameChecked = page.waitForResponse((response) => {
+    const url = new URL(response.url())
+    return url.pathname === '/api/console/resolve' && url.searchParams.get('path') === `/${seed.groups.teamA.path}/${slug}` && response.status() === 404
+  })
   await page.getByRole('button', { name: '次へ', exact: true }).click()
+  await finalNameChecked
   await expect(page.getByRole('heading', { name: '誰に見せますか？' })).toBeVisible()
   return slug
 }

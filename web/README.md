@@ -336,6 +336,17 @@ action wait for the UI that shows the failure. Console errors and other failures
 step still fail the test. Polling failures need a deterministic count: hold or
 release the route explicitly instead of counting timer ticks.
 
+Every declaration is an exact count except one: the create wizard's URL-name
+probe (`freeUrlNameChecks(moments)` in `e2e/support/fixtures.ts`). The wizard
+checks a name when it proposes one, when the name field is left and on 次へ, and
+次へ joins a check of the same name that is still running. How many `GET
+/api/console/resolve` 404s that produces depends on machine speed (CI saw two
+where a local run saw three), so this probe accepts one up to the number of
+distinct moments the flow can check. What matters is asserted exactly instead:
+`continueToShare` waits for the 404 of the final name itself, so the wizard never
+moves on without a completed check of the name it shows. Do not use a range for
+anything else.
+
 ## Japanese UI copy
 
 Copy lives in `src/copy/*` and the per-feature `copy.ts` files. Render it

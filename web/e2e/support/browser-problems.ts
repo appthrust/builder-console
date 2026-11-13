@@ -29,7 +29,12 @@ export const ERROR_BOUNDARY_TEST_ID = 'console-error-boundary'
 
 type HttpMethod = 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
-/** One deliberately provoked failure: exactly `count` matching requests inside the declaring step. */
+/**
+ * One deliberately provoked failure: exactly `count` matching requests inside
+ * the declaring step. A range (`{ min, max }`) is reserved for the debounced
+ * URL-name probe (`freeUrlNameChecks`), whose number of checks depends on typing
+ * and machine speed; every other declaration is exact.
+ */
 export type ExpectedFailure = {
   method: HttpMethod
   /**
@@ -38,7 +43,7 @@ export type ExpectedFailure = {
    * or a RegExp tested against the pathname.
    */
   path: string | RegExp
-  count: number
+  count: number | { min: number; max: number }
   /** Why the story provokes it; shown in the report and the step title. */
   reason: string
 } & ({ status: number; transportError?: never } | { transportError: string; status?: never })
@@ -73,6 +78,8 @@ type NetworkFailure =
 
 interface ExpectationWindow {
   entries: { failure: ExpectedFailure; matcher: RegExp; observed: string[] }[]
+  /** When the action returned; while settling, only requests started before it can still count. */
+  actionEnded?: number
 }
 
 /** Text that is a defect wherever it is shown to a user. */
@@ -164,6 +171,21 @@ function describeFailure(failure: ExpectedFailure): string {
 
 function describeOperation(failure: ExpectedFailure): string {
   return `${failure.method} ${String(failure.path)}`
+}
+
+/** The accepted number of occurrences: exact by default, a range only where declared. */
+export function bounds(failure: ExpectedFailure): { min: number; max: number } {
+  return typeof failure.count === 'number' ? { min: failure.count, max: failure.count } : failure.count
+}
+
+export function describeCount(failure: ExpectedFailure): string {
+  const { min, max } = bounds(failure)
+  return min === max ? String(min) : `${min}–${max}`
+}
+
+/** The one declaration allowed a range: the create wizard's debounced URL-name check. */
+function isUrlNameProbe(failure: ExpectedFailure): boolean {
+  return failure.method === 'GET' && failure.path === '/api/console/resolve' && failure.status === 404
 }
 
 function pageUrl(page: Page | null | undefined): string | undefined {
@@ -324,12 +346,16 @@ export class BrowserProblemCollector {
    * the action are attributed to the declaration instead of being problems.
    * The scope then stays open until every entry has its declared count (at most
    * `SETTLE_MS`), so a count never depends on whether the UI rendered before the
-   * response event arrived; afterwards every entry must match exactly.
+   * response event arrived. While settling, only requests started before the
+   * action returned can count: a later poll or retry on the same route is an
+   * ordinary problem, never a substitute. Afterwards every entry must match exactly.
    */
   async expectFailures(expected: readonly ExpectedFailure[], action: () => Promise<void>): Promise<void> {
     if (expected.length === 0) throw new Error('withExpectedFailures needs at least one expected failure')
     for (const failure of expected) {
-      if (!Number.isInteger(failure.count) || failure.count < 1) throw new Error(`Expected failure count must be a positive integer: ${describeOperation(failure)} (${failure.reason})`)
+      const { min, max } = bounds(failure)
+      if (!Number.isInteger(min) || !Number.isInteger(max) || min < 1 || max < min) throw new Error(`Expected failure count must be a positive integer or a { min, max } range: ${describeOperation(failure)} (${failure.reason})`)
+      if (typeof failure.count !== 'number' && !isUrlNameProbe(failure)) throw new Error(`Only the create wizard's URL-name probe (GET /api/console/resolve 404) may declare a range; declare an exact count: ${describeOperation(failure)} (${failure.reason})`)
       if ((failure.status === undefined) === (failure.transportError === undefined)) throw new Error(`Expected failure needs exactly one of status or transportError: ${describeOperation(failure)} (${failure.reason})`)
       if (!failure.reason.trim()) throw new Error(`Expected failure needs a reason: ${describeOperation(failure)}`)
     }
@@ -339,23 +365,27 @@ export class BrowserProblemCollector {
     this.windows.push(window)
     try {
       await action()
-      const deadline = Date.now() + SETTLE_MS
-      while (window.entries.some((entry) => entry.observed.length < entry.failure.count) && Date.now() < deadline) {
+      window.actionEnded = Date.now()
+      const deadline = window.actionEnded + SETTLE_MS
+      while (window.entries.some((entry) => entry.observed.length < bounds(entry.failure).min) && Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 50))
       }
     } finally {
       this.windows.splice(this.windows.indexOf(window), 1)
     }
-    const mismatches = window.entries.filter((entry) => entry.observed.length !== entry.failure.count)
+    const mismatches = window.entries.filter((entry) => {
+      const { min, max } = bounds(entry.failure)
+      return entry.observed.length < min || entry.observed.length > max
+    })
     if (mismatches.length > 0) {
       throw new Error([
         'Expected failures did not occur exactly as declared:',
         ...mismatches.map(({ failure, observed }) =>
-          `  - ${describeFailure(failure)} ${describeOperation(failure)}: expected ${failure.count}, observed ${observed.length} (${failure.reason})${observed.length ? `\n      ${observed.join('\n      ')}` : ''}`),
+          `  - ${describeFailure(failure)} ${describeOperation(failure)}: expected ${describeCount(failure)}, observed ${observed.length} (${failure.reason})${observed.length ? `\n      ${observed.join('\n      ')}` : ''}`),
       ].join('\n'))
     }
-    for (const { failure } of window.entries) {
-      this.satisfied.push({ reason: failure.reason, operation: describeOperation(failure), failure: describeFailure(failure), count: failure.count })
+    for (const { failure, observed } of window.entries) {
+      this.satisfied.push({ reason: failure.reason, operation: describeOperation(failure), failure: describeFailure(failure), count: observed.length })
     }
   }
 
@@ -407,7 +437,7 @@ export class BrowserProblemCollector {
     const request = response.request()
     const failure: NetworkFailure = { kind: 'http-failure', method: request.method(), url: response.url(), status }
     this.networkFailures.push(failure)
-    if (this.attribute(failure)) return
+    if (this.attribute(failure, request)) return
     this.problems.push({
       kind: 'http-failure', method: failure.method, url: failure.url, status, statusText: response.statusText(),
       resourceType: request.resourceType(), page: requestPage(request),
@@ -419,7 +449,7 @@ export class BrowserProblemCollector {
     const errorText = request.failure()?.errorText ?? 'unknown'
     const failure: NetworkFailure = { kind: 'transport-failure', method: request.method(), url: request.url(), errorText }
     this.networkFailures.push(failure)
-    if (this.attribute(failure)) return
+    if (this.attribute(failure, request)) return
     if (errorText === 'net::ERR_ABORTED' && this.cutOffByNavigation(request)) {
       this.navigationDiscarded++
       return
@@ -437,10 +467,14 @@ export class BrowserProblemCollector {
     this.problems.push(problem(request, failure, errorText))
   }
 
-  private attribute(failure: NetworkFailure): boolean {
+  private attribute(failure: NetworkFailure, request: Request): boolean {
     const pathname = new URL(failure.url).pathname
+    const started = this.requestSeen.get(request) ?? Number.POSITIVE_INFINITY
     for (let index = this.windows.length - 1; index >= 0; index--) {
-      for (const entry of this.windows[index]!.entries) {
+      const window = this.windows[index]!
+      // A request the page started after the action returned (a later poll or retry) is not the action's failure.
+      if (window.actionEnded !== undefined && started > window.actionEnded) continue
+      for (const entry of window.entries) {
         const expected = entry.failure
         if (expected.method !== failure.method || !entry.matcher.test(pathname)) continue
         if (failure.kind === 'http-failure' ? expected.status !== failure.status : expected.transportError !== failure.errorText) continue
