@@ -1,6 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises'
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test'
-import type { Domain } from '@appthrust/api-schema/platform-api'
+import { decodeResponse, type ResponseContract } from '../../api/boundary'
+import { creationToolsContract, listDomainsContract, listRegistryConnectionsContract, listSourceConnectionsContract, listStackDefinitionsContract, listTemplatesContract } from '../../api/contracts/platform/catalog'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterContextProvider } from '@tanstack/react-router'
 import { act } from 'react'
@@ -50,15 +51,21 @@ test.each([true, false])('new app distinguishes pending domain and recovers on i
     `${project}/source-connections`, '/api/v1/registry-connections',
     `${project}/domains`, `${project}/application-drafts/creation-tools`,
   ].map(async (path) => (await fixture(path)).json()))
-  const pendingDomains = domains.data.map((domain: Domain) => ({ ...domain, usableForPublish: false, delegationReady: false, publishUnavailableReason: 'ProjectGatewayPending' }))
+  const pendingDomains = domains.data.map((domain: Record<string, unknown>) => ({ ...domain, usableForPublish: false, delegationReady: false, publishUnavailableReason: 'ProjectGatewayPending' }))
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity, gcTime: Infinity } } })
   client.setQueryData(consoleKeys.me, { ...me, isConsoleAdmin: admin, canCreateApps: true, effectiveGroupIds: [groups[0]!.id] })
   client.setQueryData(consoleKeys.groups, groups)
-  client.setQueryData(['application-templates', me.projectId], templates)
-  client.setQueryData(['application-stack-definitions'], definitions)
+  // The cache holds what the gateway would: each wire answer decoded by its contract.
+  const read = <D,>(contract: ResponseContract<D>, wire: unknown): D => {
+    const result = decodeResponse(contract, wire)
+    if (!result.ok) throw new Error(`${contract.operationId} fixture does not match its contract`)
+    return result.value
+  }
+  client.setQueryData(['application-templates', me.projectId], read(listTemplatesContract, templates))
+  client.setQueryData(['application-stack-definitions'], read(listStackDefinitionsContract, definitions))
   const connections = createConnectionsQuery(me.projectId)
-  client.setQueryData(connections.queryKey, { sources: sources.data, registries: registries.data, domains: pendingDomains })
-  client.setQueryData(creationToolsQuery(me.projectId).queryKey, { ...tools, codexAvailable: true })
+  client.setQueryData(connections.queryKey, { sources: read(listSourceConnectionsContract, sources).data, registries: read(listRegistryConnectionsContract, registries).data, domains: read(listDomainsContract, { data: pendingDomains }).data })
+  client.setQueryData(creationToolsQuery(me.projectId).queryKey, read(creationToolsContract, { ...tools, codexAvailable: true }))
 
   const timers = new Map<number, { run: () => void; delay: number }>()
   let nextTimer = 0

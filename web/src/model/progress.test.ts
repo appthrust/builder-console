@@ -1,11 +1,13 @@
 import { describe, expect, test } from 'bun:test'
-import type { ApplicationSourceRepository, ApplicationStack } from '@appthrust/api-schema/platform-api'
+import type { ApplicationSourceRepository } from '@appthrust/api-schema/platform-api'
+import { stackOf } from '../api/testing/app-domain'
+import { sourceRepositoryOf } from '../api/testing/catalog-domain'
 import { copy } from '../copy'
 import type { AppView, ConsoleApp, ConsoleAppFacts } from './app'
 import { deriveCreateProgress, repositoryLabel, showsCreateProgress, type ProgressStep } from './progress'
 import { shareSentence, widensShare } from './share'
 
-const stack: ApplicationStack = {
+const stackWire = {
   id: 'mitsumori',
   projectId: 'pj',
   templateId: 'nextjs-postgres',
@@ -16,8 +18,9 @@ const stack: ApplicationStack = {
   webComponentId: 'mitsumori-web',
   pendingSync: false,
 }
+const stack = stackOf(stackWire)
 
-const repository = (status: ApplicationSourceRepository['status'], conditions: ApplicationSourceRepository['conditions'] = []): ApplicationSourceRepository => ({
+const repository = (status: ApplicationSourceRepository['status'], conditions: ApplicationSourceRepository['conditions'] = []) => sourceRepositoryOf({
   id: 'mitsumori-src',
   projectId: 'pj',
   template: { repository: 'appthrust/template-nextjs' },
@@ -28,7 +31,7 @@ const repository = (status: ApplicationSourceRepository['status'], conditions: A
   ...(status === 'ready' || conditions.some((condition) => condition.type === 'RepositoryCreated' && condition.status === 'True')
     ? { repositoryUrl: 'https://github.com/acme/mitsumori' }
     : {}),
-})
+} satisfies ApplicationSourceRepository)
 
 const noFacts: ConsoleAppFacts = { webReady: false, everReleased: false, hasPublish: true }
 
@@ -200,7 +203,7 @@ describe('deriveCreateProgress', () => {
   })
 
   test('image path: step 1 is the setup step, done once the stack exists', () => {
-    const imageStack = { ...stack, sourceKind: 'sample-image' as const }
+    const imageStack = stackOf({ ...stackWire, sourceKind: 'sample-image' })
     const steps = deriveCreateProgress({ view: view({}, { stack: imageStack }), shareSentence: 'x' })
     expect(steps[0]).toMatchObject({ state: 'done', title: copy.progress.setup.done })
     expect(steps[1]?.state).toBe('active')
@@ -220,7 +223,7 @@ describe('作ったコードから: repository check leads', () => {
     readiness: ApplicationSourceRepository['readiness'],
     status: ApplicationSourceRepository['status'] = 'pending',
     conditions: ApplicationSourceRepository['conditions'] = [],
-  ): ApplicationSourceRepository => ({
+  ) => sourceRepositoryOf({
     id: 'claude-mitsumori-src',
     projectId: 'pj',
     existing: { repository: 'acme/claude-mitsumori', ref: 'main' },
@@ -231,7 +234,7 @@ describe('作ったコードから: repository check leads', () => {
     ...(status === 'ready' || conditions.some((condition) => condition.type === 'RepositoryCreated' && condition.status === 'True')
       ? { repositoryUrl: 'https://github.com/acme/claude-mitsumori' }
       : {}),
-  })
+  } satisfies ApplicationSourceRepository)
 
   test('not checked yet: the check is active and links the repository', () => {
     const steps = deriveCreateProgress({ view: view({}), sourceRepository: adopted(undefined), shareSentence: 'x' })
@@ -315,6 +318,17 @@ describe('作ったコードから: repository check leads', () => {
     const steps = deriveCreateProgress({ view: view({}), sourceRepository: adopted(undefined, 'permission-denied'), shareSentence: 'x' })
     expect(steps[0]).toMatchObject({ state: 'failed', title: copy.progress.check.failed })
     expect(steps[0]?.action).toBeUndefined()
+  })
+
+  test('a repository status or readiness this console does not know is neither ready nor failed', () => {
+    const unknown = sourceRepositoryOf({
+      id: 'claude-mitsumori-src', projectId: 'pj', existing: { repository: 'acme/claude-mitsumori' }, image: { imagePath: 'ghcr.io/acme/claude-mitsumori' },
+      status: 'archived-later', conditions: [], readiness: { dockerfile: 'vendored', workflow: 'present' },
+    })
+    const steps = deriveCreateProgress({ view: view({}), sourceRepository: unknown, shareSentence: 'x' })
+    expect(states(steps)).toEqual(['active', 'pending', 'pending', 'pending', 'pending'])
+    const plain = sourceRepositoryOf({ id: 'mitsumori-src', projectId: 'pj', image: { imagePath: 'ghcr.io/acme/mitsumori' }, status: 'archived-later', conditions: [] })
+    expect(states(deriveCreateProgress({ view: view({}), sourceRepository: plain, shareSentence: 'x' }))).toEqual(['active', 'pending', 'pending', 'pending'])
   })
 })
 

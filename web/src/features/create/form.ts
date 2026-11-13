@@ -3,7 +3,7 @@
 import { useForm, type ReactFormExtendedApi } from '@tanstack/react-form'
 import { useState } from 'react'
 import { z } from 'zod'
-import type { ShareScope } from '../../api/console-unverified'
+import type { ShareScope } from '../../model/contracts/catalog'
 import { copy } from '../../copy'
 import {
   appNameProblem,

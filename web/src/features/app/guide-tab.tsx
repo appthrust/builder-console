@@ -2,13 +2,14 @@ import { useForm, useStore } from '@tanstack/react-form'
 import { Pencil } from 'lucide-react'
 import { useId, useState } from 'react'
 import { z } from 'zod'
-import type { BusinessApp } from '../../api/console-unverified'
+import { isUnknownPerson, type BusinessApp, type Person } from '../../model/contracts/console'
 import { copy, relativeTime } from '../../copy'
 import type { AppView } from '../../model/app'
 import { ActionError, Button, Card, CardBody, CardHeader, ConfirmDialog, Field, Markdown, TextArea, useUnsavedChangesGuard } from '../../ui'
 import { Comments } from './comments'
 import { text } from './copy'
-import { useSaveGuide } from './mutations'
+import { useAppReadBack, useSaveGuide } from './mutations'
+import { UnconfirmedNotice, useWriteConfirmation } from './notices'
 import { fieldError, SaveRow } from './settings/parts'
 
 const MAX_CAPABILITIES = 10
@@ -38,7 +39,7 @@ export function GuideTab({ app, view, canEdit }: { app: BusinessApp; view: AppVi
   const [editing, setEditing] = useState(false)
   const [saved, setSaved] = useState(false)
   const updatedAt = relativeTime(app.updatedAt)
-  const owner = app.owners[0]?.displayName
+  const owner = app.owners.find((person): person is Person => !isUnknownPerson(person))?.displayName
   const guideEmpty = canEdit ? text.app.guideEmptyOwner : owner ? text.app.guideEmptyViewer(owner) : text.app.guideEmpty
   const beginEditing = () => {
     setSaved(false)
@@ -88,12 +89,13 @@ export function GuideTab({ app, view, canEdit }: { app: BusinessApp; view: AppVi
 function GuideEditor({ app, onCancel, onSaved }: { app: BusinessApp; onCancel: () => void; onSaved: () => void }) {
   const id = useId()
   const mutation = useSaveGuide(app.id)
+  const confirmation = useWriteConfirmation([mutation.error], mutation.reset, useAppReadBack(app.id))
   const [discarding, setDiscarding] = useState(false)
   const form = useForm({
     defaultValues: { guide: app.guide, capabilities: app.capabilities.join('\n') },
     validators: { onChange: schema },
     onSubmit: ({ value, formApi }) => {
-      if (mutation.isPending) return
+      if (mutation.isPending || confirmation.unconfirmed) return
       mutation.mutate(
         { guide: value.guide, capabilities: parseCapabilities(value.capabilities) },
         { onSuccess: (updated) => {
@@ -159,11 +161,11 @@ function GuideEditor({ app, onCancel, onSaved }: { app: BusinessApp; onCancel: (
         </form.Field>
         <div className="flex flex-wrap items-center gap-3">
           <form.Subscribe selector={(state) => [state.isDirty, state.canSubmit] as const}>
-            {([dirty, canSubmit]) => <SaveRow pending={mutation.isPending} disabled={!dirty || !canSubmit} saved={false} />}
+            {([dirty, canSubmit]) => <SaveRow pending={mutation.isPending} disabled={!dirty || !canSubmit || confirmation.unconfirmed} saved={false} />}
           </form.Subscribe>
           <Button disabled={mutation.isPending} onClick={() => dirty ? setDiscarding(true) : onCancel()}>{copy.common.cancel}</Button>
         </div>
-        {mutation.error ? <ActionError error={mutation.error} /> : null}
+        {confirmation.unconfirmed ? <UnconfirmedNotice onConfirm={() => void confirmation.confirm()} confirming={confirmation.confirming} /> : mutation.error ? <ActionError error={mutation.error} /> : null}
       </form>
       <ConfirmDialog
         open={discarding}

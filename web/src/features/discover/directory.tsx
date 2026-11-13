@@ -3,7 +3,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { Building2, Search, X } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { directoryLinks } from '../../api/console'
-import { type DirectoryEntry } from '../../api/console-unverified'
+import { type DirectoryEntry } from '../../model/contracts/console'
 import { type Group } from '../../model/contracts/console'
 import { directoryAppsQuery } from '../../api/queries/console'
 import { copy } from '../../copy'
@@ -15,6 +15,7 @@ import { useAppViews, type AppViews } from '../app/use-app-views'
 import { AppListSkeleton, StatusLoadNotice } from './app-list'
 import { AppStoreGrid, entryHref } from './app-store-card'
 import { text } from './copy'
+import { StaleNotice } from '../app/notices'
 import { matchesDirectoryEntrySearch } from './search'
 
 export function DirectoryPage({ q }: { q: string }) {
@@ -28,7 +29,8 @@ export function DirectoryPage({ q }: { q: string }) {
       <PageHeader title={copy.directory.title} lead={copy.directory.lead} />
       <DirectorySearchBox q={q} />
       <StatusLoadNotice lookup={lookup} />
-      {entries.isError ? (
+      {entries.isRefetchError ? <StaleNotice updatedAt={entries.dataUpdatedAt} refetching={entries.isFetching} onRetry={() => void entries.refetch()} /> : null}
+      {entries.isLoadingError ? (
         <LoadFailed error={entries.error} onRetry={() => void entries.refetch()} />
       ) : entries.isPending || lookup.loading ? (
         <AppListSkeleton rows={4} />

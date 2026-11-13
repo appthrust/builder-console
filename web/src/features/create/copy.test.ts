@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import type { ApplicationTemplateSummary } from '@appthrust/api-schema/platform-api'
+import { templateOf } from '../../api/testing/catalog-domain'
 import { copy } from '../../copy'
 import { preserveLanguage } from '../../../test/language'
 import { setLanguage } from '../../shell/language'
@@ -42,7 +42,7 @@ describe('create language switching', () => {
     const icons = originals.map((template) => template.icon)
     expect(originals.map((template) => template.name)).toEqual(['在庫管理', 'マスター管理', '申請・承認', '予約・貸出'])
     expect(originals[0]!.seed).toBe('品物の在庫と入出庫を管理するアプリを作りたいです。品物の一覧、入出庫の記録、CSV の取り込み・書き出しが必要です。')
-    const catalog: ApplicationTemplateSummary[] = businessTemplates.map((template) => ({
+    const catalog = businessTemplates.map((template) => templateOf({
       id: template.id,
       displayName: template.name,
       category: 'business',

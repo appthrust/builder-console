@@ -5,7 +5,6 @@ import { useCreateStore, useSelector } from '@tanstack/react-store'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../../api/build'
 import { buildDraftOptions, readDraft } from '../../api/queries/build'
-import { consoleApi, type BusinessApp } from '../../api/console-unverified'
 import { isConsoleError } from '../../api/console'
 import { type Me } from '../../model/contracts/console'
 import { platformErrorEnvelope } from '../../api/platform-error'
@@ -21,13 +20,14 @@ import type { BuildFailure, BuildMessage } from '../../model/build/types'
 import { pickCreateEnvironment, summarizeCreationPlan } from '../../model/create'
 import { withDefaultPublish } from '../../model/build/plan'
 import { bindCreatedConsoleApp, ConsoleAppCreationError } from './bind-created-console-app'
+import { createApi } from '../../api/create'
 import { implemented, useImplementation } from './implement'
 import { acknowledgeReply, initialSession, queueReply, readBuildSession, saveBuildSession, startConversation, startPrepareConversation, type BuildSession } from './session'
 import { text } from './copy'
 
 import { appPreparationProgress, isBuildPending, sourceBuildFailureProgress } from '../../model/build/progress'
 import { useAppViews } from '../app/use-app-views'
-import { appQuery, consoleKeys } from '../../api/queries/console'
+import { appQuery, writeAppCache } from '../../api/queries/console'
 import { createConnectionsQuery, useSourceRepositories } from '../../api/queries/catalog'
 import { sourceRepositoryFor } from '../app/platform'
 /** Backoff for an AI gate 412 (about two minutes in total, the length of a platform rollout). */
@@ -175,7 +175,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
   useEffect(() => {
     const release = appView?.platform?.lastRelease
     const history = appViews.input.releasesByApplication[draft.createdApplicationId ?? '']?.components.find((component) => component.id === appView?.platform?.webComponentId)?.releases
-    if (!session.initialReleaseId && history?.length === 1 && release?.phase === 'Succeeded' && !implemented(implementation.state)) patch({ initialReleaseId: release.id })
+    if (!session.initialReleaseId && history?.length === 1 && release && isOneOf(release.phase, 'Succeeded') && !implemented(implementation.state)) patch({ initialReleaseId: release.id })
   })
   useEffect(() => {
     if (!running && !session.pending.length && !session.prepareRequested && !appProgress) return
@@ -360,10 +360,11 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
         const kept = await bindCreatedConsoleApp(
           { projectId, displayName: answers.name ?? spec.name ?? draft.title, description: spec.oneLine ?? '', tags: [], groupId: store.state.groupId, urlName: appName ?? '', share: { scope: 'private', groupIds: [], extraPersonIds: [] } },
           { stackId: draft.createdApplicationStackId!, createdAppId: store.state.createdAppId },
-          { console: consoleApi.apps, onCreatedAppId: (createdAppId) => patch({ createdAppId }) },
+          { api: createApi, onCreatedAppId: (createdAppId) => patch({ createdAppId }) },
         )
         patch({ createdAppId: kept.id, prepareRequested: false })
-        queryClient.setQueryData(consoleKeys.app(kept.id), kept)
+        // The decoded bind answer is the app; a read that started before the bind must not overwrite it.
+        await writeAppCache(queryClient, kept)
         await queryClient.invalidateQueries({ queryKey: ['console', 'apps'] })
       } catch (error) { bindingFailed.current = true; throw error }
     })
@@ -479,6 +480,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
       else send(buildCopy.questions.kickoffReply)
     },
     prepare: () => { bindingFailed.current = false; setFailure(undefined); patch({ prepareRequested: true }) },
-    published: (updated: BusinessApp) => { queryClient.setQueryData(consoleKeys.app(updated.id), updated); return markPublished() },
+    // PublishStep has written the answered app into its cache entry.
+    published: () => markPublished(),
   }
 }

@@ -2,11 +2,25 @@ import { ORPCError } from '@orpc/client'
 import { useMutation, useQueryClient, type Query, type QueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { useRef } from 'react'
-import { client, type PlatformApiClient } from '../../api/client'
-import { consoleApi, type BusinessApp, type DirectoryUser, type UpdateAppInput } from '../../api/console-unverified'
+import { deleteApplicationSourceRepository, deleteApplicationStack } from '../../api/queries/app'
 import { keys } from '../../api/queries/shared'
-import { consoleKeys, postComment, removeComment } from '../../api/queries/console'
-import { type Person } from '../../model/contracts/console'
+import {
+  approveAccessRequest,
+  consoleKeys,
+  createPerson,
+  declineAccessRequest,
+  postComment,
+  removeApp,
+  removeComment,
+  removeScreenshot,
+  reorderScreenshots,
+  searchPeople,
+  updateApp,
+  uploadScreenshot,
+  type UpdateAppInput,
+  writeAppCache,
+} from '../../api/queries/console'
+import type { BusinessApp, DirectoryUser, Person } from '../../model/contracts/console'
 import { platformErrorEnvelope } from '../../api/platform-error'
 import type { AppView } from '../../model/app'
 import { paths } from '../../routes/paths'
@@ -18,8 +32,8 @@ const CONSOLE_ROOT = [consoleKeys.me[0]] as const
 /** A realm account (or typed email) as a Directory person, pre-registered on first use, so it can be an owner or an extra viewer. */
 export async function ensurePerson(entry: DirectoryUser): Promise<Person> {
   const email = entry.email.toLowerCase()
-  const known = (await consoleApi.directory.searchPeople(entry.email)).find((person) => person.email.toLowerCase() === email)
-  return known ?? (await consoleApi.directory.createPerson({ email: entry.email, displayName: entry.displayName }))
+  const known = (await searchPeople(entry.email)).find((person) => person.email.toLowerCase() === email)
+  return known ?? (await createPerson({ email: entry.email, displayName: entry.displayName }))
 }
 
 /** PATCH the console record; follow the app to its new path when the group or slug moved. */
@@ -27,9 +41,9 @@ export function useUpdateApp(app: BusinessApp) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   return useMutation({
-    mutationFn: (input: UpdateAppInput) => consoleApi.apps.update(app.id, input),
+    mutationFn: (input: UpdateAppInput) => updateApp(app.id, input),
     onSuccess: async (updated) => {
-      queryClient.setQueryData(consoleKeys.app(app.id), updated)
+      await writeAppCache(queryClient, updated)
       await queryClient.invalidateQueries({ queryKey: CONSOLE_ROOT })
       if (updated.group.path !== app.group.path || updated.slug !== app.slug) {
         await navigate({ href: paths.app(updated.group.path, updated.slug, 'settings'), replace: true })
@@ -38,13 +52,19 @@ export function useUpdateApp(app: BusinessApp) {
   })
 }
 
+/** Reads the app record back: the confirmation after an app write whose answer could not be read. */
+export function useAppReadBack(appId: string) {
+  const queryClient = useQueryClient()
+  return () => queryClient.refetchQueries({ queryKey: consoleKeys.app(appId), exact: true })
+}
+
 /** Guide edits also refresh the capabilities shown in app and directory lists. */
 export function useSaveGuide(appId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (input: Pick<BusinessApp, 'guide' | 'capabilities'>) => consoleApi.apps.update(appId, input),
+    mutationFn: (input: Pick<BusinessApp, 'guide' | 'capabilities'>) => updateApp(appId, input),
     onSuccess: async (updated) => {
-      queryClient.setQueryData(consoleKeys.app(appId), updated)
+      await writeAppCache(queryClient, updated)
       await queryClient.invalidateQueries({ queryKey: CONSOLE_ROOT })
     },
   })
@@ -84,23 +104,23 @@ function useScreenshotMutation<I, O>(mutationFn: (input: I) => Promise<O>) {
 }
 
 export function useUploadScreenshot(appId: string) {
-  return useScreenshotMutation((input: { file: File; caption?: string }) => consoleApi.screenshots.upload(appId, input.file, input.caption))
+  return useScreenshotMutation((input: { file: File; caption?: string }) => uploadScreenshot(appId, input.file, input.caption))
 }
 
 export function useRemoveScreenshot(appId: string) {
-  return useScreenshotMutation((screenshotId: string) => consoleApi.screenshots.remove(appId, screenshotId))
+  return useScreenshotMutation((screenshotId: string) => removeScreenshot(appId, screenshotId))
 }
 
 export function useReorderScreenshots(appId: string) {
-  return useScreenshotMutation((order: string[]) => consoleApi.screenshots.reorder(appId, order))
+  return useScreenshotMutation((order: string[]) => reorderScreenshots(appId, order))
 }
 
 export function useApproveAccessRequest(appId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (requestId: string) => consoleApi.accessRequests.approve(appId, requestId),
+    mutationFn: (requestId: string) => approveAccessRequest(appId, requestId),
     onSuccess: async (response) => {
-      queryClient.setQueryData(consoleKeys.app(appId), response.app)
+      await writeAppCache(queryClient, response.app)
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: consoleKeys.accessRequestsOfApp(appId) }),
         queryClient.invalidateQueries({ queryKey: consoleKeys.accessRequestsPending }),
@@ -112,7 +132,7 @@ export function useApproveAccessRequest(appId: string) {
 export function useDeclineAccessRequest(appId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (requestId: string) => consoleApi.accessRequests.decline(appId, requestId),
+    mutationFn: (requestId: string) => declineAccessRequest(appId, requestId),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: consoleKeys.accessRequestsOfApp(appId) }),
@@ -132,7 +152,8 @@ export interface AppDeletion {
 }
 
 export interface AppDeletionDeps {
-  platform: Pick<PlatformApiClient, 'platformApiDeleteApplicationStack' | 'platformApiDeleteApplicationSourceRepository'>
+  deleteStack: (projectId: string, id: string) => Promise<unknown>
+  deleteSourceRepository: (projectId: string, id: string) => Promise<unknown>
   removeApp: (appId: string) => Promise<unknown>
   wait?: (ms: number) => Promise<void>
   now?: () => number
@@ -159,7 +180,7 @@ export async function deleteAppResources(projectId: string, deletion: AppDeletio
   const now = deps.now ?? Date.now
   if (deletion.stackId && !deletion.stackDeleted) {
     try {
-      await deps.platform.platformApiDeleteApplicationStack({ params: { projectId, id: deletion.stackId } })
+      await deps.deleteStack(projectId, deletion.stackId)
     } catch (error) {
       if (!(error instanceof ORPCError && error.status === 404)) throw error
     }
@@ -169,7 +190,7 @@ export async function deleteAppResources(projectId: string, deletion: AppDeletio
     const deadline = now() + SOURCE_RELEASE_WAIT_MS
     for (;;) {
       try {
-        await deps.platform.platformApiDeleteApplicationSourceRepository({ params: { projectId, id: deletion.sourceRepositoryId } })
+        await deps.deleteSourceRepository(projectId, deletion.sourceRepositoryId)
         break
       } catch (error) {
         if (error instanceof ORPCError && error.status === 404) break
@@ -195,7 +216,7 @@ export function useDeleteApp(projectId: string, app: BusinessApp, view: AppView)
       if (!deletion.current?.stackDeleted) {
         deletion.current = { appId: app.id, stackId: view.stack?.id, sourceRepositoryId: sourceRepositoryIdFor(view) }
       }
-      await deleteAppResources(projectId, deletion.current, { platform: client, removeApp: consoleApi.apps.remove })
+      await deleteAppResources(projectId, deletion.current, { deleteStack: deleteApplicationStack, deleteSourceRepository: deleteApplicationSourceRepository, removeApp })
     },
     onSuccess: async () => {
       const deleted = { appId: app.id, applicationId: view.platform?.id, stackId: deletion.current?.stackId, webComponentId: view.platform?.webComponentId }
@@ -228,25 +249,26 @@ export function readsDeletedApp(query: Pick<Query, 'queryKey'>, projectId: strin
   return false
 }
 
-type Listed<T> = T[] | { data?: T[]; items?: T[] } | undefined
-
 /**
  * After a delete, before leaving its page: stop the deleted app's in-flight reads
  * and take it out of the cached lists, so the next page derives nothing (no
- * releases, no screenshots) from an app that no longer exists.
+ * releases, no screenshots) from an app that no longer exists. A list read
+ * that started before the delete could land later with the app still in it, so
+ * those reads are cancelled before the lists are edited.
  */
 export async function forgetDeletedApp(queryClient: QueryClient, projectId: string, deleted: DeletedApp): Promise<void> {
-  await queryClient.cancelQueries({ predicate: (query) => readsDeletedApp(query, projectId, deleted) })
-  // Console lists are bare arrays; Platform lists are `{ data }` envelopes.
-  const without = <T extends { id: string }>(list: Listed<T>, id: string | undefined): Listed<T> => {
-    if (!list || !id) return list
-    if (Array.isArray(list)) return list.filter((item) => item.id !== id)
-    return { ...list, ...(list.data ? { data: list.data.filter((item) => item.id !== id) } : {}), ...(list.items ? { items: list.items.filter((item) => item.id !== id) } : {}) }
-  }
-  queryClient.setQueryData<Listed<{ id: string }>>(keys.applications(projectId), (list) => without(list, deleted.applicationId))
-  queryClient.setQueryData<Listed<{ id: string }>>(keys.stacks(projectId), (list) => without(list, deleted.stackId))
+  const lists = [keys.applications(projectId), keys.stacks(projectId), ['console', 'apps'], ['console', 'directory-apps']] as const
+  await Promise.all([
+    queryClient.cancelQueries({ predicate: (query) => readsDeletedApp(query, projectId, deleted) }),
+    ...lists.map((queryKey) => queryClient.cancelQueries({ queryKey })),
+  ])
+  // Every list cached here is a decoded domain array.
+  const without = <T extends { id: string }>(list: T[] | undefined, id: string | undefined): T[] | undefined =>
+    list && id ? list.filter((item) => item.id !== id) : list
+  queryClient.setQueryData<{ id: string }[]>(keys.applications(projectId), (list) => without(list, deleted.applicationId))
+  queryClient.setQueryData<{ id: string }[]>(keys.stacks(projectId), (list) => without(list, deleted.stackId))
   for (const prefix of [['console', 'apps'], ['console', 'directory-apps']]) {
-    queryClient.setQueriesData<Listed<{ id: string }>>({ queryKey: prefix }, (list) => without(list, deleted.appId))
+    queryClient.setQueriesData<{ id: string }[]>({ queryKey: prefix }, (list) => without(list, deleted.appId))
   }
 }
 
@@ -254,7 +276,7 @@ export async function forgetDeletedApp(queryClient: QueryClient, projectId: stri
 export function useDiscardDraft(app: BusinessApp) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: () => consoleApi.apps.remove(app.id),
+    mutationFn: () => removeApp(app.id),
     onSuccess: async () => {
       queryClient.removeQueries({ queryKey: consoleKeys.app(app.id) })
       await queryClient.invalidateQueries({ queryKey: CONSOLE_ROOT })

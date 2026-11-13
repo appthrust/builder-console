@@ -1,8 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { consoleApi, type DirectoryMigrationResult } from '../../api/console-unverified'
 import { directoryLinks } from '../../api/console'
-import { type Me } from '../../model/contracts/console'
+import { consoleKeys, migrateDirectory } from '../../api/queries/console'
+import type { DirectoryMigrationResult, Me } from '../../model/contracts/console'
+import { isUnconfirmedWrite, UnconfirmedNotice, useWriteConfirmation } from '../app/notices'
 import { Button, ConfirmDialog, LinkButton, Notice } from '../../ui'
 import { text } from './copy'
 
@@ -17,13 +18,19 @@ export function DirectoryMigrationBanner({ me }: { me: Me }) {
   const [confirming, setConfirming] = useState(false)
   const [result, setResult] = useState<DirectoryMigrationResult>()
   const migrate = useMutation({
-    mutationFn: () => consoleApi.admin.directoryMigrate(),
+    mutationFn: migrateDirectory,
+    // An unreadable answer closes the dialog: the banner offers the read-back instead of a resend.
+    onError: (error) => {
+      if (isUnconfirmedWrite(error)) setConfirming(false)
+    },
     onSuccess: async (answer) => {
       setConfirming(false)
       setResult(answer)
       await queryClient.invalidateQueries({ queryKey: ['console'] })
     },
   })
+  // A migration whose answer could not be read may have run: read `me` (its pending counts) back before offering it again.
+  const confirmation = useWriteConfirmation([migrate.error], migrate.reset, () => queryClient.refetchQueries({ queryKey: consoleKeys.me, exact: true }))
   const words = text.migration
   const directoryButton = me.directoryPublicURL ? (
     <LinkButton href={directoryLinks.groups(me.directoryPublicURL)} external size="sm">{words.openDirectory}</LinkButton>
@@ -56,17 +63,18 @@ export function DirectoryMigrationBanner({ me }: { me: Me }) {
       <Notice
         tone="warning"
         title={words.title}
-        actions={<Button tone="primary" size="sm" onClick={() => setConfirming(true)}>{words.start}</Button>}
+        actions={<Button tone="primary" size="sm" disabled={confirmation.unconfirmed} onClick={() => setConfirming(true)}>{words.start}</Button>}
       >
         <p>{words.body}</p>
         <p className="mt-1 font-medium">{words.counts(people, groups, memberships)}</p>
       </Notice>
+      {confirmation.unconfirmed ? <div className="mt-3"><UnconfirmedNotice onConfirm={() => void confirmation.confirm()} confirming={confirmation.confirming} /></div> : null}
       <ConfirmDialog
         open={confirming}
         onOpenChange={(open) => {
           if (migrate.isPending) return
           setConfirming(open)
-          if (!open) migrate.reset()
+          if (!open && !confirmation.unconfirmed) migrate.reset()
         }}
         title={words.confirmTitle}
         body={<div className="space-y-2"><p>{words.confirmBody}</p><p className="font-medium">{words.counts(people, groups, memberships)}</p></div>}

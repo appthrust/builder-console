@@ -1,77 +1,78 @@
 // What the create paths read: connections, repositories, templates, stack
-// definitions and creation tools.
-import {
-  GitHubSourceConnectionListResponse,
-  type Domain,
-  type GitHubSourceConnection,
-  type RegistryConnection,
-} from '@appthrust/api-schema/platform-api'
+// definitions and creation tools. Every answer is decoded at the boundary
+// (contracts/platform/catalog.ts); a failed read is the query's error, never
+// an empty list.
 import { keepPreviousData, queryOptions, skipToken, useQueries, useQuery } from '@tanstack/react-query'
-import { client, type PlatformApiClient } from '../client'
+import type { CreateConnections } from '../../model/contracts/catalog'
 import { publishDomainPending } from '../../model/create'
+import {
+  creationToolsContract,
+  listDomainsContract,
+  listGitHubRepositoriesContract,
+  listRegistryConnectionsContract,
+  listSourceConnectionsContract,
+  listSourceRepositoriesContract,
+  listStackDefinitionsContract,
+  listTemplatesContract,
+} from '../contracts/platform/catalog'
+import { apiGateway } from '../gateway'
 import { keys } from './shared'
-
-/** Ready-or-not GitHub source connections, registry connections and project domains the create paths need. */
-export interface CreateConnections {
-  sources: GitHubSourceConnection[]
-  registries: RegistryConnection[]
-  domains: Domain[]
-}
 
 export const CREATE_CONNECTIONS_POLL_MS = 10_000
 
 /**
- * The project's GitHub source connections (contract output is ZodTypeAny, so it
- * is validated at the boundary), the reusable registry connections (the
- * Platform API has no project-scoped registry-connections route) and the
- * project's domain inventory (the publish base for the app URL).
+ * The project's GitHub source connections, the reusable registry connections
+ * (the Platform API has no project-scoped registry-connections route) and the
+ * project's domain inventory (the publish base for the app URL). All three
+ * must be read: one failed answer fails the query (the last good value stays).
  */
-export function createConnectionsQuery(
-  projectId: string,
-  api: Pick<
-    PlatformApiClient,
-    'platformApiListProjectGitHubSourceConnections' | 'platformApiListRegistryConnections' | 'platformApiListDomains'
-  > = client
-) {
-  return {
+export function createConnectionsQuery(projectId: string) {
+  return queryOptions({
     queryKey: keys.createConnections(projectId),
     queryFn: async (): Promise<CreateConnections> => {
       const [sources, registries, domains] = await Promise.all([
-        api.platformApiListProjectGitHubSourceConnections({ projectId }),
-        api.platformApiListRegistryConnections(),
-        api.platformApiListDomains({ projectId }),
+        apiGateway.platform(listSourceConnectionsContract, { projectId }),
+        apiGateway.platform(listRegistryConnectionsContract, undefined),
+        apiGateway.platform(listDomainsContract, { projectId }),
       ])
-      // Only the items matter here; the pagination envelope is not validated.
-      const parsed = GitHubSourceConnectionListResponse.pick({ data: true }).parse(sources)
-      return { sources: parsed.data, registries: registries.data, domains: domains.data }
+      return { sources: sources.data, registries: registries.data, domains: domains.data }
     },
-    refetchInterval: (query: { state: { data: CreateConnections | undefined } }) =>
-      publishDomainPending(query.state.data?.domains ?? []) ? CREATE_CONNECTIONS_POLL_MS : false,
-  }
+    refetchInterval: (query) => (publishDomainPending(query.state.data?.domains ?? []) ? CREATE_CONNECTIONS_POLL_MS : false),
+  })
 }
 
 export function useCreateConnections(projectId: string) {
   return useQuery(createConnectionsQuery(projectId))
 }
 
+/**
+ * The project's source repositories for the app pages and the build session,
+ * decoded at the boundary: a build or readiness state this console does not
+ * know is an unknown value, never "failed" or "ready".
+ */
 export function useSourceRepositories(projectId: string) {
   return useQuery({
     queryKey: keys.sourceRepositories(projectId),
-    queryFn: () => client.platformApiListApplicationSourceRepositories({ projectId }),
+    queryFn: () => apiGateway.platform(listSourceRepositoriesContract, { projectId }),
   })
+}
+
+export const catalogKeys = {
+  templates: (projectId: string) => ['application-templates', projectId] as const,
+  definitions: ['application-stack-definitions'] as const,
 }
 
 export function useCreateCatalog(projectId: string) {
   const [templates, definitions] = useQueries({
     queries: [
       {
-        queryKey: ['application-templates', projectId],
-        queryFn: () => client.platformApiListApplicationTemplates({ projectId }),
+        queryKey: catalogKeys.templates(projectId),
+        queryFn: () => apiGateway.platform(listTemplatesContract, { projectId }),
         refetchInterval: false as const,
       },
       {
-        queryKey: ['application-stack-definitions'],
-        queryFn: () => client.platformApiListApplicationStackDefinitions(),
+        queryKey: catalogKeys.definitions,
+        queryFn: () => apiGateway.platform(listStackDefinitionsContract, undefined),
         refetchInterval: false as const,
       },
     ],
@@ -84,13 +85,10 @@ export function useCreateCatalog(projectId: string) {
  * or shown disabled with an explanation. A rollout gap stays pending through
  * transient retries instead of reading as "AI unavailable".
  */
-export function creationToolsQuery(
-  projectId: string,
-  api: Pick<PlatformApiClient, 'platformApiGetApplicationDraftCreationTools'> = client
-) {
+export function creationToolsQuery(projectId: string) {
   return queryOptions({
     queryKey: keys.creationTools(projectId),
-    queryFn: () => api.platformApiGetApplicationDraftCreationTools({ projectId }),
+    queryFn: () => apiGateway.platform(creationToolsContract, { projectId }),
     refetchInterval: false,
   })
 }
@@ -103,17 +101,12 @@ export function useCreationTools(projectId: string) {
  * Repositories the GitHub source connection can see, filtered server-side by
  * `q` (substring); the previous answer stays while the next term loads.
  */
-export function githubRepositoriesQuery(
-  projectId: string,
-  connectionId: string | undefined,
-  q: string,
-  api: Pick<PlatformApiClient, 'platformApiListGitHubSourceConnectionRepositories'> = client
-) {
+export function githubRepositoriesQuery(projectId: string, connectionId: string | undefined, q: string) {
   const term = q.trim()
   return queryOptions({
     queryKey: keys.githubRepositories(projectId, connectionId ?? '', term),
     queryFn: connectionId
-      ? () => api.platformApiListGitHubSourceConnectionRepositories({ projectId, id: connectionId, ...(term ? { q: term } : {}) })
+      ? () => apiGateway.platform(listGitHubRepositoriesContract, { projectId, id: connectionId, ...(term ? { q: term } : {}) })
       : skipToken,
     refetchInterval: false,
     placeholderData: keepPreviousData,

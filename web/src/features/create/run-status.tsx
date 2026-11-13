@@ -1,6 +1,6 @@
 // What the wizard shows while a create attempt runs and after it failed.
-import { LoaderCircle } from 'lucide-react'
-import { copy } from '../../copy'
+import { LoaderCircle, RotateCw } from 'lucide-react'
+import { copy, relativeTime } from '../../copy'
 import type { CreateEntry } from '../../model/create'
 import { Button, LinkButton, Notice } from '../../ui'
 import { text } from './copy'
@@ -36,6 +36,32 @@ export function CreatingPanel({ entry, phase }: { entry: Exclude<CreateEntry, 'a
       </div>
       <p className="mt-2 text-xs text-stone-500">{text.creatingHint}</p>
     </div>
+  )
+}
+
+/**
+ * A re-read of the connection catalog failed: what was read before stays on
+ * screen (same notice as ResourceBoundary's stale state), and create waits.
+ */
+export function StaleCatalogNotice({ readAt, retrying, onRetry }: { readAt: number; retrying: boolean; onRetry: () => void }) {
+  return (
+    <Notice tone="warning" actions={<Button size="sm" icon={<RotateCw />} loading={retrying} onClick={onRetry}>{copy.common.retry}</Button>}>
+      {copy.common.refreshFailed(relativeTime(new Date(readAt).toISOString()) ?? '')}
+    </Notice>
+  )
+}
+
+/**
+ * A create step answered 2xx with an answer this console cannot read: it may
+ * have happened. The only action reads the latest state back (design §6: never
+ * a generic retry, never a resend); create stays disabled until it has run.
+ */
+export function UnconfirmedCreateNotice({ confirming, stillUnknown, disabled, onConfirm }: { confirming: boolean; stillUnknown: boolean; disabled: boolean; onConfirm: () => void }) {
+  return (
+    <Notice tone="warning" title={text.unconfirmed.title} actions={<Button size="sm" loading={confirming} disabled={disabled} onClick={onConfirm}>{text.unconfirmed.confirm}</Button>}>
+      <p>{text.unconfirmed.body}</p>
+      {stillUnknown ? <p className="mt-1" role="status">{text.unconfirmed.stillUnknown}</p> : null}
+    </Notice>
   )
 }
 

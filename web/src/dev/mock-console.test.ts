@@ -77,15 +77,15 @@ test('platform reset restores seeded stacks, lifecycle state, toggles and the ID
   const originalEnv = { MOCK_ROLE: process.env.MOCK_ROLE, MOCK_REGISTRY: process.env.MOCK_REGISTRY, MOCK_CODEX: process.env.MOCK_CODEX }
   const stack = { templateId: 'nextjs-postgres', application: { name: 'reset-stack' }, source: { kind: 'sample-image', imageRef: 'ghcr.io/acme/test:edge-v1' } }
   try {
-    expect((await call('POST', `${project}/application-stacks`, stack)).status).toBe(201)
-    expect((await call('POST', `${project}/application-source-repositories`, { destination: { repositoryName: 'reset-repository' } })).status).toBe(201)
+    expect((await call('POST', `${project}/application-stacks`, stack)).status).toBe(202)
+    expect((await call('POST', `${project}/application-source-repositories`, { destination: { repositoryName: 'reset-repository' } })).status).toBe(202)
     const draft = await call('POST', `${project}/application-drafts`, { intent: 'Reset test' })
     expect(draft).toMatchObject({ status: 201, body: { id: 'draft-0001' } })
     expect((await call('POST', `${mock}/plan-generation`, { outcome: 'failed', error: 'reset failure', autoAdvance: true, publish: false })).status).toBe(200)
     expect((await call('POST', `${project}/application-drafts/${draft.body.id}/creation-plan-generations`)).status).toBe(202)
     expect((await call('POST', `${mock}/advance`)).body.moved).toBeGreaterThan(0)
     expect((await call('GET', `${project}/application-stacks/reset-stack`)).body.state).toBe('ACTIVE')
-    expect((await call('PUT', `${project}/applications/nippo/branches/production/components/nippo-web/env-vars`, { variables: [{ key: 'APP_TITLE', value: 'Changed', sensitive: false }] })).status).toBe(200)
+    expect((await call('PUT', `${project}/applications/nippo/branches/production/components/nippo-web/env-vars`, { variables: [{ key: 'APP_TITLE', value: 'Changed', sensitive: false }] })).status).toBe(202)
     expect((await call('POST', `${mock}/plan-generation`, { priorGenerations: 2 })).status).toBe(200)
     expect((await call('DELETE', `${project}/application-stacks/mitsumori`)).status).toBe(202)
     expect((await call('POST', `${mock}/logs`, { componentId: 'nippo-web', status: 500 })).status).toBe(200)
@@ -104,7 +104,7 @@ test('platform reset restores seeded stacks, lifecycle state, toggles and the ID
     expect((await call('GET', `${mock}/logs?componentId=nippo-web`)).body).toEqual({ status: 200, requests: 0 })
     expect((await call('POST', `${mock}/plan-generation`, {})).body).toEqual({ outcome: 'succeeded', error: '', autoAdvance: false, priorGenerations: 0, publish: true })
     expect((await call('POST', `${project}/application-stacks/validate`, stack)).body.valid).toBe(true)
-    expect((await call('POST', `${project}/application-stacks`, stack)).status).toBe(201)
+    expect((await call('POST', `${project}/application-stacks`, stack)).status).toBe(202)
     for (const repositoryName of ['reset-repository', 'reset-conflict']) {
       expect((await call('POST', `${project}/application-source-repositories/validate`, { destination: { repositoryName } })).body.valid).toBe(true)
     }

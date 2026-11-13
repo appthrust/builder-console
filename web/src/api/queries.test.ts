@@ -1,17 +1,13 @@
 import { afterEach, expect, mock, test } from 'bun:test'
-import type { Domain, GitHubSourceConnection } from '@appthrust/api-schema/platform-api'
-import { platformApiRouter } from '@appthrust/api-schema/platform-api-router'
-import { createORPCClient, ORPCError } from '@orpc/client'
-import { OpenAPILink } from '@orpc/openapi-client/fetch'
-import { QueryClient, QueryObserver, skipToken } from '@tanstack/react-query'
-import type { PlatformApiClient } from './client'
+import { ORPCError } from '@orpc/client'
+import { QueryClient, skipToken } from '@tanstack/react-query'
 import { ResponseContractError } from './boundary'
 import { ConsoleApiError } from './console'
 import { appQuery, consoleConfigQuery, projectIdQuery, resolveQuery } from './queries/console'
 import { componentLogsQuery } from './queries/app'
-import { createConnectionsQuery, creationToolsQuery, githubRepositoriesQuery } from './queries/catalog'
+import { createTestGateway } from './testing/gateway'
 import { dataPreconditionReason, isDataForbidden, membershipUnboundReason } from './queries/data'
-import { queryClient, readRetryDelay, retryDelay, retryQuery, retryReadQuery } from './queries/shared'
+import { readRetryDelay, retryDelay, retryQuery, retryReadQuery } from './queries/shared'
 
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
@@ -88,101 +84,10 @@ test('a 412 database_access_membership_unbound is a data precondition with its m
   expect(isDataForbidden(forbidden)).toBe(true)
 })
 
-test('create connections: source connections are validated at the boundary, registries and domains pass through', async () => {
-  const ready: GitHubSourceConnection = {
-    id: 'github-source-207cb7ce',
-    displayName: 'Acme',
-    account: { login: 'acme', type: 'Organization' },
-    capabilities: ['createRepositories'],
-    status: 'ready',
-    source: 'github-source-connection-cr',
-  }
-  const registry = {
-    id: 'ghcr-acme',
-    displayName: 'GHCR',
-    registryHost: 'ghcr.io',
-    registryType: 'ghcr',
-    status: 'ready',
-    source: 'registry-connection-cr',
-  } as const
-  const domain = {
-    id: 'pj-1.appthrust.test',
-    projectId: 'pj-1',
-    name: 'pj-1.appthrust.test',
-    source: 'seed',
-    dnsManagement: 'platform',
-    configuration: { state: 'valid', expectedRecords: [] as Domain['configuration']['expectedRecords'] },
-    usableForPublish: true,
-    deletable: false,
-    delegationReady: true,
-    publishDnsManaged: true,
-    externalDnsManaged: true,
-    usedBy: [] as Domain['usedBy'],
-  } as const
-  const calls: string[] = []
-  const api = {
-    platformApiListProjectGitHubSourceConnections: mock(async (input: { projectId: string }) => {
-      calls.push(`sources:${input.projectId}`)
-      return { data: [ready] }
-    }),
-    platformApiListRegistryConnections: mock(async () => {
-      calls.push('registries')
-      return { data: [registry] }
-    }),
-    platformApiListDomains: mock(async (input: { projectId: string }) => {
-      calls.push(`domains:${input.projectId}`)
-      return { data: [domain] }
-    }),
-  }
-  const query = createConnectionsQuery('pj-1', api as never)
-  expect(query.queryKey).toEqual(['create-connections', 'pj-1'])
-  expect(await query.queryFn()).toEqual({ sources: [ready], registries: [registry], domains: [domain] })
-  expect(calls.sort()).toEqual(['domains:pj-1', 'registries', 'sources:pj-1'])
-
-  const pending = { ...domain, usableForPublish: false, delegationReady: false, publishUnavailableReason: 'ProjectGatewayPending' }
-  const interval = query.refetchInterval as unknown as (query: unknown) => number | false
-  expect(typeof interval).toBe('function')
-  const intervalFor = (domains: unknown[]) => interval({ state: { data: { sources: [ready], registries: [registry], domains } } })
-  expect(intervalFor([pending])).toBe(10_000)
-  expect(intervalFor([{ ...pending, publishUnavailableReason: 'PublishRuntimeCapabilityPending' }])).toBe(10_000)
-  expect(intervalFor([{ ...pending, publishUnavailableReason: 'PublishUnsupportedByRuntime' }])).toBe(false)
-  expect(intervalFor([{ ...pending, publishUnavailableReason: undefined }])).toBe(false)
-  expect(intervalFor([{ ...pending, source: 'projectHostname' }])).toBe(false)
-  expect(intervalFor([])).toBe(false)
-  expect(intervalFor([pending, domain])).toBe(false)
-  expect(intervalFor([domain])).toBe(false)
-  expect(interval({ state: { data: undefined } })).toBe(false)
-
-  api.platformApiListProjectGitHubSourceConnections = mock(async () => ({ data: [{ ...ready, status: 'weird' } as unknown as GitHubSourceConnection] }))
-  await expect(createConnectionsQuery('pj-1', api as never).queryFn()).rejects.toThrow()
-})
-
-test('github repositories: the search term is trimmed and only sent when present; no connection means no request', async () => {
-  const inputs: unknown[] = []
-  const api = {
-    platformApiListGitHubSourceConnectionRepositories: mock(async (input: unknown) => {
-      inputs.push(input)
-      return { data: [{ fullName: 'acme/claude-mitsumori', defaultBranch: 'main', private: true }] }
-    }),
-  }
-  const client = new QueryClient()
-  const searched = githubRepositoriesQuery('pj-1', 'github-source-207cb7ce', ' mitsu ', api as never)
-  expect([...searched.queryKey]).toEqual(['github-repositories', 'pj-1', 'github-source-207cb7ce', 'mitsu'])
-  expect((await client.fetchQuery(searched)).data[0]?.fullName).toBe('acme/claude-mitsumori')
-  await client.fetchQuery(githubRepositoriesQuery('pj-1', 'github-source-207cb7ce', '', api as never))
-  expect(inputs).toEqual([
-    { projectId: 'pj-1', id: 'github-source-207cb7ce', q: 'mitsu' },
-    { projectId: 'pj-1', id: 'github-source-207cb7ce' },
-  ])
-  expect(githubRepositoriesQuery('pj-1', undefined, 'x', api as never).queryFn).toBe(skipToken)
-  client.clear()
-})
-
 test('logs send branchId and isolate cached results between branches', async () => {
   const requests: URL[] = []
-  const link = new OpenAPILink(platformApiRouter, {
-    url: 'http://platform.test',
-    fetch: async (request) => {
+  const api = createTestGateway({
+    platformFetch: async (request) => {
       requests.push(new URL(request.url))
       return Response.json({
         clusterId: 'wlc-1', namespace: 'pj-1', service: 'web',
@@ -191,7 +96,6 @@ test('logs send branchId and isolate cached results between branches', async () 
       })
     },
   })
-  const api = createORPCClient<PlatformApiClient>(link)
   const cache = new QueryClient()
   const production = componentLogsQuery('pj-1', 'web', 'production', api)
   const staging = componentLogsQuery('pj-1', 'web', 'staging', api)
@@ -206,62 +110,6 @@ test('logs send branchId and isolate cached results between branches', async () 
   expect(requests.map((url) => url.searchParams.get('tailLines'))).toEqual(['100', '100'])
   expect(componentLogsQuery('pj-1', undefined, undefined, api).queryFn).toBe(skipToken)
   cache.clear()
-})
-
-const envoyNoUpstream = () =>
-  new Response('upstream connect error or disconnect/reset before headers', { status: 503, headers: { 'Content-Type': 'text/plain' } })
-
-/** A Platform API client on the real contract and link answering `responses` in order (the last one repeats). */
-function platformAnswering(responses: Array<() => Response>) {
-  const fetch = mock(async () => (responses.length > 1 ? responses.shift()! : responses[0]!)())
-  const link = new OpenAPILink(platformApiRouter, { url: 'http://platform.test', fetch: () => fetch() })
-  return { api: createORPCClient<PlatformApiClient>(link), fetch }
-}
-
-/** The app's query defaults (retry policy included) without the backoff wait. */
-const appDefaults = () =>
-  new QueryClient({ defaultOptions: { queries: { ...queryClient.getDefaultOptions().queries, retryDelay: 0, refetchInterval: false } } })
-
-test('creation tools: two Envoy 503s during a rollout stay pending, then resolve; no error state is ever exposed', async () => {
-  const { api, fetch } = platformAnswering([envoyNoUpstream, envoyNoUpstream, () => Response.json({ version: 1, codexAvailable: true })])
-  const client = appDefaults()
-  const observer = new QueryObserver(client, creationToolsQuery('pj-1', api))
-  const seen: Array<{ status: string; isError: boolean }> = []
-  const settled = new Promise<void>((resolve) => {
-    const unsubscribe = observer.subscribe((result) => {
-      seen.push({ status: result.status, isError: result.isError })
-      if (result.status !== 'pending') {
-        unsubscribe()
-        resolve()
-      }
-    })
-  })
-  await settled
-  expect(observer.getCurrentResult().data?.codexAvailable).toBe(true)
-  expect(fetch).toHaveBeenCalledTimes(3)
-  expect(seen.some((state) => state.isError || state.status === 'error')).toBe(false)
-  expect(seen.at(-1)?.status).toBe('success')
-  client.clear()
-})
-
-test('creation tools: a 404 and a coded 400 are answers, not retried', async () => {
-  const notFound = platformAnswering([() => new Response('not found', { status: 404, headers: { 'Content-Type': 'text/plain' } })])
-  const client = appDefaults()
-  await expect(client.fetchQuery(creationToolsQuery('pj-1', notFound.api))).rejects.toMatchObject({ status: 404 })
-  expect(notFound.fetch).toHaveBeenCalledTimes(1)
-
-  const invalid = platformAnswering([() => Response.json({ error: { code: 'invalid_argument', message: 'bad project' } }, { status: 400 })])
-  await expect(client.fetchQuery(creationToolsQuery('pj-2', invalid.api))).rejects.toMatchObject({ status: 400 })
-  expect(invalid.fetch).toHaveBeenCalledTimes(1)
-  client.clear()
-})
-
-test('creation tools: a rollout longer than the transient retries surfaces after 1 + 3 attempts', async () => {
-  const { api, fetch } = platformAnswering([envoyNoUpstream])
-  const client = appDefaults()
-  await expect(client.fetchQuery(creationToolsQuery('pj-1', api))).rejects.toMatchObject({ status: 503 })
-  expect(fetch).toHaveBeenCalledTimes(4)
-  client.clear()
 })
 
 test('retry policy: transient → 3 retries; 4xx → none; any other failure keeps the single generic retry', () => {

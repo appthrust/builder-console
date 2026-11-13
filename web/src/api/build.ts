@@ -6,12 +6,13 @@ import type {
 import type {
   BuildDraft, BuildDraftList, BuildGeneration, BuildTurn, CreationPlanValidation, DraftDeletion, ImplementationRun,
 } from '../model/contracts/build'
-import { client } from './client'
+import type { CreatedPublish } from '../model/contracts/catalog'
 import {
   addWorkbookContract, beginCreationExecutionContract, cancelImplementationRunContract, cleanupCreationResourcesContract, createApplicationDraftContract,
   createConversationTurnContract, createImplementationRunContract, createPlanGenerationContract, deleteApplicationDraftContract, getApplicationDraftContract,
   listApplicationDraftsContract, removeWorkbookContract, runCreationExecutionContract, updateApplicationDraftContract, validateCreationPlanContract,
 } from './contracts/platform/build'
+import { createPublishContract } from './contracts/platform/catalog'
 import { apiGateway } from './gateway'
 
 /** What an implementation run may be asked to do (all tasks left, chosen ones, skips, or one change). */
@@ -87,12 +88,7 @@ export function cleanupCreation(projectId: string, draftId: string): Promise<Bui
   return apiGateway.platform(cleanupCreationResourcesContract, { projectId, id: draftId })
 }
 
-export function creationTools(projectId: string) {
-  return client.platformApiGetApplicationDraftCreationTools({ projectId })
-}
-
-export function createPublish(projectId: string, body: CreatePublishRequest) {
-  return client.platformApiCreateProjectPublish({
-    params: { projectId }, body,
-  }, { context: { idempotencyKey: body.idempotencyKey } })
+/** The publish repair; its key is the caller's, so a retry is replayed (202 with the written publish). */
+export function createPublish(projectId: string, body: CreatePublishRequest): Promise<CreatedPublish> {
+  return apiGateway.platform(createPublishContract, { params: { projectId }, body }, { idempotencyKey: body.idempotencyKey })
 }

@@ -70,16 +70,14 @@ test('all SPA facade operations have a registered HTTP success contract', async 
     return { status: 200, body: { kind: 'json', value: { items: [] } } }
   } })
   const args: Record<string, unknown[]> = {
-    resolve: ['/group/app'], 'apps.list': [{}], 'apps.get': ['app'], 'apps.byPath': ['group', 'app'],
-    'apps.create': [{ displayName: 'App', groupId: 'group' }], 'apps.update': ['app', {}], 'apps.bind': ['app', { stackId: 'stack', appName: 'app' }],
+    resolve: ['/group/app'], 'apps.list': [{}], 'apps.byPath': ['group', 'app'],
+    'apps.create': [{ displayName: 'App', groupId: 'group' }], 'apps.bind': ['app', { stackId: 'stack', appName: 'app' }],
     'apps.remove': ['app'], 'apps.directory': [{}], 'apps.directoryEntry': ['app'], 'apps.tools': ['app'],
     'directory.searchPeople': ['person'], 'directory.personBySubject': ['subject'], 'directory.people': [['person']],
     'directory.person': ['person'], 'directory.createPerson': [{ email: 'person@example.test', displayName: 'Person' }],
     'directory.members': ['group'], 'directory.users': ['person'],
     'screenshots.upload': ['app', new File(['bytes'], 'screen.png')], 'screenshots.remove': ['app', 'shot'], 'screenshots.reorder': ['app', []],
-    'accessRequests.mine': ['app'], 'accessRequests.create': [{ appName: 'app', message: '' }], 'accessRequests.pending': [],
-    'accessRequests.ofApp': ['app'], 'accessRequests.approve': ['app', 'request'], 'accessRequests.decline': ['app', 'request'],
-    'admin.platform': [], 'admin.directoryMigrate': [],
+    'admin.directoryMigrate': [],
   }
   const invoked: string[] = []
   async function visit(object: object, prefix = '') {
@@ -98,6 +96,14 @@ test('all SPA facade operations have a registered HTTP success contract', async 
   // in bootstrap.test; add their transport requests to the same inventory.
   for (const contract of [consoleContracts.me, consoleContracts.config, consoleContracts.groups]) seen.push(contract.request(undefined))
   seen.push(consoleContracts.comments.request('app'), consoleContracts.postComment.request({ appId: 'app', body: 'Hi' }), consoleContracts.removeComment.request({ appId: 'app', commentId: 'comment' }))
+  // Operations whose facade calls are gone: the SPA sends their contract requests.
+  seen.push(
+    consoleContracts.app.request('app'), consoleContracts.updateApp.request({ appId: 'app', input: {} }),
+    consoleContracts.myAccessRequest.request('app'), consoleContracts.createAccessRequest.request({ appName: 'app', message: '' }),
+    consoleContracts.pendingAccessRequests.request(undefined), consoleContracts.appAccessRequests.request('app'),
+    consoleContracts.approveAccessRequest.request({ appId: 'app', requestId: 'request' }), consoleContracts.declineAccessRequest.request({ appId: 'app', requestId: 'request' }),
+    consoleContracts.settings.request(undefined),
+  )
   const matched = new Set<string>()
   for (const request of seen) {
     const url = new URL(request.path, 'https://console.test')

@@ -70,6 +70,7 @@ export const textEn: typeof textJa = {
     inheritedColumn: 'Inherited from',
     you: 'You',
     emailMissing: 'No email address',
+    roleUnknown: 'Role unknown',
   },
   help: {
     lead: 'What to know when getting started.',

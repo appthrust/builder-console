@@ -16,6 +16,12 @@ export const textEn: typeof textJa = {
   },
   alreadyCreated: (name: string) => `This app was already created as "${name}"; finish it with that URL name.`,
   sourceUnavailable: 'The GitHub connection is unavailable.',
+  unconfirmed: {
+    title: 'Could not confirm what was created',
+    body: 'The create request may have gone through. Check the latest state before continuing, so nothing is created twice.',
+    confirm: 'Check the latest state',
+    stillUnknown: 'The latest state still cannot be confirmed. Wait a moment, then check again.',
+  },
   loadingDraft: 'Loading your unfinished app…',
   pageTitle: (step: number) => `New app (${step}/4)`,
   unsavedChanges: 'Your changes have not been saved. Leave this page?',

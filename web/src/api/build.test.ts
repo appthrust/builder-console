@@ -25,6 +25,7 @@ beforeEach(() => {
     const request = input instanceof Request ? input : new Request(input)
     requests.push(request)
     const path = new URL(request.url).pathname
+    if (path.endsWith('/publishes')) return Response.json({ id: 'publish-1', resource: { id: 'publish-1', projectId: 'project-1', applicationId: 'app-1', branchId: 'production', componentId: 'app-1-web', pendingSync: false } }, { status: 202 })
     if (path.endsWith('/conversation-turns')) return Response.json({ resource: turn }, { status: 202 })
     if (path.endsWith('/creation-plan-generations')) return Response.json({ resource: generation }, { status: 202 })
     if (path.endsWith('/creation-plan-validations')) return Response.json({ resource: { valid: true, message: 'Ready', issues: [] } })
@@ -108,7 +109,7 @@ test('publish repair retries a real readiness response with the same HTTP idempo
     requests.push(input instanceof Request ? input : new Request(input))
     return requests.length === 1
       ? Response.json({ error: { code: 'app_installation_not_ready', message: 'external authorization app installation and its publish must be Ready' } }, { status: 409 })
-      : Response.json({ id: 'publish-1' })
+      : Response.json({ id: 'publish-1', resource: { id: 'publish-1', projectId: 'project-1', applicationId: 'app-1', branchId: 'production', componentId: 'app-1-web', pendingSync: false } }, { status: 202 })
   }) as unknown as typeof fetch
   const error = await api.createPublish('project-1', body).catch((caught: unknown) => caught)
   expect(isPublishPreparationPending(error)).toBe(true)

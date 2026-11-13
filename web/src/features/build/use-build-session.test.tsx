@@ -6,10 +6,11 @@ import { act, useLayoutEffect, useSyncExternalStore } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import * as api from '../../api/build'
 import { draftOf, turnOf, generationOf } from '../../api/testing/build-domain'
+import { appOf } from '../../api/testing/catalog-domain'
 import type { BuildDraft } from '../../model/contracts/build'
 import { buildKeys } from '../../api/queries/build'
 import { consoleKeys } from '../../api/queries/console'
-import { type BusinessApp } from '../../api/console-unverified'
+import type { BusinessApp } from '../../model/contracts/console'
 import { type Me } from '../../model/contracts/console'
 import { keys } from '../../api/queries/shared'
 import { sessionExpiryStore } from '../../api/session-expiry'
@@ -54,7 +55,7 @@ let build: {
   requestPlan(): void
   retry(context?: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish'): void
   patch(next: Partial<BuildSession>): void
-  published(app: BusinessApp): Promise<void>
+  published(): Promise<void>
 }
 let implementation = implementationFixture()
 let update: Mock<typeof api.updateDraft>
@@ -112,7 +113,7 @@ beforeEach(() => {
   const implementationSpy = spyOn(implement, 'useImplementation').mockImplementation((input) => { implementationEnabled = input.enabled; return implementation })
   const viewsSpy = spyOn(appViews, 'useAppViews').mockReturnValue({
     input: { applications: [], stacks: [], publishes: [], componentSummaries: [], releasesByApplication: {} },
-    loading: false, failed: false, error: undefined, refetch: mock(),
+    loading: false, failed: false, error: undefined, stale: false, updatedAt: 0, refetching: false, refetch: mock(),
     viewFor: () => ({ status: 'deploying', label: '', text: '', second: '', draft: false }),
   })
   update = spyOn(api, 'updateDraft').mockImplementation(async (_projectId, _draftId, payload) => {
@@ -536,14 +537,15 @@ const publishedDraft: ApplicationDraft = {
   ...draft, phase: 'created', createdApplicationId: 'app-platform', createdApplicationStackId: 'stack-1',
   conversationTurns: [], publishedAt, publishPreferences: { name: draft.title, shareScope: 'group' },
 }
-const publishedApp: BusinessApp = {
+// The bind answer's wire; the bind step reads it through the app contract.
+const publishedApp = {
   id: 'app-console', slug: 'ledger', displayName: draft.title, description: '', icon: '', tags: [], guide: '', capabilities: [], screenshots: [],
   group: { id: 'sales', path: 'sales', name: 'Sales' }, owners: [me.person], stackId: 'stack-1', appName: 'app-platform',
   share: { scope: 'group', groupIds: ['sales'], extraPersonIds: [] }, createdBy: me.person, createdAt: at, updatedAt: at,
 }
 
 async function mountPublished(current = publishedDraft, session = initial) {
-  const bind = spyOn(binding, 'bindCreatedConsoleApp').mockResolvedValue(publishedApp)
+  const bind = spyOn(binding, 'bindCreatedConsoleApp').mockResolvedValue(appOf(publishedApp))
   restore.push(() => bind.mockRestore())
   await mount(current, session)
 }
@@ -599,9 +601,7 @@ test('publication persists after app updates and failed persistence retries only
   await mountPublished(publishedDraft, { ...initial, continuedAfterPublishAt: publishedAt })
   const error = new ORPCError('INTERNAL_SERVER_ERROR', { status: 500 })
   update.mockRejectedValueOnce(error)
-  const updatedApp = { ...publishedApp, displayName: '新しい公開名' }
-  await act(async () => { await build.published(updatedApp) })
-  expect(client.getQueryData<BusinessApp>(consoleKeys.app(updatedApp.id))).toEqual(updatedApp)
+  await act(async () => { await build.published() })
   expect(update.mock.calls.map((call) => call[2])).toEqual([{ markPublished: true }])
   expect(build.result.stage).toBe('build')
   expect(build.session.continuedAfterPublishAt).toBe(publishedAt)

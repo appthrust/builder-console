@@ -2,17 +2,22 @@
 // console hides template, image and the definition pairing, so they are
 // resolved here from the catalog read models. The web port is never sent: the
 // platform reads it from the built image (`EXPOSE`).
+//
+// The catalog values are evidence for whether creation is allowed: a source
+// kind, capability, connection status or domain source this console does not
+// know is never available, never a capability and never ready.
+import { isOneOf, type CreationPlan } from './contracts/build'
 import type {
-  ApplicationDraftCreationPlan,
-  ApplicationStackDefinition,
-  ApplicationTemplateSourceKind,
-  ApplicationTemplateSummary,
-  CreateApplicationSourceRepositoryRequest,
-  CreateApplicationStackRequest,
-  Domain,
-  GitHubSourceConnection,
+  PublishDomain,
   RegistryConnection,
-} from '@appthrust/api-schema/platform-api'
+  SourceConnection,
+  SourceRepositoryRequest,
+  StackDefinition,
+  StackDefinitionRef,
+  StackRequest,
+  TemplateSourceKind,
+  TemplateSummary,
+} from './contracts/catalog'
 
 /** Same rule as the contract's DnsLabelName. */
 const DNS_LABEL = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/
@@ -131,24 +136,24 @@ function randomAppName(): string {
 export type CreateSourceKind = 'github-template' | 'sample-image'
 
 export interface CreateCatalog {
-  template: ApplicationTemplateSummary
-  definitionRef: CreateApplicationStackRequest['definitionRef']
+  template: TemplateSummary
+  definitionRef: StackDefinitionRef
   connectionName: string
 }
 
-/** A source is usable only when that exact catalog path is available. */
+/** A source is usable only when that exact catalog path is available; an unknown kind is none of them. */
 export function templateUsableFor(
-  template: Pick<ApplicationTemplateSummary, 'sourceKinds' | 'availability'>,
-  kind: ApplicationTemplateSourceKind
+  template: Pick<TemplateSummary, 'sourceKinds' | 'availability'>,
+  kind: TemplateSourceKind
 ): boolean {
-  return template.sourceKinds.includes(kind) && template.availability.sources.some((source) => source.kind === kind && source.available)
+  return template.sourceKinds.some((item) => isOneOf(item, kind)) && template.availability.sources.some((source) => isOneOf(source.kind, kind) && source.available)
 }
 
 /** Templates offered for a source kind, available ones only, the default first. */
 export function templatesFor(
-  templates: readonly ApplicationTemplateSummary[],
+  templates: readonly TemplateSummary[],
   sourceKind: CreateSourceKind
-): ApplicationTemplateSummary[] {
+): TemplateSummary[] {
   return templates
     .filter((item) => templateUsableFor(item, sourceKind))
     .sort((a, b) => Number(b.id === DEFAULT_TEMPLATE_ID) - Number(a.id === DEFAULT_TEMPLATE_ID))
@@ -163,8 +168,8 @@ export function templatesFor(
  * deploys that app's image under the user's name.
  */
 export function resolveCreateCatalog(
-  templates: readonly ApplicationTemplateSummary[],
-  definitions: readonly ApplicationStackDefinition[],
+  templates: readonly TemplateSummary[],
+  definitions: readonly StackDefinition[],
   sourceKind: CreateSourceKind,
   templateId?: string
 ): CreateCatalog | undefined {
@@ -173,9 +178,10 @@ export function resolveCreateCatalog(
   if (!template) return undefined
   const definition = definitions.find((item) => !item.catalogSource && item.components.length === template.components.length)
   if (!definition) return undefined
+  // Platform omits `served: false` (internal/api/dto_application_stack_definition.go:7, omitempty): only an explicit true is served.
   const version =
-    definition.versions?.find((item) => item.default && item.served !== false) ??
-    definition.versions?.find((item) => item.served !== false)
+    definition.versions?.find((item) => item.default && item.served === true) ??
+    definition.versions?.find((item) => item.served === true)
   return {
     template,
     definitionRef: version ? { name: definition.id, version: version.name } : { name: definition.id },
@@ -184,14 +190,14 @@ export function resolveCreateCatalog(
 }
 
 export interface SourceConnections {
-  source: GitHubSourceConnection
+  source: SourceConnection
   registry: RegistryConnection
 }
 
 /** What the create paths need from the platform besides the catalog. */
 export interface CreateEnvironment {
   /** First ready GitHub connection able to create repositories and, if selected, read the template. */
-  source?: GitHubSourceConnection
+  source?: SourceConnection
   /** First ready registry connection. */
   registry?: RegistryConnection
   /** Publish-ready domain base; the app URL is `https://<appName>.<domain>` (ux-design §7.1.1). */
@@ -206,54 +212,54 @@ export type CreatePrerequisite = 'github' | 'registry' | 'domain'
  * create publish form. The project's seeded base domain (`<project>.<base>`)
  * is preferred so the URL follows §7.1.1; otherwise the first ready domain.
  */
-export function pickPublishDomain(domains: readonly Domain[]): string | undefined {
+export function pickPublishDomain(domains: readonly PublishDomain[]): string | undefined {
   const ready = domains.filter((domain) => domain.usableForPublish)
-  return (ready.find((domain) => domain.source === 'seed') ?? ready[0])?.name
+  return (ready.find((domain) => isOneOf(domain.source, 'seed')) ?? ready[0])?.name
 }
 
 /** A configured publish base is waiting on runtime readiness; another usable base wins. */
-export function publishDomainPending(domains: readonly Domain[]): boolean {
+export function publishDomainPending(domains: readonly PublishDomain[]): boolean {
   return !domains.some((domain) => domain.usableForPublish) && domains.some((domain) =>
-    domain.source !== 'projectHostname' && domain.publishDnsManaged &&
+    !isOneOf(domain.source, 'projectHostname') && domain.publishDnsManaged &&
     (domain.publishUnavailableReason === 'ProjectGatewayPending' || domain.publishUnavailableReason === 'PublishRuntimeCapabilityPending'))
 }
 
-function templateRepository(template: ApplicationTemplateSummary): string {
+function templateRepository(template: TemplateSummary): string {
   return template.githubTemplate?.repository ?? `appthrust/template-${template.id.replace(/-postgres$/, '')}`
 }
 
-function canCreateFromSource(source: GitHubSourceConnection, template?: ApplicationTemplateSummary): boolean {
-  return source.status === 'ready' && source.capabilities.includes('createRepositories') &&
-    (!template || source.capabilities.includes('readTemplateRepositories'))
+function canCreateFromSource(source: SourceConnection, template?: TemplateSummary): boolean {
+  const can = (capability: 'createRepositories' | 'readTemplateRepositories') => source.capabilities.some((item) => isOneOf(item, capability))
+  return isOneOf(source.status, 'ready') && can('createRepositories') && (!template || can('readTemplateRepositories'))
 }
 
 /** Trimmed, case-insensitive matching mirrors the Platform API's validateSourceRepositoryAllowlist. */
 export function pickSourceConnection(
-  sources: readonly GitHubSourceConnection[],
-  template?: ApplicationTemplateSummary
-): GitHubSourceConnection | undefined {
+  sources: readonly SourceConnection[],
+  template?: TemplateSummary
+): SourceConnection | undefined {
   const repository = template ? templateRepository(template).trim().toLowerCase() : undefined
   return sources.find((source) => canCreateFromSource(source, template) &&
     (!repository || !source.allowedRepositories?.length || source.allowedRepositories.some((allowed) => allowed.trim().toLowerCase() === repository)))
 }
 
 export function templateSourceProblem(
-  template: ApplicationTemplateSummary,
-  sources: readonly GitHubSourceConnection[]
+  template: TemplateSummary,
+  sources: readonly SourceConnection[]
 ): 'not-admitted' | 'no-connection' | undefined {
   if (pickSourceConnection(sources, template)) return undefined
   return sources.some((source) => canCreateFromSource(source, template)) ? 'not-admitted' : 'no-connection'
 }
 
 export function pickCreateEnvironment(
-  sources: readonly GitHubSourceConnection[],
+  sources: readonly SourceConnection[],
   registries: readonly RegistryConnection[],
-  domains: readonly Domain[],
-  template?: ApplicationTemplateSummary
+  domains: readonly PublishDomain[],
+  template?: TemplateSummary
 ): CreateEnvironment {
   return {
     source: pickSourceConnection(sources, template),
-    registry: registries.find((item) => item.status === 'ready'),
+    registry: registries.find((item) => isOneOf(item.status, 'ready')),
     domain: pickPublishDomain(domains),
   }
 }
@@ -292,7 +298,7 @@ export function buildSourceRepositoryRequest(
   appName: string,
   catalog: CreateCatalog,
   connections: SourceConnections
-): CreateApplicationSourceRepositoryRequest {
+): SourceRepositoryRequest {
   const owner = connections.source.account.login.toLowerCase()
   const host = connections.registry.registryHost.trim().toLowerCase() || 'ghcr.io'
   const github = catalog.template.githubTemplate
@@ -332,7 +338,7 @@ export function urlNameFromRepository(fullName: string): string {
 export function buildExistingSourceRepositoryRequest(
   repository: PickedRepository,
   connections: SourceConnections
-): CreateApplicationSourceRepositoryRequest {
+): SourceRepositoryRequest {
   const host = connections.registry.registryHost.trim().toLowerCase() || 'ghcr.io'
   return {
     sourceConnectionId: connections.source.id,
@@ -354,7 +360,7 @@ export interface PlanSummary {
   url?: string
 }
 
-export function summarizeCreationPlan(plan: ApplicationDraftCreationPlan): PlanSummary {
+export function summarizeCreationPlan(plan: CreationPlan): PlanSummary {
   const stack = plan.applicationStackRequest
   const parts: PlanPart[] = []
   // A plan restored by creation cleanup is persisted with `representation: null`; the Go DTO has no omitempty.
@@ -392,7 +398,7 @@ export function buildCreateStackRequest(
   source: StackSource,
   catalog: CreateCatalog,
   domain: string
-): CreateApplicationStackRequest {
+): StackRequest {
   return {
     templateId: catalog.template.id,
     definitionRef: catalog.definitionRef,

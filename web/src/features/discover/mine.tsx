@@ -6,6 +6,7 @@ import { paths } from '../../routes/paths'
 import { useShell } from '../../shell/use-shell'
 import { EmptyState, LinkButton, LoadFailed, PageHeader, useDocumentTitle } from '../../ui'
 import { useAppViews } from '../app/use-app-views'
+import { StaleNotice } from '../app/notices'
 import { AppListSkeleton, AppTable, StatusLoadNotice, usePendingAccessRequestCounts } from './app-list'
 import { text } from './copy'
 
@@ -27,9 +28,10 @@ export function MinePage({ status }: { status?: 'problem' }) {
       <PageHeader title={copy.mine.title} lead={problemOnly ? text.mine.problemLead : copy.mine.lead}
         actions={problemOnly ? <LinkButton href={paths.mine()}>{text.mine.seeAll}</LinkButton> : undefined} />
       <StatusLoadNotice lookup={lookup} />
+      {apps.isRefetchError ? <StaleNotice updatedAt={apps.dataUpdatedAt} refetching={apps.isFetching} onRetry={() => void apps.refetch()} /> : null}
       {apps.isPending || (problemOnly && lookup.loading) ? (
         <AppListSkeleton />
-      ) : apps.isError ? (
+      ) : apps.isLoadingError ? (
         <LoadFailed error={apps.error} onRetry={() => void apps.refetch()} />
       ) : (
         <AppTable

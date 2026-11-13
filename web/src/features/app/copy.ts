@@ -183,6 +183,24 @@ export const textJa = {
     jumpLatest: '最新の行へ',
     region: 'アプリのログ',
   },
+  /** Server values this console does not know: shown as such, never as success, and never offered for a write. */
+  unsupported: {
+    status: 'この状態はこの画面ではまだ扱えません。',
+    /** Status word when the status could not be read or is not supported. */
+    label: '状態不明',
+    releasePhase: '不明',
+    share: '公開範囲をこの画面では扱えません。変更はできません。',
+    env: 'この画面で扱えない設定値があるため、いまは保存できません。',
+    tools: 'Tools の状態をこの画面では扱えません。',
+    role: '役割不明',
+    request: 'この申請の状態はこの画面では扱えません。',
+  },
+  /** A write was answered with something this console cannot read: it may have happened. */
+  unconfirmed: {
+    title: '処理結果を確認できませんでした',
+    reason: '送った操作は届いているかもしれません。最新の状態を確かめてから続けてください。自動ではくり返しません。',
+    confirm: '最新の状態を確認する',
+  },
 }
 
 export const text = localized({ ja: textJa, en: textEn })

@@ -1,8 +1,9 @@
 import { Check } from 'lucide-react'
 import { screenshotUrl } from '../../api/console'
-import { type DirectoryEntry } from '../../api/console-unverified'
+import { type DirectoryEntry } from '../../model/contracts/console'
 import { copy } from '../../copy'
 import type { AppView } from '../../model/app'
+import { resolvedPeople } from '../../model/directory'
 import { paths } from '../../routes/paths'
 import { AppIcon, Avatar, Button, HrefLink, LinkButton, PersonLink, Skeleton, StatusPill } from '../../ui'
 import type { AppViews } from '../app'
@@ -27,7 +28,8 @@ export function AppStoreCard({ entry, view, showGroup = true, heading = 'h3' }: 
   heading?: HeadingLevel
 }) {
   const Heading = heading
-  const owner = entry.owners[0]
+  // The first owner the server can still resolve; an unknown person has no page or picture.
+  const owner = resolvedPeople(entry.owners)[0]
   const shot = entry.screenshots[0]
   const problem = view.status === 'failed' || view.status === 'unknown'
   return (
@@ -76,7 +78,7 @@ export function AppStoreCard({ entry, view, showGroup = true, heading = 'h3' }: 
                 <Avatar person={owner} size="sm" />
                 <span className="truncate">{owner.displayName}</span>
               </PersonLink>
-            ) : <span>{copy.appList.noOwner}</span>}
+            ) : <span>{entry.owners.length > 0 ? copy.common.unknownPerson : copy.appList.noOwner}</span>}
             {showGroup ? <><span aria-hidden>・</span><span className="truncate">{entry.group.name}</span></> : null}
           </p>
           {entry.canOpen ? (

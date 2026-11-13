@@ -35,11 +35,14 @@ export const resourceRoute = createRoute({
   loader: async ({ context: { queryClient }, params, location }): Promise<ResourceMatch> => {
     const parsed = parseResourcePath(params._splat ?? '')
     if (!parsed) throw notFound()
-    const resolved = await queryClient.ensureQueryData(resolveQuery(`/${parsed.path}`)).catch(notFoundOn404)
+    const answer = await queryClient.ensureQueryData(resolveQuery(`/${parsed.path}`)).catch(notFoundOn404)
+    // A resource kind this console does not know is not guessed as a group, app or entry: the route's fixed failure.
+    if (answer.kind === 'unsupported') throw new Error('unsupported resource kind')
+    const resolved = answer.value
     if (resolved.kind === 'entry' && parsed.sub !== null) throw notFound()
     const currentPath = resolved.currentPath.replace(/^\/+|\/+$/g, '')
     if (currentPath !== parsed.path) {
-      queryClient.setQueryData(resolveQuery(`/${currentPath}`).queryKey, resolved)
+      queryClient.setQueryData(resolveQuery(`/${currentPath}`).queryKey, answer)
       const sub = parsed.sub ? `/-/${encodeURIComponent(parsed.sub)}` : ''
       throw redirect({ href: `${paths.group(currentPath)}${sub}${location.searchStr}`, replace: true })
     }

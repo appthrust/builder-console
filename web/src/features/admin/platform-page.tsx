@@ -5,7 +5,7 @@ import { createConnectionsQuery } from '../../api/queries/catalog'
 import { platformSettingsQuery, useMe } from '../../api/queries/console'
 import { copy } from '../../copy'
 import { pickPublishDomain } from '../../model/create'
-import { Card, Disclosure, LoadFailed, Notice, PageHeader, Skeleton, StatusPill, useDocumentTitle } from '../../ui'
+import { Card, Disclosure, Notice, PageHeader, ResourceBoundary, Skeleton, StatusPill, useDocumentTitle } from '../../ui'
 import { text } from './copy'
 import { DirectoryMigrationBanner } from './directory-migration'
 
@@ -31,7 +31,10 @@ export function AdminPlatformPage() {
       <div className="mb-6 empty:hidden">
         <DirectoryMigrationBanner me={me} />
       </div>
-      {settings.isPending ? (
+      <ResourceBoundary
+        query={settings}
+        resetKey="admin-platform"
+        loading={
         <Card>
           <div className="divide-y divide-stone-100" aria-busy="true">
             {[0, 1, 2, 3].map((row) => (
@@ -45,13 +48,14 @@ export function AdminPlatformPage() {
             ))}
           </div>
         </Card>
-      ) : settings.isError ? (
-        <LoadFailed error={settings.error} onRetry={() => void settings.refetch()} />
-      ) : (
+        }
+      >
+        {(data, stale) => (
         <div className="space-y-6">
+          {stale}
           {me.isConsoleAdmin ? null : <Notice tone="info">{text.platform.readOnly}</Notice>}
           <Summary
-            missing={[settings.data.github.connected, settings.data.registry.connected, domainState !== 'missing'].filter((ok) => !ok).length}
+            missing={[data.github.connected, data.registry.connected, domainState !== 'missing'].filter((ok) => !ok).length}
             checking={domainState === 'checking'}
           />
           <Card>
@@ -59,16 +63,16 @@ export function AdminPlatformPage() {
               <StatusRow
                 icon={<FolderGit2 aria-hidden className="size-4" />}
                 title={copy.admin.github}
-                state={settings.data.github.connected ? 'ready' : 'missing'}
+                state={data.github.connected ? 'ready' : 'missing'}
               >
-                {settings.data.github.connected ? copy.admin.githubOn : copy.admin.githubOff}
+                {data.github.connected ? copy.admin.githubOn : copy.admin.githubOff}
               </StatusRow>
               <StatusRow
                 icon={<Package aria-hidden className="size-4" />}
                 title={copy.admin.registry}
-                state={settings.data.registry.connected ? 'ready' : 'missing'}
+                state={data.registry.connected ? 'ready' : 'missing'}
               >
-                {settings.data.registry.connected ? copy.admin.registryOn : copy.admin.registryOff}
+                {data.registry.connected ? copy.admin.registryOn : copy.admin.registryOff}
               </StatusRow>
               <StatusRow icon={<Globe aria-hidden className="size-4" />} title={text.platform.domain} state={domainState}>
                 {domainState === 'checking' ? (
@@ -93,7 +97,7 @@ export function AdminPlatformPage() {
               <StatusRow
                 icon={<UsersRound aria-hidden className="size-4" />}
                 title={copy.admin.team}
-                state={settings.data.teamSlug ? 'ready' : 'unknown'}
+                state={data.teamSlug ? 'ready' : 'unknown'}
               >
                 <span className="block">{copy.admin.teamBody}</span>
                 <span className="mt-1 block font-medium text-stone-700">{me.canCreateApps ? text.platform.teamYou : text.platform.teamNotYou}</span>
@@ -103,15 +107,16 @@ export function AdminPlatformPage() {
           <Disclosure title={copy.admin.advanced}>
             <p className="mb-3 text-sm text-stone-500">{text.platform.advancedLead}</p>
             <dl className="grid grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-[10rem_1fr] sm:gap-y-2">
-              <Detail label={copy.admin.project} value={settings.data.projectId} />
-              <Detail label={copy.admin.teamName} value={settings.data.teamSlug ?? copy.admin.teamUnknown} />
-              {settings.data.github.connectionId ? <Detail label={copy.admin.github} value={settings.data.github.connectionId} /> : null}
-              {settings.data.registry.connectionId ? <Detail label={copy.admin.registry} value={settings.data.registry.connectionId} /> : null}
+              <Detail label={copy.admin.project} value={data.projectId} />
+              <Detail label={copy.admin.teamName} value={data.teamSlug ?? copy.admin.teamUnknown} />
+              {data.github.connectionId ? <Detail label={copy.admin.github} value={data.github.connectionId} /> : null}
+              {data.registry.connectionId ? <Detail label={copy.admin.registry} value={data.registry.connectionId} /> : null}
               {domain ? <Detail label={text.platform.domain} value={domain} /> : null}
             </dl>
           </Disclosure>
         </div>
-      )}
+        )}
+      </ResourceBoundary>
     </div>
   )
 }

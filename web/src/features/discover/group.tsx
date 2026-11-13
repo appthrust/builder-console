@@ -2,7 +2,7 @@ import { useQuery, type UseQueryResult } from '@tanstack/react-query'
 import { ExternalLink, FolderTree, LayoutGrid } from 'lucide-react'
 import { directoryLinks } from '../../api/console'
 import { pathPrefixes, type Group } from '../../model/contracts/console'
-import { type Membership } from '../../api/console-unverified'
+import { type Membership } from '../../model/contracts/console'
 import { appsQuery, membersQuery } from '../../api/queries/console'
 import { copy } from '../../copy'
 import { paths, type GroupTab } from '../../routes/paths'
@@ -10,6 +10,7 @@ import { locale } from '../../shell/language'
 import { useShell } from '../../shell/use-shell'
 import { EmptyState, HrefLink, LinkButton, LinkTabs, LoadFailed, PageHeader, Skeleton, useDocumentTitle } from '../../ui'
 import { useAppViews } from '../app/use-app-views'
+import { StaleNotice } from '../app/notices'
 import { AppListSkeleton, AppTable, StatusLoadNotice } from './app-list'
 import { text } from './copy'
 import { GroupFront } from './group-front'
@@ -75,7 +76,7 @@ function memberCountLead(members: UseQueryResult<Membership[]>) {
       </span>
     )
   }
-  if (members.isError) return undefined
+  if (members.isLoadingError) return undefined
   const { direct, inherited } = splitMembers(members.data)
   return (
     <>
@@ -115,9 +116,10 @@ function GroupApps({ group, subgroups }: { group: Group; subgroups: Group[] }) {
         </section>
       ) : null}
       <StatusLoadNotice lookup={lookup} />
+      {apps.isRefetchError ? <StaleNotice updatedAt={apps.dataUpdatedAt} refetching={apps.isFetching} onRetry={() => void apps.refetch()} /> : null}
       {apps.isPending ? (
         <AppListSkeleton />
-      ) : apps.isError ? (
+      ) : apps.isLoadingError ? (
         <LoadFailed error={apps.error} onRetry={() => void apps.refetch()} />
       ) : (
         <AppTable

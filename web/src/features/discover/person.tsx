@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { AppWindow } from 'lucide-react'
 import { Fragment } from 'react'
-import type { PersonProfile } from '../../api/console-unverified'
+import type { PersonProfile } from '../../model/contracts/console'
+import { isOneOf } from '../../model/contracts/build'
 import { directoryAppsQuery } from '../../api/queries/console'
 import { copy } from '../../copy'
 import { isFinished, storeOrder } from '../../model/directory'
@@ -12,6 +13,7 @@ import { useAppViews } from '../app/use-app-views'
 import { StatusLoadNotice } from './app-list'
 import { AppStoreGrid, AppStoreGridSkeleton } from './app-store-card'
 import { text } from './copy'
+import { StaleNotice } from '../app/notices'
 
 /**
  * Stand-in maker card for when no Directory is linked (the route otherwise
@@ -29,7 +31,7 @@ export function PersonPage({ profile }: { profile: PersonProfile }) {
   const ordered = memberships
     .filter((membership) => membership.inheritedFrom === null)
     .sort((a, b) =>
-      (a.role === b.role ? 0 : a.role === 'manager' ? -1 : 1) || a.group.path.split('/').length - b.group.path.split('/').length || a.group.name.localeCompare(b.group.name, 'ja')
+      (isOneOf(a.role, 'manager') === isOneOf(b.role, 'manager') ? 0 : isOneOf(a.role, 'manager') ? -1 : 1) || a.group.path.split('/').length - b.group.path.split('/').length || a.group.name.localeCompare(b.group.name, 'ja')
     )
 
   return (
@@ -47,7 +49,7 @@ export function PersonPage({ profile }: { profile: PersonProfile }) {
                 {index > 0 ? <span aria-hidden>・</span> : null}
                 <span className="inline-flex items-center gap-1.5">
                   <HrefLink href={paths.group(membership.group.path)} className="inline-flex min-h-10 items-center text-accent-strong hover:underline md:min-h-8">{membership.group.name}</HrefLink>
-                  {membership.role === 'manager' ? <span className="rounded bg-stone-100 px-1.5 py-0.5 text-xs text-stone-600">{copy.members.role.manager}</span> : null}
+                  {isOneOf(membership.role, 'manager') ? <span className="rounded bg-stone-100 px-1.5 py-0.5 text-xs text-stone-600">{copy.members.role.manager}</span> : null}
                 </span>
               </Fragment>
             ))}
@@ -55,10 +57,11 @@ export function PersonPage({ profile }: { profile: PersonProfile }) {
         ) : null}
       </PageHeader>
 
-      <Section title={apps.isError ? text.person.appsLoading : loading ? <span aria-label={copy.common.loading}><Skeleton className="h-5 w-48" /></span> : text.person.apps(finished.length)}>
+      <Section title={apps.isLoadingError ? text.person.appsLoading : loading ? <span aria-label={copy.common.loading}><Skeleton className="h-5 w-48" /></span> : text.person.apps(finished.length)}>
         <div className="space-y-4">
           <StatusLoadNotice lookup={lookup} />
-          {apps.isError ? (
+          {apps.isRefetchError ? <StaleNotice updatedAt={apps.dataUpdatedAt} refetching={apps.isFetching} onRetry={() => void apps.refetch()} /> : null}
+          {apps.isLoadingError ? (
             <LoadFailed error={apps.error} onRetry={() => void apps.refetch()} />
           ) : loading ? (
             <AppStoreGridSkeleton />

@@ -1,12 +1,12 @@
 // Pending 設定値 changes: the section stages adds, edits and removals and
 // saves them with one PUT of the full user-owned list, like every other
 // settings section saves on 保存.
-import type { ApplicationBranchComponentConfigEntry } from '@appthrust/api-schema/platform-api'
+import type { EnvVariable } from '../../../api/queries/app'
+import { isOneOf } from '../../../model/contracts/build'
+import type { EnvVariableEntry } from '../../../model/contracts/app'
 
-type Entry = ApplicationBranchComponentConfigEntry
-
-/** The PUT body's shape: sensitive values are write-only, so retained secrets go without a value and the server keeps them. */
-export type EnvVariable = { key: string; value?: string; sensitive: boolean }
+type Entry = EnvVariableEntry
+export type { EnvVariable }
 
 export type EnvChange =
   | { kind: 'added'; value: string; sensitive: boolean }
@@ -19,19 +19,28 @@ export type EnvChanges = Readonly<Record<string, EnvChange>>
 /** A table row: the saved entry with its staged change applied. */
 export type EnvRow = Entry & { change?: EnvChange['kind'] }
 
-const userOwned = (entries: readonly Entry[]) => entries.filter((entry) => entry.source === 'user')
+/** Whether the entry is the user's own; a source this console does not know is not. */
+export const isUserOwned = (entry: Pick<Entry, 'source'>) => isOneOf(entry.source, 'user')
+
+/**
+ * Saving PUTs the full user-owned list, so an entry whose source or state this
+ * console does not know could be dropped or overwritten: no save is offered then.
+ */
+export const hasUnsupportedEntry = (entries: readonly Entry[]) => entries.some((entry) => entry.source.kind === 'unknown' || entry.state.kind === 'unknown')
+
+const userOwned = (entries: readonly Entry[]) => entries.filter(isUserOwned)
 
 /** Saved rows with their staged edit or removal, then the staged additions. */
 export function pendingRows(entries: readonly Entry[], changes: EnvChanges): EnvRow[] {
   const rows: EnvRow[] = entries.map((entry) => {
     const change = changes[entry.key]
-    if (!change || entry.source !== 'user') return entry
+    if (!change || !isUserOwned(entry)) return entry
     if (change.kind !== 'edited') return { ...entry, change: change.kind }
     return { ...entry, change: 'edited', sensitive: change.sensitive, value: change.sensitive ? undefined : change.value }
   })
   for (const [key, change] of Object.entries(changes)) {
     if (change.kind !== 'added') continue
-    rows.push({ key, state: 'configured', source: 'user', sensitive: change.sensitive, value: change.sensitive ? undefined : change.value, change: 'added' })
+    rows.push({ key, state: { kind: 'known', value: 'configured' }, source: { kind: 'known', value: 'user' }, sensitive: change.sensitive, value: change.sensitive ? undefined : change.value, change: 'added' })
   }
   return rows
 }
@@ -76,4 +85,23 @@ export function stageRemove(changes: EnvChanges, key: string): EnvChanges {
 /** 戻す: drop one staged change. */
 export function unstage(changes: EnvChanges, key: string): EnvChanges {
   return Object.fromEntries(Object.entries(changes).filter(([staged]) => staged !== key))
+}
+
+/**
+ * The staged changes read against the saved list as it is now. A save whose
+ * answer could not be read may have happened (or another tab saved): an
+ * addition whose key is now saved becomes an edit of that value, dropped when
+ * the value is already saved or the key is not the user's, so neither the rows
+ * nor the next PUT ever carry a key twice.
+ */
+export function rebaseChanges(entries: readonly Entry[], changes: EnvChanges): EnvChanges {
+  let rebased = changes
+  for (const [key, change] of Object.entries(changes)) {
+    if (change.kind !== 'added' || !entries.some((entry) => entry.key === key)) continue
+    rebased = unstage(rebased, key)
+    const saved = userOwned(entries).find((entry) => entry.key === key)
+    const same = saved && !saved.sensitive && !change.sensitive && saved.value === change.value
+    if (saved && !same) rebased = { ...rebased, [key]: { kind: 'edited', value: change.value, sensitive: change.sensitive } }
+  }
+  return rebased
 }

@@ -1,8 +1,9 @@
 // Step 0: describe the job, choose a business template, or publish existing work.
-import type { ApplicationDraftCreationToolRegistryResponse, ApplicationTemplateSummary } from '@appthrust/api-schema/platform-api'
+import type { CreationTools, TemplateSummary } from '../../../model/contracts/catalog'
+import { isOneOf } from '../../../model/contracts/build'
 import { useStore } from '@tanstack/react-form'
 import { ArrowRight, Check, FileSpreadsheet, FolderGit2, Settings, Sparkles } from 'lucide-react'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { copy } from '../../../copy'
 import { aiPolicyExplanation } from '../../../copy/ai-policy'
 import { DEFAULT_TEMPLATE_ID, templateUsableFor, type CreateEntry } from '../../../model/create'
@@ -14,17 +15,19 @@ import { joinBusinessTemplates, type BusinessTemplate } from '../templates'
 
 export type EntryBlocks = Record<CreateEntry, string | undefined>
 
-export function StartStep({ form, disabled, loading, catalogFailed, onRetryCatalog, blocked, setupLink, catalog, codexAvailable, codexUnavailableReason, codexPolicy, onBuild, onCustomize, startingBuild, onTemplate, onExisting, onUseImage }: {
+export function StartStep({ form, disabled, loading, catalogFailed, onRetryCatalog, stale, blocked, setupLink, catalog, codexAvailable, codexUnavailableReason, codexPolicy, onBuild, onCustomize, startingBuild, onTemplate, onExisting, onUseImage }: {
   form: CreateFormApi
   disabled: boolean
   loading: boolean
   catalogFailed: boolean
   onRetryCatalog: () => void
+  /** The "could not update" notice while a re-read of the shown catalog failed: every create entry waits for a fresh read. */
+  stale: ReactNode
   blocked: EntryBlocks
   setupLink: boolean
-  catalog: ApplicationTemplateSummary[]
+  catalog: TemplateSummary[]
   codexAvailable: boolean
-  codexUnavailableReason?: ApplicationDraftCreationToolRegistryResponse['codexUnavailableReason']
+  codexUnavailableReason?: CreationTools['codexUnavailableReason']
   codexPolicy?: string
   onBuild: () => void
   onCustomize: (template: BusinessTemplate) => void
@@ -35,9 +38,10 @@ export function StartStep({ form, disabled, loading, catalogFailed, onRetryCatal
 }) {
   const values = useStore(form.store, (state) => state.values)
   const [framework, setFramework] = useState(DEFAULT_TEMPLATE_ID)
-  const ready = (entry: CreateEntry) => !disabled && !loading && !catalogFailed && !blocked[entry]
+  const ready = (entry: CreateEntry) => !disabled && !loading && !catalogFailed && !stale && !blocked[entry]
   const templates = joinBusinessTemplates(catalog)
-  const frameworks = catalog.filter((item) => item.category !== 'business' && item.sourceKinds.includes('github-template'))
+  // An omitted category is a framework template (canonical rule); an unknown one is neither.
+  const frameworks = catalog.filter((item) => (item.category === undefined || isOneOf(item.category, 'framework')) && item.sourceKinds.some((kind) => isOneOf(kind, 'github-template')))
   const setupAction = setupLink ? <LinkButton to="/-/admin/platform" size="sm" icon={<Settings className="size-4" />}>{text.openPlatform}</LinkButton> : undefined
   const reasons = [...new Set([blocked.existing, blocked.template].filter((reason) => reason !== undefined))]
   const policyExplanation = aiPolicyExplanation(codexUnavailableReason, codexPolicy)
@@ -65,6 +69,7 @@ export function StartStep({ form, disabled, loading, catalogFailed, onRetryCatal
 
       <section aria-labelledby="business-templates-title">
         <h3 id="business-templates-title" className="mb-3 text-sm font-semibold text-stone-900">{copy.create.start.popular}</h3>
+        {stale ? <div className="mb-3">{stale}</div> : null}
         {loading ? <div className="grid gap-3 sm:grid-cols-2" aria-busy>{[0, 1, 2, 3].map((id) => <Skeleton key={id} className="h-48" />)}</div> : (
           <div className="grid gap-3 sm:grid-cols-2">
             {templates.map((template) => {
@@ -75,7 +80,7 @@ export function StartStep({ form, disabled, loading, catalogFailed, onRetryCatal
               const Icon = template.icon
               return (
                 <div key={template.id} className="flex flex-col gap-2">
-                <button type="button" aria-pressed={selected} disabled={disabled || catalogFailed || Boolean(reason)} onClick={() => onTemplate(template.id)} className={`relative flex flex-1 flex-col rounded-lg border p-4 text-left transition-colors focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:bg-stone-50 ${selected ? 'border-accent bg-accent-soft' : 'border-stone-200 hover:border-stone-400'}`} data-testid={`template-${template.id}`}>
+                <button type="button" aria-pressed={selected} disabled={disabled || catalogFailed || Boolean(stale) || Boolean(reason)} onClick={() => onTemplate(template.id)} className={`relative flex flex-1 flex-col rounded-lg border p-4 text-left transition-colors focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:bg-stone-50 ${selected ? 'border-accent bg-accent-soft' : 'border-stone-200 hover:border-stone-400'}`} data-testid={`template-${template.id}`}>
                   <span className="flex items-center gap-2 font-semibold text-stone-900"><Icon aria-hidden className="size-5 text-accent-strong" />{template.name}{selected ? <Check aria-hidden className="ml-auto size-4 text-accent-strong" /> : null}</span>
                   <span className="mt-2 text-sm leading-relaxed text-stone-600">{template.lead}</span>
                   <span className="mt-3 text-xs font-medium text-stone-500">{copy.create.start.includes}</span>

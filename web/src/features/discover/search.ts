@@ -1,4 +1,4 @@
-import type { BusinessApp, DirectoryEntry } from '../../api/console-unverified'
+import { isUnknownPerson, type BusinessApp, type DirectoryEntry } from '../../model/contracts/console'
 
 type SearchableApp = Pick<BusinessApp, 'displayName' | 'description' | 'group' | 'tags' | 'capabilities' | 'owners'>
 
@@ -15,7 +15,7 @@ export function matchesDirectoryEntrySearch(entry: DirectoryEntry, query: string
 function matchesSearch(app: SearchableApp, path: string, query: string): boolean {
   const words = query.normalize('NFKC').toLocaleLowerCase('ja').trim().split(/\s+/).filter(Boolean)
   const searchable = [app.displayName, app.description, path, app.group.name, app.group.path, ...app.tags,
-    ...app.capabilities, ...app.owners.flatMap((owner) => [owner.displayName, owner.email])]
+    ...app.capabilities, ...app.owners.flatMap((owner) => (isUnknownPerson(owner) ? [] : [owner.displayName, owner.email]))]
     .join('\n').normalize('NFKC').toLocaleLowerCase('ja')
   return words.every((word) => searchable.includes(word))
 }

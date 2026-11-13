@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { FolderTree } from 'lucide-react'
 import type { Group } from '../../model/contracts/console'
+import { isOneOf } from '../../model/contracts/build'
 import { directoryAppsQuery, membersQuery } from '../../api/queries/console'
 import { copy, relativeTime } from '../../copy'
 import { isFinished, makersOf, storeOrder, storeScore, type Maker } from '../../model/directory'
@@ -11,6 +12,7 @@ import { useAppViews } from '../app/use-app-views'
 import { StatusLoadNotice } from './app-list'
 import { AppStoreGrid, AppStoreGridSkeleton } from './app-store-card'
 import { text } from './copy'
+import { StaleNotice } from '../app/notices'
 
 /** The group's introduction (written in the Directory), its contacts, makers and finished apps. */
 export function GroupFront({ group, subgroups }: { group: Group; subgroups: Group[] }) {
@@ -18,7 +20,7 @@ export function GroupFront({ group, subgroups }: { group: Group; subgroups: Grou
   const members = useQuery(membersQuery(group.id))
   const apps = useQuery(directoryAppsQuery({ groupId: group.id }))
   const lookup = useAppViews(me.projectId)
-  const contacts = members.data?.filter((member) => member.inheritedFrom == null && member.role === 'manager') ?? []
+  const contacts = members.data?.filter((member) => member.inheritedFrom == null && isOneOf(member.role, 'manager')) ?? []
   const finished = storeOrder((apps.data ?? []).filter((entry) => isFinished(lookup.viewFor(entry))))
   const introduced = finished.filter((entry) => storeScore(entry) > 0)
   const trial = finished.filter((entry) => storeScore(entry) === 0)
@@ -32,7 +34,7 @@ export function GroupFront({ group, subgroups }: { group: Group; subgroups: Grou
         {group.about.trim() ? <Markdown source={group.about} /> : <EmptyState title={copy.group.aboutEmpty} />}
         {members.isPending ? (
           <div role="status" aria-label={copy.common.loading}><Skeleton className="h-4 w-48" /></div>
-        ) : members.isError ? (
+        ) : members.isLoadingError ? (
           <LoadFailed error={members.error} onRetry={() => void members.refetch()} />
         ) : contacts.length > 0 ? (
           <p className="text-sm text-stone-600">{copy.group.contacts}: {contacts.map((member) => member.person.displayName).join('、')}</p>
@@ -46,15 +48,16 @@ export function GroupFront({ group, subgroups }: { group: Group; subgroups: Grou
         ) : null}
       </section>
 
-      {!loadingApps && !apps.isError && makers.length > 0 ? <MakerRow makers={makers} /> : null}
+      {!loadingApps && !apps.isLoadingError && makers.length > 0 ? <MakerRow makers={makers} /> : null}
 
       <Section
-        title={apps.isError ? copy.group.apps : loadingApps ? <span aria-label={copy.common.loading}><Skeleton className="h-5 w-64" /></span> : copy.group.finishedApps(finished.length)}
+        title={apps.isLoadingError ? copy.group.apps : loadingApps ? <span aria-label={copy.common.loading}><Skeleton className="h-5 w-64" /></span> : copy.group.finishedApps(finished.length)}
         actions={<HrefLink href={paths.group(group.path, 'apps')} className="inline-flex min-h-10 items-center text-sm font-medium text-accent-strong hover:underline">{copy.group.all}</HrefLink>}
       >
         <div className="space-y-4">
           <StatusLoadNotice lookup={lookup} />
-          {apps.isError ? (
+          {apps.isRefetchError ? <StaleNotice updatedAt={apps.dataUpdatedAt} refetching={apps.isFetching} onRetry={() => void apps.refetch()} /> : null}
+          {apps.isLoadingError ? (
             <LoadFailed error={apps.error} onRetry={() => void apps.refetch()} />
           ) : loadingApps ? (
             <AppStoreGridSkeleton />

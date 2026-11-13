@@ -19,6 +19,13 @@ export const textJa = {
   },
   alreadyCreated: (name: string) => `this app was already created as "${name}"; finish it with that URL name`,
   sourceUnavailable: 'source connections unavailable',
+  /** A create step answered 2xx with an answer this console cannot read: it may have happened (never resent blindly). */
+  unconfirmed: {
+    title: '作成の結果を確認できませんでした',
+    body: '作成の操作は届いているかもしれません。同じものを二重に作らないよう、最新の状態を確かめてから続けてください。',
+    confirm: '最新の状態を確認する',
+    stillUnknown: 'まだ最新の状態を確認できません。少し待ってから、もう一度確認してください。',
+  },
   loadingDraft: '作成途中のアプリを読み込んでいます…',
   pageTitle: (step: number) => `新しいアプリ (${step}/4)`,
   unsavedChanges: '入力した内容は保存されていません。この画面を離れますか？',

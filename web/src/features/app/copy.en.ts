@@ -179,4 +179,19 @@ export const textEn: typeof textJa = {
     jumpLatest: 'Jump to latest',
     region: 'App logs',
   },
+  unsupported: {
+    status: 'This state is not supported on this screen yet.',
+    label: 'Status unknown',
+    releasePhase: 'Unknown',
+    share: 'This screen cannot handle the sharing setting, so it cannot be changed here.',
+    env: 'Some settings cannot be handled on this screen, so saving is paused.',
+    tools: 'This screen cannot handle the state of Tools.',
+    role: 'Role unknown',
+    request: 'This screen cannot handle the state of this request.',
+  },
+  unconfirmed: {
+    title: 'Could not confirm the result',
+    reason: 'What you sent may have arrived. Check the latest state before continuing. Nothing is repeated automatically.',
+    confirm: 'Check the latest state',
+  },
 }

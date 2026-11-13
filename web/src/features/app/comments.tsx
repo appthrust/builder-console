@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { MoreHorizontal, Trash2 } from 'lucide-react'
 import { useId, useState } from 'react'
 import { isConsoleError } from '../../api/console'
-import { isUnknownPerson, membershipRoots, type AppComment, type Group, type Me, type Person } from '../../model/contracts/console'
+import { isUnknownPerson, membershipRoots, type AppComment, type Group, type Me, type PersonRef } from '../../model/contracts/console'
 import { commentsQuery, useGroups, useMe } from '../../api/queries/console'
 import { copy, relativeTime } from '../../copy'
 import { ActionError, Avatar, Button, ConfirmDialog, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, IconButton, Notice, ResourceBoundary, Section, TextArea } from '../../ui'
@@ -42,7 +42,7 @@ export function commentErrorText(error: unknown): string | undefined {
   return undefined
 }
 
-type CommentsProps = { appId: string; owners: Person[]; canDeleteAny: boolean }
+type CommentsProps = { appId: string; owners: readonly PersonRef[]; canDeleteAny: boolean }
 
 /** Shared by the guide and the directory entry; never needs the full app or its visibility policy. */
 export function Comments(props: CommentsProps) {
@@ -62,7 +62,8 @@ function CommentThread({ appId, owners, canDeleteAny }: CommentsProps) {
   const id = useId()
   const input = commentInput(body)
   const department = commentDepartment(me, groups)
-  const ownerIds = new Set(owners.map((owner) => owner.id))
+  // An owner the server can no longer resolve is not marked as one.
+  const ownerIds = new Set(owners.filter((owner) => !isUnknownPerson(owner)).map((owner) => owner.id))
   const showCounter = input.length > COMMENT_COUNTER_THRESHOLD
   const title = comments.data ? text.comments.title(comments.data.length) : text.comments.loadingTitle
 

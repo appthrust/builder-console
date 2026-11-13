@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
-import { ConsoleApiError, createConsoleTransport } from '../../api/console'
-import { createConsoleApi, type CreateAppInput } from '../../api/console-unverified'
+import { ConsoleApiError } from '../../api/console'
+import { createCreateApi, type CreateAppInput } from '../../api/create'
+import { createTestGateway } from '../../api/testing/gateway'
 import { consoleRoutes } from '../../dev/mock-console'
 import type { AppDetails } from '../create/submit'
 import { bindCreatedConsoleApp, ConsoleAppCreationError } from './bind-created-console-app'
@@ -32,11 +33,10 @@ beforeEach(async () => {
 afterEach(async () => { await fetchConsole('/api/console/__mock/reset', { method: 'POST' }) })
 
 function harness(createdAppId?: string) {
-  const api = createConsoleApi(createConsoleTransport(fetchConsole))
+  const api = createCreateApi(createTestGateway({ consoleFetch: fetchConsole }))
   const apps = {
-    ...api.apps,
-    list: mock(api.apps.list), get: mock(api.apps.get), create: mock(api.apps.create),
-    update: mock(api.apps.update), bind: mock(api.apps.bind),
+    list: mock(api.myApps), get: mock(api.app), create: mock(api.createApp),
+    update: mock(api.updateApp), bind: mock(api.bindApp),
   }
   const values = new Map<string, string>()
   const storage = {
@@ -47,7 +47,7 @@ function harness(createdAppId?: string) {
   saveBuildSession(draftId, session, storage)
   const savedIds: Array<string | undefined> = []
   const deps = {
-    console: apps,
+    api: { myApps: apps.list, app: apps.get, createApp: apps.create, updateApp: apps.update, bindApp: apps.bind },
     onCreatedAppId: (createdAppId: string | undefined) => {
       session = { ...session, createdAppId }
       savedIds.push(createdAppId)
@@ -71,7 +71,7 @@ describe('bindCreatedConsoleApp', () => {
 
   test.each(['list', 'update', 'bind'] as const)('a %s not_found remains unmarked', async (operation) => {
     const h = harness()
-    const existing = operation === 'update' ? await h.api.apps.create({ ...input, displayName: 'Earlier name' }) : undefined
+    const existing = operation === 'update' ? await h.api.createApp({ ...input, displayName: 'Earlier name' }) : undefined
     const resumed = existing ? harness(existing.id) : h
     const error = new ConsoleApiError(404, { error: 'not_found', message: 'The requested resource was not found' })
     resumed.apps[operation].mockRejectedValueOnce(error)
@@ -90,11 +90,11 @@ describe('bindCreatedConsoleApp', () => {
     const h = harness('deleted-console-record')
     h.apps.create.mockImplementation(async (input) => {
       expect(h.saved().createdAppId).toBeUndefined()
-      return h.api.apps.create(input)
+      return h.api.createApp(input)
     })
     h.apps.bind.mockImplementation(async (appId, binding) => {
       expect(h.saved().createdAppId).toBe(appId)
-      return h.api.apps.bind(appId, binding)
+      return h.api.bindApp(appId, binding)
     })
     const app = await h.run()
     expect(h.apps.get.mock.calls).toEqual([['deleted-console-record']])
@@ -104,7 +104,7 @@ describe('bindCreatedConsoleApp', () => {
     expect(app).toMatchObject({ stackId, appName: request.urlName, slug: request.urlName })
     expect(h.savedIds).toEqual([undefined, app.id])
     expect(h.saved().createdAppId).toBe(app.id)
-    expect(await h.api.apps.get(app.id)).toEqual(app)
+    expect(await h.api.app(app.id)).toEqual(app)
   })
 
   test.each([
@@ -126,10 +126,10 @@ describe('bindCreatedConsoleApp', () => {
 
   test('an existing stack binding wins over the stale id and missing plan name, without creating or rebinding', async () => {
     const h = harness('deleted-console-record')
-    const existing = await h.api.apps.create(input)
-    const bound = await h.api.apps.bind(existing.id, { stackId, appName: request.urlName })
+    const existing = await h.api.createApp(input)
+    const bound = await h.api.bindApp(existing.id, { stackId, appName: request.urlName })
     expect(await h.run({ ...request, urlName: '' })).toEqual(bound)
-    expect(h.apps.list.mock.calls).toEqual([[{ scope: 'mine' }]])
+    expect(h.apps.list).toHaveBeenCalledTimes(1)
     expect(h.apps.get).not.toHaveBeenCalled()
     expect(h.apps.create).not.toHaveBeenCalled()
     expect(h.apps.update).not.toHaveBeenCalled()
@@ -139,36 +139,36 @@ describe('bindCreatedConsoleApp', () => {
 
   test('a slug conflict reuses an owned unbound record in the requested group', async () => {
     const h = harness('deleted-console-record')
-    const existing = await h.api.apps.create(input)
+    const existing = await h.api.createApp(input)
     const app = await h.run()
     expect(app).toMatchObject({ id: existing.id, stackId, appName: request.urlName })
     expect(h.apps.create).toHaveBeenCalledTimes(1)
-    expect(h.apps.list.mock.calls).toEqual([[{ scope: 'mine' }], [{ scope: 'mine' }]])
+    expect(h.apps.list).toHaveBeenCalledTimes(2)
     expect(h.apps.bind.mock.calls).toEqual([[existing.id, { stackId, appName: request.urlName }]])
     expect(h.savedIds).toEqual([undefined, existing.id])
     expect(h.saved().createdAppId).toBe(existing.id)
-    expect((await h.api.apps.list({ scope: 'mine' })).filter((app) => app.slug === request.urlName)).toHaveLength(1)
+    expect((await h.api.myApps()).filter((app) => app.slug === request.urlName)).toHaveLength(1)
   })
 
   test('an update slug conflict also reuses the existing unbound record', async () => {
     const h = harness()
-    const previous = await h.api.apps.create({ ...input, slug: 'old-inspection-name' })
-    const existing = await h.api.apps.create(input)
+    const previous = await h.api.createApp({ ...input, slug: 'old-inspection-name' })
+    const existing = await h.api.createApp(input)
     // Resume from the previous record, whose rename now collides.
     const resumed = harness(previous.id)
     expect(await resumed.run()).toMatchObject({ id: existing.id, stackId })
     expect(resumed.apps.create).not.toHaveBeenCalled()
     expect(resumed.apps.update).toHaveBeenCalledTimes(1)
     expect(resumed.savedIds).toEqual([existing.id])
-    expect((await h.api.apps.get(previous.id)).stackId).toBeNull()
+    expect((await h.api.app(previous.id)).stackId).toBeNull()
   })
 
   test('a record bound to the same stack during creation is reused without rebinding', async () => {
     const h = harness()
-    const existing = await h.api.apps.create(input)
+    const existing = await h.api.createApp(input)
     h.apps.create.mockImplementation(async (input) => {
-      await h.api.apps.bind(existing.id, { stackId, appName: request.urlName })
-      return h.api.apps.create(input)
+      await h.api.bindApp(existing.id, { stackId, appName: request.urlName })
+      return h.api.createApp(input)
     })
     expect(await h.run()).toMatchObject({ id: existing.id, stackId })
     expect(h.apps.bind).not.toHaveBeenCalled()
@@ -177,26 +177,26 @@ describe('bindCreatedConsoleApp', () => {
 
   test('a slug collision bound to another stack stays a slug_taken failure and is never rebound', async () => {
     const h = harness()
-    const existing = await h.api.apps.create(input)
-    const bound = await h.api.apps.bind(existing.id, { stackId: 'another-stack', appName: request.urlName })
+    const existing = await h.api.createApp(input)
+    const bound = await h.api.bindApp(existing.id, { stackId: 'another-stack', appName: request.urlName })
     await expect(h.run()).rejects.toMatchObject({ status: 409, code: 'slug_taken' })
     expect(h.apps.bind).not.toHaveBeenCalled()
     expect(h.savedIds).toEqual([])
-    expect(await h.api.apps.get(existing.id)).toEqual(bound)
+    expect(await h.api.app(existing.id)).toEqual(bound)
   })
 
   test('a slug conflict cannot adopt a same-slug record from another group or another owner', async () => {
     const h = harness()
-    const otherGroup = await h.api.apps.create({ ...input, groupId: 'g-sales-east' })
+    const otherGroup = await h.api.createApp({ ...input, groupId: 'g-sales-east' })
     await fetchConsole('/api/console/__mock/caller', { method: 'POST', body: JSON.stringify({ personId: 'p-suzuki', role: 'Editor' }) })
-    const otherOwner = await h.api.apps.create(input)
+    const otherOwner = await h.api.createApp(input)
     await fetchConsole('/api/console/__mock/caller', { method: 'POST', body: JSON.stringify({ personId: 'p-yamada', role: 'Editor' }) })
     await expect(h.run()).rejects.toMatchObject({ status: 409, code: 'slug_taken' })
     expect(h.apps.bind).not.toHaveBeenCalled()
     expect(h.savedIds).toEqual([])
-    expect((await h.api.apps.get(otherGroup.id)).stackId).toBeNull()
+    expect((await h.api.app(otherGroup.id)).stackId).toBeNull()
     await fetchConsole('/api/console/__mock/caller', { method: 'POST', body: JSON.stringify({ personId: 'p-suzuki', role: 'Editor' }) })
-    expect((await h.api.apps.get(otherOwner.id)).stackId).toBeNull()
+    expect((await h.api.app(otherOwner.id)).stackId).toBeNull()
   })
 
   test('a failed bind keeps the fresh record id so retry reuses it', async () => {

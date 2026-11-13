@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test'
-import type { ApplicationBranchComponentConfigEntry } from '@appthrust/api-schema/platform-api'
-import { pendingRows, stageAdd, stageEdit, stageRemove, unstage, variablesToSave, type EnvChanges } from './env-changes'
+import { configOf } from '../../../api/testing/app-domain'
+import { hasUnsupportedEntry, pendingRows, rebaseChanges, stageAdd, stageEdit, stageRemove, unstage, variablesToSave, type EnvChanges } from './env-changes'
 
-const entries: ApplicationBranchComponentConfigEntry[] = [
+const entries = configOf({ revision: 'r1', variables: [
   { key: 'APP_TITLE', state: 'configured', source: 'user', sensitive: false, value: 'mitsumori' },
   { key: 'API_TOKEN', state: 'configured', source: 'user', sensitive: true },
   { key: 'DATABASE_URL', state: 'generated', source: 'generated', sensitive: true },
-]
+] }).variables
 
 describe('pending env changes', () => {
   test('nothing staged saves the user-owned list unchanged (secrets without their value)', () => {
@@ -51,5 +51,49 @@ describe('pending env changes', () => {
     const removed = stageRemove({}, 'APP_TITLE')
     expect(stageAdd(entries, removed, 'APP_TITLE', 'again', true)).toEqual({ APP_TITLE: { kind: 'edited', value: 'again', sensitive: true } })
     expect(unstage(removed, 'APP_TITLE')).toEqual({})
+  })
+})
+
+describe('entries this console does not know', () => {
+  const future = configOf({ revision: 'r2', variables: [
+    { key: 'APP_TITLE', state: 'configured', source: 'user', sensitive: false, value: 'mitsumori' },
+    { key: 'MANAGED_BY_POLICY', state: 'configured', source: 'policy', sensitive: false, value: 'x' },
+  ] }).variables
+
+  test('an unknown source is never the user\'s own: not edited and not saved', () => {
+    expect(variablesToSave(future, {})).toEqual([{ key: 'APP_TITLE', value: 'mitsumori', sensitive: false }])
+    expect(stageEdit(future, {}, 'MANAGED_BY_POLICY', 'y')).toEqual({})
+  })
+
+  test('saving the full user-owned list is not offered while any entry is unknown', () => {
+    expect(hasUnsupportedEntry(entries)).toBe(false)
+    expect(hasUnsupportedEntry(future)).toBe(true)
+    expect(hasUnsupportedEntry(configOf({ revision: 'r3', variables: [{ key: 'A', state: 'rotating', source: 'user', sensitive: true }] }).variables)).toBe(true)
+  })
+})
+
+describe('staged changes after a save whose answer could not be read', () => {
+  const saved = (variables: unknown[]) => configOf({ revision: 'r4', variables: [
+    { key: 'APP_TITLE', state: 'configured', source: 'user', sensitive: false, value: 'mitsumori' },
+    { key: 'DATABASE_URL', state: 'generated', source: 'generated', sensitive: true },
+    ...variables,
+  ] }).variables
+
+  test('an addition the read-back shows saved is not shown or sent twice', () => {
+    const changes = stageAdd(entries, {}, 'FEATURE_FLAG', 'on', false)
+    const after = saved([{ key: 'FEATURE_FLAG', state: 'configured', source: 'user', sensitive: false, value: 'on' }])
+    expect(rebaseChanges(after, changes)).toEqual({})
+    expect(pendingRows(after, rebaseChanges(after, changes)).filter((row) => row.key === 'FEATURE_FLAG')).toHaveLength(1)
+    expect(variablesToSave(after, rebaseChanges(after, changes)).filter((item) => item.key === 'FEATURE_FLAG')).toEqual([{ key: 'FEATURE_FLAG', value: 'on', sensitive: false }])
+  })
+
+  test('an addition saved with another value becomes an edit of it; one the user does not own is dropped', () => {
+    const changes = stageAdd(entries, stageAdd(entries, {}, 'FEATURE_FLAG', 'on', false), 'DATABASE_HOST', 'x', false)
+    const after = saved([
+      { key: 'FEATURE_FLAG', state: 'configured', source: 'user', sensitive: false, value: 'off' },
+      { key: 'DATABASE_HOST', state: 'generated', source: 'generated', sensitive: true },
+    ])
+    expect(rebaseChanges(after, changes)).toEqual({ FEATURE_FLAG: { kind: 'edited', value: 'on', sensitive: false } })
+    expect(rebaseChanges(entries, changes)).toBe(changes)
   })
 })
