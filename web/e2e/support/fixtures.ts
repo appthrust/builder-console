@@ -47,8 +47,12 @@ export interface MockControl {
 }
 
 function mockControl(request: APIRequestContext): MockControl {
+  // Each control request uses its own connection. The dev server closes an idle
+  // keep-alive socket after a few seconds, and a POST sent on a socket it is
+  // closing fails with ECONNRESET; `advance` is not idempotent, so a retry is not an option.
+  const headers = { connection: 'close' }
   const post = async (path: string, body?: unknown) => {
-    const response = await request.post(path, body === undefined ? {} : { data: body })
+    const response = await request.post(path, body === undefined ? { headers } : { data: body, headers })
     expect(response.ok(), `${path} -> ${response.status()}`).toBe(true)
     return response
   }
