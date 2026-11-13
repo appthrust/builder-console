@@ -46,7 +46,7 @@ export const me = z.strictObject({
   platformUnavailable: observed(z.boolean()), notMember: observed(z.boolean()), teamSlug: observed(text),
   directoryPublicURL: text, migration: migrationCounts.extend({ pending: z.boolean() }),
 })
-export const config = z.strictObject({ projectId: text.max(63).regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/), dashboardUrl: observed(text) })
+export const config = z.strictObject({ projectId: text.max(63).regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/), dashboardUrl: observed(text), newAppConversation: z.boolean() })
 export const comment = z.strictObject({ id, appId: id, author: personRef, body: text, createdAt: text })
 export const accessRequest = z.strictObject({
   id, appId: id, requester: personRef, message: text, status: z.enum(requestStatuses),

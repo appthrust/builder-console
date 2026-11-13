@@ -18,6 +18,7 @@ import (
 	"github.com/appthrust/appserver-go/appserver/launcher"
 	"github.com/appthrust/appserver-go/appserver/link"
 	platform "github.com/appthrust/appserver-go/appserver/platformclient"
+	"github.com/appthrust/builder-console/cmd/server/internal/buildsession"
 	"github.com/appthrust/builder-console/cmd/server/internal/directoryview"
 	"github.com/appthrust/builder-console/cmd/server/internal/domain"
 	"github.com/appthrust/builder-console/cmd/server/internal/store"
@@ -34,6 +35,8 @@ type API struct {
 	appByPathHandler http.HandlerFunc
 	stackMu          sync.Mutex
 	stackURLs        map[string]cachedStackURLs
+	builds           *buildsession.Service
+	installationID   string
 }
 
 type request struct {
@@ -48,6 +51,7 @@ type request struct {
 	access              platform.ProjectAccess
 	bearer              string
 	platformUnavailable bool
+	claims              identity.Identity
 }
 
 type endpoint func(*request) (any, int, error)
@@ -90,6 +94,7 @@ func New(database *store.Store, auth *identity.Authenticator, upstream *platform
 	a.route("POST /api/console/apps/{id}/access-requests/{rid}/approve", true, true, a.approveAccessRequest)
 	a.route("POST /api/console/apps/{id}/access-requests/{rid}/decline", true, true, a.declineAccessRequest)
 	a.route("GET /api/console/admin/platform", false, true, a.settings)
+	a.registerBuildSessions()
 	a.route("/", false, false, func(*request) (any, int, error) { return nil, 0, httpx.NotFound() })
 	return a
 }
@@ -103,6 +108,10 @@ func Unavailable() http.Handler {
 func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if a.links == nil && strings.HasPrefix(r.URL.Path, "/api/console/") && r.URL.Path != "/api/console/openapi.json" {
+		if strings.HasPrefix(r.URL.Path, "/api/console/v1/build-sessions") {
+			writeBuildError(w, directoryError(link.ErrUnavailable))
+			return
+		}
 		httpx.WriteError(w, directoryError(link.ErrUnavailable), "console")
 		return
 	}
@@ -120,12 +129,26 @@ func (a *API) route(pattern string, mutation, needsRoles bool, handler endpoint)
 }
 
 func (a *API) routeHandler(mutation, needsRoles bool, handler endpoint) http.HandlerFunc {
+	return a.routeHandlerMode(mutation, needsRoles, true, handler)
+}
+
+// Build handlers reuse authentication and Directory resolution, but own their
+// short transactions so no external HTTP call occurs inside Store.Do.
+func (a *API) routeHandlerMode(mutation, needsRoles, transactional bool, handler endpoint) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
 		r = r.WithContext(ctx)
 		claims, bearer, err := a.identity.Authenticate(ctx, r.Header.Get("Authorization"))
 		if err != nil {
+			if !transactional {
+				status := http.StatusUnauthorized
+				if errors.Is(err, identity.ErrUnavailable) {
+					status = http.StatusServiceUnavailable
+				}
+				writeBuildError(w, httpx.Fail(status, "unauthorized", "Authentication is required"))
+				return
+			}
 			if errors.Is(err, identity.ErrUnavailable) {
 				httpx.WriteError(w, httpx.Fail(503, "identity_unavailable", "The identity provider is temporarily unavailable"), "console")
 				return
@@ -140,13 +163,28 @@ func (a *API) routeHandler(mutation, needsRoles bool, handler endpoint) http.Han
 		var body any
 		var status int
 		me := r.Method == http.MethodGet && r.URL.Path == "/api/console/me"
-		err = a.withRequest(ctx, claims, bearer, mutation, needsRoles, me, func(state *request) error {
+		run := a.withRequest
+		if !transactional {
+			run = func(ctx context.Context, claims identity.Identity, bearer string, mutation, needsRoles, me bool, handler func(*request) error) error {
+				return a.withResolvedRequest(ctx, claims, bearer, needsRoles, me, true, handler)
+			}
+		}
+		err = run(ctx, claims, bearer, mutation, needsRoles, me, func(state *request) error {
 			state.r, state.w = r, w
+			if !transactional {
+				// Authenticate may normalize the scheme; forwarding must preserve
+				// the exact value that the caller supplied.
+				state.bearer = r.Header.Get("Authorization")
+			}
 			var failure error
 			body, status, failure = handler(state)
 			return failure
 		})
 		if err != nil {
+			if !transactional {
+				writeBuildError(w, err)
+				return
+			}
 			httpx.WriteError(w, directoryError(err), "console")
 			return
 		}
@@ -172,19 +210,34 @@ func (a *API) routeHandler(mutation, needsRoles bool, handler endpoint) http.Han
 // between console routes and capability providers. me retains the self-profile
 // route's degraded-platform and non-member behavior.
 func (a *API) withRequest(ctx context.Context, claims identity.Identity, bearer string, mutation, needsRoles, me bool, handler func(*request) error) error {
-	state := &request{bearer: bearer, directory: a.directory.Session(ctx, bearer)}
+	return a.withResolvedRequest(ctx, claims, bearer, needsRoles, me, false, func(state *request) error {
+		return directoryError(a.store.Do(ctx, mutation, func(tx *store.Tx) error {
+			state.tx = tx
+			tx.DirectoryGroups = state.groups
+			tx.HydratePeople = state.directory.People
+			return handler(state)
+		}))
+	})
+}
+
+func (a *API) withResolvedRequest(ctx context.Context, claims identity.Identity, bearer string, needsRoles, me, fresh bool, handler func(*request) error) error {
+	view := a.directory
+	if fresh {
+		view = directoryview.New(a.links)
+	}
+	state := &request{bearer: bearer, claims: claims, directory: view.Session(ctx, bearer)}
 	var err error
 	if me {
-		self, failure := a.directory.Me(ctx, bearer)
+		self, failure := view.Me(ctx, bearer)
 		err = failure
 		state.person, state.effectiveGroupIDs = self.Person, self.EffectiveGroupIDs
 	} else {
-		state.person, err = a.directory.PersonBySubject(ctx, bearer, claims.Principal.Subject)
+		state.person, err = view.PersonBySubject(ctx, bearer, claims.Principal.Subject)
 		if err == nil && state.person.ID == "" {
 			err = httpx.Fail(403, "unknown_person", "Sign in to Directory before using the console")
 		}
 		if err == nil {
-			state.effectiveGroupIDs, err = a.directory.EffectiveGroups(ctx, bearer, state.person.ID)
+			state.effectiveGroupIDs, err = view.EffectiveGroups(ctx, bearer, state.person.ID)
 		}
 	}
 	if err != nil {
@@ -204,13 +257,13 @@ func (a *API) withRequest(ctx context.Context, claims identity.Identity, bearer 
 			return httpx.Fail(403, "not_project_member", message)
 		}
 	}
-	state.groups, err = a.directory.Groups(ctx, bearer)
+	state.groups, err = view.Groups(ctx, bearer)
 	if err != nil {
 		return directoryError(err)
 	}
 	state.actor = domain.NewActor(state.person.ID, domain.Roles(state.access.Roles), state.effectiveGroupIDs, state.groups)
 	if needsRoles && !state.access.NotMember {
-		profile, failure := a.directory.Profile(ctx, bearer, state.person.ID)
+		profile, failure := view.Profile(ctx, bearer, state.person.ID)
 		if failure != nil {
 			return directoryError(failure)
 		}
@@ -220,12 +273,7 @@ func (a *API) withRequest(ctx context.Context, claims identity.Identity, bearer 
 			}
 		}
 	}
-	return directoryError(a.store.Do(ctx, mutation, func(tx *store.Tx) error {
-		state.tx = tx
-		tx.DirectoryGroups = state.groups
-		tx.HydratePeople = state.directory.People
-		return handler(state)
-	}))
+	return handler(state)
 }
 
 func upstreamError() error {

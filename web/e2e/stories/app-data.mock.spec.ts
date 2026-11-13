@@ -213,7 +213,7 @@ test.describe('App data @app-data', () => {
     // Production /config names the Dashboard's Team settings (cmd/server); the Vite dev config does not.
     const settingsUrl = 'https://dashboard.appthrust.test/dashboard/settings'
     const config = (url: URL) => url.pathname === '/config'
-    await page.route(config, (route) => route.fulfill({ json: { projectId: 'commerce', dashboardUrl: settingsUrl } }))
+    await page.route(config, (route) => route.fulfill({ json: { projectId: 'commerce', dashboardUrl: settingsUrl, newAppConversation: false } }))
     await mock.platform('data', { mode: 'subject-unbound' })
     const notice = page.getByRole('status').filter({ hasText: 'いまのチームメンバー登録では、データへのアクセスが許可されていません' })
     await withExpectedFailures([tablesRefused(412, 'the signed-in subject is not bound to a Team member')], async () => {

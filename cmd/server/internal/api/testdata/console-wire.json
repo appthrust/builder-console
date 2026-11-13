@@ -449,7 +449,8 @@
     "schema": "Config",
     "body": {
       "dashboardUrl": "https://dashboard.example.test/dashboard/settings",
-      "projectId": "project"
+      "projectId": "project",
+      "newAppConversation": false
     }
   },
   {

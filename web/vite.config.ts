@@ -44,7 +44,7 @@ export default defineConfig(({ mode }) => {
             }
             response.setHeader('Content-Type', 'application/json')
             response.setHeader('Cache-Control', 'no-store')
-            response.end(JSON.stringify({ projectId }))
+            response.end(JSON.stringify({ projectId, newAppConversation: false }))
           })
         },
       },

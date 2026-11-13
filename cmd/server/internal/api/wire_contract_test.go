@@ -61,7 +61,7 @@ func consoleWriterFixtures(t *testing.T) []writerFixture {
 		{"migration", "MigrationResult", migrationResponse(directory.ImportResult{})},
 		{"me", "Me", meResponse{Person: person, ProjectID: "project", EffectiveGroupIDs: []string{}, ManagedGroupIDs: []string{}, Migration: store.MigrationStatus{}}},
 		{"me-degraded", "Me", meResponse{Person: person, ProjectID: "project", EffectiveGroupIDs: []string{}, ManagedGroupIDs: []string{}, PlatformUnavailable: true, NotMember: true, TeamSlug: "team"}},
-		{"config", "Config", map[string]string{"projectId": "project", "dashboardUrl": "https://dashboard.example.test/dashboard/settings"}},
+		{"config", "Config", map[string]any{"projectId": "project", "dashboardUrl": "https://dashboard.example.test/dashboard/settings", "newAppConversation": false}},
 		{"comment", "Comment", comment}, {"comments", "CommentList", []domain.AppComment{comment}}, {"empty-comments", "CommentList", []domain.AppComment{}},
 		{"screenshot", "Screenshot", shot}, {"screenshots", "ScreenshotList", []domain.Screenshot{shot}}, {"empty-screenshots", "ScreenshotList", []domain.Screenshot{}},
 		{"requests", "AccessRequestList", []domain.AppAccessRequest{request}}, {"empty-requests", "AccessRequestList", []domain.AppAccessRequest{}},

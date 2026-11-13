@@ -5584,6 +5584,25 @@
               "message"
             ],
             "additionalProperties": false
+          },
+          "plan": {
+            "presence": "optionalObservation",
+            "type": "object",
+            "properties": {
+              "specRevision": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "stale": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "specRevision",
+              "stale"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -5880,6 +5899,25 @@
                   "required": [
                     "error",
                     "message"
+                  ],
+                  "additionalProperties": false
+                },
+                "plan": {
+                  "presence": "optionalObservation",
+                  "type": "object",
+                  "properties": {
+                    "specRevision": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "stale": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "specRevision",
+                    "stale"
                   ],
                   "additionalProperties": false
                 }
@@ -9397,6 +9435,25 @@
               "message"
             ],
             "additionalProperties": false
+          },
+          "plan": {
+            "presence": "optionalObservation",
+            "type": "object",
+            "properties": {
+              "specRevision": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "stale": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "specRevision",
+              "stale"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -12067,10 +12124,14 @@
           "dashboardUrl": {
             "presence": "optionalObservation",
             "type": "string"
+          },
+          "newAppConversation": {
+            "type": "boolean"
           }
         },
         "required": [
-          "projectId"
+          "projectId",
+          "newAppConversation"
         ],
         "additionalProperties": false
       },

@@ -46,12 +46,14 @@ test('groups: the Directory list envelope is required; people in it are always r
 
 test('config: the project id is a DNS label; an unvouched Dashboard link is dropped', () => {
   assertWireContractCases(configContract, [
-    { name: 'project only', variant: 'absent', path: '/dashboardUrl', wire: { projectId: 'pj-1' }, expect: { accept: true, value: { projectId: 'pj-1' } } },
-    { name: 'https link kept', variant: 'present', path: '/dashboardUrl', wire: { projectId: 'pj-1', dashboardUrl: 'https://dash.example.test/s' }, expect: { accept: true, value: { projectId: 'pj-1', dashboardUrl: 'https://dash.example.test/s' } } },
-    { name: 'script link dropped', variant: 'unknown', path: '/dashboardUrl', wire: { projectId: 'pj-1', dashboardUrl: 'javascript:alert(1)' }, expect: { accept: true, value: { projectId: 'pj-1' } } },
-    { name: 'project absent', variant: 'absent', path: '/projectId', wire: {}, expect: { accept: false, issues: [{ path: '/projectId', code: 'missing' }] } },
-    { name: 'project null', variant: 'null', path: '/projectId', wire: { projectId: null }, expect: { accept: false, issues: [{ path: '/projectId', code: 'invalid_type' }] } },
-    { name: 'project not a DNS label', variant: 'unknown', path: '/projectId', wire: { projectId: `x/${SECRET}` }, expect: { accept: false, issues: [{ path: '/projectId', code: 'invalid_value' }] } },
+    { name: 'project only', variant: 'absent', path: '/dashboardUrl', wire: { projectId: 'pj-1', newAppConversation: false }, expect: { accept: true, value: { projectId: 'pj-1', newAppConversation: false } } },
+    { name: 'https link kept', variant: 'present', path: '/dashboardUrl', wire: { projectId: 'pj-1', newAppConversation: true, dashboardUrl: 'https://dash.example.test/s' }, expect: { accept: true, value: { projectId: 'pj-1', newAppConversation: true, dashboardUrl: 'https://dash.example.test/s' } } },
+    { name: 'script link dropped', variant: 'unknown', path: '/dashboardUrl', wire: { projectId: 'pj-1', newAppConversation: false, dashboardUrl: 'javascript:alert(1)' }, expect: { accept: true, value: { projectId: 'pj-1', newAppConversation: false } } },
+    { name: 'project absent', variant: 'absent', path: '/projectId', wire: { newAppConversation: false }, expect: { accept: false, issues: [{ path: '/projectId', code: 'missing' }] } },
+    { name: 'project null', variant: 'null', path: '/projectId', wire: { projectId: null, newAppConversation: false }, expect: { accept: false, issues: [{ path: '/projectId', code: 'invalid_type' }] } },
+    { name: 'project not a DNS label', variant: 'unknown', path: '/projectId', wire: { projectId: `x/${SECRET}`, newAppConversation: false }, expect: { accept: false, issues: [{ path: '/projectId', code: 'invalid_value' }] } },
+    { name: 'conversation capability absent', variant: 'absent', path: '/newAppConversation', wire: { projectId: 'pj-1' }, expect: { accept: false, issues: [{ path: '/newAppConversation', code: 'missing' }] } },
+    { name: 'conversation capability is not coerced', variant: 'unknown', path: '/newAppConversation', wire: { projectId: 'pj-1', newAppConversation: 'on' }, expect: { accept: false, issues: [{ path: '/newAppConversation', code: 'invalid_type' }] } },
   ])
 })
 

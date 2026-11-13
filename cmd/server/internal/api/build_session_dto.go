@@ -48,25 +48,31 @@ type BuildCapabilities struct {
 	CanRequestPlan bool `json:"canRequestPlan"`
 }
 
+type BuildPlanObservation struct {
+	SpecRevision int64 `json:"specRevision"`
+	Stale        bool  `json:"stale"`
+}
+
 type BuildSession struct {
-	ID            string             `json:"id"`
-	Kind          string             `json:"kind"`
-	Engine        string             `json:"engine"`
-	Version       int64              `json:"version"`
-	Lifecycle     string             `json:"lifecycle"`
-	GroupID       string             `json:"groupId"`
-	Locale        string             `json:"locale"`
-	CreatedAt     string             `json:"createdAt"`
-	UpdatedAt     string             `json:"updatedAt"`
-	ArchivedAt    *string            `json:"archivedAt,omitempty"`
-	DraftID       *string            `json:"draftId,omitempty"`
-	Specification BuildSpecification `json:"specification"`
-	ActiveTurnID  *string            `json:"activeTurnId,omitempty"`
-	Projection    BuildProjection    `json:"projection"`
-	Capabilities  BuildCapabilities  `json:"capabilities"`
-	NextAction    string             `json:"nextAction"`
-	PollAfterMS   *int64             `json:"pollAfterMs,omitempty"`
-	Failure       *BuildError        `json:"failure,omitempty"`
+	ID            string                `json:"id"`
+	Kind          string                `json:"kind"`
+	Engine        string                `json:"engine"`
+	Version       int64                 `json:"version"`
+	Lifecycle     string                `json:"lifecycle"`
+	GroupID       string                `json:"groupId"`
+	Locale        string                `json:"locale"`
+	CreatedAt     string                `json:"createdAt"`
+	UpdatedAt     string                `json:"updatedAt"`
+	ArchivedAt    *string               `json:"archivedAt,omitempty"`
+	DraftID       *string               `json:"draftId,omitempty"`
+	Specification BuildSpecification    `json:"specification"`
+	ActiveTurnID  *string               `json:"activeTurnId,omitempty"`
+	Projection    BuildProjection       `json:"projection"`
+	Capabilities  BuildCapabilities     `json:"capabilities"`
+	NextAction    string                `json:"nextAction"`
+	PollAfterMS   *int64                `json:"pollAfterMs,omitempty"`
+	Failure       *BuildError           `json:"failure,omitempty"`
+	Plan          *BuildPlanObservation `json:"plan,omitempty"`
 }
 
 // Typed structural validation context, also used by the cross-language corpus.

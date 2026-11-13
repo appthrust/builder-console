@@ -24,7 +24,7 @@ const configReader: z.ZodType<ConsoleConfig> = config.strip().extend({
   })
   .transform((config): ConsoleConfig => {
     const dashboardUrl = httpUrl(config.dashboardUrl)
-    return dashboardUrl ? { projectId: config.projectId, dashboardUrl } : { projectId: config.projectId }
+    return { projectId: config.projectId, newAppConversation: config.newAppConversation, ...(dashboardUrl ? { dashboardUrl } : {}) }
   })
 
 export const configContract = consoleContract({

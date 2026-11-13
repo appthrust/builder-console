@@ -76,6 +76,7 @@ export type Me = {
 export interface ConsoleConfig {
   projectId: string
   dashboardUrl?: string
+  newAppConversation: boolean
 }
 
 /** Unknown states carry no wire string and never grant permission. */

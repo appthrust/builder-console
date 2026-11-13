@@ -80,11 +80,11 @@ func TestConfigShapeAndLocalRouting(t *testing.T) {
 	defer upstream.Close()
 	w := httptest.NewRecorder()
 	testHandler(t, upstream.URL).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/config", nil))
-	var got map[string]string
+	var got map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if w.Code != http.StatusOK || len(got) != 2 || got["projectId"] != "pj-eee7fa8eabbc" || got["dashboardUrl"] != upstream.URL+"/dashboard/settings" || w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Content-Type") != "application/json" {
+	if w.Code != http.StatusOK || len(got) != 3 || got["projectId"] != "pj-eee7fa8eabbc" || got["dashboardUrl"] != upstream.URL+"/dashboard/settings" || got["newAppConversation"] != false || w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Content-Type") != "application/json" {
 		t.Fatalf("status=%d config=%v headers=%v", w.Code, got, w.Header())
 	}
 }
@@ -417,6 +417,7 @@ func TestDatabaseURLFallbackIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer closeConsole()
+	waitConsoleReady(t, console)
 	w := httptest.NewRecorder()
 	console.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/console/me", nil))
 	if w.Code != 401 {

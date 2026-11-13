@@ -188,6 +188,7 @@ Contract choices where the design left a shape or bound implicit:
 - Session requires `groupId`, `locale`, `createdAt`, `updatedAt` in addition to
   its illustrated fields; `archivedAt`, `draftId`, `activeTurnId`, `failure`,
   and `pollAfterMs` are optional observations. Dates are RFC3339 UTC (`Z`).
+  Optional `plan:{specRevision,stale}` appears only after a successful plan; `stale` is computed by the server against the current specification revision. Clients must disable creation when stale; direct Platform creation admission is not fenced by Console.
   Generated session/turn IDs are UUIDs; Directory and Platform IDs remain opaque.
 - Versions/ordinals are positive and revisions nonnegative safe JSON integers
   (maximum 9007199254740991), including ETags. Revision zero has explicit
@@ -239,12 +240,107 @@ claim that schema validation proves natural-language correctness. S4-1/3
 must enforce lifecycle transitions, one active Turn, authorization, replay
 precedence, immutable attempts and transactional confirmation.
 
-Run the web checks listed in `web/package.json`, then the server tests/vet,
-gofmt on the three new Go files, and `go mod tidy -diff`. The known APT-845
-DSN-only startup tests (`TestPublicURLEnvStartup` and
-`TestConsoleMountPrecedesProxyAndMissingDatabase`) are unrelated to these
-contracts; excluding them does not prove database integration.
+Run the web checks listed in `web/package.json`, the DSN-backed server tests/vet,
+gofmt on changed Go files, and `go mod tidy -diff`. APT-845 startup tests now wait
+on the same bounded readiness condition as `/readyz`; `server-db` includes all
+of `go test ./cmd/server/... -count=1`, rather than excluding startup tests.
 
+
+
+## NEW-APP conversation server
+
+The S4 server is in `cmd/server/internal/buildsession`. It is separate from
+`conversation` because the immutable prompt catalog already depends on the
+reply validator; putting the orchestrator in that leaf would create an import
+cycle. The twelve internal `/api/console/v1/build-sessions` operations reuse
+Console authentication and Directory resolution without the legacy handler-wide
+transaction. The served public OpenAPI document is unchanged.
+
+Every request rechecks Platform Project actions and the caller's current Directory
+groups. The exact authenticated Authorization value is forwarded; the adapter
+has no cookie jar, follows no redirects, and accepts only its configured origin.
+Tokens and payloads are not logged or persisted. GET can observe and import a
+result, but never dispatches, repairs, wakes, starts a plan, or deletes artifacts.
+Those writes require the next authenticated `advance` request.
+
+`BUILDER_CONSOLE_NEW_APP_CONVERSATION=off|allowlist|on` defaults to `off`.
+`BUILDER_CONSOLE_NEW_APP_CONVERSATION_ALLOWLIST` is a JSON array of
+`{"issuer":"…","subject":"…"}` entries, not email addresses.
+`GET /config` always includes the caller-resolved boolean `newAppConversation`.
+Existing console-v1 sessions and draft resolution remain available when disabled.
+`BUILDER_CONSOLE_INSTALLATION_ID` may pin the receipt namespace; the default is
+the singleton `builder-console/<configured Project>`. Keep it stable across upgrades.
+Prompt registration records `BUILDER_CONSOLE_RELEASE_VERSION`, or `development`
+for an unversioned local server; that local label is not release evidence.
+
+Operators must enable the flag only after deploying Platform P1–P3. Platform
+does not serve a capability/OpenAPI endpoint, so a pre-offer capability probe is
+not possible. Missing strong draft ETags or a missing/mismatched plan input digest
+fail closed with reason `PlatformCapabilityMissing`, and suppress new offers for
+two minutes. An incompatible create retains its attributable empty draft on an
+archived session with a failure; it creates no workspace and does not delete the
+draft. Its resolver remains console-v1. This is an intentional deviation from a
+pre-offer deployment proof, not a claim that a response proves every P1 guarantee.
+
+External intents and exact prepared AgentTurn requests commit before HTTP.
+Replays retain their original keys, bodies, and first HTTP response snapshot.
+Definitive initialization failures archive the session; uncertain requests and
+authorization failures retain the original recoverable intent. Publication
+failures retain typed desired values in failed sync state for explicit retry.
+Progress snapshots live separately from imported artifact observations in
+`build_turn_progress` (migration 008); unchanged/older observations never bump
+the session version. Existing payload retention clears the progress snapshot.
+
+AgentTurn inputs are sent atomically in its `inputs` field, rather than PUT before
+runtime startup. Every output path is attempt-scoped. A successful phase alone is
+insufficient: outcome and declared outputs must agree, followed by digest and
+Reply validation. Only validation errors can cause one repair. Changed specs
+remain proposals until `accept_spec`. Planning pins the confirmed revision using
+conditional PATCH, readback, then conditional generation admission. No cancel API
+or background service identity exists.
+
+Resource creation remains Platform-owned. Console observes created resources
+and stops spec work even if another client created a stale plan. It preserves
+the confirmed spec and successful plan revision; the UI identifies this case as
+`lifecycle === "created" && plan?.stale`. A directly issued Platform creation
+request is not fenced by Console; strict admission would require another
+Platform input-hash contract. The legacy proxy also does not consult Console
+draft bindings: Platform remains responsible for authorization on that route.
+The v1 resolver never falls back to legacy for an inaccessible Console binding.
+Non-v1 handlers retain the existing 60-second Directory view cache; v1 requests
+use a fresh view and recheck current Platform actions.
+
+If creation is observed after an AgentTurn POST answer was lost and no operation
+ID was recorded, deleting the runtime cannot be proved safe. A terminal cleanup
+effect records `{"state":"withheld","reason":"OperationIdentityUnknown"}` and one
+bounded operator warning; it does not occupy the pending-effect slot or make the
+created session fail. The Session contract has no non-fatal retained-resource
+note. Publication and archive remain usable. Idle policy can sleep compute but
+does not delete the volume. Explicit Platform draft deletion cleans up associated
+draft workspaces; alternatively a later user request may delete the dedicated
+workspace if its operation becomes observable and terminal. No identity search,
+new model execution, cancellation, or background cleanup is invented.
+
+Platform adapter requests (same caller Authorization, never Cookie; paths below
+are relative to `/api/v1/projects/{projectId}`):
+
+| Method / path | Additional headers / purpose |
+| --- | --- |
+| GET `/access` | Current membership and compute/workload actions |
+| GET `/application-drafts/creation-tools` | Safe prompt capability facts |
+| POST `/application-drafts` | `Idempotency-Key: bs/{session}/draft/0` |
+| GET `/application-drafts/{draft}` | Strong ETag and exact draft observation |
+| PATCH `/application-drafts/{draft}` | `If-Match`, fixed spec/publication key; typed spec/title or publication body |
+| POST `/application-drafts/{draft}/creation-plan-generations` | Fixed `bs/{session}/plan/{turn}` key, synchronized `If-Match`, `expectedSpecSha256`; no conversation workspace ID |
+| POST `/dev-workspaces` | `bs/{session}/workspace/0`; draft scope, unattended policy |
+| GET `/dev-workspaces/{workspace}` | Verify dedicated association before deletion |
+| POST `/dev-workspaces/{workspace}/restart` | Attempt-bound fixed wake key |
+| DELETE `/dev-workspaces/{workspace}` | Fixed dedicated-workspace deletion key |
+| POST `/dev-workspaces/{workspace}/agent-turns` | `bs/{session}/turn/{turn}/attempt/{0,1}`; persisted prompt/inputs/outputs/timeout |
+| GET `/dev-workspaces/{workspace}/agent-turns/{operation}` | Exact operation observation |
+| GET `/dev-workspaces/{workspace}/files/{path}` | Bounded bytes and SHA256 ETag |
+| DELETE `/dev-workspaces/{workspace}/files/{path}` | Known attempt-scoped paths, fixed cleanup key |
+| PUT `/dev-workspaces/{workspace}/files/{path}` | Full-byte replacement adapter; normal inputs use AgentTurn POST instead |
 
 
 ## Container and runtime
