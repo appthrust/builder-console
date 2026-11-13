@@ -69,6 +69,12 @@ async function rewriteDraftGets(page: Page, path: string, rewrite: (body: Record
 }
 
 test.describe('build session with an unreadable Platform answer @app-build-malformed-response', () => {
+  // The page keeps polling the draft through the rewriting route; a poll still inside
+  // `route.fetch` when the test body returns would fail the test as "Test ended".
+  test.afterEach(async ({ page }) => {
+    await page.unrouteAll({ behavior: 'ignoreErrors' })
+  })
+
   test('one malformed draft poll keeps the last good session and the unsent text, then clears on the next good poll @mock @story', async ({ page, mock }, testInfo) => {
     const draft = await openingDraft(page.request, mock, false)
     let corrupt = false

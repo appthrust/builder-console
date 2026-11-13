@@ -42,6 +42,7 @@ interface FlowUnderTest {
   startAnalysis(): Promise<void>
   setHint(hint: string): void
   analysis: { problem?: AnalysisProblem; failure?: BuildFailure; continueOffline(): Promise<void>; retry(): void }
+  spec: { save(body: string): Promise<boolean> }
 }
 let client: QueryClient
 let root: Root
@@ -264,6 +265,27 @@ test('an ApplicationCreated conflict makes further uploads, removals and analysi
   expect(add).toHaveBeenCalledTimes(1)
   expect(removeWorkbook).not.toHaveBeenCalled()
   expect(turn).not.toHaveBeenCalled()
+})
+
+test('a draft re-read still in flight when a later write answers cannot overwrite that answer', async () => {
+  seedDraft({ ...draft, source: { kind: 'excel', revision: at, workbooks: [summary] } })
+  await render(draft.id)
+  // The analysis turn is refused (409), so the hook re-reads the draft; that read answers only after a later save.
+  turn.mockRejectedValueOnce(error(409, 'TurnRunning'))
+  const read = Promise.withResolvers<BuildDraft>()
+  get.mockImplementationOnce(() => read.promise)
+  let analysis: Promise<void> | undefined
+  await act(async () => { analysis = flow.startAnalysis() })
+  expect(get).toHaveBeenCalledTimes(1)
+  const before = draftOf(drafts.get(draft.id)!)
+  await act(async () => { expect(await flow.spec.save('# 保存した本文\n')).toBe(true) })
+  expect(flow.draft?.specMarkdown).toBe('# 保存した本文\n')
+  await act(async () => {
+    read.resolve(before)
+    await analysis
+  })
+  expect(flow.draft?.specMarkdown).toBe('# 保存した本文\n')
+  expect(client.getQueryData<BuildDraft>(buildKeys.draft(projectId, draft.id))?.specMarkdown).toBe('# 保存した本文\n')
 })
 
 test('a later successful file reuses the draft retained after failed cleanup', async () => {
