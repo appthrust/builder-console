@@ -64,7 +64,7 @@ test('question → proposal → run → review, in the application workspace', a
   const proposalPath = `${project}/source-change-proposals/${current.proposalId}`
   expect((await call('GET', proposalPath)).body.phase).toBe('Proposed')
   expect((await call('POST', `${path}/implementation-runs`)).status).toBe(409)
-  expect((await call('POST', `${proposalPath}/decisions`, { decision: 'RequestChanges', comment: '今月の分も表示してください' })).status).toBe(202)
+  expect((await call('POST', `${proposalPath}/decisions`, { decision: 'RequestChanges', comment: '今月の分も表示してください' })).status).toBe(200)
 
   // The next request starts over with a question, then a new proposal with new tasks.
   const again = await say('CSV で書き出したい')

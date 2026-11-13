@@ -5,11 +5,11 @@ import * as api from '../../api/build'
 import { buildDraftOptions, buildKeys } from '../../api/queries/build'
 import { platformErrorEnvelope } from '../../api/platform-error'
 import { classifyBuildFailure, unconfirmedFailure, type BuildFailure } from '../../model/build'
-import type { BuildDraft } from '../../model/contracts/build'
+import { isOneOf, type BuildDraft } from '../../model/contracts/build'
 import { deriveImprove } from '../../model/improve'
 import { useImplementation } from '../build/implement'
 import { proposalOptions } from '../../api/queries/proposal'
-import { proposalTerminal, proposalWaiting } from '../proposals/model'
+import { improvementLocked } from '../proposals/model'
 
 /**
  * Turns and runs are server-owned: sending a message only POSTs the turn and
@@ -25,16 +25,17 @@ export function useImproveSession(projectId: string, draft: BuildDraft) {
   const implementation = useImplementation({ projectId, draft, handoff: draft.creationPlan?.implementationHandoff, enabled: true })
   const proposal = useQuery(proposalOptions(projectId, draft.proposalId))
   const phase = proposal.data?.phase
-  const reviewLocked = !!draft.proposalId && (!phase || proposalWaiting(phase) || proposalTerminal(phase))
+  const reviewLocked = !!draft.proposalId && improvementLocked(phase)
+  const applied = isOneOf(phase, 'Applied')
   // The controller applies first; release correlation updates the private draft later.
   useQuery({
     ...buildDraftOptions(projectId, draft.id),
-    enabled: phase === 'Applied' && !state.version,
-    refetchInterval: phase === 'Applied' && !state.version ? 3000 : false,
+    enabled: applied && !state.version,
+    refetchInterval: applied && !state.version ? 3000 : false,
   })
   useEffect(() => {
-    if (phase === 'Applied') void queryClient.invalidateQueries({ queryKey: buildKeys.draft(projectId, draft.id) })
-  }, [phase, projectId, draft.id, queryClient])
+    if (applied) void queryClient.invalidateQueries({ queryKey: buildKeys.draft(projectId, draft.id) })
+  }, [applied, projectId, draft.id, queryClient])
 
   async function send(text: string) {
     const message = text.trim()

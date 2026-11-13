@@ -1,8 +1,9 @@
 // The unchecked Console facade, kept only for its remaining callers until they
 // read through api/contracts/console/* and the gateway (then this file goes):
-// - api/queries/proposal.ts: `directory.personBySubject` (the proposal slice);
 // - api/console.test.ts: the transport tests of the operations below;
+// - api/contracts/console/operations.test.ts: the facade's request inventory;
 // - dev/mock-console.ts: the wire types the mock answers with.
+// No feature or query code calls it any more.
 // Every body passes through the single unchecked cast `unverified()`: nothing
 // here is validated, so feature code importing this module is a tracked
 // boundary violation (api/testing/response-boundary-allowlist.json).
@@ -130,8 +131,6 @@ export interface ConsoleApi {
   directory: {
     /** Registered people matching a name or email. */
     searchPeople(query: string): Promise<Person[]>
-    /** Exact subject lookup, including people who do not own a visible app. */
-    personBySubject(subject: string): Promise<Person | undefined>
     /** Batch lookup (no call for an empty list); unknown ids are absent from the answer. */
     people(ids: string[]): Promise<Person[]>
     /** 404 for an unknown person. */
@@ -194,7 +193,6 @@ export function createConsoleApi(transport: ConsoleTransport = consoleTransport)
     },
     directory: {
       searchPeople: (query: string) => list<Person>(`/directory/people${q({ q: query })}`),
-      personBySubject: async (subject: string) => (await list<Person>(`/directory/people${q({ subject })}`))[0],
       people: async (ids: string[]) => {
         // The Directory answers at most 100 ids per call.
         const batches: string[][] = []
