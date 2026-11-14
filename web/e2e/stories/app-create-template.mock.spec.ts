@@ -10,6 +10,10 @@ import {
 
 test.describe('App create from a business template @create', () => {
   test('creates the suggested inventory app for its group, publishes it, and finds it in mine @mock @story', async ({ page, mock }) => {
+    // The wizard, six dependent create calls, two 5 s overview polls before v1 shows as running (about 11 s
+    // alone) and three app-page loads: 21–30 s on GitHub runners on main (29.8 s on run 43599832937), 31.5 s
+    // timed out on run 43596061108 against the 30 s default.
+    test.setTimeout(60_000)
     const displayName = '在庫管理'
     const description = '品物の在庫と入出庫を、ひとつの画面で管理します。'
     const group = seed.groups.teamA
