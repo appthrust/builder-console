@@ -16,6 +16,7 @@ import { proposalRoute, proposalsRoute } from './proposals'
 import { requestAccessRoute } from './request-access'
 import { resourceRoute } from './resource'
 import { rootRoute } from './root'
+import { workspacePreviewRoute } from './workspace-preview'
 
 export const routeTree = rootRoute.addChildren([
   homeRoute,
@@ -30,6 +31,7 @@ export const routeTree = rootRoute.addChildren([
   improveRoute,
   proposalRoute,
   proposalsRoute,
+  workspacePreviewRoute,
   adminPlatformRoute,
   appByIdRoute,
   personRoute,

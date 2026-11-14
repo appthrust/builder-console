@@ -27,15 +27,17 @@ test('legacy preparation keeps its generic steps and hint', () => {
   expect(html).not.toContain('いまの動き')
 })
 
-test('the merged build renders one ladder, and a ready preview starts with the first task', () => {
-  const state = { phase: 'idle' as const, tasks: [taskOf({ id: 'one', title: '顧客一覧', status: 'pending' })], previewUrl: '/preview', previewStatus: 'ready' as const }
+test('the merged build renders one ladder, and the preview card starts with the first task', () => {
+  const preview = { projectId: 'p', workspaceId: 'ws', availability: { kind: 'ready' as const, publishUID: '7d0f3c52-9a41-4f7e-8b52-3c1f0e6a9b10', origin: 'https://pv-0123456789abcdef0123456789abcdef.p.appthrust.test' }, readBack: () => {} }
+  const state = { phase: 'idle' as const, tasks: [taskOf({ id: 'one', title: '顧客一覧', status: 'pending' })], preview }
   const pending = renderToStaticMarkup(<ImplementPanel state={state} released={false} onOpenPreview={() => {}} />)
   expect(pending.match(/<ol /g)).toHaveLength(1)
   expect(pending).toContain('アプリを作っています')
-  expect(pending).not.toContain('<iframe')
+  expect(pending).not.toContain('アプリのプレビュー')
   const running = renderToStaticMarkup(<ImplementPanel state={{ ...state, phase: 'running', currentTaskId: 'one', step: runOf({ id: 'r', status: 'running', startedAt: '2026-10-27T00:00:00Z', devWorkspaceId: 'ws', taskIds: [], tasks: [], step: 'working' }).step, activityTail: '画面を作っています\n', tasks: [taskOf({ id: 'one', title: '顧客一覧', status: 'running' })] }} released={false} onOpenPreview={() => {}} />)
-  expect(running).toContain('<iframe')
-  expect(running.indexOf('<iframe')).toBeLessThan(running.indexOf('<ol'))
+  // The card shows from the first task; its frame waits for the session (implement/preview-viewer.test.tsx).
+  expect(running).toContain('プレビューにつないでいます')
+  expect(running.indexOf('プレビューにつないでいます')).toBeLessThan(running.indexOf('<ol'))
   expect(running.match(/<ol /g)).toHaveLength(1)
   expect(running).toContain('画面「顧客一覧」')
   expect(running).not.toContain('前回の続きから進めています')

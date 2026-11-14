@@ -25,9 +25,14 @@ export function ProposalStatus({ proposal }: { proposal: Proposal }) {
   return <StatusPill status={status} label={text.phase[phase]} />
 }
 
+/**
+ * 「変更後の画面を見る」 opens the Console's preview viewer in a new tab, never the preview origin itself. A workspace
+ * never moved to its own origin opens its legacy same-origin URL, as before (remove at migration stage 5).
+ */
 export function ProposalPreview({ proposal }: { proposal: Proposal }) {
   const preview = useQuery(proposalPreviewOptions(proposal.projectId, proposal.previewWorkspaceId))
-  return preview.data ? <LinkButton external href={preview.data} size="sm" icon={<ExternalLink />}>{text.preview}</LinkButton> : preview.error ? <ActionError error={preview.error} /> : null
+  const href = preview.data?.kind === 'viewer' ? paths.workspacePreview(preview.data.workspaceId) : preview.data?.url
+  return href ? <LinkButton external href={href} size="sm" icon={<ExternalLink />}>{text.preview}</LinkButton> : preview.error ? <ActionError error={preview.error} /> : null
 }
 
 /**

@@ -3,28 +3,7 @@ import type { ApplicationDraftImplementationTask, DevWorkspaceRead } from '@appt
 import { taskOf, workspaceOf } from '../../../api/testing/build-domain'
 import * as model from './runtime'
 
-const implementationPreviewUrl = (workspace: unknown) => model.implementationPreviewUrl(workspaceOf(workspace))
 const previewDatabaseStatus = (workspace: unknown, tasks: readonly unknown[]) => model.previewDatabaseStatus(workspaceOf(workspace), tasks.map(taskOf))
-
-test('only Ready workspaces expose a same-origin preview', () => {
-  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'window')
-  Object.defineProperty(globalThis, 'window', { configurable: true, value: { location: { origin: 'http://console.test' } } })
-  try {
-    const workspace: DevWorkspaceRead = {
-      id: 'ws-1', projectId: 'p1', scope: 'application', applicationId: 'app-1', displayName: '見積',
-      ownerUserId: 'owner', phase: 'Ready', branchName: 'main', baseRef: 'main', createdAt: '2026-10-10T00:00:00Z', conditions: [],
-      previewUrl: 'https://platform.test/api/v1/projects/p1/dev-workspaces/ws-1/proxy/preview/',
-    }
-    expect(implementationPreviewUrl(workspace)).toBe('/api/v1/projects/p1/dev-workspaces/ws-1/proxy/preview/')
-    expect(implementationPreviewUrl({ ...workspace, phase: 'Starting' })).toBeUndefined()
-    expect(implementationPreviewUrl({ ...workspace, phase: 'Sleeping' })).toBeUndefined()
-    expect(implementationPreviewUrl({ ...workspace, previewUrl: undefined })).toBeUndefined()
-    expect(() => implementationPreviewUrl({ ...workspace, previewUrl: 'https://other.test/preview' })).toThrow('outside the Platform API proxy')
-  } finally {
-    if (descriptor) Object.defineProperty(globalThis, 'window', descriptor)
-    else Reflect.deleteProperty(globalThis, 'window')
-  }
-})
 
 const workspace: DevWorkspaceRead = {
   id: 'ws-1', projectId: 'p1', scope: 'applicationDraft', draftId: 'draft-1', displayName: '点検',

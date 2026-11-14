@@ -7,10 +7,11 @@ import { knownValue, type ImplementationTask } from '../../model/contracts/build
 import type { ImproveState, ImproveVersion } from '../../model/improve'
 import { ActivityLog, Card, CardBody, LinkButton } from '../../ui'
 import { text as buildText } from '../build/copy'
-import type { ImplementationState } from '../build/implement'
+import { legacyPreviewReady, type ImplementationState } from '../build/implement'
 import { text } from './copy'
 import { useClock } from './use-clock'
 import { text as proposalText } from '../proposals/copy'
+import { paths } from '../../routes/paths'
 
 const MARK = { todo: '○', doing: '●', done: '✔', failed: '✖', unknown: '?' } as const
 
@@ -81,7 +82,15 @@ function RunProgress({ state, implementation, appUrl, proposalPending }: { state
   const activity = running && tasks.some((task) => knownValue(task.status) === 'running') ? activityLines(implementation.activityTail).filter(isProductLanguage) : []
   const runStep = knownValue(implementation.step)
   const step = runStep === 'working' ? copy.working(Boolean(implementation.activityTail?.trim())) : runStep ? copy[runStep] : undefined
-  const previewReady = Boolean(implementation.previewUrl) && implementation.previewStatus === 'ready'
+  // The work in progress opens in the Console's own viewer page (it explains every state); only an endpoint
+  // still being published says so here.
+  const preview = implementation.preview
+  // Legacy same-origin preview (remove at migration stage 5; ../build/implement/legacy-preview.tsx): a never-moved
+  // workspace links to its own URL once it answers, says it is preparing until then, and shows nothing before Ready.
+  const legacy = implementation.legacyPreview
+  const previewHref = legacy ? legacyPreviewReady(legacy) ? legacy.url : undefined
+    : preview && preview.availability.kind !== 'preparing' ? paths.workspacePreview(preview.workspaceId) : undefined
+  const previewPreparing = legacy ? Boolean(legacy.url) && !legacyPreviewReady(legacy) : preview?.availability.kind === 'preparing'
   const title = state.phase === 'unsupported' ? buildCopy.unsupported.title
     : state.phase === 'done' ? proposalPending ? proposalText.sent : text.updated(state.version) : running ? text.run.running : implementation.failure?.title ?? text.run.running
   return <section aria-label={text.pane.progress} aria-live="polite"><Card><CardBody>
@@ -102,9 +111,8 @@ function RunProgress({ state, implementation, appUrl, proposalPending }: { state
       })}
     </ol>
     <ActivityLog lines={activity} label={buildCopy.progress.observe.activity} className="mt-3 max-h-40 p-2.5" />
-    {(running || proposalPending) && implementation.previewUrl ? previewReady
-      ? <LinkButton external href={implementation.previewUrl} size="sm" icon={<ExternalLink />} className="mt-3">{text.run.preview}</LinkButton>
-      : <p role="status" className="mt-3 text-xs text-stone-500">{text.run.previewPreparing}</p> : null}
+    {(running || proposalPending) && previewHref ? <LinkButton external href={previewHref} size="sm" icon={<ExternalLink />} className="mt-3">{text.run.preview}</LinkButton>
+      : (running || proposalPending) && previewPreparing ? <p role="status" className="mt-3 text-xs text-stone-500">{text.run.previewPreparing}</p> : null}
     {state.phase === 'done' && appUrl ? <LinkButton external href={appUrl} tone="primary" size="sm" icon={<ExternalLink />} className="mt-4">{text.run.openApp}</LinkButton> : null}
   </CardBody></Card></section>
 }

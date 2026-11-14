@@ -2,8 +2,9 @@ import type { BuildFailure } from '../../../model/build'
 import { classifyBuildFailure } from '../../../model/build/failure'
 import { isOneOf, knownValue, type BuildDraft, type ImplementationHandoff, type ImplementationRun, type ImplementationTask, type RunStep } from '../../../model/contracts/build'
 import type { OpenValue } from '../../../api/boundary'
+import type { LegacyPreview } from './legacy-preview'
 import type { PreviewDatabaseStatus } from './runtime'
-import type { PreviewReadiness } from './use-preview-readiness'
+import type { PreviewSessionTarget } from './use-preview-session'
 import { text } from '../copy'
 
 export interface ImplementationState {
@@ -11,8 +12,13 @@ export interface ImplementationState {
   phase: 'idle' | 'starting-workspace' | 'running' | 'pushing' | 'done' | 'failed' | 'unsupported'
   tasks: ImplementationTask[]
   currentTaskId?: string
-  previewUrl?: string
-  previewStatus?: PreviewReadiness
+  /**
+   * The workspace's preview origin as last read (unset until the workspace has been read). The viewer asks for a
+   * session only when it is `ready`; `readBack` reads the workspace again.
+   */
+  preview?: PreviewSessionTarget & { readBack(): void }
+  /** Legacy same-origin preview (remove at migration stage 5; ./legacy-preview.tsx): set only for a never-moved workspace. */
+  legacyPreview?: LegacyPreview
   /** Unset until the workspace has been read. */
   previewDatabaseStatus?: PreviewDatabaseStatus
   activityTail?: string
