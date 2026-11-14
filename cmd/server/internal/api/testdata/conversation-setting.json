@@ -1,0 +1,226 @@
+[
+  {
+    "name": "default",
+    "schema": "ConversationSetting",
+    "raw": "{\"mode\":\"off\",\"allowlist\":[],\"version\":0}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "updated",
+    "schema": "ConversationSetting",
+    "raw": "{\"mode\":\"allowlist\",\"allowlist\":[{\"subject\":\"admin\",\"displayName\":\"Administrator\"},{\"subject\":\"removed\"}],\"version\":2,\"updatedAt\":\"2026-11-14T00:00:00Z\",\"updatedBy\":{\"id\":\"removed-person\",\"displayName\":\"\",\"unknown\":true}}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "unknown-writer-mode",
+    "schema": "ConversationSetting",
+    "raw": "{\"mode\":\"future\",\"allowlist\":[],\"version\":0}",
+    "expected": {
+      "accept": false,
+      "path": "/mode"
+    }
+  },
+  {
+    "name": "unknown-reader-mode",
+    "schema": "ConversationSettingRead",
+    "raw": "{\"mode\":\"future\",\"allowlist\":[{\"subject\":\"removed\"}],\"version\":2}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "input-on",
+    "schema": "ConversationSettingInput",
+    "raw": "{\"mode\":\"on\",\"allowlist\":[{\"subject\":\"retained\"}]}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "input-off",
+    "schema": "ConversationSettingInput",
+    "raw": "{\"mode\":\"off\",\"allowlist\":[]}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "input-allowlist",
+    "schema": "ConversationSettingInput",
+    "raw": "{\"mode\":\"allowlist\",\"allowlist\":[{\"subject\":\"admin\"}]}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "unknown-input-mode",
+    "schema": "ConversationSettingInput",
+    "raw": "{\"mode\":\"future\",\"allowlist\":[]}",
+    "expected": {
+      "accept": false,
+      "path": "/mode"
+    }
+  },
+  {
+    "name": "long-allowlist",
+    "schema": "ConversationSettingInput",
+    "raw": "{\"mode\":\"allowlist\",\"allowlist\":[{\"subject\":\"subject-0\"},{\"subject\":\"subject-1\"},{\"subject\":\"subject-2\"},{\"subject\":\"subject-3\"},{\"subject\":\"subject-4\"},{\"subject\":\"subject-5\"},{\"subject\":\"subject-6\"},{\"subject\":\"subject-7\"},{\"subject\":\"subject-8\"},{\"subject\":\"subject-9\"},{\"subject\":\"subject-10\"},{\"subject\":\"subject-11\"},{\"subject\":\"subject-12\"},{\"subject\":\"subject-13\"},{\"subject\":\"subject-14\"},{\"subject\":\"subject-15\"},{\"subject\":\"subject-16\"},{\"subject\":\"subject-17\"},{\"subject\":\"subject-18\"},{\"subject\":\"subject-19\"},{\"subject\":\"subject-20\"},{\"subject\":\"subject-21\"},{\"subject\":\"subject-22\"},{\"subject\":\"subject-23\"},{\"subject\":\"subject-24\"},{\"subject\":\"subject-25\"},{\"subject\":\"subject-26\"},{\"subject\":\"subject-27\"},{\"subject\":\"subject-28\"},{\"subject\":\"subject-29\"},{\"subject\":\"subject-30\"},{\"subject\":\"subject-31\"},{\"subject\":\"subject-32\"},{\"subject\":\"subject-33\"},{\"subject\":\"subject-34\"},{\"subject\":\"subject-35\"},{\"subject\":\"subject-36\"},{\"subject\":\"subject-37\"},{\"subject\":\"subject-38\"},{\"subject\":\"subject-39\"},{\"subject\":\"subject-40\"},{\"subject\":\"subject-41\"},{\"subject\":\"subject-42\"},{\"subject\":\"subject-43\"},{\"subject\":\"subject-44\"},{\"subject\":\"subject-45\"},{\"subject\":\"subject-46\"},{\"subject\":\"subject-47\"},{\"subject\":\"subject-48\"},{\"subject\":\"subject-49\"},{\"subject\":\"subject-50\"},{\"subject\":\"subject-51\"},{\"subject\":\"subject-52\"},{\"subject\":\"subject-53\"},{\"subject\":\"subject-54\"},{\"subject\":\"subject-55\"},{\"subject\":\"subject-56\"},{\"subject\":\"subject-57\"},{\"subject\":\"subject-58\"},{\"subject\":\"subject-59\"},{\"subject\":\"subject-60\"},{\"subject\":\"subject-61\"},{\"subject\":\"subject-62\"},{\"subject\":\"subject-63\"},{\"subject\":\"subject-64\"},{\"subject\":\"subject-65\"},{\"subject\":\"subject-66\"},{\"subject\":\"subject-67\"},{\"subject\":\"subject-68\"},{\"subject\":\"subject-69\"},{\"subject\":\"subject-70\"},{\"subject\":\"subject-71\"},{\"subject\":\"subject-72\"},{\"subject\":\"subject-73\"},{\"subject\":\"subject-74\"},{\"subject\":\"subject-75\"},{\"subject\":\"subject-76\"},{\"subject\":\"subject-77\"},{\"subject\":\"subject-78\"},{\"subject\":\"subject-79\"},{\"subject\":\"subject-80\"},{\"subject\":\"subject-81\"},{\"subject\":\"subject-82\"},{\"subject\":\"subject-83\"},{\"subject\":\"subject-84\"},{\"subject\":\"subject-85\"},{\"subject\":\"subject-86\"},{\"subject\":\"subject-87\"},{\"subject\":\"subject-88\"},{\"subject\":\"subject-89\"},{\"subject\":\"subject-90\"},{\"subject\":\"subject-91\"},{\"subject\":\"subject-92\"},{\"subject\":\"subject-93\"},{\"subject\":\"subject-94\"},{\"subject\":\"subject-95\"},{\"subject\":\"subject-96\"},{\"subject\":\"subject-97\"},{\"subject\":\"subject-98\"},{\"subject\":\"subject-99\"},{\"subject\":\"subject-100\"},{\"subject\":\"subject-101\"},{\"subject\":\"subject-102\"},{\"subject\":\"subject-103\"},{\"subject\":\"subject-104\"},{\"subject\":\"subject-105\"},{\"subject\":\"subject-106\"},{\"subject\":\"subject-107\"},{\"subject\":\"subject-108\"},{\"subject\":\"subject-109\"},{\"subject\":\"subject-110\"},{\"subject\":\"subject-111\"},{\"subject\":\"subject-112\"},{\"subject\":\"subject-113\"},{\"subject\":\"subject-114\"},{\"subject\":\"subject-115\"},{\"subject\":\"subject-116\"},{\"subject\":\"subject-117\"},{\"subject\":\"subject-118\"},{\"subject\":\"subject-119\"},{\"subject\":\"subject-120\"},{\"subject\":\"subject-121\"},{\"subject\":\"subject-122\"},{\"subject\":\"subject-123\"},{\"subject\":\"subject-124\"},{\"subject\":\"subject-125\"},{\"subject\":\"subject-126\"},{\"subject\":\"subject-127\"},{\"subject\":\"subject-128\"},{\"subject\":\"subject-129\"},{\"subject\":\"subject-130\"},{\"subject\":\"subject-131\"},{\"subject\":\"subject-132\"},{\"subject\":\"subject-133\"},{\"subject\":\"subject-134\"},{\"subject\":\"subject-135\"},{\"subject\":\"subject-136\"},{\"subject\":\"subject-137\"},{\"subject\":\"subject-138\"},{\"subject\":\"subject-139\"},{\"subject\":\"subject-140\"},{\"subject\":\"subject-141\"},{\"subject\":\"subject-142\"},{\"subject\":\"subject-143\"},{\"subject\":\"subject-144\"},{\"subject\":\"subject-145\"},{\"subject\":\"subject-146\"},{\"subject\":\"subject-147\"},{\"subject\":\"subject-148\"},{\"subject\":\"subject-149\"},{\"subject\":\"subject-150\"},{\"subject\":\"subject-151\"},{\"subject\":\"subject-152\"},{\"subject\":\"subject-153\"},{\"subject\":\"subject-154\"},{\"subject\":\"subject-155\"},{\"subject\":\"subject-156\"},{\"subject\":\"subject-157\"},{\"subject\":\"subject-158\"},{\"subject\":\"subject-159\"},{\"subject\":\"subject-160\"},{\"subject\":\"subject-161\"},{\"subject\":\"subject-162\"},{\"subject\":\"subject-163\"},{\"subject\":\"subject-164\"},{\"subject\":\"subject-165\"},{\"subject\":\"subject-166\"},{\"subject\":\"subject-167\"},{\"subject\":\"subject-168\"},{\"subject\":\"subject-169\"},{\"subject\":\"subject-170\"},{\"subject\":\"subject-171\"},{\"subject\":\"subject-172\"},{\"subject\":\"subject-173\"},{\"subject\":\"subject-174\"},{\"subject\":\"subject-175\"},{\"subject\":\"subject-176\"},{\"subject\":\"subject-177\"},{\"subject\":\"subject-178\"},{\"subject\":\"subject-179\"},{\"subject\":\"subject-180\"},{\"subject\":\"subject-181\"},{\"subject\":\"subject-182\"},{\"subject\":\"subject-183\"},{\"subject\":\"subject-184\"},{\"subject\":\"subject-185\"},{\"subject\":\"subject-186\"},{\"subject\":\"subject-187\"},{\"subject\":\"subject-188\"},{\"subject\":\"subject-189\"},{\"subject\":\"subject-190\"},{\"subject\":\"subject-191\"},{\"subject\":\"subject-192\"},{\"subject\":\"subject-193\"},{\"subject\":\"subject-194\"},{\"subject\":\"subject-195\"},{\"subject\":\"subject-196\"},{\"subject\":\"subject-197\"},{\"subject\":\"subject-198\"},{\"subject\":\"subject-199\"},{\"subject\":\"subject-200\"}]}",
+    "expected": {
+      "accept": false,
+      "path": "/allowlist"
+    }
+  },
+  {
+    "name": "empty-subject",
+    "schema": "ConversationSettingInput",
+    "raw": "{\"mode\":\"allowlist\",\"allowlist\":[{\"subject\":\"\"}]}",
+    "expected": {
+      "accept": false,
+      "path": "/allowlist/0/subject"
+    }
+  },
+  {
+    "name": "long-subject",
+    "schema": "ConversationSettingInput",
+    "raw": "{\"mode\":\"allowlist\",\"allowlist\":[{\"subject\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}]}",
+    "expected": {
+      "accept": false,
+      "path": "/allowlist/0/subject"
+    }
+  },
+  {
+    "name": "whitespace-subject",
+    "schema": "ConversationSettingInput",
+    "raw": "{\"mode\":\"allowlist\",\"allowlist\":[{\"subject\":\"has space\"}]}",
+    "expected": {
+      "accept": false,
+      "path": "/allowlist/0/subject"
+    }
+  },
+  {
+    "name": "control-subject",
+    "schema": "ConversationSettingInput",
+    "raw": "{\"mode\":\"allowlist\",\"allowlist\":[{\"subject\":\"bad\\nsubject\"}]}",
+    "expected": {
+      "accept": false,
+      "path": "/allowlist/0/subject"
+    }
+  },
+  {
+    "name": "unicode-subject",
+    "schema": "ConversationSettingInput",
+    "raw": "{\"mode\":\"allowlist\",\"allowlist\":[{\"subject\":\"利用者\"}]}",
+    "expected": {
+      "accept": false,
+      "path": "/allowlist/0/subject"
+    }
+  },
+  {
+    "name": "duplicate-subject",
+    "schema": "ConversationSettingInput",
+    "raw": "{\"mode\":\"allowlist\",\"allowlist\":[{\"subject\":\"twice\"},{\"subject\":\"once\"},{\"subject\":\"twice\"}]}",
+    "expected": {
+      "accept": false,
+      "path": "/allowlist/2/subject"
+    }
+  },
+  {
+    "name": "duplicate-subject-answer",
+    "schema": "ConversationSetting",
+    "raw": "{\"mode\":\"allowlist\",\"allowlist\":[{\"subject\":\"twice\",\"displayName\":\"Twice\"},{\"subject\":\"twice\"}],\"version\":1}",
+    "expected": {
+      "accept": false,
+      "path": "/allowlist/1/subject"
+    }
+  },
+  {
+    "name": "missing-allowlist",
+    "schema": "ConversationSettingInput",
+    "raw": "{\"mode\":\"off\"}",
+    "expected": {
+      "accept": false,
+      "path": "/allowlist"
+    }
+  },
+  {
+    "name": "null-allowlist",
+    "schema": "ConversationSettingInput",
+    "raw": "{\"mode\":\"off\",\"allowlist\":null}",
+    "expected": {
+      "accept": false,
+      "path": "/allowlist"
+    }
+  },
+  {
+    "name": "negative-version",
+    "schema": "ConversationSetting",
+    "raw": "{\"mode\":\"off\",\"allowlist\":[],\"version\":-1}",
+    "expected": {
+      "accept": false,
+      "path": "/version"
+    }
+  },
+  {
+    "name": "headers",
+    "schema": "ConversationSettingHeaders",
+    "raw": "{\"If-Match\":\"\\\"cs-0\\\"\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "missing-if-match",
+    "schema": "ConversationSettingHeaders",
+    "raw": "{}",
+    "expected": {
+      "accept": false,
+      "path": "/If-Match"
+    }
+  },
+  {
+    "name": "weak-if-match",
+    "schema": "ConversationSettingHeaders",
+    "raw": "{\"If-Match\":\"W/\\\"cs-0\\\"\"}",
+    "expected": {
+      "accept": false,
+      "path": "/If-Match"
+    }
+  },
+  {
+    "name": "etag",
+    "schema": "ConversationSettingETag",
+    "raw": "\"\\\"cs-12\\\"\"",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "unsafe-etag",
+    "schema": "ConversationSettingETag",
+    "raw": "\"\\\"cs-9007199254740992\\\"\"",
+    "expected": {
+      "accept": false,
+      "path": "/"
+    }
+  },
+  {
+    "name": "missing-if-match-error",
+    "schema": "BuildError",
+    "raw": "{\"error\":\"precondition_required\",\"message\":\"Conversation setting If-Match is required\"}",
+    "expected": {
+      "accept": true
+    }
+  },
+  {
+    "name": "stale-version-error",
+    "schema": "BuildError",
+    "raw": "{\"error\":\"version_conflict\",\"message\":\"Conversation setting has changed\",\"details\":{\"currentVersion\":2}}",
+    "expected": {
+      "accept": true
+    }
+  }
+]

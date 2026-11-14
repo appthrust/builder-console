@@ -115,6 +115,23 @@ describe('Retry-After from the server (mock 503)', () => {
   })
 })
 
+test('the poll delay is drawn once per answer: re-renders re-evaluating it get the same delay, so the pending read is not postponed', async () => {
+  const session = await initialized()
+  const options = buildSessionOptions(session.id, api)
+  client.setQueryData(options.queryKey, { ...session, activeTurnId: undefined, nextAction: { kind: 'known', value: 'observe' } })
+  const interval = options.refetchInterval as (query: unknown) => number | false
+  const query = () => client.getQueryCache().find({ queryKey: options.queryKey, exact: true })!
+  // TanStack evaluates it on every render of every observer and restarts the timer when the value differs.
+  const first = interval(query())
+  expect(Array.from({ length: 20 }, () => interval(query()))).toEqual(Array.from({ length: 20 }, () => first))
+  // A new answer draws a new delay (±20 % around the step), and keeps it until the next answer.
+  client.setQueryData(options.queryKey, { ...session, version: session.version + 1, activeTurnId: undefined, nextAction: { kind: 'known', value: 'observe' } }, { updatedAt: Date.now() + 1_000 })
+  const next = interval(query())
+  expect(next).toBeGreaterThanOrEqual(1_600)
+  expect(next).toBeLessThanOrEqual(2_400)
+  expect(interval(query())).toBe(next)
+})
+
 describe('newer answers win', () => {
   test('a session read that started before a write and lands after it does not bring the old session back', async () => {
     const before = await created()

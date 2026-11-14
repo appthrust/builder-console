@@ -237,9 +237,13 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 	p := &servicePlatform{t: t, db: checked, keys: map[string]string{}, turns: map[string]AgentTurn{}, requests: map[string]prompts.AgentTurnRequest{}, artifacts: map[string]Artifact{}, plans: map[string]Generation{}}
 	catalog, err := prompts.NewCatalog("test-release", nil)
 	require.NoError(t, err)
-	s, err := NewService(t.Context(), checked, p, catalog, Flag{Mode: "on"})
+	s, err := NewService(t.Context(), checked, p, catalog)
 	require.NoError(t, err)
 	f := &serviceFixture{s: s, p: p, db: checked, c: Caller{Access: store.BuildAccess{Scope: domain.BuildScope{InstallationID: "installation", ProjectID: "project", OwnerIssuer: "issuer", OwnerSubject: "subject"}, GroupIDs: []string{"group"}}, PersonID: "person", Authorization: "bEaReR exact-caller"}, now: time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC)}
+	require.NoError(t, db.Do(t.Context(), true, func(tx *store.Tx) error {
+		_, err := tx.SetConversationSetting(domain.ConversationScope{InstallationID: "installation", ProjectID: "project"}, 0, domain.ConversationSettingInput{Mode: "on", Allowlist: []domain.ConversationSubject{}}, "person-admin", f.now)
+		return err
+	}))
 	s.Now = func() time.Time { return f.now }
 	return f
 }
@@ -455,7 +459,7 @@ func TestMissingCapabilitiesRetainAttributionAndCloseOffer(t *testing.T) {
 	require.Equal(t, "draft", f.a.Session.DraftID)
 	require.Empty(t, f.p.workspace.ID)
 	require.Empty(t, f.p.turns)
-	require.False(t, f.s.Offered(Owner{"issuer", "subject"}))
+	require.False(t, f.s.Offered(t.Context(), f.c.Access.Scope))
 	id, err := f.s.Resolve(t.Context(), f.c, "draft")
 	require.NoError(t, err)
 	require.Equal(t, f.a.Session.ID, id)
@@ -463,7 +467,7 @@ func TestMissingCapabilitiesRetainAttributionAndCloseOffer(t *testing.T) {
 		require.NotContains(t, call.kind, "delete")
 	}
 	f.now = f.now.Add(3 * time.Minute)
-	require.True(t, f.s.Offered(Owner{"issuer", "subject"}))
+	require.True(t, f.s.Offered(t.Context(), f.c.Access.Scope))
 }
 func TestMissingPlanDigestFailsHandoff(t *testing.T) {
 	f := newServiceFixture(t)
@@ -476,10 +480,13 @@ func TestMissingPlanDigestFailsHandoff(t *testing.T) {
 	require.Equal(t, "specifying", f.a.Session.Lifecycle)
 	require.Equal(t, "PlatformCapabilityMissing", f.a.Turn.Failure.Reason)
 }
-func TestFlagOffExistingSessionAndReadOnlyObservation(t *testing.T) {
+func TestSettingOffExistingSessionAndReadOnlyObservation(t *testing.T) {
 	f := newServiceFixture(t)
 	f.ready(t)
-	f.s.Flag.Mode = "off"
+	require.NoError(t, f.db.Do(t.Context(), true, func(tx *store.Tx) error {
+		_, err := tx.SetConversationSetting(domain.ConversationScope{InstallationID: "installation", ProjectID: "project"}, 1, domain.ConversationSettingInput{Mode: "off", Allowlist: []domain.ConversationSubject{}}, "person-admin", f.now)
+		return err
+	}))
 	before := len(f.p.calls)
 	require.NoError(t, f.observe(t))
 	for _, call := range f.p.calls[before:] {
@@ -522,6 +529,37 @@ func TestExplicitSpecConfirmationAndReplay(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, replay.Replay)
 	require.Equal(t, result.Aggregate, replay.Aggregate)
+}
+
+// The observing read that finds the proposal moves the session version (by two:
+// validation and import), so resolve must send the version that read reports,
+// not the one cached before it.
+func TestResolveUsesTheVersionReportedByTheObservingRead(t *testing.T) {
+	f := newServiceFixture(t)
+	f.p.changed = true
+	f.ready(t)
+	before := f.a.Session.Version
+	require.NoError(t, f.observe(t))
+	require.Equal(t, "awaiting_confirmation", f.a.Turn.State)
+	require.EqualValues(t, before+2, f.a.Session.Version)
+	_, err := f.s.ResolveTurn(t.Context(), f.c, f.a.Session.ID, f.a.Turn.ID, before, "resolve-stale", "accept_spec")
+	var conflict *domain.BuildRejection
+	require.ErrorAs(t, err, &conflict)
+	require.Equal(t, "version_conflict", conflict.Code)
+	require.Equal(t, f.a.Session.Version, conflict.CurrentVersion)
+	result, err := f.s.ResolveTurn(t.Context(), f.c, f.a.Session.ID, f.a.Turn.ID, f.a.Session.Version, "resolve", "accept_spec")
+	require.NoError(t, err)
+	require.EqualValues(t, 1, result.Aggregate.Session.CurrentSpecRevision)
+}
+
+// A stored setting the API would refuse (written around it) is treated as off.
+func TestOfferedFailsClosedOnInvalidStoredSetting(t *testing.T) {
+	f := newServiceFixture(t)
+	require.True(t, f.s.Offered(t.Context(), f.c.Access.Scope))
+	require.NoError(t, f.db.Do(t.Context(), true, func(tx *store.Tx) error {
+		return tx.Exec(`UPDATE conversation_settings SET allowlist='[{"subject":"has space"}]'`)
+	}))
+	require.False(t, f.s.Offered(t.Context(), f.c.Access.Scope))
 }
 func TestAdvanceReceiptReplayAfterVersionChanges(t *testing.T) {
 	f := newServiceFixture(t)

@@ -403,11 +403,14 @@ schema declares a default).
 `src/dev/mock-build-sessions.ts` for the current list
 (`role`, `registry`, `codex`, `stack-conflict`, `github-repository`,
 `plan-generation`, `implementation-run`, `logs`, `bare-500`, `app-draft`, ...).
-The dev `/config` (`vite.config.ts`) reports the mock's NEW-APP flag:
-`POST /api/console/__mock/new-app-conversation {on?}` makes `/new` start a
-console-v1 session (off after `__mock/reset`); `build-session-start-failure`
-and `build-session-unavailable {reads?, retryAfterSeconds?}` (503 with
-`Retry-After`) exercise a stopped start and the bounded backoff.
+Whether `/new` starts a console-v1 session is the Console administrator setting
+新しい AI 会話 on 基盤の設定 (`GET/PUT /api/console/admin/conversation`, admins
+only, `If-Match: "cs-<version>"`). The mock stores it (off after `__mock/reset`)
+and the dev `/config` (`vite.config.ts`) reports `newAppConversation` for the
+current caller from it, so stories turn the conversation on through the admin
+card. `build-session-start-failure` and `build-session-unavailable {reads?,
+retryAfterSeconds?}` (503 with `Retry-After`) exercise a stopped start and the
+bounded backoff.
 
 ### Browser stories
 

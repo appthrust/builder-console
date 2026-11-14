@@ -24,9 +24,8 @@
 // preferences are written to the draft too, and the session carries the last accepted ones with their sync state
 // (`session.publish`). The resolver answers console-v1 for a draft a session owns, else
 // platform-v1 (the Platform draft read that follows decides whether the draft exists).
+// Whether `/new` starts a session here is the administrator setting (mock-console `GET/PUT /admin/conversation`).
 // `__mock` controls (`/api/console/__mock/<name>`, routed here by mock-console; reset restores the defaults):
-// - `GET config` answers `{newAppConversation}`, what the dev `/config` (vite.config.ts) passes on;
-// - `POST new-app-conversation {on?}` turns that flag on (default) or off (the seeded state);
 // - `POST build-session-start-failure` makes the next session's initialization fail (a recorded
 //   `service_unavailable`, nothing to advance), as when the Platform draft cannot be created;
 // - `POST build-session-unavailable {reads?, retryAfterSeconds?}` answers the next `reads` (default 1) session
@@ -63,7 +62,7 @@ const BASE = '/api/console/v1/build-sessions'
 
 let sessions = new Map<string, Stored>()
 let replays = new Map<string, Replay>()
-const defaultControls = () => ({ newAppConversation: false, startFailure: false, unavailableReads: 0, retryAfterSeconds: 5 })
+const defaultControls = () => ({ startFailure: false, unavailableReads: 0, retryAfterSeconds: 5 })
 let controls = defaultControls()
 
 export function resetBuildSessions() {
@@ -78,14 +77,7 @@ export async function buildSessionMockControl(request: Request, name: string): P
     const text = await request.text()
     return (text ? JSON.parse(text) : {}) as Record<string, unknown>
   }
-  if (name === 'config' && request.method === 'GET') return answer(200, { newAppConversation: controls.newAppConversation })
   if (request.method !== 'POST') return undefined
-  if (name === 'new-app-conversation') {
-    const { on = true } = await input()
-    if (typeof on !== 'boolean') return fail(400, 'invalid_argument', 'on must be a boolean')
-    controls.newAppConversation = on
-    return answer(200, { newAppConversation: on })
-  }
   if (name === 'build-session-start-failure') {
     controls.startFailure = true
     return answer(200, { startFailure: true })
@@ -181,9 +173,12 @@ async function platform(method: string, path: string, body?: unknown): Promise<R
  * One observation of the active turn: it moves one step, as the server would after observing Platform. A plan
  * turn writes the confirmed specification to the draft (syncing_spec), starts a Platform plan generation
  * (starting_plan) and follows it (planning); success records `session.plan` on the revision it was made from.
+ * Like the server (domain ApplyBuildCommand: every command increments the session version), each step that
+ * moves the turn moves the session version; a step that observes no change moves nothing.
  */
 async function observe(stored: Stored, turn: TurnWire): Promise<TurnWire> {
   const now = stamp()
+  const before = stored.session.version
   const progress = (stage: NonNullable<TurnWire['progress']>['stage']) => ({ stage, observedAt: now, activity: [] })
   let next: TurnWire = turn
   if (turn.kind === 'conversation') {
@@ -225,6 +220,8 @@ async function observe(stored: Stored, turn: TurnWire): Promise<TurnWire> {
       } else if (status === 'failed') next = failed('agent_failed', 'the plan generation failed')
     }
   }
+  if (next !== turn && stored.session.version === before) bump(stored, {})
+  next = { ...next, sessionVersion: stored.session.version }
   stored.turns = stored.turns.map((item) => item.id === turn.id ? next : item)
   return next
 }
@@ -434,7 +431,8 @@ export async function buildSessionRoutes(request: Request, url: URL, caller: { o
     return revision ? answer(200, revision) : fail(404, 'not_found', 'revision not found')
   }
   if (sub !== 'turns') return undefined
-  if (!subId && method === 'GET') return page(stored.turns)
+  // Like the server, every Turn answer states the session version at the time of the read.
+  if (!subId && method === 'GET') return page(stored.turns.map((item) => ({ ...item, sessionVersion: stored.session.version })))
   if (!subId && method === 'POST') return write(request, owner, path, true, (body, version) => stale(stored, version) ?? createTurn(stored, body))
   const turn = stored.turns.find((item) => item.id === subId)
   if (!turn) return fail(404, 'not_found', 'turn not found', { resource: 'operation' })
@@ -442,7 +440,7 @@ export async function buildSessionRoutes(request: Request, url: URL, caller: { o
     const busy = unavailable()
     if (busy) return busy
     const observed = turn.id === stored.session.activeTurnId ? await observe(stored, turn) : turn
-    return answer(200, observed, { ETag: etag(stored.session.version) })
+    return answer(200, { ...observed, sessionVersion: stored.session.version }, { ETag: etag(stored.session.version) })
   }
   if (action === 'resolution' && method === 'POST') return write(request, owner, path, true, (body, version) => stale(stored, version) ?? resolveTurn(stored, turn.id, body))
   return undefined
