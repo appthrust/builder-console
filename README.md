@@ -335,9 +335,9 @@ app-to-app capabilities. None names the draft contracts, and #6723 has no
 released Platform version to use as its minimum yet. `catalog/entry.yaml`
 therefore keeps its existing fields: no invented capability or version.
 **Release-time requirement:** the Console release that first enables this flow
-must set `spec.versions[].minPlatformVersion` on its new version entry in
-`catalog/entry.yaml` to the first Platform release containing #6723, once that
-version exists. Until that prerequisite is known and deployed, keep the setting off;
+must declare its exact app version in `catalog/entry.yaml`'s top-level
+`publisherReleases` map (see Publication below), using the first Platform release
+containing #6723 once that version exists. Until that prerequisite is known and deployed, keep the setting off;
 a catalog declaration alone is not runtime deployment evidence.
 
 Platform does not serve a capability/OpenAPI endpoint, so a pre-offer capability
@@ -478,6 +478,40 @@ GitHub OIDC/cosign, then submits the catalog entry to Cloud. A queued publicatio
 observed directly; a snapshot-only response triggers Cloud publication with the
 repository's GitHub App credentials. Success requires the exact version/image digest
 in the signed catalog artifact, not merely a successful dispatch.
+
+### Releases requiring a minimum Platform version
+
+Before tagging, the release owner chooses the oldest supported Platform developer
+contract and commits an exact app-version declaration in `catalog/entry.yaml`.
+For example only (not a release decision):
+
+```yaml
+publisherReleases:
+  "1.2.3":
+    minPlatformVersion: "v0.1.0-rc.30"
+```
+
+Then tag that same commit as `v1.2.3` through the normal release process. No digest
+or workflow flag is needed: the publisher strips this top-level metadata and copies
+the matching minimum into the new `spec.versions[]` item and catalog version.
+The committed map is empty until an owner makes a release decision.
+
+Minimums must be SemVer `MAJOR.MINOR.PATCH`, optionally prefixed by `v` and with a
+prerelease suffix (for example `-rc.30`); build metadata is not accepted. Values
+must contain 1–63 characters and no whitespace (63 is the CRD maximum).
+This field is **informational until Platform enforces it (APT-1010)**: the Dashboard
+displays “Needs platform X or later”; it is not a compatibility check or deployment
+proof.
+
+An absent declaration leaves a new version without the field. Recorded minimums
+are immutable, just like images: rerenders retain them even if the declaration is
+removed, and a different declaration fails (including adding one to a recorded
+version that had none). Earlier versions retain their recorded minimums.
+A declaration for another version is accepted only if that exact version already
+exists in the merged catalog history and its minimum matches; otherwise publication
+fails. Thus recorded declarations may remain for review/history, but an unpublished
+or mistyped leftover cannot silently apply to another release. Before tagging, remove
+unpublished declarations for other versions; never rewrite recorded minimums.
 
 Required repository secrets: `CLOUD_CATALOG_ADMIN_TOKEN`,
 `APPTHRUST_GITHUB_ACTIONS_APP_ID`, and `APPTHRUST_GITHUB_ACTIONS_APP_PRIVATE_KEY`.
