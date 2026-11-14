@@ -26,11 +26,67 @@ function sameDraft(a: Draft, b: Draft): boolean {
   return a.allowlist.every((entry) => subjects.has(entry.subject))
 }
 
-/** What the server holds, in words (the 412 notice compares it with the unsaved choice). */
+/** What the server holds, in words (the conflict notice names the setting it would replace). */
 function describe(setting: ConversationSetting): string {
   if (setting.mode.kind === 'unknown') return text.conversation.unknownMode
   const title = text.conversation.modes[setting.mode.value].title
   return setting.mode.value === 'allowlist' ? text.conversation.summaryWithPeople(title, setting.allowlist.length) : title
+}
+
+/** Names listed per group before 「すべて表示」. */
+const DIFF_PREVIEW = 5
+
+/** A person in the difference: the Directory name, else 不明な利用者 with enough of the sign-in subject to tell two apart. */
+function personLabel({ subject, displayName }: ConversationSetting['allowlist'][number]): string {
+  if (displayName) return displayName
+  return text.conversation.unknownSubject(copy.common.unknownPerson, subject.length > 24 ? `${subject.slice(0, 12)}…${subject.slice(-8)}` : subject)
+}
+
+/**
+ * Another administrator saved first: what replacing their setting with the unsaved choice would change, in plain terms
+ * (the mode, and who joins or leaves the list), so 「置き換えて続ける」 is decided on the setting it replaces.
+ */
+function ConflictNotice({ current, server, draft, onDiscard, onKeep }: { current: string; server: Draft; draft: Draft; onDiscard: () => void; onKeep: () => void }) {
+  const words = text.conversation
+  const [expanded, setExpanded] = useState(false)
+  const saved = new Set(server.allowlist.map((entry) => entry.subject))
+  const mine = new Set(draft.allowlist.map((entry) => entry.subject))
+  const groups = [
+    { kind: 'added', label: words.diffAdded, people: draft.allowlist.filter((entry) => !saved.has(entry.subject)) },
+    { kind: 'removed', label: words.diffRemoved, people: server.allowlist.filter((entry) => !mine.has(entry.subject)) },
+  ].filter((group) => group.people.length > 0)
+  const long = groups.some((group) => group.people.length > DIFF_PREVIEW)
+  return (
+    <Notice
+      tone="warning"
+      title={words.conflictTitle}
+      actions={<>
+        <Button size="sm" onClick={onDiscard}>{words.discard}</Button>
+        <Button size="sm" onClick={onKeep}>{words.keep}</Button>
+      </>}
+    >
+      <p>{words.conflictBody(current)}</p>
+      <ul className="mt-1.5 space-y-1" data-testid="conversation-conflict-diff">
+        {draft.mode !== server.mode ? (
+          <li data-testid="conversation-conflict-mode">{words.diffMode(words.modes[server.mode].title, words.modes[draft.mode].title)}</li>
+        ) : null}
+        {groups.map(({ kind, label, people }) => {
+          const listed = expanded ? people : people.slice(0, DIFF_PREVIEW)
+          return (
+            <li key={kind} data-testid={`conversation-conflict-${kind}`}>
+              <span className="font-medium">{label(people.length)}</span> {listed.map(personLabel).join(words.separator)}
+              {listed.length < people.length ? ` ${words.diffMore(people.length - listed.length)}` : null}
+            </li>
+          )
+        })}
+      </ul>
+      {long ? (
+        <Button size="sm" tone="ghost" className="-ml-2.5 mt-1" aria-expanded={expanded} onClick={() => setExpanded((open) => !open)}>
+          {expanded ? words.showFewer : words.showAll}
+        </Button>
+      ) : null}
+    </Notice>
+  )
 }
 
 /**
@@ -74,10 +130,14 @@ function ConversationForm({ setting, stale }: { setting: ConversationSetting; st
   const [notSignedIn, setNotSignedIn] = useState<string>()
   // Addresses of people picked here (the setting stores subjects and names only): marks them 追加済み in the search.
   const [emails, setEmails] = useState<Record<string, string>>({})
-  const shown = draft ?? server
-  const dirty = draft !== undefined && server !== undefined && !sameDraft(draft, server)
+  // The server's mode is one this page understands: only then can a choice be shown, compared, edited or saved.
+  const editable = server !== undefined
+  // An unknown mode shows what the server holds; an unsaved choice is kept (and guarded) but not shown or saved.
+  const shown = server && (draft ?? server)
+  const unsaved = draft !== undefined && (server === undefined || !sameDraft(draft, server))
+  const dirty = unsaved && editable
   // Someone saved since the choice was started (a poll read it, or the save was refused): nothing is saved or edited
-  // until the user discards the choice or keeps it on top of the newer setting.
+  // until the user discards the choice or replaces that setting with it.
   const conflict = draft !== undefined && dirty && (draft.base !== setting.version || rejected)
 
   // A new read that already matches the unsaved choice (a read-back, another administrator's identical save) ends it.
@@ -109,7 +169,7 @@ function ConversationForm({ setting, stale }: { setting: ConversationSetting; st
   const confirmation = useWriteConfirmation([save.error], save.reset, readBack)
   const busy = save.isPending || confirmation.unconfirmed
   const locked = busy || conflict
-  useUnsavedChangesGuard(dirty && !save.isPending, words.unsaved)
+  useUnsavedChangesGuard(unsaved && !save.isPending, words.unsaved)
 
   const update = (next: (current: Draft) => Draft) => {
     if (!server || conflict) return
@@ -120,9 +180,9 @@ function ConversationForm({ setting, stale }: { setting: ConversationSetting; st
       return sameDraft(changed, server) ? undefined : changed
     })
   }
-  const resolveConflict = (keep: boolean) => {
-    // Keeping adopts the newer version as the base: the next 保存 replaces that setting, as the user chose.
-    setDraft((current) => keep && current ? { ...current, base: setting.version } : undefined)
+  /** Discards the choice, or keeps it on exactly the setting the notice showed (`version`) so the next 保存 replaces it. */
+  const resolveConflict = (keep: { version: number } | undefined) => {
+    setDraft((current) => keep && current ? { ...current, base: keep.version } : undefined)
     setRejected(false)
     save.reset()
   }
@@ -148,7 +208,6 @@ function ConversationForm({ setting, stale }: { setting: ConversationSetting; st
 
   const people = shown?.allowlist ?? setting.allowlist
   const atLimit = people.length >= CONVERSATION_ALLOWLIST_LIMIT
-  const editable = shown !== undefined
   const updatedBy = setting.updatedBy && !isUnknownPerson(setting.updatedBy) ? setting.updatedBy.displayName : copy.common.unknownPerson
   const updatedAt = relativeTime(setting.updatedAt)
 
@@ -163,18 +222,16 @@ function ConversationForm({ setting, stale }: { setting: ConversationSetting; st
       }}
     >
       {stale}
-      {editable ? null : <Notice tone="warning">{words.unknownMode}</Notice>}
-      {conflict ? (
-        <Notice
-          tone="warning"
-          title={words.conflictTitle}
-          actions={<>
-            <Button size="sm" onClick={() => resolveConflict(false)}>{words.discard}</Button>
-            <Button size="sm" onClick={() => resolveConflict(true)}>{words.keep}</Button>
-          </>}
-        >
-          {words.conflictBody(describe(setting))}
-        </Notice>
+      {editable ? null : <Notice tone="warning">{words.unknownMode}{draft ? ` ${words.unknownModeUnsaved}` : ''}</Notice>}
+      {conflict && server && draft ? (
+        <ConflictNotice
+          current={describe(setting)}
+          server={server}
+          draft={draft}
+          onDiscard={() => resolveConflict(undefined)}
+          // The version of the very read whose difference is on screen: a newer read re-renders the notice first.
+          onKeep={() => resolveConflict({ version: setting.version })}
+        />
       ) : null}
       <RadioCards
         name="conversation-mode"

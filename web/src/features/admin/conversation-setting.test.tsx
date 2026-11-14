@@ -2,13 +2,15 @@
 // transport and canonical contracts against the in-memory Console mock: each
 // mode saves with `If-Match` and round-trips into `/config`, the allowlist is
 // picked from the Directory, an unsaved choice saves on the version it started
-// from: a 412 or a poll that reads a newer setting keeps the choice next to it
-// until the user discards or keeps it, while a card without unsaved changes
-// follows polls. An unreadable 2xx offers only the read-back, an unknown mode
-// offers no save, and only Console administrators get the card at all.
+// from: a 412 or a poll that reads a newer setting stops the choice and shows
+// what replacing that setting would change (mode, who joins or leaves the
+// list) until the user discards it or replaces exactly the setting shown,
+// while a card without unsaved changes follows polls. An unreadable 2xx offers
+// only the read-back, an unknown mode (also mid-edit) offers no save but keeps
+// the unsaved-changes guard, and only Console administrators get the card.
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterContextProvider } from '@tanstack/react-router'
+import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterContextProvider, type AnyRouter } from '@tanstack/react-router'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { consoleKeys, groupsQuery, meQuery } from '../../api/queries/console'
@@ -29,6 +31,7 @@ const words = text.conversation
 let mock: ConsoleMockFetch
 let client: QueryClient
 let root: Root | undefined
+let router: AnyRouter
 let container: HTMLDivElement
 const restore: (() => void)[] = []
 const originalFetch = globalThis.fetch
@@ -90,7 +93,9 @@ async function renderPage({ polling = false } = {}) {
   await Promise.all([client.fetchQuery(meQuery), client.fetchQuery(groupsQuery)])
   const rootRoute = createRootRoute()
   const page = createRoute({ getParentRoute: () => rootRoute, path: '/-/admin/platform', component: () => null })
-  const router = createRouter({ routeTree: rootRoute.addChildren([page]), history: createMemoryHistory({ initialEntries: ['/-/admin/platform'] }) })
+  // Another app page, to leave 基盤の設定 for (the unsaved-changes guard).
+  const mine = createRoute({ getParentRoute: () => rootRoute, path: '/mine', component: () => null })
+  router = createRouter({ routeTree: rootRoute.addChildren([page, mine]), history: createMemoryHistory({ initialEntries: ['/-/admin/platform'] }) })
   await router.load()
   container = document.createElement('div')
   document.body.append(container)
@@ -227,6 +232,14 @@ describe('the allowlist', () => {
 })
 
 const conflictNotice = () => [...card()!.querySelectorAll('[role="status"]')].find((item) => item.textContent?.includes(words.conflictTitle))
+/** One line of the notice's difference: `mode`, `added` (joins the list by continuing) or `removed` (leaves it). */
+const diff = (kind: 'mode' | 'added' | 'removed') => card()!.querySelector(`[data-testid="conversation-conflict-${kind}"]`)?.textContent ?? null
+/** Another administrator's save, as another client would make it. */
+async function foreignSave(personId: string, version: number, subjects: string[], mode = 'allowlist') {
+  await signIn(personId, 'Admin')
+  expect((await call('PUT', '/api/console/admin/conversation', { mode, allowlist: subjects.map((subject) => ({ subject })) }, { 'If-Match': `"cs-${version}"` })).status).toBe(200)
+  await signIn('p-yamada', 'Admin')
+}
 
 test('412: the newer setting is read back and named, the unsaved choice stays for comparison, and nothing is resent', async () => {
   await renderPage()
@@ -241,6 +254,10 @@ test('412: the newer setting is read back and named, the unsaved choice stays fo
   await save()
   expect(mine().map((item) => item.status)).toEqual([412])
   expect(conflictNotice()!.textContent).toContain(words.conflictBody(words.summaryWithPeople(words.modes.allowlist.title, 1)))
+  // What continuing would replace: 全員 instead of their 一部の人だけ, and 鈴木 leaves the list.
+  expect(diff('mode')).toBe(words.diffMode(words.modes.allowlist.title, words.modes.on.title))
+  expect(diff('removed')).toBe(`${words.diffRemoved(1)} 鈴木 一郎`)
+  expect(diff('added')).toBeNull()
   expect(radio('on').getAttribute('aria-checked')).toBe('true')
   expect(card()!.querySelector('[data-testid="conversation-updated"]')!.textContent).toBe(words.updated('佐藤 花子', copy.relative.justNow))
   // The choice was started on the older version: saving it is locked until the user decides.
@@ -282,6 +299,10 @@ describe('with the app\'s polling on', () => {
     await nextPoll()
     // Before any save: the newer setting is named, 山田's choice stays, and nothing can be saved or edited on it.
     expect(conflictNotice()!.textContent).toContain(words.conflictBody(words.summaryWithPeople(words.modes.allowlist.title, 1)))
+    // Continuing would bring back 鈴木, whom 佐藤 just took off, and take 佐藤 off.
+    expect(diff('added')).toBe(`${words.diffAdded(1)} 鈴木 一郎`)
+    expect(diff('removed')).toBe(`${words.diffRemoved(1)} 佐藤 花子`)
+    expect(diff('mode')).toBeNull()
     expect(card()!.querySelector('[data-testid="conversation-updated"]')!.textContent).toBe(words.updated('佐藤 花子', copy.relative.justNow))
     expect(people()).toEqual(['鈴木 一郎'])
     expect(saveButton()!.disabled).toBe(true)
@@ -301,6 +322,40 @@ describe('with the app\'s polling on', () => {
     expect((await stored()).body).toMatchObject({ version: 3, allowlist: [{ subject: 'sub-suzuki' }] })
   }, 30_000)
 
+  test('two more saves while the notice is up update it, 置き換えて続ける adopts the setting it shows, and a save after that stops it again', async () => {
+    await foreignSave('p-yamada', 0, ['sub-sato', 'sub-suzuki'])
+    await renderPage({ polling: true })
+    await click(button(words.removeLabel('佐藤 花子')))
+    await foreignSave('p-sato', 1, ['sub-sato'])
+    await nextPoll()
+    expect(diff('removed')).toBe(`${words.diffRemoved(1)} 佐藤 花子`)
+
+    // Two consecutive saves (佐藤 adds 田中, then 田中 leaves only herself) before the next poll.
+    await foreignSave('p-sato', 2, ['sub-sato', 'sub-tanaka'])
+    await foreignSave('p-tanaka', 3, ['sub-tanaka'])
+    await nextPoll()
+    expect(conflictNotice()!.textContent).toContain(words.conflictBody(words.summaryWithPeople(words.modes.allowlist.title, 1)))
+    expect(diff('added')).toBe(`${words.diffAdded(1)} 鈴木 一郎`)
+    expect(diff('removed')).toBe(`${words.diffRemoved(1)} 田中 美咲`)
+    expect(saveButton()!.disabled).toBe(true)
+
+    // Continuing adopts version 4, the one on screen.
+    await click(button(words.keep))
+    // Another save lands after 置き換えて続ける and before 保存; the next poll stops the choice again.
+    await foreignSave('p-sato', 4, ['sub-sato'])
+    await nextPoll()
+    expect(diff('removed')).toBe(`${words.diffRemoved(1)} 佐藤 花子`)
+    expect(saveButton()!.disabled).toBe(true)
+    await save()
+    // 保存 sent nothing while stopped: only the five other saves.
+    expect(puts().map((item) => item.ifMatch)).toEqual(['"cs-0"', '"cs-1"', '"cs-2"', '"cs-3"', '"cs-4"'])
+
+    await click(button(words.keep))
+    await save()
+    expect(puts().slice(5).map((item) => [item.status, item.ifMatch])).toEqual([[200, '"cs-5"']])
+    expect((await stored()).body).toMatchObject({ version: 6, allowlist: [{ subject: 'sub-suzuki' }] })
+  }, 45_000)
+
   test('a card without unsaved changes follows the poll, even after a change that was undone; the next save uses the version it shows', async () => {
     await renderPage({ polling: true })
     await click(radio('on'))
@@ -318,6 +373,63 @@ describe('with the app\'s polling on', () => {
     await save()
     expect(puts().slice(1).map((item) => [item.status, item.ifMatch])).toEqual([[200, '"cs-1"']])
   }, 30_000)
+})
+
+test('a save that lands after the notice is drawn and before 置き換えて続ける is not adopted: the shown version is, so the save is refused and the notice shows the newer setting', async () => {
+  await foreignSave('p-yamada', 0, ['sub-sato', 'sub-suzuki'])
+  await renderPage()
+  await click(button(words.removeLabel('佐藤 花子')))
+  await foreignSave('p-sato', 1, ['sub-sato'])
+  await save()
+  expect(diff('removed')).toBe(`${words.diffRemoved(1)} 佐藤 花子`)
+  // 田中 saves while the notice for version 2 is on screen; nothing has read it yet.
+  await foreignSave('p-tanaka', 2, ['sub-sato', 'sub-tanaka'])
+  await click(button(words.keep))
+  await save()
+  // 山田's refused save, 田中's save, then 山田's save on version 2 (the one shown): refused too.
+  expect(puts().slice(2).map((item) => [item.status, item.ifMatch])).toEqual([[412, '"cs-1"'], [200, '"cs-2"'], [412, '"cs-2"']])
+  // The refusal reads version 3: the notice now names 田中 too, and only another decision continues.
+  expect(diff('removed')).toBe(`${words.diffRemoved(2)} 佐藤 花子${words.separator}田中 美咲`)
+  expect(saveButton()!.disabled).toBe(true)
+  await click(button(words.keep))
+  await save()
+  expect(puts().slice(5).map((item) => [item.status, item.ifMatch])).toEqual([[200, '"cs-3"']])
+})
+
+test('a long difference lists the first five of each group with a count, 「すべて表示」 lists all, and people the Directory does not know are told apart by subject', async () => {
+  const long = 'https://issuer.example/subjects/0123456789-abcdef'
+  const subjects = [...Array.from({ length: 7 }, (_, index) => `sub-extra-${index}`), long]
+  await foreignSave('p-yamada', 0, subjects)
+  await renderPage()
+  await click(radio('on'))
+  await foreignSave('p-sato', 1, ['sub-sato'], 'allowlist')
+  await save()
+  const shortLong = `${long.slice(0, 12)}…${long.slice(-8)}`
+  const label = (subject: string) => words.unknownSubject(copy.common.unknownPerson, subject)
+  expect(diff('mode')).toBe(words.diffMode(words.modes.allowlist.title, words.modes.on.title))
+  expect(diff('removed')).toBe(`${words.diffRemoved(1)} 佐藤 花子`)
+  expect(diff('added')).toBe(`${words.diffAdded(8)} ${subjects.slice(0, 5).map(label).join(words.separator)} ${words.diffMore(3)}`)
+  await click(button(words.showAll))
+  expect(diff('added')).toBe(`${words.diffAdded(8)} ${[...subjects.slice(0, 7), shortLong].map(label).join(words.separator)}`)
+  expect(button(words.showFewer).getAttribute('aria-expanded')).toBe('true')
+})
+
+test('a mode this console does not know arriving mid-edit says why nothing can be saved, stops editing, and keeps the unsaved-changes guard', async () => {
+  await renderPage()
+  await click(radio('on'))
+  mock.rewrites.push({ method: 'GET', path: SETTING, once: false, body: (wire) => ({ ...wire, mode: 'groups' }) })
+  await act(async () => { await client.refetchQueries({ queryKey: consoleKeys.conversationSetting }) })
+  await settle()
+  expect(card()!.textContent).toContain(`${words.unknownMode} ${words.unknownModeUnsaved}`)
+  expect(conflictNotice()).toBeUndefined()
+  expect([...card()!.querySelectorAll('[role="radio"]')].every((item) => (item as HTMLButtonElement).disabled)).toBe(true)
+  expect(saveButton()).toBeUndefined()
+  // Leaving the page still asks first: the unsaved choice is not silently dropped.
+  await act(async () => { void router.navigate({ to: '/mine' }) })
+  await settle()
+  expect(document.body.textContent).toContain(copy.unsavedChanges.title)
+  expect(document.body.textContent).toContain(words.unsaved)
+  expect(router.state.location.pathname).toBe('/-/admin/platform')
 })
 
 test('412 then 変更をやめる shows the other administrator\'s setting', async () => {
