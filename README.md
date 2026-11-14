@@ -288,17 +288,40 @@ Those writes require the next authenticated `advance` request.
 
 ### Operations: capability floor, rollback and retention
 
-`BUILDER_CONSOLE_NEW_APP_CONVERSATION=off|allowlist|on` defaults to `off`.
-`BUILDER_CONSOLE_NEW_APP_CONVERSATION_ALLOWLIST` is a JSON array of
-`{"issuer":"…","subject":"…"}` entries, not email addresses.
-`GET /config` always includes the caller-resolved boolean `newAppConversation`.
-Existing console-v1 sessions and draft resolution remain available when disabled.
+Console administrators change the NEW-APP conversation setting on **基盤の設定**.
+It is stored in the Console PostgreSQL database per installation/Project and
+defaults to `off`, both on a fresh install and when upgrading an existing database.
+Upgrading does not import the former `BUILDER_CONSOLE_NEW_APP_CONVERSATION*`
+environment variables: an estate that had them on starts `off` until an administrator sets it again.
+`allowlist` enables it only for the listed Directory subjects of this installation's
+issuer (not email addresses); `on` enables it for all authenticated callers.
+The list is retained but ignored in `off` and `on`. Unknown subjects are accepted
+and displayed as 不明な利用者. The list is limited to 200 OIDC subjects (1–255
+printable ASCII characters each, each listed once; a repeat is refused with 400).
+There is no environment-variable override. A stored row that the API would refuse
+(for example one edited directly in the database) counts as `off` for new sessions,
+and the admin GET fails until a valid PUT replaces it.
+
+Administrators can also use `GET` / `PUT /api/console/admin/conversation`.
+GET returns a strong `ETag: "cs-<version>"`; PUT requires that value in `If-Match`
+(428 `precondition_required` if missing, 412 `version_conflict` if stale).
+The setting records the last writer and update time. The server has no separate
+admin-write audit log; this follows the other admin writes.
+The database is read on each `/config` decision and new-session creation, so a
+committed change takes effect on the next request without a restart or setting cache.
+`GET /config` always includes the caller-resolved boolean `newAppConversation`,
+ANDed with the existing Platform-capability verdict cache.
+`off`, or removing someone from the list, stops only new sessions: sessions already
+started continue (turns, proposals, plan and creation), and draft resolution stays available.
+Rolling back to a binary older than this setting leaves migration 009 in place but
+ignores it, and that binary again obeys its `BUILDER_CONSOLE_NEW_APP_CONVERSATION*`
+environment variables, so check them before rolling back.
 `BUILDER_CONSOLE_INSTALLATION_ID` may pin the receipt namespace; the default is
 the singleton `builder-console/<configured Project>`. Keep it stable across upgrades.
 Prompt registration records `BUILDER_CONSOLE_RELEASE_VERSION`, or `development`
 for an unversioned local server; that local label is not release evidence.
 
-Keep `BUILDER_CONSOLE_NEW_APP_CONVERSATION=off` until the estate's Platform
+Keep the administrator setting `off` until the estate's Platform
 contains the draft contracts from [Platform PR #6723](https://github.com/appthrust/platform/pull/6723):
 P1 durable draft-create idempotency, P2 strong ETag/conditional draft update, and
 P3 pinned plan input with `expectedSpecSha256`/`inputSpecSha256`.
@@ -314,17 +337,17 @@ therefore keeps its existing fields: no invented capability or version.
 **Release-time requirement:** the Console release that first enables this flow
 must set `spec.versions[].minPlatformVersion` on its new version entry in
 `catalog/entry.yaml` to the first Platform release containing #6723, once that
-version exists. Until that prerequisite is known and deployed, keep the flag off;
+version exists. Until that prerequisite is known and deployed, keep the setting off;
 a catalog declaration alone is not runtime deployment evidence.
 
 Platform does not serve a capability/OpenAPI endpoint, so a pre-offer capability
-probe is not possible. If the flag is enabled too early, a missing strong draft
+probe is not possible. If the setting is enabled too early, a missing strong draft
 ETag or missing/mismatched plan input digest fails closed with typed
 `service_unavailable`, `details.reason=PlatformCapabilityMissing`,
 `details.retryable=false`. The process-local negative verdict cache suppresses
 new offers for two minutes after the last missing-capability observation.
 The first observation outside that window logs:
-`NEW_APP_CONVERSATION flag is enabled but Platform lacks the draft contract`.
+`NEW-APP conversation is enabled but Platform lacks the draft contract`.
 An incompatible create retains its attributable empty draft on an archived
 session with that failure; it creates no workspace and does not delete the draft.
 Its resolver remains console-v1. This is an intentional deviation from a pre-offer

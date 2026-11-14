@@ -4854,6 +4854,189 @@
           }
         }
       }
+    },
+    "/admin/conversation": {
+      "get": {
+        "operationId": "consoleGetConversationSetting",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Current installation setting",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "ETag": {
+                "required": true,
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationSettingETag"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationSetting"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Console error; never a success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Console error; never a success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildError"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Console error; never a success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildError"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Console error; never a success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Console error; never a success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "consolePutConversationSetting",
+        "parameters": [
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ConversationSettingETag"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current installation setting",
+            "headers": {
+              "Cache-Control": {
+                "required": true,
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "ETag": {
+                "required": true,
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationSettingETag"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationSetting"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Console error; never a success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Console error; never a success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildError"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Console error; never a success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildError"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Console error; never a success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Console error; never a success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationSettingInput"
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -10832,6 +11015,311 @@
           "message"
         ],
         "additionalProperties": false
+      },
+      "ConversationSetting": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "off",
+              "allowlist",
+              "on"
+            ]
+          },
+          "allowlist": {
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "subject": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^[!-~]+$"
+                },
+                "displayName": {
+                  "presence": "optionalObservation",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "subject"
+              ],
+              "additionalProperties": false
+            },
+            "x-uniqueBy": [
+              "subject"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "updatedAt": {
+            "presence": "optionalObservation",
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "updatedBy": {
+            "presence": "optionalObservation",
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "subject": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "pending": {
+                    "type": "boolean"
+                  },
+                  "email": {
+                    "type": "string"
+                  },
+                  "displayName": {
+                    "type": "string"
+                  },
+                  "avatarVersion": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "subject",
+                  "pending",
+                  "email",
+                  "displayName",
+                  "avatarVersion"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "displayName": {
+                    "type": "string",
+                    "const": ""
+                  },
+                  "unknown": {
+                    "type": "boolean",
+                    "const": true
+                  }
+                },
+                "required": [
+                  "id",
+                  "displayName",
+                  "unknown"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": [
+          "mode",
+          "allowlist",
+          "version"
+        ],
+        "additionalProperties": false
+      },
+      "ConversationSettingRead": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string"
+          },
+          "allowlist": {
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "subject": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^[!-~]+$"
+                },
+                "displayName": {
+                  "presence": "optionalObservation",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "subject"
+              ],
+              "additionalProperties": false
+            },
+            "x-uniqueBy": [
+              "subject"
+            ]
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "updatedAt": {
+            "presence": "optionalObservation",
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "updatedBy": {
+            "presence": "optionalObservation",
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "subject": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "pending": {
+                    "type": "boolean"
+                  },
+                  "email": {
+                    "type": "string"
+                  },
+                  "displayName": {
+                    "type": "string"
+                  },
+                  "avatarVersion": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "subject",
+                  "pending",
+                  "email",
+                  "displayName",
+                  "avatarVersion"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "displayName": {
+                    "type": "string",
+                    "const": ""
+                  },
+                  "unknown": {
+                    "type": "boolean",
+                    "const": true
+                  }
+                },
+                "required": [
+                  "id",
+                  "displayName",
+                  "unknown"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": [
+          "mode",
+          "allowlist",
+          "version"
+        ],
+        "additionalProperties": false
+      },
+      "ConversationSettingInput": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "off",
+              "allowlist",
+              "on"
+            ]
+          },
+          "allowlist": {
+            "maxItems": 200,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "subject": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 255,
+                  "pattern": "^[!-~]+$"
+                }
+              },
+              "required": [
+                "subject"
+              ],
+              "additionalProperties": false
+            },
+            "x-uniqueBy": [
+              "subject"
+            ]
+          }
+        },
+        "required": [
+          "mode",
+          "allowlist"
+        ],
+        "additionalProperties": false
+      },
+      "ConversationSettingHeaders": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "If-Match": {
+            "type": "string",
+            "pattern": "^\"cs-(0|[1-9][0-9]*)\"$",
+            "x-maxVersion": 9007199254740991
+          }
+        },
+        "required": [
+          "If-Match"
+        ],
+        "additionalProperties": false
+      },
+      "ConversationSettingETag": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "string",
+        "pattern": "^\"cs-(0|[1-9][0-9]*)\"$",
+        "x-maxVersion": 9007199254740991
       },
       "Person": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",

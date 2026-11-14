@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -26,40 +25,11 @@ type Caller struct {
 	Access                  store.BuildAccess
 	PersonID, Authorization string
 }
-type Flag struct {
-	Mode      string
-	Allowlist []Owner
-}
-
-func NewFlag(mode, allowlist string) (Flag, error) {
-	if mode == "" {
-		mode = "off"
-	}
-	if !slices.Contains([]string{"off", "allowlist", "on"}, mode) {
-		return Flag{}, errors.New("invalid NEW_APP_CONVERSATION mode")
-	}
-	f := Flag{Mode: mode}
-	if allowlist != "" {
-		if json.Unmarshal([]byte(allowlist), &f.Allowlist) != nil {
-			return Flag{}, errors.New("NEW_APP_CONVERSATION_ALLOWLIST must be an array of issuer/subject objects")
-		}
-	}
-	for _, owner := range f.Allowlist {
-		if owner.Issuer == "" || owner.Subject == "" {
-			return Flag{}, errors.New("allowlist requires issuer and subject")
-		}
-	}
-	return f, nil
-}
-func (f Flag) Allows(owner Owner) bool {
-	return f.Mode == "on" || (f.Mode == "allowlist" && slices.Contains(f.Allowlist, owner))
-}
 
 type Service struct {
 	DB       Database
 	Platform Platform
 	Catalog  *prompts.Catalog
-	Flag     Flag
 	Now      func() time.Time
 	// Boundary is a test fault injector, called only after commit or external I/O.
 	// Production leaves it nil. It never sees payloads or credentials.
@@ -74,7 +44,7 @@ type observationCall struct {
 	err    error
 }
 
-func NewService(ctx context.Context, db Database, platform Platform, catalog *prompts.Catalog, flag Flag) (*Service, error) {
+func NewService(ctx context.Context, db Database, platform Platform, catalog *prompts.Catalog) (*Service, error) {
 	version, err := catalog.Select()
 	if err != nil {
 		return nil, err
@@ -85,7 +55,7 @@ func NewService(ctx context.Context, db Database, platform Platform, catalog *pr
 	if err != nil {
 		return nil, err
 	}
-	return &Service{DB: db, Platform: platform, Catalog: catalog, Flag: flag, Now: time.Now, observing: map[string]*observationCall{}}, nil
+	return &Service{DB: db, Platform: platform, Catalog: catalog, Now: time.Now, observing: map[string]*observationCall{}}, nil
 }
 func (s *Service) checkpoint(name string) error {
 	if s.Boundary != nil {
@@ -93,16 +63,29 @@ func (s *Service) checkpoint(name string) error {
 	}
 	return nil
 }
-func (s *Service) Offered(owner Owner) bool {
+
+// Offered reads the installation setting on every request. Only the existing
+// Platform-capability verdict is cached; a database error fails closed.
+func (s *Service) Offered(ctx context.Context, scope domain.BuildScope) bool {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.Flag.Allows(owner) && !s.Now().Before(s.absentUntil)
+	absent := s.Now().Before(s.absentUntil)
+	s.mu.Unlock()
+	if absent {
+		return false
+	}
+	var setting domain.ConversationSetting
+	err := s.DB.Do(ctx, false, func(tx *store.Tx) error {
+		var err error
+		setting, err = tx.ConversationSetting(domain.ConversationScope{InstallationID: scope.InstallationID, ProjectID: scope.ProjectID})
+		return err
+	})
+	return err == nil && setting.Allows(scope.OwnerSubject)
 }
 func (s *Service) missingCapability() *Failure {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.Now().Before(s.absentUntil) {
-		log.Print("NEW_APP_CONVERSATION flag is enabled but Platform lacks the draft contract")
+		log.Print("NEW-APP conversation is enabled but Platform lacks the draft contract")
 	}
 	s.absentUntil = s.Now().Add(2 * time.Minute)
 	f := failure(503, "service_unavailable")
@@ -197,7 +180,7 @@ func (s *Service) Create(ctx context.Context, c Caller, group, intent, locale, k
 	if replay, err := s.replay(ctx, c, "", store.BuildReceipt{Action: "create", Key: key, Body: body}); err != nil || replay.Replay {
 		return replay, err
 	}
-	if !s.Offered(Owner{Issuer: c.Access.Scope.OwnerIssuer, Subject: c.Access.Scope.OwnerSubject}) {
+	if !s.Offered(ctx, c.Access.Scope) {
 		return store.BuildResult{}, failure(412, "failed_precondition")
 	}
 	id := uuid.NewString()

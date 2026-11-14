@@ -94,6 +94,8 @@ func New(database *store.Store, auth *identity.Authenticator, upstream *platform
 	a.route("POST /api/console/apps/{id}/access-requests/{rid}/approve", true, true, a.approveAccessRequest)
 	a.route("POST /api/console/apps/{id}/access-requests/{rid}/decline", true, true, a.declineAccessRequest)
 	a.route("GET /api/console/admin/platform", false, true, a.settings)
+	a.route("GET /api/console/admin/conversation", false, true, a.getConversationSetting)
+	a.route("PUT /api/console/admin/conversation", true, true, a.putConversationSetting)
 	a.registerBuildSessions()
 	a.route("/", false, false, func(*request) (any, int, error) { return nil, 0, httpx.NotFound() })
 	return a
@@ -187,6 +189,11 @@ func (a *API) routeHandlerMode(mutation, needsRoles, transactional bool, handler
 			return failure
 		})
 		if err != nil {
+			var rejection *domain.BuildRejection
+			if errors.As(err, &rejection) {
+				writeBuildError(w, err)
+				return
+			}
 			if !transactional {
 				writeBuildError(w, err)
 				return

@@ -30,9 +30,9 @@ const proxy: ProxyOptions = {
 }
 
 /**
- * The NEW-APP conversation flag `/config` reports. Against the in-repo mock it is the mock's switch
- * (`POST /api/console/__mock/new-app-conversation`, off after `__mock/reset`), so a story can turn it on;
- * against a real upstream it stays off here.
+ * The NEW-APP conversation flag `/config` reports. Against the in-repo mock it follows the mock's stored
+ * administrator setting for the current caller (`GET /api/console/__mock/config`, from `PUT
+ * /api/console/admin/conversation`; off after `__mock/reset`); against a real upstream it stays off here.
  */
 async function newAppConversation(): Promise<boolean> {
   if (!mockUpstream) return false

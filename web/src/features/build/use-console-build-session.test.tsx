@@ -157,12 +157,41 @@ test('a second tab writing on an older version gets 412: it re-reads, shows the 
   expect(mock.requests.filter((item) => item.method === 'POST' && item.path.endsWith('/turns')).map((item) => item.status)).toEqual([202, 412])
   expect(mock.count('GET', new RegExp(`/build-sessions/${session.id}$`))).toBeGreaterThan(sessionReads)
   expect(tabB.view.engine).toBe('console-v1')
-  expect(tabB.view.session.version).toBe(tabA.view.session.version)
+  // Tab B now shows a version at least as new as tab A's write (the server also moves it on each step of A's turn).
+  expect(tabB.view.session.version).toBeGreaterThanOrEqual(tabA.view.session.version)
   expect(tabB.view.session.activeTurnId).toBe(tabA.view.session.activeTurnId)
   expect(tabB.view.conflict?.rejected).toMatchObject({ family: 'turn', body: { message: 'タブ B の質問' } })
   expect(tabB.view.write).toBeUndefined()
   await settle()
   expect(turnPosts(session.id)).toBe(2)
+})
+
+test('反映する right after the turn read that showed the proposal carries that read\'s session version, not the session still being re-read', async () => {
+  const idle = await idleSession()
+  const turn = await api.createTurn(idle.id, { kind: 'conversation', message: '承認を二段階にして', intent: 'change', baseSpecRevision: 0 }, { key: mintIdempotencyKey(), version: idle.version })
+  // Two observations: running, then validating. The tab's own turn read is the step that imports the proposal.
+  for (let step = 0; step < 2; step++) await api.getTurn(idle.id, turn.id)
+  // The session re-read that the turn read triggers is still on its way when the user clicks.
+  const { promise: held, resolve: release } = Promise.withResolvers<void>()
+  let sessionReads = 0
+  const sessionPath = new RegExp(`/build-sessions/${idle.id}$`)
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if ((init?.method ?? 'GET') === 'GET' && sessionPath.test(new URL(String(input), window.location.href).pathname) && sessionReads++ > 0) await held
+    return mock.fetch(input, init)
+  }) as typeof globalThis.fetch
+  const tab = await openTab(idle.id)
+  expect(tab.view.confirmation?.id).toBe(turn.id)
+  const shownTurn = tab.client.getQueryData<{ sessionVersion: number }>(['build-session', idle.id, 'turn', turn.id])!
+  expect(tab.view.session.version).toBeLessThan(shownTurn.sessionVersion)
+
+  await act(async () => { tab.build.actions.resolve(turn.id, 'accept_spec') })
+  await settle()
+  const resolution = mock.requests.filter((item) => item.method === 'POST' && item.path.endsWith('/resolution'))
+  expect(resolution.map((item) => [item.status, item.ifMatch])).toEqual([[200, `"bs-${shownTurn.sessionVersion}"`]])
+  release()
+  await settle()
+  expect(tab.view.conflict).toBeUndefined()
+  expect(tab.view.session.specification.revision).toBe(1)
 })
 
 describe('an unreadable 2xx answer to a write', () => {

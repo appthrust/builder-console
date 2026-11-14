@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/appthrust/appserver-go/appserver/httpx"
 	"github.com/appthrust/appserver-go/appserver/identity"
@@ -76,7 +77,11 @@ func buildHTTPHarness(t *testing.T) *buildHTTPFixture {
 			if f.accessDenied {
 				actions = []string{}
 			}
-			write(200, map[string]any{"projectId": "project", "member": true, "roles": []string{"Editor"}, "actions": actions})
+			role := "Editor"
+			if f.bearer == buildBearer("admin") {
+				role = "Admin"
+			}
+			write(200, map[string]any{"projectId": "project", "member": true, "roles": []string{role}, "actions": actions})
 		case path == "/application-drafts/creation-tools":
 			write(200, map[string]any{"version": 1, "tools": []any{}})
 		case path == "/application-drafts" && r.Method == "POST":
@@ -177,8 +182,12 @@ func buildHTTPHarness(t *testing.T) *buildHTTPFixture {
 	require.NoError(t, err)
 	catalog, err := prompts.NewCatalog("test", nil)
 	require.NoError(t, err)
-	f.service, err = buildsession.NewService(t.Context(), database, client, catalog, buildsession.Flag{Mode: "on"})
+	f.service, err = buildsession.NewService(t.Context(), database, client, catalog)
 	require.NoError(t, err)
+	require.NoError(t, database.Do(t.Context(), true, func(tx *store.Tx) error {
+		_, err := tx.SetConversationSetting(domain.ConversationScope{InstallationID: "installation", ProjectID: "project"}, 0, domain.ConversationSettingInput{Mode: "on", Allowlist: []domain.ConversationSubject{}}, "person-admin", time.Now())
+		return err
+	}))
 	auth, err := identity.New(identity.Trust{})
 	require.NoError(t, err)
 	f.api = New(database, auth, platform.New(upstream.URL, "project"), f.directory.client(t), "")

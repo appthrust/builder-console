@@ -9,14 +9,24 @@ const DRAFTS = `/api/v1/projects/${seed.projectId}/application-drafts`
 const c = text.console
 
 // The NEW-APP conversation on the console-v1 engine (APT-753 S4). `/new` starts a
-// console-v1 session once the server's `/config` turns `newAppConversation` on (the
-// mock's `__mock/new-app-conversation` switch). The mock stands in for the model and
-// the server; cases that are about a later stage set the session up through the v1
-// API the way another client would, then open it.
+// console-v1 session when the server's `/config` turns `newAppConversation` on for
+// the caller, which follows the Console administrator setting 新しい AI 会話 on
+// 基盤の設定 (off after a reset). The first story turns it on through that card; the
+// other cases set it, or a session, up through the API the way another client would.
+// The mock stands in for the model and the server.
 
 interface SessionWire { id: string; version: number; draftId?: string; activeTurnId?: string; specification: { revision: number } }
 const json = { connection: 'close' }
 const writeHeaders = (key: string, version?: number) => ({ ...json, 'Idempotency-Key': key, ...(version === undefined ? {} : { 'If-Match': `"bs-${version}"` }) })
+const SETTING = '/api/console/admin/conversation'
+
+/** An administrator (the default signed-in 山田) sets the conversation for everyone, as another client would. */
+async function conversationForEveryone(request: APIRequestContext) {
+  const current = await request.get(SETTING, { headers: json })
+  expect(current.status()).toBe(200)
+  const saved = await request.put(SETTING, { headers: { ...json, 'If-Match': current.headers().etag! }, data: { mode: 'on', allowlist: [] } })
+  expect(saved.status()).toBe(200)
+}
 
 async function readSession(request: APIRequestContext, id: string): Promise<SessionWire> {
   return await (await request.get(`${BASE}/${id}`, { headers: json })).json() as SessionWire
@@ -80,11 +90,28 @@ async function advanceUntil(mock: MockControl, visible: () => Promise<void>, att
 }
 
 test.describe('console-v1 build conversation @app-build-console-conversation', () => {
-  test('starts from /new, answers, offers candidates, confirms a spec change, plans and creates; nothing asks for a publish name before creation @mock @story', async ({ page, mock }, testInfo) => {
+  test('an administrator turns it on for a member on 基盤の設定; the member starts from /new, answers, offers candidates, confirms a spec change, plans and creates; nothing asks for a publish name before creation @mock @story', async ({ page, mock }, testInfo) => {
     test.setTimeout(120_000)
     await mock.platform('codex', { available: true })
     await mock.platform('plan-generation', { autoAdvance: true })
-    await mock.console('new-app-conversation', { on: true })
+
+    // 山田 (Console administrator) chooses 一部の人だけ and adds 鈴木 from the Directory.
+    await page.goto('/-/admin/platform')
+    const setting = page.getByTestId('conversation-setting')
+    await expect(setting.getByRole('radio', { name: /使わない/ })).toHaveAttribute('aria-checked', 'true')
+    await setting.getByRole('radio', { name: /一部の人だけ/ }).click()
+    await setting.getByLabel('人を追加する', { exact: true }).fill('鈴木')
+    await setting.getByRole('button', { name: '鈴木 一郎 を追加', exact: true }).click()
+    await expect(setting.getByTestId('conversation-person-label')).toHaveText(['鈴木 一郎suzuki@example.com'])
+    const saved = await captureWrite(page, 'PUT', SETTING, () => setting.getByRole('button', { name: '保存', exact: true }).click())
+    expect(saved.body).toEqual({ mode: 'allowlist', allowlist: [{ subject: 'sub-suzuki' }] })
+    expect(saved.request.headers()['if-match']).toBe('"cs-0"')
+    await expect(setting.getByText('保存しました。', { exact: true })).toBeVisible()
+    await expect(setting.getByTestId('conversation-updated')).toContainText('山田 太郎')
+    await page.screenshot({ path: testInfo.outputPath('admin-conversation-setting.png'), fullPage: true })
+
+    // 鈴木, a member of 営業1課, signs in: the next start is the new conversation, without any reload of the server.
+    await mock.console('caller', { personId: 'p-suzuki', role: 'Editor' })
     const legacyDrafts: string[] = []
     page.on('request', (sent) => { if (sent.method() === 'POST' && new URL(sent.url()).pathname === DRAFTS) legacyDrafts.push(sent.url()) })
 
@@ -162,10 +189,25 @@ test.describe('console-v1 build conversation @app-build-console-conversation', (
     await page.screenshot({ path: testInfo.outputPath('creating.png'), fullPage: true })
   })
 
-  test('a start the server stops shows its typed failure; 「新しく作り直す」 starts a new session @mock @story', async ({ page, mock }) => {
+  test('with the setting off (the default), /new starts the legacy flow: a Platform draft, no console session @mock @story', async ({ page, mock }) => {
+    await mock.platform('codex', { available: true })
+    const sessions: string[] = []
+    page.on('request', (sent) => { if (sent.method() === 'POST' && new URL(sent.url()).pathname === BASE) sessions.push(sent.url()) })
+    const intent = '備品の貸し出しを記録するアプリ'
+    await page.goto('/new')
+    await page.getByLabel('やりたいことを書く', { exact: true }).fill(intent)
+    const draft = await captureWrite(page, 'POST', DRAFTS, () => page.getByRole('button', { name: 'AI と作る', exact: true }).click())
+    expect(draft.body).toMatchObject({ intent })
+    await expect(page).toHaveURL(/\/-\/build\/[^/?]+$/, { timeout: 20_000 })
+    await expect(page.getByTestId('build-session')).toHaveAttribute('data-stage', 'ask')
+    await expect(page.getByTestId('build-session')).not.toHaveAttribute('data-engine', 'console-v1')
+    expect(sessions).toEqual([])
+  })
+
+  test('a start the server stops shows its typed failure; 「新しく作り直す」 starts a new session @mock @story', async ({ page, mock, request }) => {
     test.setTimeout(60_000)
     await mock.platform('codex', { available: true })
-    await mock.console('new-app-conversation', { on: true })
+    await conversationForEveryone(request)
     await mock.console('build-session-start-failure')
     await page.goto('/new')
     await page.getByLabel('やりたいことを書く', { exact: true }).fill('備品の貸し出しを記録するアプリ')

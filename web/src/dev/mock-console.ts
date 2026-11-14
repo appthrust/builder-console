@@ -29,10 +29,17 @@
 // the rest have no Tools built-in app (panel hidden), and drafts answer as unbound apps. `POST
 // /api/console/__mock/tools {appId, state: 'list' | 'empty' | 'pending' | 'unavailable' | 'absent'}` switches one app.
 // `/api/console/v1/build-sessions*` (NEW-APP conversation sessions) is ./mock-build-sessions; reset clears it too,
-// and its `__mock` controls (the `/config` NEW-APP flag, a failed start, 503 + Retry-After reads) are documented there.
+// and its `__mock` controls (a failed start, 503 + Retry-After reads) are documented there.
+// `GET/PUT /admin/conversation` is the NEW-APP conversation setting (Console administrators only; others 403
+// `forbidden`): answers carry `ETag: "cs-<version>"`; PUT needs `If-Match` (428 `precondition_required` without,
+// 400 when malformed, 412 `version_conflict` with `details.currentVersion` when stale) and validates
+// `{mode, allowlist: [{subject}]}` (≤ 200 distinct printable-ASCII subjects). Seeded off at version 0; reset reseeds it.
+// `GET /api/console/__mock/config` answers `{newAppConversation}` for the current caller from that setting
+// (on → true, allowlist → the caller's subject is listed, off → false): what the dev `/config` (vite.config.ts) passes on.
 import type { z } from 'zod'
+import { conversationSettingInput } from '../api/contracts/console/schema/schemas'
 import type * as wire from '../api/contracts/console/schema/schemas'
-import { isValidSlug } from '../model/contracts/console'
+import { isValidSlug, type ConversationSettingInput } from '../model/contracts/console'
 import { buildSessionMockControl, buildSessionRoutes, resetBuildSessions } from './mock-build-sessions'
 import { imageInfo, mockAvatarPng, mockScreenPng, type Rgb, type ScreenshotType } from './mock-images'
 
@@ -66,6 +73,7 @@ type StoredScreenshotFile = { appId: string; contentType: ScreenshotType; bytes:
 type StoredAvatar = { contentType: ScreenshotType; bytes: Uint8Array<ArrayBuffer> }
 type ToolsState = 'list' | 'empty' | 'pending' | 'unavailable' | 'absent'
 const TOOLS_STATES: readonly ToolsState[] = ['list', 'empty', 'pending', 'unavailable', 'absent']
+type StoredConversation = { mode: ConversationSettingInput['mode']; allowlist: string[]; version: number; updatedAt?: string; updatedById?: string }
 
 const MAX_SCREENSHOTS = 5
 const MAX_SCREENSHOT_BYTES = 2 * 1024 * 1024
@@ -233,6 +241,8 @@ function seedConsole() {
     screenshotFiles,
     avatarFiles,
     migration: { pending: false, people: 0, groups: 0, memberships: 0 } as DirectoryMigration,
+    /** The NEW-APP conversation setting: subjects only, names are resolved when answering (like the server). */
+    conversation: { mode: 'off', allowlist: [], version: 0 } as StoredConversation,
     /** Replayed on repeat calls, like the server. */
     migrationResult: undefined as DirectoryMigrationResult | undefined,
   }
@@ -514,6 +524,43 @@ async function directoryRoutes(request: Request, url: URL, segments: string[]): 
   return undefined
 }
 
+// ---------- NEW-APP conversation setting ----------
+
+/** `/config`'s `newAppConversation` for the current caller (the mock has no Platform capability verdict to AND). */
+function newAppConversation(): boolean {
+  const { mode, allowlist } = state.conversation
+  return mode === 'on' || (mode === 'allowlist' && allowlist.includes(mockSubject()))
+}
+
+function conversationAnswer(): Response {
+  const stored = state.conversation
+  return Response.json({
+    mode: stored.mode,
+    allowlist: stored.allowlist.map((subject) => {
+      const known = state.people.find((entry) => entry.subject === subject)
+      return known ? { subject, displayName: known.displayName } : { subject }
+    }),
+    version: stored.version,
+    ...(stored.updatedAt ? { updatedAt: stored.updatedAt } : {}),
+    ...(stored.updatedById ? { updatedBy: person(stored.updatedById) } : {}),
+  }, { headers: { ETag: `"cs-${stored.version}"`, 'Cache-Control': 'no-store' } })
+}
+
+async function putConversation(request: Request): Promise<Response> {
+  const match = request.headers.get('If-Match')
+  if (match === null) return fail(428, 'precondition_required', 'If-Match is required')
+  const version = /^"cs-(0|[1-9]\d*)"$/.exec(match)?.[1]
+  if (version === undefined) return fail(400, 'invalid_argument', 'malformed If-Match')
+  if (Number(version) !== state.conversation.version) {
+    return json({ error: 'version_conflict', message: 'The setting was changed by someone else', details: { currentVersion: state.conversation.version } } satisfies ApiError, 412)
+  }
+  const parsed = conversationSettingInput.safeParse(await request.json().catch(() => undefined))
+  if (!parsed.success) return fail(400, 'invalid_argument', 'body must be {mode, allowlist: [{subject}]} with at most 200 distinct printable-ASCII subjects')
+  const allowlist = parsed.data.allowlist.map((entry) => entry.subject)
+  state.conversation = { mode: parsed.data.mode, allowlist, version: state.conversation.version + 1, updatedAt: new Date().toISOString(), updatedById: state.callerId }
+  return conversationAnswer()
+}
+
 /** Handles `/api/console/*` and the public `/api/directory/v1/*`; returns undefined for anything else. */
 export async function consoleRoutes(request: Request, url: URL): Promise<Response | undefined> {
   requestOrigin = url.origin
@@ -602,6 +649,7 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
     state.migrationResult = undefined
     return json(state.migration)
   }
+  if (head === '__mock' && id === 'config' && method === 'GET') return json({ newAppConversation: newAppConversation() })
   if (head === '__mock' && id && !sub) {
     const controlled = await buildSessionMockControl(request, id)
     if (controlled) return controlled
@@ -941,6 +989,10 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
       registry: { connected: true, connectionId: 'registry-ghcr' },
       defaultTemplateId: 'nextjs-postgres',
     } satisfies PlatformSettings)
+  }
+  if (head === 'admin' && id === 'conversation' && !sub && (method === 'GET' || method === 'PUT')) {
+    if (!isAdmin()) return forbidden()
+    return method === 'GET' ? conversationAnswer() : putConversation(request)
   }
   return undefined
 }
