@@ -1,6 +1,7 @@
+// Legacy same-origin preview (remove at migration stage 5 with ./legacy-preview.tsx): an unmigrated workspace's
+// build card, side link and readiness probe behave exactly as before APT-798.
 import { taskOf } from '../../../api/testing/build-domain'
-import { afterEach, beforeEach, describe, expect, spyOn, test, type Mock } from 'bun:test'
-import { ORPCError } from '@orpc/client'
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test, type Mock } from 'bun:test'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -8,19 +9,25 @@ import { preserveLanguage } from '../../../../test/language'
 import { setLanguage } from '../../../shell/language'
 import { implementationCopy as copy } from './copy'
 import { ImplementPanel } from './implement-panel'
+import { PREVIEW_POLL_MS, PREVIEW_SLOW_POLL_MS, PREVIEW_TIMEOUT_MS, previewReadiness, usePreviewReadiness, type PreviewReadiness } from './legacy-preview'
 import type { PreviewDatabaseControl } from './preview-database'
 import type { ImplementationState } from './state'
-import { previewDatabaseResetError } from './use-implementation'
-import { PREVIEW_POLL_MS, PREVIEW_SLOW_POLL_MS, PREVIEW_TIMEOUT_MS, previewReadiness, usePreviewReadiness } from './use-preview-readiness'
+import { PreviewSessionDepsContext, type PreviewSessionDeps } from './use-preview-session'
+
+const LEGACY_URL = '/api/v1/projects/p1/dev-workspaces/ws-1/proxy/preview/'
 
 const state: ImplementationState = {
   phase: 'running',
   tasks: [taskOf({ id: 'screen', title: '顧客一覧', status: 'running' })],
-  previewUrl: '/api/v1/projects/p1/dev-workspaces/ws-1/proxy/preview/',
+  preview: { projectId: 'p1', workspaceId: 'ws-1', availability: { kind: 'legacy', url: LEGACY_URL }, readBack: () => {} },
 }
 
-function render(status: ImplementationState['previewStatus']) {
-  return renderToStaticMarkup(<ImplementPanel state={{ ...state, previewStatus: status }} released={false} onOpenPreview={() => {}} />)
+function withStatus(status: PreviewReadiness | undefined): ImplementationState {
+  return { ...state, legacyPreview: status === undefined ? { status: 'preparing' } : { url: LEGACY_URL, status } }
+}
+
+function render(status: PreviewReadiness | undefined) {
+  return renderToStaticMarkup(<ImplementPanel state={withStatus(status)} released={false} onOpenPreview={() => {}} />)
 }
 
 test('a 503 keeps the iframe and both actions gated until a 200 response', () => {
@@ -32,10 +39,20 @@ test('a 503 keeps the iframe and both actions gated until a 200 response', () =>
 
   const ready = render(previewReadiness(200, 4_000))
   expect(ready).toContain(`<iframe`)
-  expect(ready).toContain(`src="${state.previewUrl}"`)
-  expect(ready).toContain(`href="${state.previewUrl}"`)
+  expect(ready).toContain(`src="${LEGACY_URL}"`)
+  expect(ready).toContain(`href="${LEGACY_URL}"`)
   expect(ready).not.toContain('disabled=""')
   expect(ready).not.toContain(copy.preparing)
+})
+
+test('the legacy frame keeps its pre-APT-798 attributes and the new tab opens the legacy URL, never the viewer page', () => {
+  const ready = render('ready')
+  expect(ready).toContain('sandbox="allow-same-origin allow-scripts allow-forms"')
+  expect(ready).not.toContain('referrerPolicy')
+  expect(ready).not.toContain('referrerpolicy')
+  expect(ready).not.toContain('/-/workspaces/')
+  expect(ready).toContain('target="_blank"')
+  expect(ready).toContain('rel="noopener noreferrer"')
 })
 
 test('missing readiness evidence cannot expose an iframe or an enabled action', () => {
@@ -59,7 +76,7 @@ test('ten minutes changes the message and enables only the explicit new-tab esca
   expect(timedOut).not.toContain(copy.preparing)
   expect(timedOut).not.toContain('<iframe')
   expect(timedOut.match(/disabled=""/g)).toHaveLength(1)
-  expect(timedOut).toContain(`href="${state.previewUrl}"`)
+  expect(timedOut).toContain(`href="${LEGACY_URL}"`)
   expect(timedOut).toContain('target="_blank"')
   expect(timedOut).toContain('rel="noopener noreferrer"')
   expect(previewReadiness(200, PREVIEW_TIMEOUT_MS)).toBe('ready')
@@ -78,7 +95,7 @@ test.each(['ja', 'en'] as const)('every preview state renders its message, actio
   setLanguage(language)
   try {
     for (const status of ['preparing', 'error', 'timed-out', 'ready'] as const) {
-      const html = renderToStaticMarkup(<ImplementPanel state={{ ...state, previewStatus: status }} previewNotice={copy.previewDatabase(true)} released={false} onOpenPreview={() => {}} />)
+      const html = renderToStaticMarkup(<ImplementPanel state={withStatus(status)} previewNotice={copy.previewDatabase(true)} released={false} onOpenPreview={() => {}} />)
       expect(html).toContain('role="note"')
       expect(html).toContain(copy.previewDatabase(true))
       if (status === 'ready') {
@@ -92,7 +109,7 @@ test.each(['ja', 'en'] as const)('every preview state renders its message, actio
       }
       if (status === 'preparing') expect(html).not.toContain('href=')
       else {
-        expect(html).toContain(`href="${state.previewUrl}"`)
+        expect(html).toContain(`href="${LEGACY_URL}"`)
         expect(html).toContain('target="_blank"')
         expect(html).toContain('rel="noopener noreferrer"')
       }
@@ -108,17 +125,17 @@ test.each(['ja', 'en'] as const)('the database line sits under the preview heade
   setLanguage(language)
   try {
     const control = (status: PreviewDatabaseControl['status'], busy = false): PreviewDatabaseControl => ({ status, excel: true, busy, pending: false, onReset: async () => true })
-    const ready = renderToStaticMarkup(<ImplementPanel state={{ ...state, previewStatus: 'ready' }} previewDatabase={control('ready-unverified')} released={false} onOpenPreview={() => {}} />)
+    const ready = renderToStaticMarkup(<ImplementPanel state={withStatus('ready')} previewDatabase={control('ready-unverified')} released={false} onOpenPreview={() => {}} />)
     expect(ready).toContain(copy.database.readyUnverified(true))
     expect(ready).not.toContain('role="note"')
     expect(ready.indexOf(copy.database.readyUnverified(true))).toBeLessThan(ready.indexOf('<iframe'))
     expect(ready).toContain(copy.databaseReset)
     expect(ready).not.toContain('disabled=""')
     // Waiting for the database, or for the AI to finish, keeps the reset action disabled; preview actions are unchanged.
-    const starting = renderToStaticMarkup(<ImplementPanel state={{ ...state, previewStatus: 'ready' }} previewDatabase={control('starting')} released={false} onOpenPreview={() => {}} />)
+    const starting = renderToStaticMarkup(<ImplementPanel state={withStatus('ready')} previewDatabase={control('starting')} released={false} onOpenPreview={() => {}} />)
     expect(starting).toContain(copy.database.starting)
     expect(starting.match(/disabled=""/g)).toHaveLength(1)
-    const busy = renderToStaticMarkup(<ImplementPanel state={{ ...state, previewStatus: 'ready' }} previewDatabase={control('unavailable', true)} released={false} onOpenPreview={() => {}} />)
+    const busy = renderToStaticMarkup(<ImplementPanel state={withStatus('ready')} previewDatabase={control('unavailable', true)} released={false} onOpenPreview={() => {}} />)
     expect(busy).toContain(copy.database.unavailable)
     expect(busy.match(/disabled=""/g)).toHaveLength(1)
     expect(busy).toContain(`title="${copy.databaseResetRunning}"`)
@@ -127,12 +144,20 @@ test.each(['ja', 'en'] as const)('the database line sits under the preview heade
   }
 })
 
-test('reset refusals become plain sentences from details.reason', () => {
-  const refusal = (status: number, reason?: string) => new ORPCError('UNKNOWN', { status, data: { body: { error: { code: 'conflict', message: 'preview database is busy', ...(reason ? { details: { reason } } : {}) } } } })
-  expect(previewDatabaseResetError(refusal(409, 'PreviewDatabaseBusy'))).toBe(copy.databaseResetBusy)
-  expect(previewDatabaseResetError(refusal(412, 'PreviewDatabaseNotEnabled'))).toBe(copy.databaseResetNotEnabled)
-  expect(previewDatabaseResetError(refusal(409))).toBe(copy.databaseResetFailed)
-  expect(previewDatabaseResetError(new Error('network'))).toBe(copy.databaseResetFailed)
+test('a legacy card asks the Platform for no preview session', async () => {
+  const issue: Mock<PreviewSessionDeps['issue']> = mock(async () => { throw new Error('no session for a legacy workspace') })
+  const deps: PreviewSessionDeps = { issue, exchange: mock(async () => ({ kind: 'ready' as const })), now: () => Date.now(), schedule: () => () => {} }
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+  try {
+    await act(async () => { root.render(<PreviewSessionDepsContext value={deps}><ImplementPanel state={withStatus('ready')} released={false} onOpenPreview={() => {}} /></PreviewSessionDepsContext>) })
+    expect(container.querySelector('iframe')?.getAttribute('src')).toBe(LEGACY_URL)
+    expect(issue).not.toHaveBeenCalled()
+  } finally {
+    await act(async () => { root.unmount() })
+    container.remove()
+  }
 })
 
 describe('preview polling', () => {
@@ -147,7 +172,7 @@ describe('preview polling', () => {
   function Harness({ url }: { url?: string }) {
     return <output>{usePreviewReadiness(url)}</output>
   }
-  async function mount(url = state.previewUrl) {
+  async function mount(url: string = LEGACY_URL) {
     await act(async () => { root.render(<Harness url={url} />) })
   }
   async function advance(ms: number) {

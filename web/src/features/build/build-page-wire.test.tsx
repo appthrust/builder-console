@@ -11,6 +11,7 @@ import { meContract } from '../../api/contracts/console/me'
 import { buildKeys } from '../../api/queries/build'
 import { consoleKeys } from '../../api/queries/console'
 import { queryClient as appQueryClient } from '../../api/queries/shared'
+import { atConsoleOrigin } from '../../api/testing/console-origin'
 import { createTestGateway } from '../../api/testing/gateway'
 import { copy } from '../../copy'
 import { consoleRoutes } from '../../dev/mock-console'
@@ -23,6 +24,7 @@ import { preserveLanguage } from '../../../test/language'
 import { BuildPage } from './build-page'
 import { text as uiText } from './copy'
 import { implementationCopy } from './implement/copy'
+import { PreviewSessionDepsContext, type PreviewSessionDeps } from './implement/use-preview-session'
 
 const SECRET = 'SENTINEL-build-page-7f3a'
 const PROJECT = '/api/v1/projects/commerce'
@@ -56,6 +58,19 @@ async function call(method: string, path: string, body?: unknown) {
 const advance = async (count = 1) => { for (let step = 0; step < count; step++) await call('POST', '/api/v1/__mock/advance') }
 const draftPath = (id: string) => `${PROJECT}/application-drafts/${id}`
 const consoleGateway = createTestGateway({ consoleFetch: (path, init) => mockFetch(path, init) })
+/**
+ * The preview session against the Platform mock: grants come from its real `http-sessions` route (embedded by the
+ * Console origin it accepts); the preview origin's exchange is out of this test's reach and answers Ready.
+ */
+const previewSessions: PreviewSessionDeps = {
+  issue: async (projectId, workspaceId, publishUID) => {
+    const { resource } = await call('POST', `/api/v1/projects/${projectId}/dev-workspaces/${workspaceId}/http-sessions`, { target: 'preview', publishUID, embedderOrigin: `https://console.${projectId}.appthrust.test` }) as { resource: { origin: string; publishUID: string; exchangeUrl: string; grant: string; expiresAt: string; renewAfterSeconds: number } }
+    return resource
+  },
+  exchange: async () => ({ kind: 'ready' }),
+  now: () => Date.now(),
+  schedule: () => () => {},
+}
 
 /** The opening turn answered with a question: the composer is open and no job runs, so nothing polls. */
 async function askingDraft() {
@@ -122,7 +137,7 @@ let container: HTMLDivElement
 let restore: (() => void)[] = []
 
 beforeEach(async () => {
-  restore = [preserveLanguage()]
+  restore = [preserveLanguage(), atConsoleOrigin('https://console.commerce.appthrust.test')]
   setLanguage('ja')
   Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: window.sessionStorage })
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: window.localStorage })
@@ -167,7 +182,7 @@ async function renderBuild(draftId: string) {
   document.body.append(container)
   root = createRoot(container)
   await act(async () => {
-    root!.render(<QueryClientProvider client={client}><RouterContextProvider router={router}><UnsavedChangesProvider><BuildPage draftId={draftId} /></UnsavedChangesProvider></RouterContextProvider></QueryClientProvider>)
+    root!.render(<QueryClientProvider client={client}><RouterContextProvider router={router}><UnsavedChangesProvider><PreviewSessionDepsContext value={previewSessions}><BuildPage draftId={draftId} /></PreviewSessionDepsContext></UnsavedChangesProvider></RouterContextProvider></QueryClientProvider>)
   })
   await settle()
   return { key: buildKeys.draft('commerce', draftId), router }
@@ -498,5 +513,51 @@ describe('the session\'s own writes', () => {
     await tick(key)
     await settle(20)
     expect(count('POST', turns)).toBe(1)
+  })
+})
+
+describe('APT-798 migration: a workspace the Platform has not moved yet', () => {
+  const proxyPreview = /\/dev-workspaces\/[^/]+\/proxy\/preview\/$/
+  const preview = () => container.querySelector('iframe')
+  async function readWorkspace(draftId: string) {
+    await act(async () => { await client.refetchQueries({ queryKey: ['build', draftId, 'commerce', 'workspace'] }) })
+    await settle()
+  }
+
+  test('shows the legacy same-origin preview, switches once moved, and never returns: not on a failed endpoint, not after a reload', async () => {
+    const issue = spyOn(previewSessions, 'issue')
+    restore.push(() => issue.mockRestore())
+    await call('POST', '/api/v1/__mock/workspace-http', { endpoint: 'none' })
+    const draftId = await buildingDraft()
+    await renderBuild(draftId)
+    // Legacy: the probe reads the proxied URL, then the frame shows it as before; no session is asked for.
+    expect(preview()?.getAttribute('src')).toMatch(proxyPreview)
+    expect(preview()?.getAttribute('sandbox')).toBe('allow-same-origin allow-scripts allow-forms')
+    expect(count('GET', proxyPreview)).toBeGreaterThan(0)
+    expect(issue).not.toHaveBeenCalled()
+
+    // The Platform moves the workspace (its endpoint is Ready and it records DirectPreviewActivated=True).
+    await call('POST', '/api/v1/__mock/workspace-http', { endpoint: 'auto' })
+    await readWorkspace(draftId)
+    expect(issue).toHaveBeenCalledTimes(1)
+    expect(preview()?.getAttribute('src')).toMatch(/^https:\/\/pv-[0-9a-f]{32}\.commerce\.appthrust\.test\/$/)
+    expect(preview()?.getAttribute('referrerpolicy')).toBe('no-referrer')
+    const probes = count('GET', proxyPreview)
+
+    // The endpoint then disappears: the workspace still carries the legacy URL, but it is unavailable, never legacy.
+    await call('POST', '/api/v1/__mock/workspace-http', { endpoint: 'none' })
+    await readWorkspace(draftId)
+    expect(preview()).toBeNull()
+    expect(pageText()).toContain(implementationCopy.viewer.unavailable)
+
+    // A reload (a fresh page and cache) reads the same answer: still never legacy.
+    await act(async () => { root?.unmount() })
+    container.remove()
+    client.clear()
+    await renderBuild(draftId)
+    expect(preview()).toBeNull()
+    expect(pageText()).toContain(implementationCopy.viewer.unavailable)
+    expect(container.innerHTML).not.toMatch(/proxy\/preview/)
+    expect(count('GET', proxyPreview)).toBe(probes)
   })
 })

@@ -43,6 +43,8 @@ func TestInvalidPublicURLEnvFailsStartup(t *testing.T) {
 	t.Setenv("BUILDER_CONSOLE_DATABASE_URL", "")
 	t.Setenv("DATABASE_URL", "")
 	for _, publicURL := range []string{
+		"", "https://console.example.test:8443", "https://dashboard.example.test",
+		"https://console", "https://console.localhost", "https://127.0.0.1",
 		"not a URL", "https://", "http://console.example.test", "http://localhost",
 		"https://user:pass@console.example.test", "https://console.example.test/",
 		"https://console.example.test/path", "https://console.example.test?query=value",
@@ -57,6 +59,10 @@ func TestInvalidPublicURLEnvFailsStartup(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), "BUILDER_CONSOLE_PUBLIC_URL") || handler != nil {
 				t.Fatalf("invalid public URL did not fail startup: handler=%v err=%v", handler, err)
 			}
+			routed, err := newHandler(t.TempDir(), "http://127.0.0.1:1", "pj-test", nil, nil)
+			if err == nil || !strings.Contains(err.Error(), "BUILDER_CONSOLE_PUBLIC_URL") || routed != nil {
+				t.Fatalf("invalid public URL allowed routing/CSP: handler=%v err=%v", routed, err)
+			}
 		})
 	}
 }
@@ -67,13 +73,8 @@ func TestPublicURLEnvStartup(t *testing.T) {
 	t.Setenv("PLATFORM_OIDC_ISSUER_CA_PEM", "")
 	t.Setenv("BUILDER_CONSOLE_DATABASE_URL", "")
 	t.Setenv("DATABASE_URL", "")
-	var logs bytes.Buffer
-	previousOutput := log.Writer()
-	log.SetOutput(&logs)
-	t.Cleanup(func() { log.SetOutput(previousOutput) })
-	for _, publicURL := range []string{"", "https://console.example.test", "https://console.example.test:8443"} {
+	for _, publicURL := range []string{"https://console.example.test", "https://console.example.test:443"} {
 		t.Run(publicURL, func(t *testing.T) {
-			logs.Reset()
 			t.Setenv("BUILDER_CONSOLE_PUBLIC_URL", publicURL)
 			handler, cleanup, err := consoleHandler("http://127.0.0.1:1", "pj-test")
 			if cleanup != nil {
@@ -82,17 +83,14 @@ func TestPublicURLEnvStartup(t *testing.T) {
 			if err != nil || handler == nil {
 				t.Fatalf("valid public URL blocked startup: handler=%v err=%v", handler, err)
 			}
-			warned := strings.Contains(logs.String(), "WARNING: BUILDER_CONSOLE_PUBLIC_URL is unset")
-			if warned != (publicURL == "") {
-				t.Fatalf("publicURL=%q logs=%q", publicURL, logs.String())
-			}
 		})
 	}
 }
 
-func TestIdentityOutageIsIsolatedToConsoleAPI(t *testing.T) {
+func TestIdentityOutageClosesAuthenticatedAPIsOnly(t *testing.T) {
 	issuer := testutil.NewOIDCIssuer(t)
 	issuer.Available.Store(false)
+	configureProxyIdentity(t, issuer)
 	auth, err := identity.New(identity.Trust{OIDCIssuer: issuer.Server.URL, OIDCCAPEM: issuer.CAPEM, OIDCAudiences: []string{"appthrust-platform-api"}})
 	if err != nil {
 		t.Fatalf("unavailable issuer blocked startup: %v", err)
@@ -142,7 +140,14 @@ func TestIdentityOutageIsIsolatedToConsoleAPI(t *testing.T) {
 			}
 		}
 	}
-	for _, path := range []string{"/", "/apps/example", "/api/v1/projects/pj-test", "/config", "/releasez", "/healthz", "/readyz"} {
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/projects/pj-test", nil)
+	request.Header.Set("Authorization", issuer.Bearer(t))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), `"error":"identity_unavailable"`) {
+		t.Fatalf("proxy did not fail closed on identity outage: %d %s", response.Code, response.Body)
+	}
+	for _, path := range []string{"/", "/apps/example", "/config", "/releasez", "/healthz", "/readyz"} {
 		request := httptest.NewRequest(http.MethodGet, path, nil)
 		request.Header.Set("Authorization", "Bearer token")
 		response := httptest.NewRecorder()
@@ -151,8 +156,8 @@ func TestIdentityOutageIsIsolatedToConsoleAPI(t *testing.T) {
 			t.Fatalf("issuer outage affected %s: status=%d body=%s", path, response.Code, response.Body)
 		}
 	}
-	if issuer.Discovery.Load() != 1 {
-		t.Fatalf("outage bypassed discovery backoff: calls=%d", issuer.Discovery.Load())
+	if issuer.Discovery.Load() != 2 {
+		t.Fatalf("each authenticator must back off after one discovery: calls=%d", issuer.Discovery.Load())
 	}
 }
 
@@ -179,6 +184,7 @@ func TestIdentityCAEnvAndRecoveryIntegration(t *testing.T) {
 	t.Setenv("PLATFORM_OIDC_ISSUER", issuer.Server.URL)
 	t.Setenv("BUILDER_CONSOLE_OIDC_AUDIENCES", "appthrust-platform-api")
 	t.Setenv("PLATFORM_OIDC_ISSUER_CA_PEM", issuer.CAPEM)
+	t.Setenv("BUILDER_CONSOLE_PUBLIC_URL", testConsoleOrigin)
 	handler, cleanup, err := consoleHandler("http://127.0.0.1:1", "pj-test")
 	if err != nil {
 		t.Fatalf("unavailable issuer blocked startup: %v", err)
@@ -228,6 +234,7 @@ func TestUnreachableDatabaseKeepsServerAliveAndUnready(t *testing.T) {
 	t.Setenv("PLATFORM_OIDC_ISSUER", "https://issuer.example.test")
 	t.Setenv("BUILDER_CONSOLE_OIDC_AUDIENCES", "appthrust-platform-api")
 	t.Setenv("PLATFORM_OIDC_ISSUER_CA_PEM", "")
+	t.Setenv("BUILDER_CONSOLE_PUBLIC_URL", testConsoleOrigin)
 	t.Setenv("BUILDER_CONSOLE_DIRECTORY_URL", "http://127.0.0.1:1")
 	t.Setenv("BUILDER_CONSOLE_DATABASE_URL", "postgres://console@127.0.0.1:1/console?sslmode=disable&connect_timeout=1")
 	var logs bytes.Buffer
@@ -345,5 +352,53 @@ func TestDatabaseRecoveryMakesConsoleReadyIntegration(t *testing.T) {
 	console.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/console/me", nil))
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("recovered console did not mount the API: %d %s", w.Code, w.Body)
+	}
+}
+
+func TestDevelopmentPublicOriginIsExplicitAndLoopbackOnly(t *testing.T) {
+	t.Setenv("PLATFORM_OIDC_ISSUER", "")
+	t.Setenv("PLATFORM_OIDC_ISSUER_CA_PEM", "")
+	for _, publicURL := range []string{"", "http://localhost:5173", "http://127.0.0.1:5173", "http://[::1]:5173", "https://localhost:8443"} {
+		t.Run(publicURL, func(t *testing.T) {
+			t.Setenv("BUILDER_CONSOLE_PUBLIC_URL", publicURL)
+			origins, err := loadConsoleOrigins()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if origins.publicURL != publicURL || origins.previewSource != "" {
+				t.Fatalf("development origin changed or broadened: %+v", origins)
+			}
+			handler, err := newHandler(t.TempDir(), "http://127.0.0.1:1", "pj-test", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewServer(handler)
+			defer server.Close()
+			for _, origin := range []string{publicURL, "http://evil.localhost:5173"} {
+				r, err := http.NewRequest(http.MethodPost, server.URL+"/api/console/test", nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				r.Header.Set("Origin", origin)
+				response, err := server.Client().Do(r)
+				if err != nil {
+					t.Fatal(err)
+				}
+				response.Body.Close()
+				want := http.StatusForbidden
+				if publicURL != "" && origin == publicURL {
+					want = http.StatusNoContent
+				}
+				if response.StatusCode != want {
+					t.Fatalf("origin=%q status=%d want=%d", origin, response.StatusCode, want)
+				}
+			}
+		})
+	}
+	for _, raw := range []string{"http://console.example.test", "http://evil.localhost:5173"} {
+		t.Setenv("BUILDER_CONSOLE_PUBLIC_URL", raw)
+		if _, err := loadConsoleOrigins(); err == nil {
+			t.Fatalf("accepted non-loopback HTTP origin %q", raw)
+		}
 	}
 }

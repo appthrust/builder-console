@@ -1,8 +1,17 @@
 import { test, expect, seed, captureWrite, withExpectedFailures } from '../support/fixtures'
 import { textJa } from '../../src/model/build/copy'
+import { consoleUrl, previewHosts, startConsoleFront } from './preview-hosts'
 
 const FIRST_TURN = textJa.questions.firstTurn
 const KICKOFF_REPLY = textJa.questions.kickoffReply
+
+// The preview runs on the workspace's own origin: the stories that show it open
+// the Console on its real host (./preview-hosts.ts). The others keep the plain
+// base URL, where the Console trusts no preview origin and asks for nothing.
+test.use(previewHosts)
+let stopFront: (() => Promise<void>) | undefined
+test.beforeAll(async () => { stopFront = await startConsoleFront() })
+test.afterAll(async () => { await stopFront?.() })
 
 // Build Session replaces the former AI-dialog/wizard story. Mock lifecycle is
 // advanced only after each asynchronous write has been acknowledged.
@@ -13,14 +22,7 @@ test.describe('AI build session @app-build-ai', () => {
     const draftsPath = `/api/v1/projects/${seed.projectId}/application-drafts`
     await mock.platform('codex', { available: true })
     await mock.platform('plan-generation', { outcome: 'succeeded', autoAdvance: false, publish: false })
-    // Readiness probes meet the gateway's 503 until the story lets the app listen.
-    let previewListening = false
-    await page.route('**/dev-workspaces/*/proxy/preview/', async (route) => {
-      if (!previewListening) {
-        await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ kind: 'Status', message: 'error trying to reach service: connection refused', code: 503 }) })
-      } else await route.continue()
-    })
-    await page.goto('/new')
+    await page.goto(consoleUrl('/new'))
     await page.getByLabel('やりたいことを書く', { exact: true }).fill(intent)
     const turnMessages: string[] = []
     page.on('request', (request) => {
@@ -86,25 +88,21 @@ test.describe('AI build session @app-build-ai', () => {
       }
       await visible()
     }
-    const preview = '/api/v1/projects/{projectId}/dev-workspaces/{workspaceId}/proxy/preview/'
-    // The console probes every four seconds; the app listens right after the first 503 is shown.
-    await withExpectedFailures([{ method: 'GET', path: preview, status: 503, count: 1, reason: 'the first preview probe reaches the workspace before the app listens' }], async () => {
-      const firstProbe = page.waitForResponse((response) => response.url().endsWith('/proxy/preview/') && response.status() === 503)
-      // The prepare action sits on the AI's proposal; after the reply changed the spec it regenerates the plan first.
-      const run = await captureWrite(page, 'POST', /\/creation-executions\/[^/]+\/run$/, () => page.getByRole('button', { name: /^(この内容で作る|計画を更新して作る)$/ }).click())
-      expect((await run.request.response())?.status()).toBe(202)
-      // The mock settles the execution on polls; the session binds the app and submits a server run.
-      await expect(page.getByTestId('build-session')).toHaveAttribute('data-stage', 'build', { timeout: 20_000 })
-      await advanceUntil(() => expect(page.getByText('画面の準備をしています', { exact: true })).toBeVisible({ timeout: 2_000 }))
-      await firstProbe
-      await expect(page.locator('iframe')).toHaveCount(0)
-      await expect(page.getByRole('button', { name: '見てみる', exact: true })).toBeDisabled()
-      await expect(page.getByRole('button', { name: '新しいタブで開く', exact: true })).toBeDisabled()
-      previewListening = true
-    })
-    await advanceUntil(() => expect(page.frameLocator('iframe').getByRole('heading', { name: /^プレビュー:/ })).toBeVisible({ timeout: 2_000 }))
+    // The workspace's preview origin is published once the app listens; until then the card says it is preparing.
+    await mock.platform('workspace-http', { endpoint: 'pending' })
+    // The prepare action sits on the AI's proposal; after the reply changed the spec it regenerates the plan first.
+    const run = await captureWrite(page, 'POST', /\/creation-executions\/[^/]+\/run$/, () => page.getByRole('button', { name: /^(この内容で作る|計画を更新して作る)$/ }).click())
+    expect((await run.request.response())?.status()).toBe(202)
+    // The mock settles the execution on polls; the session binds the app and submits a server run.
+    await expect(page.getByTestId('build-session')).toHaveAttribute('data-stage', 'build', { timeout: 20_000 })
+    await advanceUntil(() => expect(page.getByText('画面の準備をしています', { exact: true })).toBeVisible({ timeout: 2_000 }))
+    await expect(page.locator('iframe')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: '見てみる', exact: true })).toBeDisabled()
+    await mock.platform('workspace-http', { endpoint: 'auto' })
+    await advanceUntil(() => expect(page.frameLocator('iframe').getByRole('heading', { name: /^プレビュー:/ })).toBeVisible({ timeout: 4_000 }))
     await expect(page.getByRole('button', { name: '見てみる', exact: true })).toBeEnabled()
-    await expect(page.getByRole('link', { name: '新しいタブで開く', exact: true })).toHaveAttribute('href', /\/proxy\/preview\/$/)
+    // The new tab is the Console's own viewer page, never the preview origin itself.
+    await expect(page.getByRole('link', { name: '新しいタブで開く', exact: true })).toHaveAttribute('href', /^\/-\/workspaces\/[^/]+\/preview$/)
     await advanceUntil(() => expect(page.getByRole('list', { name: 'アプリを作る手順', exact: true }).getByText('画面「見積の画面」', { exact: true })).toBeVisible({ timeout: 2_000 }))
     await advanceUntil(() => expect(page.getByRole('button', { name: '公開する', exact: true })).toBeEnabled({ timeout: 2_000 }))
     // The preparation rungs stay in the one ladder after startup.
@@ -163,7 +161,7 @@ test.describe('AI build session @app-build-ai', () => {
       }
       await assertion()
     }
-    await builder.goto(`/-/build/${draft.id}`)
+    await builder.goto(consoleUrl(`/-/build/${draft.id}`))
     const ladder = () => builder.getByRole('list', { name: 'アプリを作る手順', exact: true })
     await expect(ladder().getByRole('listitem')).toHaveCount(7)
     await expect(ladder().getByRole('listitem').filter({ hasText: '下地を起動' })).toHaveAttribute('aria-current', 'step')
@@ -186,7 +184,7 @@ test.describe('AI build session @app-build-ai', () => {
       await builder.screenshot({ path: testInfo.outputPath(`run-ladder-${width}.png`), fullPage: true })
     }
     const mine = await context.newPage()
-    await mine.goto('/mine')
+    await mine.goto(consoleUrl('/mine'))
     const row = mine.getByRole('row').filter({ hasText: '見積を管理' })
     await expect(row).toContainText('画面「顧客一覧」を作っています', { timeout: 15_000 })
     await expect(row.getByRole('link', { name: '続きから作る', exact: true })).toHaveAttribute('href', `/-/build/${draft.id}`)
@@ -205,9 +203,11 @@ test.describe('AI build session @app-build-ai', () => {
     await expect(mine.getByTestId('status-text')).toHaveText('画面「見積の編集」を作っています', { timeout: 15_000 })
     // Following the product link in a fresh tab observes progress; it never allocates another workspace.
     builder = await context.newPage()
-    await builder.goto(await continueLink.getAttribute('href') as string)
+    await builder.goto(consoleUrl(await continueLink.getAttribute('href') as string))
     await expect(ladder().getByRole('listitem').filter({ hasText: '画面「顧客一覧」' })).toContainText('できました')
     await expect(ladder().getByRole('listitem').filter({ hasText: '画面「見積の編集」' })).toHaveAttribute('aria-current', 'step')
+    // The reopened tab asks for its own preview grant; reload once it is shown, not while that request is in flight.
+    await expect(builder.frameLocator('iframe').getByRole('heading', { name: /^プレビュー:/ })).toBeVisible()
     await builder.reload()
     await expect(ladder().getByRole('listitem').filter({ hasText: '画面「見積の編集」' })).toHaveAttribute('aria-current', 'step')
     expect(await currentRun()).toMatchObject({ id: original.id, devWorkspaceId: original.devWorkspaceId, status: 'running' })

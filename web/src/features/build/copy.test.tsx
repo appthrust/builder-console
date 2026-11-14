@@ -15,6 +15,7 @@ import { ConversationPane } from './conversation-pane'
 import { text } from './copy'
 import { ImplementPanel } from './implement'
 import { implementationCopy } from './implement/copy'
+import type { PreviewAvailability } from './implement/preview'
 import { projectImplementation, type ImplementationState } from './implement/state'
 import { NameChoice } from './name-choice'
 import { ProposalBody } from './proposal'
@@ -151,10 +152,10 @@ test('English progress and preview expose translated accessible labels', () => {
   expect(progress).toContain('aria-label="App preparation"')
   expect(progress).toContain('aria-label="In progress"')
   const preview = renderToStaticMarkup(<ImplementPanel
-    state={{ phase: 'running', tasks: [taskOf({ id: 'one', title: 'Contacts', status: 'running' })], previewUrl: '/preview', previewStatus: 'ready', currentTaskId: 'one', step: { kind: 'known', value: 'working' } }}
+    state={{ phase: 'running', tasks: [taskOf({ id: 'one', title: 'Contacts', status: 'running' })], preview: previewTarget('ready'), currentTaskId: 'one', step: { kind: 'known', value: 'working' } }}
     released={false} onOpenPreview={() => {}}
   />)
-  expect(preview).toContain('title="App preview"')
+  expect(preview).toContain('Connecting to the preview')
   expect(preview).toContain('Open in new tab')
   expect(preview).toContain('aria-label="Steps to build your app"')
   expect(preview).toContain('aria-label="In progress"')
@@ -313,9 +314,15 @@ function previewDraft(excel: boolean, database: boolean): ApplicationDraft {
   }
 }
 
+/** The workspace's preview endpoint as the build page reads it; `ready` is a published origin. */
+function previewTarget(kind: PreviewAvailability['kind']): NonNullable<ImplementationState['preview']> {
+  const availability: PreviewAvailability = kind === 'ready' ? { kind, publishUID: '7d0f3c52-9a41-4f7e-8b52-3c1f0e6a9b10', origin: 'https://pv-0123456789abcdef0123456789abcdef.project-1.appthrust.test' } : { kind }
+  return { projectId: 'project-1', workspaceId: 'ws-1', availability, readBack: () => {} }
+}
+
 function renderPreview(draft: ApplicationDraft, stage: 'build' | 'publish', implementation: Partial<ImplementationState>, reset = noReset) {
   return renderToStaticMarkup(<ArtifactPane draft={draftOf(draft)} spec={{ users: [], screens: [], records: [], rules: [] }}
-    stage={stage} implementation={{ phase: 'done', tasks: [taskOf({ id: 'list', title: '点検一覧', status: 'done' })], previewUrl: '/preview', previewStatus: 'ready', ...implementation }}
+    stage={stage} implementation={{ phase: 'done', tasks: [taskOf({ id: 'list', title: '点検一覧', status: 'done' })], preview: previewTarget('ready'), ...implementation }}
     shareText="" previewDatabaseReset={reset} onOpenPreview={() => {}} onRetry={() => {}} onSkipTask={() => {}} onCollapse={() => {}}
   />)
 }
@@ -333,19 +340,19 @@ test.each([
   ['ja', true, false, 'build', 'ready'],
   ['ja', true, true, 'publish', 'ready'],
   ['ja', true, true, 'build', 'preparing'],
-  ['ja', true, true, 'build', 'timed-out'],
-  ['ja', true, true, 'build', 'error'],
+  ['ja', true, true, 'build', 'unavailable'],
+  ['ja', true, true, 'build', 'unknown'],
   ['en', true, true, 'build', 'preparing'],
-  ['en', true, true, 'build', 'timed-out'],
-  ['en', true, true, 'build', 'error'],
-  ['en', true, false, 'build', 'error'],
-  ['en', true, true, 'publish', 'error'],
-] as const)('a workspace without its own database keeps the no-database notice: language=%s Excel=%s database=%s stage=%s preview=%s', (language, excel, database, stage, previewStatus) => {
+  ['en', true, true, 'build', 'unavailable'],
+  ['en', true, true, 'build', 'unknown'],
+  ['en', true, false, 'build', 'unknown'],
+  ['en', true, true, 'publish', 'unknown'],
+] as const)('a workspace without its own database keeps the no-database notice: language=%s Excel=%s database=%s stage=%s preview=%s', (language, excel, database, stage, preview) => {
   setLanguage(language)
-  const html = renderPreview(previewDraft(excel, database), stage, { previewStatus, previewDatabaseStatus: 'none' })
+  const html = renderPreview(previewDraft(excel, database), stage, { preview: previewTarget(preview), previewDatabaseStatus: 'none' })
   if (database && stage === 'build') {
     expect(html).toContain(implementationCopy.previewDatabase(excel))
-    if (previewStatus === 'ready') expect(html.indexOf(implementationCopy.previewDatabase(excel))).toBeLessThan(html.indexOf('<iframe'))
+    if (preview === 'ready') expect(html.indexOf(implementationCopy.previewDatabase(excel))).toBeLessThan(html.indexOf(implementationCopy.viewer.connecting))
   } else {
     expect(html).not.toContain(implementationCopy.previewDatabase(true))
     expect(html).not.toContain(implementationCopy.previewDatabase(false))
@@ -383,7 +390,7 @@ test.each([
   expect(html).toContain(lines[line]!)
   for (const other of lines.filter((text) => text !== lines[line])) expect(html).not.toContain(other)
   if (!excel) expect(html).not.toContain('Excel')
-  expect(html.indexOf(lines[line]!)).toBeLessThan(html.indexOf('<iframe'))
+  expect(html.indexOf(lines[line]!)).toBeLessThan(html.indexOf(implementationCopy.viewer.connecting))
   const button = html.match(new RegExp(`<button\\b[^>]*>(?:(?!</button>)[\\s\\S])*${implementationCopy.databaseReset}</button>`))?.[0]
   expect(button).toBeDefined()
   expect(button!.includes('disabled=""')).toBe(status === 'starting' || status === 'sleeping')

@@ -10,10 +10,11 @@ import { classifyBuildFailure, unconfirmedFailure, type BuildFailure } from '../
 import { buildCopy } from '../../../model/build/copy'
 import { isBuildPending } from '../../../model/build/progress'
 import { isOneOf, jobState, knownValue, type BuildDraft, type ImplementationHandoff, type ImplementationRun } from '../../../model/contracts/build'
-import { implementationPreviewUrl, previewDatabaseStatus } from './runtime'
+import { useLegacyPreview } from './legacy-preview'
+import { previewAvailability } from './preview'
+import { previewDatabaseStatus } from './runtime'
 import { implemented, projectImplementation } from './state'
 import { implementationCopy as copy } from './copy'
-import { usePreviewReadiness } from './use-preview-readiness'
 
 interface ImplementationInput {
   projectId: string
@@ -55,18 +56,24 @@ export function useImplementation({ projectId, draft, handoff, enabled }: Implem
     refetchInterval: (query) => {
       const current = query.state.data
       if (isBuildPending(run) || isOneOf(current?.phase, 'Starting') || (current && previewDatabaseStatus(current, run?.tasks ?? []) === 'starting')) return BUILD_POLL_MS
-      // A run or workspace state this console does not know: keep reading at the normal pace until it is known.
-      return jobState(run) === 'unknown' || current?.phase.kind === 'unknown' ? POLL_INTERVAL_MS : false
+      // A preview origin still being published moves on by itself: keep reading until it is Ready (or stops).
+      if (current && previewAvailability(current).kind === 'preparing') return BUILD_POLL_MS
+      // A run, workspace or preview state this console does not know: keep reading at the normal pace until it is known.
+      return jobState(run) === 'unknown' || current?.phase.kind === 'unknown' || (current && previewAvailability(current).kind === 'unknown') ? POLL_INTERVAL_MS : false
     },
   })
-  const previewUrl = workspace.data ? implementationPreviewUrl(workspace.data) : undefined
-  const previewStatus = usePreviewReadiness(previewUrl)
+  const preview = workspace.data && workspaceId ? {
+    projectId, workspaceId, availability: previewAvailability(workspace.data),
+    readBack: () => { void queryClient.invalidateQueries({ queryKey: workspaceKey }) },
+  } : undefined
+  // Legacy same-origin preview (remove at migration stage 5): probes only a never-moved workspace's URL.
+  const legacyPreview = useLegacyPreview(preview?.availability)
   // An unconfirmed write is settled by the draft read back: once it shows another run, or the run in another state, that is what happened.
   const failure = requestFailure?.draftId === draft.id && !(requestFailure.failure.kind === 'unconfirmed' && runMark(run) !== requestFailure.runBefore) ? requestFailure.failure : undefined
   const state = {
     ...projection,
-    previewUrl,
-    previewStatus,
+    preview,
+    ...(legacyPreview ? { legacyPreview } : {}),
     ...(workspace.data ? { previewDatabaseStatus: previewDatabaseStatus(workspace.data, projection.tasks) } : {}),
     retryPending: pending || !enabled || !projection.tasks.length,
     // An unconfirmed start is not a stopped run: the draft read back shows what actually happened.

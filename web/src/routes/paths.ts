@@ -35,6 +35,8 @@ export const paths = {
   improve: (draftId: string) => `/-/improve/${encodeURIComponent(draftId)}`,
   proposal: (id: string) => `/-/proposals/${encodeURIComponent(id)}`,
   proposals: (applicationId?: string) => withSearch('/-/proposals', { applicationId }),
+  /** The new-tab preview viewer: Console's own page embedding the workspace's preview origin (never the raw origin). */
+  workspacePreview: (workspaceId: string) => `/-/workspaces/${encodeURIComponent(workspaceId)}/preview`,
   group: (path: string, tab: GroupTab = 'front') => `/${encodePath(path)}${tab === 'front' ? '' : `/-/${tab}`}`,
   app: (groupPath: string, slug: string, tab: AppTab = 'overview') =>
     `/${encodePath(groupPath)}/${encodeURIComponent(slug)}${tab === 'overview' ? '' : `/-/${tab}`}`,

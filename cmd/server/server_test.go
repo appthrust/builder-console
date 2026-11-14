@@ -90,6 +90,7 @@ func TestConfigShapeAndLocalRouting(t *testing.T) {
 }
 
 func TestProxyHeaders(t *testing.T) {
+	bearer := testProxyIdentity(t)
 	called := false
 	var wantHost string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -97,7 +98,7 @@ func TestProxyHeaders(t *testing.T) {
 		if r.URL.RequestURI() != "/api/v1/projects?limit=3" || r.Host != wantHost {
 			t.Errorf("unexpected target %s host %s", r.URL, r.Host)
 		}
-		for key, want := range map[string]string{"Authorization": "Bearer x", "Idempotency-Key": "key", "Last-Event-ID": "event", "Accept": "application/json", "Content-Type": "application/json", "Accept-Language": "ja"} {
+		for key, want := range map[string]string{"Authorization": bearer, "Idempotency-Key": "key", "Last-Event-ID": "event", "Accept": "application/json", "Content-Type": "application/json", "Accept-Language": "ja"} {
 			if got := r.Header.Get(key); got != want {
 				t.Errorf("%s = %q, want %q", key, got, want)
 			}
@@ -114,7 +115,7 @@ func TestProxyHeaders(t *testing.T) {
 	wantHost = strings.TrimPrefix(upstream.URL, "http://")
 	h := testHandler(t, upstream.URL)
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/projects?limit=3", strings.NewReader("{}"))
-	for key, value := range map[string]string{"Authorization": "Bearer x", "Idempotency-Key": "key", "Last-Event-ID": "event", "Accept": "application/json", "Content-Type": "application/json", "Accept-Language": "ja", "Cookie": "oauth=secret", "X-Forwarded-For": "spoof", "X-Forwarded-Host": "spoof", "X-Forwarded-Proto": "http", "X-Forwarded-Custom": "secret"} {
+	for key, value := range map[string]string{"Authorization": bearer, "Origin": testConsoleOrigin, "Idempotency-Key": "key", "Last-Event-ID": "event", "Accept": "application/json", "Content-Type": "application/json", "Accept-Language": "ja", "Cookie": "oauth=test", "X-Forwarded-For": "spoof", "X-Forwarded-Host": "spoof", "X-Forwarded-Proto": "http", "X-Forwarded-Custom": "test"} {
 		r.Header.Set(key, value)
 	}
 	w := httptest.NewRecorder()
@@ -125,6 +126,7 @@ func TestProxyHeaders(t *testing.T) {
 }
 
 func TestProxyMutationErrorEnvelopes(t *testing.T) {
+	bearer := testProxyIdentity(t)
 	for _, method := range []string{http.MethodDelete, http.MethodPatch} {
 		for _, status := range []int{http.StatusForbidden, http.StatusInternalServerError} {
 			t.Run(method+"/"+http.StatusText(status), func(t *testing.T) {
@@ -135,7 +137,7 @@ func TestProxyMutationErrorEnvelopes(t *testing.T) {
 					if r.Method != method || r.URL.RequestURI() != "/api/v1/projects/pj-eee7fa8eabbc/application-source-repositories/source-test" {
 						t.Errorf("unexpected request: method=%s target=%s", r.Method, r.URL.RequestURI())
 					}
-					if r.Header.Get("Authorization") != "Bearer x" || r.Header.Get("Idempotency-Key") != "mutation-key" {
+					if r.Header.Get("Authorization") != bearer || r.Header.Get("Idempotency-Key") != "mutation-key" {
 						t.Errorf("mutation headers not forwarded: %v", r.Header)
 					}
 					w.Header().Set("Content-Type", "application/json")
@@ -149,7 +151,7 @@ func TestProxyMutationErrorEnvelopes(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				r.Header.Set("Authorization", "Bearer x")
+				r.Header.Set("Authorization", bearer)
 				r.Header.Set("Idempotency-Key", "mutation-key")
 				response, err := console.Client().Do(r)
 				if err != nil {
@@ -179,11 +181,12 @@ func TestUnauthenticated(t *testing.T) {
 }
 
 func TestUpstreamUnavailable(t *testing.T) {
+	bearer := testProxyIdentity(t)
 	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	upstream.Close()
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
-	r.Header.Set("Authorization", "Bearer x")
+	r.Header.Set("Authorization", bearer)
 	testHandler(t, upstream.URL).ServeHTTP(w, r)
 	if w.Code != 502 || strings.TrimSpace(w.Body.String()) != `{"error":"upstream_unavailable"}` {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body)
@@ -191,6 +194,7 @@ func TestUpstreamUnavailable(t *testing.T) {
 }
 
 func TestSSEIncremental(t *testing.T) {
+	bearer := testProxyIdentity(t)
 	continueStream := make(chan struct{})
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -207,7 +211,7 @@ func TestSSEIncremental(t *testing.T) {
 	console := httptest.NewServer(testHandler(t, upstream.URL))
 	defer console.Close()
 	r, _ := http.NewRequest(http.MethodGet, console.URL+"/api/events", nil)
-	r.Header.Set("Authorization", "Bearer x")
+	r.Header.Set("Authorization", bearer)
 	client := &http.Client{Timeout: 3 * time.Second}
 	response, err := client.Do(r)
 	if err != nil {
@@ -227,6 +231,7 @@ func TestSSEIncremental(t *testing.T) {
 }
 
 func TestProxyStreamNDJSON(t *testing.T) {
+	bearer := testProxyIdentity(t)
 	const first = "{\"type\":\"output.delta\",\"text\":\"working\"}\n"
 	const last = "{\"type\":\"task.completed\"}\n"
 	for _, knownLength := range []bool{false, true} {
@@ -256,7 +261,7 @@ func TestProxyStreamNDJSON(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			r.Header.Set("Authorization", "Bearer test")
+			r.Header.Set("Authorization", bearer)
 			r.Header.Set("Content-Type", "application/json")
 			r.Header.Set("Accept", "application/x-ndjson")
 			client := &http.Client{Timeout: 3 * time.Second}

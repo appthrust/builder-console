@@ -4,10 +4,14 @@ import { buildCopy } from '../../../model/build/copy'
 import { buildFailureReference } from '../../../model/build/failure'
 import { isOneOf } from '../../../model/contracts/build'
 import type { ProgressCard } from '../../../model/build/types'
+import { paths } from '../../../routes/paths'
 import { Button, Card, CardBody, CardHeader, CopyButton, Notice } from '../../../ui'
 import { implementationCopy as copy } from './copy'
+import { LegacyPreviewCard, legacyPreviewReady } from './legacy-preview'
 import { PreviewDatabaseLine, type PreviewDatabaseControl } from './preview-database'
+import { PreviewViewer } from './preview-viewer'
 import { implemented, type ImplementationState } from './state'
+import { usePreviewSession } from './use-preview-session'
 import { text } from '../copy'
 
 
@@ -38,16 +42,18 @@ export function ImplementPanel({ state, preparation, released, previewNotice, pr
   const reference = state.failure?.reference ? buildFailureReference(state.failure.reference) : undefined
   const nothingImplemented = state.phase === 'done' && !implemented(state)
   const progress = buildProgress(preparation, state, now, released)
-  const previewReady = Boolean(state.previewUrl) && state.previewStatus === 'ready'
   const taskStarted = state.tasks.some((task) => isOneOf(task.status, 'running', 'done', 'failed'))
   // The preview first appears with the first task. A new run (retry, skip, change)
   // starts with every task pending; a preview already shown stays mounted then,
   // instead of tearing down the iframe and reloading the app when a task starts.
   const [previewShown, setPreviewShown] = useState(false)
+  // Legacy same-origin preview (remove at migration stage 5; ./legacy-preview.tsx): a never-moved workspace's card.
+  const legacy = state.legacyPreview
+  // The session runs only while this card shows the preview; a hidden page renews nothing. A legacy workspace asks for none.
+  const session = usePreviewSession(state.preview, { enabled: !legacy && (taskStarted || previewShown), onEndpointChanged: state.preview?.readBack })
+  const previewReady = legacy ? legacyPreviewReady(legacy) : session.view.kind === 'ready'
   if (previewReady && taskStarted && !previewShown) setPreviewShown(true)
-  const previewStarted = taskStarted || (previewShown && previewReady)
-  const newTabAvailable = Boolean(state.previewUrl) && (previewReady || state.previewStatus === 'error' || state.previewStatus === 'timed-out')
-  const previewMessage = state.previewStatus === 'error' ? copy.previewError : state.previewStatus === 'timed-out' ? copy.previewTimedOut : copy.preparing
+  const previewStarted = taskStarted || (previewShown && (!legacy || previewReady))
   const openPreview = () => {
     if (!previewReady) return
     setPreviewRevision((value) => value + 1)
@@ -57,29 +63,30 @@ export function ImplementPanel({ state, preparation, released, previewNotice, pr
   }
   return (
     <div className="space-y-4">
-      {previewStarted ? <Card>
+      {previewStarted && legacy ? <LegacyPreviewCard legacy={legacy} previewNotice={previewNotice} previewDatabase={previewDatabase} revision={previewRevision} frameRef={preview} onOpen={openPreview} /> : null}
+      {previewStarted && !legacy ? <Card>
         <CardHeader title={copy.title} actions={(
           <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" disabled={!previewReady} onClick={openPreview}>{copy.open}</Button>
-            {newTabAvailable ? <Button asChild tone="ghost" size="sm">
-              <a href={state.previewUrl} target="_blank" rel="noopener noreferrer">{copy.newTab}</a>
+            {/* The new tab is the Console's own viewer page; the raw preview origin is never opened top-level. */}
+            {state.preview ? <Button asChild tone="ghost" size="sm">
+              <a href={paths.workspacePreview(state.preview.workspaceId)} target="_blank" rel="noopener noreferrer">{copy.newTab}</a>
             </Button> : <Button tone="ghost" size="sm" disabled>{copy.newTab}</Button>}
           </div>
         )} />
         {previewNotice ? <p role="note" className="border-t border-amber-100 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-900">{previewNotice}</p> : null}
         {previewDatabase ? <PreviewDatabaseLine control={previewDatabase} /> : null}
-        {previewReady ? (
-          <iframe
-            key={`${state.previewUrl}:${previewRevision}`}
-            ref={preview}
-            title={copy.preview}
-            src={state.previewUrl}
-            sandbox="allow-same-origin allow-scripts allow-forms"
-            className="h-48 w-full rounded-b-lg border-0 bg-white sm:h-56"
-          />
-        ) : (
-          <CardBody><p role="status" className="py-16 text-center text-sm text-stone-500">{previewMessage}</p></CardBody>
-        )}
+        <PreviewViewer
+          session={session}
+          workspaceId={state.preview?.workspaceId ?? ''}
+          title={copy.preview}
+          revision={previewRevision}
+          newTab={Boolean(state.preview)}
+          onReadBack={state.preview?.readBack}
+          frameRef={preview}
+          frameClassName="h-48 w-full rounded-b-lg border-0 bg-white sm:h-56"
+          statusClassName="border-t border-line py-12"
+        />
       </Card> : null}
       <section aria-label={text.artifact.progress} aria-live="polite"><Card><CardBody>
         <h3 className="font-semibold text-stone-900">{progress.title}</h3>
