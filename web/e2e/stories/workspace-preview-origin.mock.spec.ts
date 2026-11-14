@@ -1,4 +1,4 @@
-import type { APIRequestContext, BrowserContext, Frame, Page, TestInfo } from '@playwright/test'
+import type { APIRequestContext, BrowserContext, Frame, Page, Request, TestInfo } from '@playwright/test'
 import { test, expect, seed, withExpectedFailures, type MockControl } from '../support/fixtures'
 import { CONSOLE_ORIGIN, consoleUrl, previewHosts, startConsoleFront } from './preview-hosts'
 
@@ -63,6 +63,32 @@ async function storageOf(target: Page | Frame): Promise<string> {
 }
 
 const previewFrame = (page: Page) => page.frames().find((frame) => frame.url().startsWith('https://pv-'))
+
+/** The fetches the context has open: sent, and neither answered in full nor failed. */
+function openFetches(context: BrowserContext): Set<Request> {
+  const open = new Set<Request>()
+  context.on('request', (sent) => { if (sent.resourceType() === 'fetch' || sent.resourceType() === 'xhr') open.add(sent) })
+  context.on('requestfinished', (done) => open.delete(done))
+  context.on('requestfailed', (failed) => open.delete(failed))
+  return open
+}
+
+/** Shorter than every timeout the Console runs on the page's clock; the shortest is the 8 s read timeout. */
+const CLOCK_STEP_MS = 5_000
+
+/**
+ * Lets `ms` pass on the page's clock the way a device lives through it. `page.clock` also runs the Console's
+ * timeouts (`setTimeout`, `AbortSignal.timeout`), so one long jump over a request that is merely in flight
+ * times it out: a read ends `net::ERR_ABORTED`, a renewal becomes a stalled one that rightly stops the preview.
+ * Time therefore passes in steps shorter than any of those timeouts, each taken once every open fetch is answered.
+ */
+async function live(page: Page, open: Set<Request>, ms: number) {
+  for (let left = ms; left > 0; left -= CLOCK_STEP_MS) {
+    await expect.poll(() => open.size).toBe(0)
+    await page.clock.fastForward(Math.min(CLOCK_STEP_MS, left))
+  }
+  await expect.poll(() => open.size).toBe(0)
+}
 
 async function shoot(page: Page, testInfo: TestInfo, name: string) {
   for (const [label, size] of [['desktop', { width: 1280, height: 900 }], ['mobile', { width: 390, height: 844 }]] as const) {
@@ -160,8 +186,12 @@ test.describe('preview on the workspace origin @workspace-preview-origin', () =>
     test.setTimeout(120_000)
     const { draftId } = await implementing(request, mock)
     await page.clock.install()
+    const open = openFetches(page.context())
     const sessions: string[] = []
     page.on('request', (sent) => { if (sent.method() === 'POST' && /\/http-sessions$/.test(new URL(sent.url()).pathname)) sessions.push(sent.url()) })
+    // Ready checks the preview origin answered: the last step of a connection or renewal.
+    let readyChecks = 0
+    page.on('requestfinished', async (done) => { if (READY.test(new URL(done.url()).pathname) && (await done.response())?.status() === 200) readyChecks++ })
     await page.goto(consoleUrl(`/-/build/${draftId}`))
     const app = page.frameLocator('iframe[title="アプリのプレビュー"]')
     await expect(app.getByRole('heading', { name: /^プレビュー:/ })).toBeVisible({ timeout: 20_000 })
@@ -172,8 +202,11 @@ test.describe('preview on the workspace origin @workspace-preview-origin', () =>
     await expect(app.locator('#hmr')).toHaveAttribute('data-state', 'open')
     await app.locator('#save').click()
     await expect(app.getByText('保存しました')).toBeVisible()
-    await page.clock.fastForward(31_000)
+    const checked = readyChecks
+    await live(page, open, 31_000)
     await expect.poll(() => sessions.length).toBe(issued + 1)
+    // The renewal finished (its ready check was answered) and the frame kept the app's state.
+    await expect.poll(() => readyChecks).toBe(checked + 1)
     await expect(app.getByText('保存しました')).toBeVisible()
 
     // Hidden, nothing is renewed; back in the foreground after the renewal time, it authorizes again before showing.
@@ -182,7 +215,7 @@ test.describe('preview on the workspace origin @workspace-preview-origin', () =>
       document.dispatchEvent(new Event('visibilitychange'))
     }, state)
     await visibility('hidden')
-    await page.clock.fastForward(95_000)
+    await live(page, open, 95_000)
     expect(sessions.length).toBe(issued + 1)
     await visibility('visible')
     await expect.poll(() => sessions.length).toBe(issued + 2)
@@ -192,13 +225,13 @@ test.describe('preview on the workspace origin @workspace-preview-origin', () =>
     // A failed renewal removes the frame at once; nothing retries until asked, and asking gets a new grant.
     await mock.platform('workspace-http', { sessions: 'unavailable' })
     await withExpectedFailures([{ method: 'POST', path: SESSIONS, status: 503, count: 1, reason: 'the Platform cannot issue a renewal grant' }], async () => {
-      await page.clock.fastForward(31_000)
+      await live(page, open, 31_000)
       await expect(page.getByText('プレビューとの接続が切れたため、表示を止めました。もう一度つなぐと再開します。')).toBeVisible()
     })
     await expect(page.locator('iframe[title="アプリのプレビュー"]')).toHaveCount(0)
     await expect(page.getByRole('button', { name: '見てみる', exact: true })).toBeDisabled()
     await shoot(page, testInfo, 'renew-failed')
-    await page.clock.fastForward(120_000)
+    await live(page, open, 120_000)
     expect(sessions.length).toBe(issued + 3)
     await mock.platform('workspace-http', { sessions: 'ok' })
     await page.getByRole('button', { name: 'もう一度つなぐ', exact: true }).click()
@@ -207,7 +240,7 @@ test.describe('preview on the workspace origin @workspace-preview-origin', () =>
     // Losing the permission stops the preview and says why; there is nothing to retry.
     await mock.platform('workspace-http', { sessions: 'revoked' })
     await withExpectedFailures([{ method: 'POST', path: SESSIONS, status: 403, count: 1, reason: 'the viewer lost project.compute access' }], async () => {
-      await page.clock.fastForward(31_000)
+      await live(page, open, 31_000)
       await expect(page.getByText('このプレビューを見る権限がなくなったため、表示を止めました。')).toBeVisible()
     })
     await expect(page.locator('iframe[title="アプリのプレビュー"]')).toHaveCount(0)
