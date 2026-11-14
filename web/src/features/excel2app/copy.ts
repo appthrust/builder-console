@@ -162,6 +162,8 @@ export const textJa = {
     nameHint: 'アプリの一覧と画面の見出しに出ます。',
     nameRequired: '名前を入れてください。',
     audience: '見せる相手',
+    /** The draft's saved audience is one this version does not know: it is kept as saved, not offered or changed. */
+    audienceUnknown: '保存されている見せる相手は、このバージョンでは表示できません。変えずにそのまま使います。',
     audienceHint: {
       private: 'あなただけが使えます。',
       group: 'グループのメンバーが使えます。',

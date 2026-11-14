@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { text } from '../../../features/build/copy'
 import { validatePreparationPlan } from '../../../features/build/use-draft-creation'
 import { planProposal } from '../../../model/build/messages'
 import { deriveStage } from '../../../model/build/stage'
@@ -193,8 +194,13 @@ describe('plan validation (platformApiValidateApplicationDraftCreationPlan)', ()
 
   test('wire variants', () => {
     assertWireContractCases(validateCreationPlanContract, [
-      { name: 'the verdict and its messages', variant: 'present', path: '/resource', wire: validation(), expect: { accept: true, value: { valid: true, message: 'ok', creationPlanFingerprint: 'fp-1', applicationStackValidation: { valid: true, message: 'ok', source: section, runtime: section, publish: section } } } },
-      { name: 'a gate id and state added later do not make the answer unreadable', variant: 'unknown', path: '/resource/applicationStackValidation/publish', wire: validation({}, { ...section, gates: [gate({ id: SECRET, state: SECRET })] }), expect: { accept: true, check: noSecret } },
+      { name: 'the verdict, its messages and its gates', variant: 'present', path: '/resource', wire: validation(), expect: { accept: true, value: { valid: true, message: 'ok', creationPlanFingerprint: 'fp-1', applicationStackValidation: { valid: true, message: 'ok', source: section, runtime: section, publish: { ...section, gates: [{ id: { kind: 'known', value: 'domain' }, state: { kind: 'known', value: 'ready' }, blocking: false, message: 'ok' }] } } } } },
+      {
+        name: 'a gate id and state added later are the explicit unknown values (the answer stays readable)', variant: 'unknown', path: '/resource/applicationStackValidation/publish/gates',
+        wire: validation({}, { ...section, gates: [gate({ id: SECRET, state: SECRET })] }),
+        expect: { accept: true, check: (value) => { expect(value.applicationStackValidation?.publish?.gates?.[0]).toMatchObject({ id: { kind: 'unknown' }, state: { kind: 'unknown' } }); noSecret(value) } },
+      },
+      { name: 'a gate state that is not a string is broken, never unknown', variant: 'unknown', path: '/resource/applicationStackValidation/publish/gates', wire: validation({}, { ...section, gates: [gate({ state: 3 })] }), expect: { accept: false, issues: [{ path: '/resource/applicationStackValidation/publish/gates/*/state', code: 'invalid_type' }] } },
       { name: 'branch values added later do not make the answer unreadable', variant: 'unknown', path: '/resource/applicationStackValidation', wire: validation({ applicationStackValidation: { valid: true, message: 'ok', source: section, runtime: section, resolvedBranch: { ...resolvedBranch, state: SECRET, management: { source: SECRET, mutableFields: [SECRET] } } } }), expect: { accept: true } },
       { name: 'Go omits resolvedBranch (a pointer, omitempty): still a verdict', variant: 'absent', path: '/resource/applicationStackValidation', wire: validation({ applicationStackValidation: { valid: false, message: 'no', source: { valid: false, message: 'source missing' }, runtime: section } }), expect: { accept: true } },
       { name: 'a verdict that is not a boolean is broken, never "valid"', variant: 'unknown', path: '/resource/valid', wire: validation({ valid: SECRET }), expect: { accept: false, issues: [{ path: '/resource/valid', code: 'invalid_type' }] } },
@@ -203,15 +209,33 @@ describe('plan validation (platformApiValidateApplicationDraftCreationPlan)', ()
     ])
   })
 
-  test('a gate whose id or state this console does not know never lets an invalid plan through: creation stops with the server\'s message', async () => {
-    const publish = { valid: false, message: 'The new gate is not ready.', gates: [gate({ id: SECRET, state: SECRET, blocking: true, message: 'The new gate is not ready.' })] }
+  const stopOf = (wire: unknown) => validatePreparationPlan('project-1', 'draft-1', async () => read(wire)).then(() => 'created', (error: unknown) => (error instanceof Error ? error.message : String(error)))
+
+  test('a blocking gate the server reports stops creation with its message', async () => {
+    const publish = { valid: false, message: 'The domain is not ready.', gates: [gate({ state: 'blocked', blocking: true, message: 'The domain is not ready.' })] }
     const blocked = validation({ valid: false, message: 'Launch needs changes before resources can be created.', creationPlanFingerprint: undefined, applicationStackValidation: { valid: false, message: 'no', source: section, runtime: section, publish, resolvedBranch } })
-    const outcome = validatePreparationPlan('project-1', 'draft-1', async () => read(blocked)).then(() => 'created', (error: unknown) => (error instanceof Error ? error.message : String(error)))
-    expect(await outcome).toBe('Launch needs changes before resources can be created.\nThe new gate is not ready.')
+    expect(await stopOf(blocked)).toBe('Launch needs changes before resources can be created.\nThe domain is not ready.')
   })
 
-  test('a plan the server accepts is created from even when a non-blocking gate has a state added later', async () => {
-    const accepted = validation({}, { ...section, gates: [gate({ state: SECRET, blocking: false })] })
-    expect(await validatePreparationPlan('project-1', 'draft-1', async () => read(accepted))).toBe('fp-1')
+  test('a blocking gate in a state this console does not know stops creation even when the server says valid', async () => {
+    const publish = { ...section, gates: [gate({ state: SECRET, blocking: true, message: 'Something new is pending.' }), gate({ id: 'gateway', state: 'warning', message: 'The gateway is slow.' })] }
+    expect(await stopOf(validation({}, publish))).toBe([text.session.unknownGate, 'Something new is pending.'].join('\n'))
+  })
+
+  test('a gate id this console does not know is judged by its blocking flag and state like any other', async () => {
+    expect(await stopOf(validation({}, { ...section, gates: [gate({ id: SECRET, blocking: true, state: 'ready' })] }))).toBe('created')
+    expect(await stopOf(validation({}, { ...section, gates: [gate({ id: SECRET, blocking: true, state: 'pending', message: 'A new check is pending.' })] }))).toBe('A new check is pending.')
+  })
+
+  test('a non-blocking gate never stops creation, known or unknown', async () => {
+    expect(await stopOf(validation({}, { ...section, gates: [gate({ state: SECRET, blocking: false }), gate({ id: SECRET, state: SECRET, blocking: false }), gate({ state: 'blocked', blocking: false })] }))).toBe('created')
+  })
+
+  test('the server verdict valid:false always stops, even with every gate ready', async () => {
+    expect(await stopOf(validation({ valid: false, message: 'Launch needs changes before resources can be created.' }))).toBe('Launch needs changes before resources can be created.')
+  })
+
+  test('a plan the server accepts with every gate known and ready is created from', async () => {
+    expect(await stopOf(validation())).toBe('created')
   })
 })

@@ -171,7 +171,8 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
   const retry = failure && shown?.kind === 'name-taken'
     // The checked suggestion arrives after the failure: start over with it offered instead of an open field.
     ? <NameChoice key={shown.suggestedName ?? ''} suggestion={shown.suggestedName} onUse={(name) => effects.rename(name, failure.failure, () => setFailure(undefined))} />
-    : failure && failure.failure.kind !== 'policy'
+    // A clean preparation needs a plan this console knows whole: with an unsupported draft only the re-read is offered.
+    : failure && failure.failure.kind !== 'policy' && !(failure.context === 'prepare' && result.unsupported && failure.failure.kind !== 'unconfirmed')
       ? <Button size="sm" onClick={() => {
         const { context, failure: reported } = failure
         setFailure(undefined)

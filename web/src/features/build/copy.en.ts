@@ -72,6 +72,7 @@ export const textEn: typeof textJa = {
     missingExecution: 'The server did not return a creation execution',
     operationFailed: 'The operation failed',
     missingAppName: 'The creation plan has no application name',
+    unknownGate: 'A check before creating cannot be judged on this screen, so creation has stopped.',
   },
   header: {
     stateWord: { ask: 'Draft', decide: 'Draft', build: 'Building', publish: 'Published' },

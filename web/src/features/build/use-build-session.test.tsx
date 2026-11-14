@@ -121,7 +121,8 @@ beforeEach(() => {
     // The cached preferences are domain values: written back as the wire they came from (a known scope's value).
     const saved = current.publishPreferences && { ...current.publishPreferences, shareScope: knownValue(current.publishPreferences.shareScope) }
     const patch = draftOf({ ...draft, title: current.title, intent: current.intent, specMarkdown: current.specMarkdown, publishPreferences: saved, ...payload })
-    return { ...current, title: patch.title, intent: patch.intent, specMarkdown: patch.specMarkdown, publishPreferences: patch.publishPreferences }
+    // A written plan is the answer's plan (else the default-address effect would see the old plan and write again).
+    return { ...current, title: patch.title, intent: patch.intent, specMarkdown: patch.specMarkdown, publishPreferences: patch.publishPreferences, ...(payload.creationPlan ? { creationPlan: patch.creationPlan } : {}) }
   })
   createTurn = spyOn(api, 'createTurn').mockImplementation(async (_projectId, _draftId, payload) =>
     turnOf(turn('share', payload.message, 2)))
@@ -662,4 +663,63 @@ test('the drafts list uses server publication, regardless of a tab continuation 
     root.render(<QueryClientProvider client={client}><DraftListHarness /></QueryClientProvider>)
   })
   expect(items).toMatchObject([{ kind: 'build', stage: 'build' }])
+})
+
+describe('automatic writes withheld from a draft this console cannot read whole', () => {
+  const stack = { templateId: 'nextjs-postgres', application: { name: 'mitsumori' }, source: { kind: 'sample-image', imageRef: 'ghcr.io/acme/m:1' }, web: { componentName: 'web' }, database: { componentName: 'db' }, connection: { connectionName: 'db' } }
+  const handoff = { summary: '画面', workspaceMode: 'application-develop', targetApplicationRef: 'createdApplicationId', sourceRepositoryStrategy: 'github-template', tasks: [{ title: '見積の一覧', description: '見積を一覧で見られる。', acceptanceCriteria: ['一覧が出る'] }] }
+  const plan = (database: Record<string, unknown> = { componentName: 'db' }) => ({ summary: '見積を管理する', markdown: '# 見積', representation: ['ApplicationStack'], applicationStackRequest: { ...stack, database }, implementationHandoff: handoff })
+  const planned = (patch: Record<string, unknown> = {}) => ({
+    ...draft, phase: 'planned', conversationTurns: [], creationPlan: plan(),
+    creationPlanGenerations: [{ id: 'plan-1', status: 'succeeded', startedAt: '2026-10-26T00:04:00Z', devWorkspaceId: 'workspace-1' }], ...patch,
+  }) as unknown as ApplicationDraft
+  let requests: string[]
+
+  beforeEach(() => {
+    client.setQueryData(keys.createConnections(me.projectId), { sources: [], registries: [], domains: [domainOf({ name: 'project.test', usableForPublish: true, publishDnsManaged: true, source: 'seed' })] })
+    requests = []
+    const spies = [
+      spyOn(api, 'runExecution').mockImplementation(async () => { requests.push('runExecution'); return client.getQueryData<BuildDraft>(queryKey)! }),
+      spyOn(api, 'validatePlan').mockImplementation(async () => { requests.push('validatePlan'); throw new Error('not expected') }),
+      spyOn(api, 'cleanupCreation').mockImplementation(async () => { requests.push('cleanupCreation'); return client.getQueryData<BuildDraft>(queryKey)! }),
+      spyOn(api, 'createPublish').mockImplementation(async () => { requests.push('createPublish'); throw new Error('not expected') }),
+      spyOn(binding, 'bindCreatedConsoleApp').mockImplementation(async () => { requests.push('bind'); throw new Error('not expected') }),
+    ]
+    restore.push(...spies.map((spy) => () => spy.mockRestore()))
+  })
+  const sent = () => [...requests, ...update.mock.calls.map(() => 'updateDraft'), ...(implementation.start as Mock<() => void>).mock.calls.map(() => 'implementation.start')]
+
+  test('positive control: a known plan without an address gets the default address written back', async () => {
+    await mount(planned())
+    expect(update.mock.calls.map((call) => Object.keys(call[2]))).toEqual([['creationPlan']])
+  })
+
+  test.each([
+    ['an unknown kind', { kind: 'fork' }],
+    ['an unknown saved audience', { publishPreferences: { shareScope: 'department' } }],
+    ['an unknown source kind', { source: { kind: 'sheets' } }],
+    ['a plan holding an unknown value', { creationPlan: plan({ componentName: 'db', postgresVersion: '19.1' }) }],
+  ] as const)('the default address is not written back for %s: no request', async (_name, patch) => {
+    await mount(planned(patch))
+    expect(sent()).toEqual([])
+  })
+
+  test('an unknown-kind draft that was created runs none of the creation page writes (bind, implementation, resume, alignment)', async () => {
+    implementation.state.phase = 'idle'
+    const created = planned({
+      kind: 'fork', phase: 'created', createdApplicationStackId: 'stack-1', createdApplicationId: 'app-platform',
+      conversationTurns: [turn('prepare', buildCopy.questions.prepareTurn, 0), turn('name', '営業見積', 1)],
+      creationExecutions: [{ id: 'exec-1', attempt: 1, status: 'running', startedAt: at, steps: [] }],
+    })
+    await mount(created, { ...initial, prepareRequested: true })
+    expect(sent()).toEqual([])
+    expect(build.result).toMatchObject({ unsupported: true, primary: { action: 'none' } })
+  })
+
+  test('a retry of a failed preparation is not offered for an unsupported plan, and a stored request does not stay to start later', async () => {
+    await mount(planned({ creationPlan: plan({ componentName: 'db', postgresVersion: '19.1' }) }), { ...initial, prepareRequested: true })
+    expect(readBuildSession(draft.id)?.prepareRequested).toBe(false)
+    await act(async () => { build.retry('prepare') })
+    expect(sent()).toEqual([])
+  })
 })

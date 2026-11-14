@@ -147,7 +147,8 @@ export interface PlanValidationSection {
 }
 /**
  * The server's verdict on the stored plan, with each section's gates. `valid` with a fingerprint is the server's
- * permission to create; a gate whose id or state this console does not know withholds it as well, whatever the verdict.
+ * permission to create; a blocking gate in a state this console does not know as passed withholds it as well
+ * (features/build/use-draft-creation.ts `validatePreparationPlan`).
  */
 export interface CreationPlanValidation {
   valid: boolean

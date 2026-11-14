@@ -326,6 +326,7 @@ function Excel2AppFlow({ draftId, onCreatedDraft }: { draftId?: string; onCreate
               design={design}
               name={chosenName}
               shareChoice={chosenScope}
+              savedAudienceUnknown={savedScope?.kind === 'unknown'}
               ownerGroupName={ownerGroupName}
               nameMissing={nameMissing}
               onName={setPublishName}
@@ -684,12 +685,14 @@ function SpecStep({ body, specMarkdown, editing, readOnly, status, fileName, onE
   )
 }
 
-function ImplementStep({ reading, plan, design, name, shareChoice, ownerGroupName, nameMissing, onName, onShareChoice }: {
+function ImplementStep({ reading, plan, design, name, shareChoice, savedAudienceUnknown, ownerGroupName, nameMissing, onName, onShareChoice }: {
   reading: ExcelAnalysis
   plan: AppPlan
   design: UiDesign
   name: string
   shareChoice: DraftShareScope
+  /** The draft's saved audience is one this console does not know: it is kept (the hand-off withholds it), not offered. */
+  savedAudienceUnknown: boolean
   ownerGroupName?: string
   nameMissing: boolean
   onName: (name: string) => void
@@ -757,14 +760,14 @@ function ImplementStep({ reading, plan, design, name, shareChoice, ownerGroupNam
         <Field id={PUBLISH_NAME_ID} label={text.implement.name} hint={text.implement.nameHint} error={nameMissing && !name.trim() ? text.implement.nameRequired : undefined} required>
           <TextInput id={PUBLISH_NAME_ID} data-testid="excel2app-publish-name" value={name} maxLength={200} autoComplete="off" invalid={nameMissing && !name.trim()} onChange={(event) => onName(event.target.value)} />
         </Field>
-        <RadioCards<DraftShareScope>
+        {savedAudienceUnknown ? <p role="note" data-testid="excel2app-audience-unknown" className="text-sm text-stone-600">{text.implement.audienceUnknown}</p> : <RadioCards<DraftShareScope>
           name="excel2app-audience"
           legend={text.implement.audience}
           columns={3}
           value={shareChoice}
           onChange={onShareChoice}
           options={SHARE_CHOICES.map((choice) => ({ value: choice, title: shareScopeLabel(choice, ownerGroupName), description: text.implement.audienceHint[choice] }))}
-        />
+        />}
       </section>
       <p className="flex items-center gap-1.5 text-xs text-stone-500"><Sparkles aria-hidden className="size-3.5 shrink-0 text-accent" />{text.implement.startHint}</p>
     </div>

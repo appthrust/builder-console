@@ -29,6 +29,7 @@ import {
   ApplicationDraftCreatedSourceRepository,
   ApplicationStackValidation,
   ApplicationStackValidationSection,
+  PublishReadinessGate,
   ApplicationDraftCreationExecution,
   ApplicationDraftCreationExecutionStatus,
   ApplicationDraftCreationExecutionStep,
@@ -227,8 +228,8 @@ const gateReader = PublishReadinessGate.pick({ blocking: true, message: true }).
 const validationSection = ApplicationStackValidationSection.pick({ valid: true, message: true }).extend({ gates: z.array(gateReader).optional() })
 
 /**
- * The server's verdict, its messages and each section's gates (open id and state: a gate this console cannot judge
- * withholds creation, features/build/use-draft-creation.ts). The resolved branch and the source repository check are
+ * The server's verdict, its messages and each section's gates (open id and state: a blocking gate in a state this
+ * console does not know as passed withholds creation, features/build/use-draft-creation.ts). The resolved branch and the source repository check are
  * not read: no screen uses them, so a value added there cannot make the answer unreadable.
  */
 const planValidationReader: z.ZodType<CreationPlanValidation> = ApplicationDraftCreationPlanValidation.pick({ valid: true, message: true, creationPlanFingerprint: true, staticErrors: true }).extend({

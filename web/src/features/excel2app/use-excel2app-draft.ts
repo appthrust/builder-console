@@ -189,16 +189,19 @@ export function analysisTitle(draft: BuildDraft, turn: BuildTurn | undefined): s
 /** 用意する's two questions, persisted on the draft for every tab. */
 export interface PublishChoice { name: string; shareScope: ShareScopeChoice }
 
-/** The hand-off's PATCH: the aligned name (title and specification) and the publish preferences. */
-export interface HandOffPatch { title?: string; specMarkdown?: string; publishPreferences: PublishChoice }
+/** The hand-off's PATCH: the aligned name (title and specification) and, unless withheld, the publish preferences. */
+export interface HandOffPatch { title?: string; specMarkdown?: string; publishPreferences?: PublishChoice }
 
-/** Align the title/spec name and replace the draft's publish preferences in the same PATCH. */
-export function handOffPatch(draft: Pick<BuildDraft, 'title' | 'specMarkdown'>, specMarkdown: string, publish: PublishChoice): HandOffPatch {
+/**
+ * Align the title/spec name and replace the draft's publish preferences in the same PATCH. A saved audience this
+ * console does not know is never overwritten: the preferences (written whole) are withheld, as the legacy session does.
+ */
+export function handOffPatch(draft: Pick<BuildDraft, 'title' | 'specMarkdown'>, specMarkdown: string, publish: PublishChoice, keepSavedAudience = false): HandOffPatch {
   const { name } = publish
   const { spec, body } = parseSpec(specMarkdown)
   // A document without readable front-matter keeps its text as is; the title still carries the name.
   const named = spec.name === name || body === specMarkdown ? specMarkdown : serializeSpec({ ...spec, name }, body)
-  return { ...(draft.title === name ? {} : { title: name }), ...(named === draft.specMarkdown ? {} : { specMarkdown: named }), publishPreferences: publish }
+  return { ...(draft.title === name ? {} : { title: name }), ...(named === draft.specMarkdown ? {} : { specMarkdown: named }), ...(keepSavedAudience ? {} : { publishPreferences: publish }) }
 }
 
 type SpecSave = { state: 'idle' | 'saving' | 'saved' } | { state: 'failed'; body: string }
@@ -529,7 +532,7 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the analysis turn and the name; the PATCH reads the latest draft through a ref.
   useEffect(() => {
     const current = draftRef.current
-    if (!nextTitle || !current || !analysisTurn) return
+    if (!nextTitle || !current || !analysisTurn || writesClosed()) return
     const key = `${current.id}:${analysisTurn.id}`
     if (titled.current.has(key)) return
     titled.current.add(key)
@@ -685,7 +688,7 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
     // The build must not start from an analysis or design whose unknown part the user never saw.
     if (!current || writesClosed() || !handOffReady) return false
     const specMarkdown = usingOffline && offlineDesign ? withUiDecisions(current.specMarkdown, offlineDesign.design) : current.specMarkdown
-    const patch = handOffPatch(current, specMarkdown, publish)
+    const patch = handOffPatch(current, specMarkdown, publish, current.publishPreferences?.shareScope?.kind === 'unknown')
     try {
       await receive(await api.updateDraft(projectId, current.id, patch))
     } catch {
