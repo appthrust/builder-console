@@ -355,7 +355,7 @@ func buildExtensionPaths(raw, value any, path []string) []string {
 			paths = append(paths, buildPointer(path))
 		}
 		if max, ok := schema["x-maxVersion"].(float64); ok {
-			if strings.HasPrefix(text, "\"bs-") && strings.HasSuffix(text, "\"") {
+			if (strings.HasPrefix(text, "\"bs-") || strings.HasPrefix(text, "\"cs-")) && strings.HasSuffix(text, "\"") {
 				version, err := strconv.ParseUint(text[4:len(text)-1], 10, 64)
 				if err != nil || version > uint64(max) {
 					paths = append(paths, buildPointer(path))

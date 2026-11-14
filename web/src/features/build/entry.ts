@@ -11,8 +11,8 @@ import { initialSession, readBuildSession, saveBuildSession, titleFromIntent } f
 import { text } from './copy'
 
 /**
- * The engine a NEW session is created with. The server decides it (the `/config` flag
- * `BUILDER_CONSOLE_NEW_APP_CONVERSATION`, resolved for the caller); it never changes the engine of a
+ * The engine a NEW session is created with. The server decides it (the `/config` flag, resolved for the
+ * caller from the Console administrator setting on 基盤の設定); it never changes the engine of a
  * session that exists: opening a draft always asks the resolver (routes/build.tsx).
  */
 export type NewSessionEngine = 'console-v1' | 'platform-v1'

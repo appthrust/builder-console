@@ -30,6 +30,7 @@ type harness struct {
 	stackCalls    atomic.Int32
 	stackBearer   atomic.Value
 	stacks        atomic.Value
+	database      *store.Store
 }
 
 func token(subject string) string {
@@ -40,7 +41,7 @@ func token(subject string) string {
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	database, _ := testutil.Database(t, store.Open)
-	h := &harness{t: t, directory: newFakeDirectory(t)}
+	h := &harness{t: t, directory: newFakeDirectory(t), database: database}
 	h.stacks.Store(map[string][]platform.ApplicationStack{})
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if h.failed.Load() {

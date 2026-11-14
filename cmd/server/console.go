@@ -52,10 +52,6 @@ func consoleHandler(upstreamURL, projectID string) (*consoleAPI, func(), error) 
 		}
 	}
 	upstream := platform.New(upstreamURL, projectID, platform.WithHTTPClient(auth.HTTPClient()))
-	conversationFlag, err := buildsession.NewFlag(os.Getenv("BUILDER_CONSOLE_NEW_APP_CONVERSATION"), os.Getenv("BUILDER_CONSOLE_NEW_APP_CONVERSATION_ALLOWLIST"))
-	if err != nil {
-		return nil, nil, err
-	}
 	conversationPlatform, err := buildsession.NewClient(upstreamURL, projectID, auth.HTTPClient().Transport)
 	if err != nil {
 		return nil, nil, err
@@ -100,7 +96,7 @@ func consoleHandler(upstreamURL, projectID string) (*consoleAPI, func(), error) 
 				return nil, err
 			}
 		}
-		conversations, err := buildsession.NewService(ctx, database, conversationPlatform, catalog, conversationFlag)
+		conversations, err := buildsession.NewService(ctx, database, conversationPlatform, catalog)
 		if err != nil {
 			_ = database.Close()
 			return nil, err

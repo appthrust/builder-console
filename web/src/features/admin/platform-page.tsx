@@ -7,14 +7,17 @@ import { copy } from '../../copy'
 import { pickPublishDomain } from '../../model/create'
 import { Card, Disclosure, Notice, PageHeader, ResourceBoundary, Skeleton, StatusPill, useDocumentTitle } from '../../ui'
 import { text } from './copy'
+import { ConversationSettingCard } from './conversation-setting'
 import { DirectoryMigrationBanner } from './directory-migration'
 
 type RowState = 'ready' | 'missing' | 'checking' | 'unknown'
 
 /**
  * 基盤の設定 (ux-design §7.1, C3): whether the platform pieces app creation
- * needs are in place, and who to ask otherwise. Read-only for everyone; the
- * settings themselves are changed on the platform side.
+ * needs are in place, and who to ask otherwise. The platform rows are read-only
+ * for everyone (changed on the platform side). The route is reachable by any
+ * Project member (the nav link is admin-only); Console administrators also get
+ * the 新しい AI 会話 setting, which is never rendered or read for anyone else.
  */
 export function AdminPlatformPage() {
   useDocumentTitle(copy.admin.platformTitle)
@@ -104,6 +107,7 @@ export function AdminPlatformPage() {
               </StatusRow>
             </ul>
           </Card>
+          {me.isConsoleAdmin ? <ConversationSettingCard /> : null}
           <Disclosure title={copy.admin.advanced}>
             <p className="mb-3 text-sm text-stone-500">{text.platform.advancedLead}</p>
             <dl className="grid grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-[10rem_1fr] sm:gap-y-2">

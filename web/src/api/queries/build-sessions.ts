@@ -69,10 +69,16 @@ export function buildPollDelay(input: PollInput): number | false {
   return input.hidden ? Math.max(server, HIDDEN_POLL_MS) : server
 }
 
-interface PollTrack { phase: string; since: number; dataUpdatedAt: number; errorsAtData: number }
+/** `jitter` is drawn once per answer (or failure): the delay must not change when the component merely re-renders. */
+interface PollTrack { phase: string; since: number; dataUpdatedAt: number; errorsAtData: number; errorUpdateCount: number; jitter: number }
 const tracks = new WeakMap<object, PollTrack>()
 
-/** `refetchInterval` for a query whose data says what to observe next. */
+/**
+ * `refetchInterval` for a query whose data says what to observe next. TanStack re-evaluates it on every render of
+ * every observer and restarts the timer whenever the value differs, so the value is a function of the read
+ * (phase, answer time, failures) only: a re-render (another query landing, the elapsed-time ticker) keeps the
+ * pending read where it was instead of postponing it again.
+ */
 function pollInterval<T>(observe: (data: T) => { nextAction: NextAction; pollAfterMs?: number; phase: string } | undefined) {
   return (query: Query<T, Error, T, readonly unknown[]>): number | false => {
     const { data, dataUpdatedAt, errorUpdateCount, error } = query.state
@@ -82,15 +88,16 @@ function pollInterval<T>(observe: (data: T) => { nextAction: NextAction; pollAft
     const now = Date.now()
     const previous = tracks.get(query)
     const track: PollTrack = !previous || previous.phase !== target.phase
-      ? { phase: target.phase, since: now, dataUpdatedAt, errorsAtData: errorUpdateCount }
-      : previous.dataUpdatedAt !== dataUpdatedAt ? { ...previous, dataUpdatedAt, errorsAtData: errorUpdateCount } : previous
+      ? { phase: target.phase, since: now, dataUpdatedAt, errorsAtData: errorUpdateCount, errorUpdateCount, jitter: Math.random() }
+      : previous.dataUpdatedAt !== dataUpdatedAt ? { ...previous, dataUpdatedAt, errorsAtData: errorUpdateCount, errorUpdateCount, jitter: Math.random() }
+        : previous.errorUpdateCount !== errorUpdateCount ? { ...previous, errorUpdateCount, jitter: Math.random() } : previous
     tracks.set(query, track)
     const consecutiveErrors = errorUpdateCount - track.errorsAtData
     return buildPollDelay({
       nextAction: target.nextAction, pollAfterMs: target.pollAfterMs, phaseElapsedMs: now - track.since,
       hidden: typeof document !== 'undefined' && document.visibilityState === 'hidden', consecutiveErrors,
       ...(consecutiveErrors > 0 && error instanceof ConsoleApiError && error.retryAfterMs !== undefined ? { retryAfterMs: error.retryAfterMs } : {}),
-      random: Math.random,
+      random: () => track.jitter,
     })
   }
 }
@@ -190,6 +197,20 @@ export async function receiveTurn(client: QueryClient, sessionId: string, turn: 
   client.setQueryData<BuildTurn[]>(listKey, (turns) => mergeTurn(turns ?? [], turn))
   const session = client.getQueryData<BuildSession>(buildSessionKeys.session(sessionId))
   if (!session || session.version < turn.sessionVersion) await client.invalidateQueries({ queryKey: buildSessionKeys.session(sessionId), exact: true })
+}
+
+/**
+ * The session version a decision on `turnId` (反映する／反映しない) is made on: the cached session's, or the later one
+ * the turn's own answer carried (every Turn answer states the session version at its read, contract
+ * `sessionVersion`). The server moves the version on every step of a running turn, and the session is re-read only
+ * after the turn read that showed the step, so the turn the user acts on can be newer than the cached session.
+ */
+export function turnDecisionVersion(client: QueryClient, sessionId: string, turnId: string): number | undefined {
+  const session = client.getQueryData<BuildSession>(buildSessionKeys.session(sessionId))
+  if (!session) return undefined
+  const turn = client.getQueryData<BuildTurn>(buildSessionKeys.turn(sessionId, turnId))
+  const listed = client.getQueryData<BuildTurn[]>(buildSessionKeys.turns(sessionId))?.find((item) => item.id === turnId)
+  return Math.max(session.version, turn?.sessionVersion ?? 0, listed?.sessionVersion ?? 0)
 }
 
 /**

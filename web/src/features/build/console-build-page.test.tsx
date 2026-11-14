@@ -302,9 +302,11 @@ describe('progress', () => {
     expect(log(page).textContent).toContain(c.progress.repairingHint)
     expect(log(page).textContent).not.toContain(c.failure.repair_exhausted.title)
 
-    // The server ends the turn: still invalid after the repair. The session is idle again.
+    // The server ends the turn: still invalid after the repair. The session is idle again. Like the server's failing
+    // command, the ended turn is a later observation than the running one already shown.
     mock.rewrites.splice(0)
-    const failed = (wire: Record<string, unknown>) => ({ ...wire, state: 'failed', attempt: 1, nextAction: 'none', failure: { error: 'reply_invalid', message: 'reply is still invalid' } })
+    const endedAt = new Date(Date.now() + 60_000).toISOString()
+    const failed = (wire: Record<string, unknown>) => ({ ...wire, state: 'failed', attempt: 1, nextAction: 'none', failure: { error: 'reply_invalid', message: 'reply is still invalid' }, updatedAt: endedAt })
     mock.rewrites.push({ method: 'GET', path: new RegExp(`^${BASE}/${sessionId}/turns(\\?|$)`), once: false, body: (wire) => ({ ...wire, items: (wire.items as Record<string, unknown>[]).map((turn, index, all) => index === all.length - 1 ? failed(turn) : turn) }) })
     mock.rewrites.push({ method: 'GET', path: turnPath(sessionId), once: false, body: failed })
     mock.rewrites.push({ method: 'GET', path: new RegExp(`^${BASE}/${sessionId}$`), once: false, body: (wire) => { const { activeTurnId: _active, ...rest } = wire; return { ...rest, nextAction: 'none', capabilities: { canConverse: true, canRequestPlan: true } } } })
