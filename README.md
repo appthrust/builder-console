@@ -73,15 +73,25 @@ that Playwright's Node loader cannot resolve, and one value import fails discove
 of the whole suite. Fixing the package's Node-ESM exports is owned by the SDK
 repository, not by an app-local source alias or loader shim.
 
-### Console response contracts (APT-832 / W1)
+### Console response contracts
 
 `web/src/api/contracts/console/schema/` is the canonical Zod source for Console
 success wires and the HTTP error envelope. `operations.ts` in that directory
-registers all 33 SPA operations, including `/config`, screenshot multipart
-responses, and the three 204 deletes. Adapters in the parent directory reuse
-those schemas and expose the domain types in `model/contracts/console.ts`.
-Feature migrations remain separate; this slice does not replace the unverified
-facade's callers.
+registers 33 Console operations, including `/config`, screenshot multipart
+responses, and the three 204 deletes. Conversation sessions add 12 v1 operations
+in `build-session-operations.ts`. Adapters reuse those schemas and expose the
+domain types in `model/contracts/console.ts`.
+
+Every successful response passes through `api/gateway.ts` exactly once before
+a query, mutation, loader or screen uses it. Feature, model, route and copy code
+cannot import raw clients or Console schemas, call `fetch`/`response.json()`, or
+assert wire output types. `bun run check:response-boundaries` rejects every
+violation, including type-only, barrel and dynamic imports; there are no
+per-file exemptions. Domain declarations in `model/contracts` may derive
+Platform types; that does not permit raw transport or Console schema imports.
+Mocks infer wire types from the canonical schemas, not a second handwritten DTO.
+Unreadable writes are unconfirmed, never automatically resent; unreadable reads
+retain the last successful cached domain value.
 
 | Operation family | Count | Responses |
 | --- | ---: | --- |

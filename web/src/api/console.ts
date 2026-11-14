@@ -6,13 +6,12 @@
 // The transport returns undecoded bodies (`unknown`): the gateway
 // (gateway.ts) decodes every success against its operation contract. Error
 // bodies are parsed into the safe `ConsoleApiError` envelope, never cast.
+import type { z } from 'zod'
 import { error as canonicalError } from './contracts/console/schema/schemas'
 import type { HttpMethod } from './boundary'
 import { copy } from '../copy'
 import { assertSessionActive, checkSessionResponse } from './session-expiry'
 
-/** `error` is a stable snake_case code. */
-export type ApiError = { error: string; message: string; details?: unknown }
 /**
  * Non-2xx console response. `code` is the contract's stable snake_case error.
  * `transient` = no contract envelope came back: a 5xx from a proxy or gateway
@@ -28,7 +27,7 @@ export class ConsoleApiError extends Error {
   readonly transient: boolean
   readonly retryAfterMs: number | undefined
 
-  constructor(status: number, body: Partial<ApiError> | undefined, retryAfterMs?: number) {
+  constructor(status: number, body: (Partial<Pick<z.output<typeof canonicalError>, 'error' | 'message'>> & { details?: unknown }) | undefined, retryAfterMs?: number) {
     const code = typeof body?.error === 'string' ? body.error : undefined
     const transient = code === undefined && (status === 0 || status >= 500)
     super(transient ? copy.errors.transient : body?.message || `console api ${status}`)
@@ -75,9 +74,9 @@ export interface ConsoleRequest {
 }
 
 /** A success body: JSON (still unknown), nothing at all, or bytes that are not JSON. */
-export type ConsoleBody = { kind: 'json'; value: unknown } | { kind: 'empty' } | { kind: 'invalid' }
+type ConsoleBody = { kind: 'json'; value: unknown } | { kind: 'empty' } | { kind: 'invalid' }
 
-export interface ConsoleResponse {
+interface ConsoleResponse {
   status: number
   body: ConsoleBody
 }
@@ -135,8 +134,6 @@ export function createConsoleTransport(fetcher: Fetcher = (input, init) => fetch
     },
   }
 }
-
-export const consoleTransport = createConsoleTransport()
 
 export const screenshotUrl = (appId: string, screenshotId: string) =>
   `/api/console/apps/${encodeURIComponent(appId)}/screenshots/${encodeURIComponent(screenshotId)}`

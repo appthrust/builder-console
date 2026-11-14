@@ -201,15 +201,6 @@ export const migrateDirectory = () => apiGateway.console(migrateDirectoryContrac
 
 const fetchConsoleConfig = () => apiGateway.console(configContract, undefined)
 
-const configuredProjectId: string | undefined =
-  import.meta.env?.DEV ? import.meta.env.VITE_CONSOLE_PROJECT_ID || undefined : undefined
-
-export function useProjectId() {
-  return useQuery({
-    ...projectIdQuery(configuredProjectId),
-  })
-}
-
 const fixedConfig = {
   retry: false,
   refetchInterval: false as const,
@@ -217,14 +208,6 @@ const fixedConfig = {
   refetchOnReconnect: false,
   staleTime: Number.POSITIVE_INFINITY,
   gcTime: Number.POSITIVE_INFINITY,
-}
-
-export function projectIdQuery(projectIdOverride?: string) {
-  return {
-    queryKey: ['project-id', projectIdOverride],
-    queryFn: async (): Promise<string> => projectIdOverride || (await fetchConsoleConfig()).projectId,
-    ...fixedConfig,
-  }
 }
 
 export const consoleConfigQuery = queryOptions({ queryKey: ['console-config'], queryFn: fetchConsoleConfig, ...fixedConfig })

@@ -1,18 +1,15 @@
-// check:response-boundaries (design §9). Feature and model code may read only
-// domain values that came through the gateway. This check fails when code
-// under features/** or model/** (except model/contracts/**; tests excluded):
+// check:response-boundaries (design §9). Screens and models read only domain
+// values that came through the gateway; every violation fails the check.
+// Rules apply to features, model, routes and copy (tests excluded):
 //   raw-platform-client  imports the Platform transport (api/client)
-//   raw-console-api      imports the unverified Console facade (api/console-unverified)
-//                        or the Console transport factory/instance (api/console)
-//   wire-schema-import   imports @appthrust/api-schema (wire input/output types or schemas)
+//   raw-console-api      imports Console transport symbols (api/console)
+//   wire-schema-import   imports canonical wire schemas, directly or through barrels
 //   direct-fetch         calls fetch() / window.fetch() / globalThis.fetch()
 //   response-json        calls `.json()` on a response
-//   wire-cast            asserts (`as` / `<T>`) to a type imported from the wire schema
-// Type-only imports, `export … from` re-exports and src barrels that re-export
-// any of the above count the same. Existing violations are listed per file and
-// rule in response-boundary-allowlist.json, which may only shrink: a count
-// above its entry fails (new violation), a count below it fails too (lower or
-// delete the entry), so every migration also deletes its exemption.
+//   wire-cast            asserts (`as` / `<T>`) to a type imported from wire schemas
+// Domain declarations may derive Platform types in model/contracts; they may
+// not import a transport or the Console's raw schema directory.
+// Type-only imports, re-exports, aliases and dynamic imports obey the same rules.
 //
 // Run from web/: `bun src/api/testing/check-response-boundaries.ts`
 import { readdirSync, readFileSync } from 'node:fs'
@@ -28,22 +25,20 @@ export interface Violation {
   line: number
 }
 
-export type Allowlist = Record<string, Partial<Record<Rule, number>>>
-
 /** src-relative module (no extension) → the rule importing it breaks. */
 const RAW_MODULES: Record<string, Rule> = {
   'api/client': 'raw-platform-client',
-  'api/console-unverified': 'raw-console-api',
 }
 /** Transport symbols of api/console; its error class and URL helpers stay importable. */
-const RAW_CONSOLE_SYMBOLS: Record<string, true> = { createConsoleTransport: true, consoleTransport: true }
+const RAW_CONSOLE_SYMBOLS: Record<string, true> = {
+  createConsoleTransport: true, ConsoleTransport: true, ConsoleRequest: true,
+}
 const WIRE_PACKAGE = '@appthrust/api-schema'
 const FETCH_OWNERS: Record<string, true> = { window: true, globalThis: true, self: true }
 
 export function inScope(file: string): boolean {
   if (/\.test\.tsx?$/.test(file)) return false
-  if (file.startsWith('model/contracts/')) return false
-  return file.startsWith('features/') || file.startsWith('model/')
+  return /^(features|model|routes|copy)\//.test(file) || file === 'copy.ts' || file === 'router.tsx'
 }
 
 const isWireSpecifier = (specifier: string) => specifier === WIRE_PACKAGE || specifier.startsWith(`${WIRE_PACKAGE}/`)
@@ -66,7 +61,7 @@ function parse(file: string, text: string): ts.SourceFile {
 /** The rules a module breaks for its importers by re-exporting raw modules or the wire package (barrels, aliases). */
 function reexportRules(files: ReadonlyMap<string, string>, file: string, seen = new Set<string>()): Set<Rule> {
   const rules = new Set<Rule>()
-  if (moduleId(file).startsWith('api/contracts/console/schema/')) rules.add('wire-schema-import')
+  if (/^api\/contracts\/console\/schema(?:\/|$)/.test(moduleId(file))) rules.add('wire-schema-import')
   if (seen.has(file)) return rules
   seen.add(file)
   const text = files.get(file)
@@ -153,7 +148,9 @@ export function findViolations(files: ReadonlyMap<string, string>): Violation[] 
     const visit = (node: ts.Node) => {
       if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
         const names = ts.isImportDeclaration(node) ? importedNames(node.importClause) : exportedNames(node)
-        for (const rule of specifierRules(files, file, node.moduleSpecifier.text, names)) add(rule, node)
+        // Domain declarations derive Platform vocabulary; re-exporting raw schemas still leaks the wire.
+        const domainDefinition = file.startsWith('model/contracts/') && ts.isImportDeclaration(node) && isWireSpecifier(node.moduleSpecifier.text)
+        if (!domainDefinition) for (const rule of specifierRules(files, file, node.moduleSpecifier.text, names)) add(rule, node)
       } else if (ts.isCallExpression(node)) {
         const callee = node.expression
         if (callee.kind === ts.SyntaxKind.ImportKeyword && node.arguments[0] && ts.isStringLiteral(node.arguments[0])) {
@@ -174,38 +171,6 @@ export function findViolations(files: ReadonlyMap<string, string>): Violation[] 
   return violations.sort((a, b) => a.file.localeCompare(b.file) || a.rule.localeCompare(b.rule) || a.line - b.line)
 }
 
-/** Per-file, per-rule counts, keys sorted: the allowlist shape. */
-export function countViolations(violations: readonly Violation[]): Allowlist {
-  const counts: Allowlist = {}
-  for (const violation of violations) {
-    const entry = (counts[violation.file] ??= {})
-    entry[violation.rule] = (entry[violation.rule] ?? 0) + 1
-  }
-  return Object.fromEntries(
-    Object.keys(counts).sort().map((file) => [file, Object.fromEntries(Object.entries(counts[file]!).sort(([a], [b]) => a.localeCompare(b)))]),
-  )
-}
-
-/** Problems of the tree against the allowlist; empty when the check passes. */
-export function compareWithAllowlist(violations: readonly Violation[], allowlist: Allowlist): string[] {
-  const problems: string[] = []
-  const counts = countViolations(violations)
-  for (const file of [...new Set([...Object.keys(counts), ...Object.keys(allowlist)])].sort()) {
-    const rules = new Set([...Object.keys(counts[file] ?? {}), ...Object.keys(allowlist[file] ?? {})]) as Set<Rule>
-    for (const rule of [...rules].sort()) {
-      const found = counts[file]?.[rule] ?? 0
-      const allowed = allowlist[file]?.[rule] ?? 0
-      if (found > allowed) {
-        const lines = violations.filter((violation) => violation.file === file && violation.rule === rule).map((violation) => violation.line)
-        problems.push(`new violation: ${file} ${rule} (${found} found, ${allowed} allowed; lines ${lines.join(', ')})`)
-      } else if (found < allowed) {
-        problems.push(`stale allowlist entry: ${file} ${rule} is ${found} now (allowlist says ${allowed}); lower or delete the entry`)
-      }
-    }
-  }
-  return problems
-}
-
 /** web/src as a map of src-relative path → text (ts/tsx only). */
 export function readSourceTree(root: string): Map<string, string> {
   const files = new Map<string, string>()
@@ -221,12 +186,10 @@ export function readSourceTree(root: string): Map<string, string> {
 }
 
 export const SRC_ROOT = resolve(import.meta.dir, '../..')
-export const ALLOWLIST_PATH = join(import.meta.dir, 'response-boundary-allowlist.json')
 
-export function checkTree(root = SRC_ROOT, allowlistPath = ALLOWLIST_PATH): { violations: Violation[]; problems: string[] } {
+export function checkTree(root = SRC_ROOT): { violations: Violation[]; problems: string[] } {
   const violations = findViolations(readSourceTree(root))
-  const allowlist = JSON.parse(readFileSync(allowlistPath, 'utf8')) as Allowlist
-  return { violations, problems: compareWithAllowlist(violations, allowlist) }
+  return { violations, problems: violations.map(({ file, line, rule }) => `${file}:${line} ${rule}`) }
 }
 
 if (import.meta.main) {
@@ -235,5 +198,5 @@ if (import.meta.main) {
     console.error(`check:response-boundaries failed:\n- ${problems.join('\n- ')}`)
     process.exit(1)
   }
-  console.log(`check:response-boundaries passed (${violations.length} allowlisted violations in ${Object.keys(countViolations(violations)).length} files; the allowlist may only shrink)`)
+  console.log(`check:response-boundaries passed (${violations.length} violations)`)
 }
