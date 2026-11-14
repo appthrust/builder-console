@@ -14,7 +14,7 @@ import type { ConsoleOperationContract } from './contracts/define'
 import { apiGateway, type ApiGateway } from './gateway'
 import type {
   BuildCreateSessionInput, BuildListQuery, BuildPublishInput, BuildPublishResult, BuildResolutionInput, BuildResolveResult,
-  BuildSession, BuildSpecRevision, BuildTurn, BuildTurnInput,
+  BuildSession, BuildSessionList, BuildSpecRevision, BuildTurn, BuildTurnInput, BuildTurnList,
 } from '../model/contracts/console'
 
 const BASE = '/api/console/v1/build-sessions'
@@ -94,23 +94,17 @@ const contracts = {
     ({ method: 'POST', path: `${sessionPath(id)}/archive`, body: {}, headers: writeHeaders(write) })),
 }
 
-/** One page of a collection, in server order. */
-export interface BuildPage<T> {
-  items: T[]
-  nextCursor?: string
-}
-
 export interface BuildSessionsApi {
   /** 202; the same key and body replay the original session, another body is 409 `idempotency_conflict`. */
   create(body: BuildCreateSessionInput, key: string): Promise<BuildSession>
-  list(query?: BuildListQuery): Promise<BuildPage<BuildSession>>
+  list(query?: BuildListQuery): Promise<BuildSessionList>
   get(id: string): Promise<BuildSession>
   /** Which engine owns this draft: an existing console-v1 session, else the legacy platform-v1 draft. */
   resolve(draftId: string): Promise<BuildResolveResult>
   /** Moves the stored next step (initialization, sync, wake, repair) on; only when the session says `advance`. */
   advance(id: string, write: BuildWrite): Promise<BuildSession>
   createTurn(id: string, body: BuildTurnInput, write: BuildWrite): Promise<BuildTurn>
-  listTurns(id: string, query?: BuildListQuery): Promise<BuildPage<BuildTurn>>
+  listTurns(id: string, query?: BuildListQuery): Promise<BuildTurnList>
   /** Every turn in ordinal order, following `nextCursor` to the end. */
   allTurns(id: string): Promise<BuildTurn[]>
   /** Observes the turn (the server may import a validated reply); never a new Platform write. */

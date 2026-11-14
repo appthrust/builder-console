@@ -6,7 +6,7 @@
 // Platform API, and the Authorization header is attached by the OIDC edge
 // (Envoy) in front of the console. The SPA never sees or requests a token.
 import { platformApiRouter } from '@appthrust/api-schema/platform-api-router'
-import { createORPCClient, ORPCError } from '@orpc/client'
+import { createORPCClient } from '@orpc/client'
 import type { ContractRouterClient } from '@orpc/contract'
 import { OpenAPILink } from '@orpc/openapi-client/fetch'
 import { assertSessionActive, checkSessionResponse } from './session-expiry'
@@ -35,7 +35,7 @@ export function createPlatformFetch(fetchImpl: FetchImpl): FetchImpl {
   }
 }
 
-export const platformFetch = createPlatformFetch((request) => fetch(request))
+const defaultFetch = createPlatformFetch((request) => fetch(request))
 
 /**
  * A Platform API client. `fetch` is the network call under the session and
@@ -43,7 +43,7 @@ export const platformFetch = createPlatformFetch((request) => fetch(request))
  * read per request, so creating the default never touches `window`.
  */
 export function createPlatformTransport(options: { fetch?: FetchImpl; origin?: () => string } = {}): PlatformApiClient {
-  const send = options.fetch ? createPlatformFetch(options.fetch) : platformFetch
+  const send = options.fetch ? createPlatformFetch(options.fetch) : defaultFetch
   // Contract paths already start with `/api/v1`, so the base is the bare origin
   // (an `/api` suffix would produce `/api/api/v1/...`).
   const link = new OpenAPILink<PlatformClientContext>(platformApiRouter, {
@@ -59,11 +59,4 @@ export function createPlatformTransport(options: { fetch?: FetchImpl; origin?: (
     ],
   })
   return createORPCClient(link)
-}
-
-export const client: PlatformApiClient = createPlatformTransport()
-
-/** The Platform API rejected the edge-issued credentials even after a fresh sign-in. */
-export function isAccessDenied(error: unknown): boolean {
-  return error instanceof ORPCError && error.status === 401
 }

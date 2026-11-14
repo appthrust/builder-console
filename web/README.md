@@ -21,12 +21,37 @@ See the [repository README](../README.md) for builds and publication. Product de
   for a live app (`/-/improve/{id}`); `excel2app/` turns an Excel ledger into
   an editable specification (`/-/excel2app`).
 - `src/model/` — pure status/progress/share/create derivations with tests.
-- `src/api/` — `console.ts` (`/api/console/*`), `queries.ts` (TanStack Query
-  factories), `platform-error.ts` (Platform API error envelope: `OpenAPILink`
-  puts the HTTP body under `ORPCError.data.body`).
+- `src/api/` — `client.ts` and `console.ts` are internal transports;
+  `gateway.ts` decodes every successful response against `contracts/` before
+  `queries/` (TanStack Query factories), mutations or loaders receive it.
+  `platform-error.ts` classifies Platform API failures.
 - `src/ui/` — the console's own kit (Radix + lucide): dialogs that return focus,
   `useDocumentTitle`, `useUnsavedChangesGuard`, `Stepper`, `DataTable`.
 - `src/dev/` — the mock console + platform API used by `bun run mock`.
+
+## Response boundary rules
+
+Screens, models, routes and copy use domain values from `model/contracts`,
+not raw clients or Console schema directories. No direct `fetch`,
+`response.json()` or wire-type assertions belong in those consumers.
+`bun run check:response-boundaries` enforces these rules without per-file
+exceptions, including aliases, type-only imports, barrels and dynamic imports.
+Domain declarations may derive canonical Platform types; only API adapters
+read wire responses. The console-v1 conversation flow obeys the same rules.
+Mocks infer their wire types from the canonical schemas.
+
+Only decoded values enter caches. An unreadable refetch retains the last
+successful snapshot; an unreadable write is unconfirmed and must be read back,
+not blindly repeated. Contract tests replay writer fixtures and malformed
+variants through the real gateway.
+
+Draft writes cancel older reads before replacing cached data. Excel calls
+`useQuery` inside its hook, so each render gets the current optimistic query
+result even before batched notifications; it needs no second cache read.
+The build-session hook receives a parent prop instead: its own store can
+re-render before that prop updates, so it must read the current draft cache to
+avoid sending the hidden preparation turn twice. `stale-draft.test.tsx` and
+`build-page-wire.test.tsx` protect both cases.
 
 ## Publication readiness when creating apps
 
@@ -702,7 +727,7 @@ non-engineers, with engineering words only under 「詳しい人向け」
 - People, groups and memberships belong to the Directory built-in app
   (`design/platform/builtin-app-directory/console-cutover.md`). The SPA reaches its
   API through the console's same-origin proxy `/api/console/directory/*`
-  (`consoleApi.directory`: `groups`, `groups/{id}/members`, `people?q=`,
+  (`api/queries/console.ts`: `groups`, `groups/{id}/members`, `people?q=`,
   `people?ids=` (batched by 100), `people/{id}`, `POST people`,
   `directory-users?q=`); list answers are `{items: [...]}` as the Directory
   sends them. `GET /me` carries `effectiveGroupIds` (direct

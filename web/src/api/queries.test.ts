@@ -3,7 +3,7 @@ import { ORPCError } from '@orpc/client'
 import { QueryClient, skipToken } from '@tanstack/react-query'
 import { ResponseContractError } from './boundary'
 import { ConsoleApiError } from './console'
-import { appQuery, consoleConfigQuery, projectIdQuery, resolveQuery } from './queries/console'
+import { appQuery, consoleConfigQuery, peopleByIds, resolveQuery } from './queries/console'
 import { componentLogsQuery } from './queries/app'
 import { createTestGateway } from './testing/gateway'
 import { dataPreconditionReason, isDataForbidden, membershipUnboundReason } from './queries/data'
@@ -19,27 +19,36 @@ test('loads the installed project from local config once, never from the project
     return Response.json({ projectId: 'pj-eee7fa8eabbc', newAppConversation: false })
   }) as unknown as typeof fetch
   const client = new QueryClient()
-  const query = projectIdQuery()
-  const first: string = await client.fetchQuery<string>(query)
-  const second: string = await client.fetchQuery<string>(query)
-  expect(first).toBe('pj-eee7fa8eabbc')
-  expect(second).toBe('pj-eee7fa8eabbc')
+  const first = await client.fetchQuery(consoleConfigQuery)
+  const second = await client.fetchQuery(consoleConfigQuery)
+  expect(first.projectId).toBe('pj-eee7fa8eabbc')
+  expect(second.projectId).toBe('pj-eee7fa8eabbc')
   expect(requests).toEqual(['/config'])
   client.clear()
 })
 
-test('a configured dev override avoids config and project-list requests', async () => {
-  const fetch = mock(async () => { throw new Error('unexpected request') })
-  globalThis.fetch = fetch as unknown as typeof globalThis.fetch
-  expect(await projectIdQuery('commerce').queryFn()).toBe('commerce')
-  expect(fetch).not.toHaveBeenCalled()
+test('people lookup skips empty batches and splits more than 100 ids', async () => {
+  const person = { id: 'p/1', subject: null, pending: true, email: 'new@example.com', displayName: 'New', avatarVersion: null }
+  const requests: string[] = []
+  globalThis.fetch = mock(async (input: RequestInfo | URL) => {
+    requests.push(String(input))
+    return Response.json({ items: requests.length === 1 ? [person] : [] })
+  }) as unknown as typeof fetch
+  expect(await peopleByIds([])).toEqual([])
+  expect(requests).toEqual([])
+  const ids = Array.from({ length: 101 }, (_, index) => `p${index}`)
+  expect(await peopleByIds(ids)).toEqual([person])
+  expect(requests).toEqual([
+    `/api/console/directory/people?ids=${ids.slice(0, 100).join('%2C')}`,
+    '/api/console/directory/people?ids=p100',
+  ])
 })
 
 test('config failure fails closed without retries or another project', async () => {
   const fetch = mock(async () => new Response('not found', { status: 404 }))
   globalThis.fetch = fetch as unknown as typeof globalThis.fetch
   const client = new QueryClient({ defaultOptions: { queries: { retry: 3 } } })
-  await expect(client.fetchQuery(projectIdQuery())).rejects.toMatchObject({ status: 404, code: 'not_found' })
+  await expect(client.fetchQuery(consoleConfigQuery)).rejects.toMatchObject({ status: 404, code: 'not_found' })
   expect(fetch).toHaveBeenCalledTimes(1)
   client.clear()
 })
@@ -47,7 +56,9 @@ test('config failure fails closed without retries or another project', async () 
 test.each([[{ newAppConversation: false }, 'missing'], [{ projectId: '', newAppConversation: false }, 'invalid_value'], [{ projectId: 'wrong/project', newAppConversation: false }, 'invalid_value'], [{ projectId: 12, newAppConversation: false }, 'invalid_type']] as const)(
   'invalid config fails closed: %j', async (config, code) => {
     globalThis.fetch = mock(async () => Response.json(config)) as unknown as typeof fetch
-    const error = await projectIdQuery().queryFn().catch((caught: unknown) => caught)
+    const client = new QueryClient()
+    const error = await client.fetchQuery(consoleConfigQuery).catch((caught: unknown) => caught)
+    client.clear()
     expect(error).toBeInstanceOf(ResponseContractError)
     expect(error).toMatchObject({ operationId: 'consoleGetConfig', issues: [{ path: '/projectId', code }] })
   }

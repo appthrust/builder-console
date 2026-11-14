@@ -17,8 +17,8 @@ import {
   type ResponseContractError,
   type ResponseIssue,
 } from './boundary'
-import { client, type PlatformApiClient, type PlatformClientContext } from './client'
-import { consoleTransport as defaultConsoleTransport, type ConsoleTransport } from './console'
+import { createPlatformTransport, type PlatformApiClient, type PlatformClientContext } from './client'
+import { createConsoleTransport, type ConsoleTransport } from './console'
 import type { ConsoleOperationContract, PlatformInput, PlatformOperation, PlatformOperationContract } from './contracts/define'
 
 export interface ApiGatewayDeps {
@@ -88,7 +88,7 @@ export function createApiGateway({ platformTransport, consoleTransport, reportFa
 
 /** The app's gateway: production transports and the console.warn reporter. */
 export const apiGateway = createApiGateway({
-  platformTransport: client,
-  consoleTransport: defaultConsoleTransport,
+  platformTransport: createPlatformTransport(),
+  consoleTransport: createConsoleTransport(),
   reportFailure: createConsoleWarnReporter(),
 })

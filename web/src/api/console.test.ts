@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test'
-import { avatarUrl, ConsoleApiError, createConsoleTransport, directoryLinks, screenshotUrl } from './console'
+import { readFileSync } from 'node:fs'
+import { avatarUrl, ConsoleApiError, directoryLinks, screenshotUrl } from './console'
 import { buildGroupTree, canManageGroup, flattenGroupTree, isValidSlug, membershipRoots, pathPrefixes, subtreeIds, type Group } from '../model/contracts/console'
-import { createConsoleApi } from './console-unverified'
+import { consoleContracts as contracts } from './contracts/console/operations'
 import { groupsContract } from './contracts/console/groups'
 import { meContract } from './contracts/console/me'
 import { createTestGateway } from './testing/gateway'
@@ -30,6 +31,10 @@ const groups = [
   group('d', null, '総務部', 'soumu'),
 ]
 
+const fixtures: { schema: string; body: unknown }[] = JSON.parse(readFileSync(new URL('../../../cmd/server/internal/api/testdata/console-wire.json', import.meta.url), 'utf8'))
+const appWire = fixtures.find((fixture) => fixture.schema === 'App')!.body
+const entryWire = fixtures.find((fixture) => fixture.schema === 'DirectoryEntry')!.body
+
 type Call = { input: string; init: RequestInit }
 
 function recorder(responses: Response[]) {
@@ -38,19 +43,20 @@ function recorder(responses: Response[]) {
     calls.push({ input, init })
     return responses.shift() ?? new Response(null, { status: 500 })
   }
-  return { api: createConsoleApi(createConsoleTransport(fetcher)), gateway: createTestGateway({ consoleFetch: fetcher }), calls }
+  const gateway = createTestGateway({ consoleFetch: fetcher })
+  return { api: gateway.console, gateway, calls }
 }
 
-describe('createConsoleApi', () => {
+describe('Console gateway transport', () => {
   test('builds same-origin URLs with encoded query and path segments', async () => {
     const { api, calls } = recorder([
       Response.json({ items: [] }),
       Response.json({ kind: 'group', id: 'c', currentPath: 'sales/east/team-a' }),
-      Response.json({}),
+      Response.json(appWire),
     ])
-    expect(await api.apps.list({ scope: 'all', q: '見積 書' })).toEqual([])
-    await api.resolve('/sales/east/team-a')
-    await api.apps.byPath('sales/east/team-a', 'mitsumori')
+    expect(await api(contracts.apps, { scope: 'all', q: '見積 書' })).toEqual([])
+    await api(contracts.resolve, '/sales/east/team-a')
+    await api(contracts.appByPath, { groupPath: 'sales/east/team-a', slug: 'mitsumori' })
     expect(calls.map((call) => call.input)).toEqual([
       '/api/console/apps?scope=all&q=%E8%A6%8B%E7%A9%8D+%E6%9B%B8',
       '/api/console/resolve?path=%2Fsales%2Feast%2Fteam-a',
@@ -61,9 +67,9 @@ describe('createConsoleApi', () => {
   })
 
   test('sends JSON bodies for mutations and returns undefined for 204', async () => {
-    const { api, calls } = recorder([Response.json({ id: 'x' }, { status: 201 }), new Response(null, { status: 204 })])
-    await api.apps.create({ displayName: '見積', slug: 'mitsumori', groupId: 'b' })
-    expect(await api.apps.remove('x')).toBeUndefined()
+    const { api, calls } = recorder([Response.json(appWire, { status: 201 }), new Response(null, { status: 204 })])
+    await api(contracts.createApp, { displayName: '見積', slug: 'mitsumori', groupId: 'b' })
+    expect(await api(contracts.removeApp, 'x')).toBeUndefined()
     expect(calls[0].init.method).toBe('POST')
     expect(new Headers(calls[0].init.headers).get('Content-Type')).toBe('application/json')
     expect(JSON.parse(String(calls[0].init.body))).toEqual({ displayName: '見積', slug: 'mitsumori', groupId: 'b' })
@@ -72,19 +78,19 @@ describe('createConsoleApi', () => {
 
   test('surfaces the contract error code', async () => {
     const { api } = recorder([Response.json({ error: 'already_bound', message: 'already bound' }, { status: 409 })])
-    const error = await api.apps.bind('a', { stackId: 's', appName: 'a' }).catch((caught: unknown) => caught)
+    const error = await api(contracts.bindApp, { appId: 'a', stackId: 's', appName: 'a' }).catch((caught: unknown) => caught)
     expect(error).toBeInstanceOf(ConsoleApiError)
     expect(error).toMatchObject({ status: 409, code: 'already_bound', message: 'already bound' })
   })
 
   test('falls back to not_found when a 404 has no JSON body', async () => {
     const { api } = recorder([new Response('nope', { status: 404 })])
-    await expect(api.resolve('/missing')).rejects.toMatchObject({ status: 404, code: 'not_found' })
+    await expect(api(contracts.resolve, '/missing')).rejects.toMatchObject({ status: 404, code: 'not_found' })
   })
 
   test('a 5xx without a contract envelope (gateway) is transient, with no raw status text', async () => {
     const { api } = recorder([new Response('upstream connect error or disconnect/reset before headers', { status: 500 })])
-    const error = (await api.apps.create({ displayName: 'x', slug: 'x', groupId: 'g' }).catch((caught: unknown) => caught)) as ConsoleApiError
+    const error = (await api(contracts.createApp, { displayName: 'x', slug: 'x', groupId: 'g' }).catch((caught: unknown) => caught)) as ConsoleApiError
     expect(error).toMatchObject({ status: 500, code: 'unknown', transient: true, message: copy.errors.transient })
     expect(error.message).not.toContain('console api')
   })
@@ -106,17 +112,17 @@ describe('createConsoleApi', () => {
       Response.json([shot]),
       new Response(null, { status: 204 }),
       Response.json({ items: [] }),
-      Response.json({}),
+      Response.json(entryWire),
       Response.json(tools),
     ])
     const file = new File([new Uint8Array([1, 2, 3])], 'screen.png', { type: 'image/png' })
-    expect(await api.screenshots.upload('a/1', file, '一覧')).toEqual(shot)
-    await api.screenshots.upload('a/1', file)
-    expect(await api.screenshots.reorder('a/1', ['s/1'])).toEqual([shot])
-    expect(await api.screenshots.remove('a/1', 's/1')).toBeUndefined()
-    expect(await api.apps.directory({ groupId: 'g', ownerId: 'p 1' })).toEqual([])
-    await api.apps.directoryEntry('a/1')
-    expect(await api.apps.tools('a/1')).toEqual(tools)
+    expect(await api(contracts.uploadScreenshot, { appId: 'a/1', file, caption: '一覧' })).toEqual(shot)
+    await api(contracts.uploadScreenshot, { appId: 'a/1', file })
+    expect(await api(contracts.reorderScreenshots, { appId: 'a/1', order: ['s/1'] })).toEqual([shot])
+    expect(await api(contracts.removeScreenshot, { appId: 'a/1', screenshotId: 's/1' })).toBeUndefined()
+    expect(await api(contracts.directoryApps, { groupId: 'g', ownerId: 'p 1' })).toEqual([])
+    await api(contracts.directoryEntry, 'a/1')
+    expect(await api(contracts.tools, 'a/1')).toEqual(tools)
     expect(calls.map((call) => `${call.init.method} ${call.input}`)).toEqual([
       'POST /api/console/apps/a%2F1/screenshots',
       'POST /api/console/apps/a%2F1/screenshots',
@@ -136,11 +142,9 @@ describe('createConsoleApi', () => {
     expect(screenshotUrl('a/1', 's/1')).toBe('/api/console/apps/a%2F1/screenshots/s%2F1')
   })
 
-  test('Directory calls go through the same-origin proxy; empty batches make no call; >100 ids are split', async () => {
+  test('Directory calls go through the same-origin proxy with encoded ids and queries', async () => {
     const person = { id: 'p/1', subject: null, pending: true, email: 'new@example.com', displayName: 'New', avatarVersion: null }
     const { api, gateway, calls } = recorder([
-      Response.json({ items: [] }),
-      Response.json({ items: [person] }),
       Response.json({ items: [] }),
       Response.json({ items: [person] }),
       Response.json({ person, memberships: [] }),
@@ -148,24 +152,19 @@ describe('createConsoleApi', () => {
       Response.json({ items: [] }),
       Response.json({ items: [] }),
       Response.json({ items: [] }),
-      Response.json({ imported: { people: 1, groups: 0, memberships: 0 }, conflicts: [] }),
+      Response.json({ imported: { people: 1, groups: 0, memberships: 0 }, conflicts: [], merged: [] }),
     ])
-    expect(await api.directory.people([])).toEqual([])
-    await api.directory.searchPeople('new@example.com')
-    expect(await api.directory.people(['p/1', 'p 2'])).toEqual([person])
-    const many = Array.from({ length: 101 }, (_, index) => `p${index}`)
-    expect(await api.directory.people(many)).toEqual([person])
-    await api.directory.person('p/1')
-    expect(await api.directory.createPerson({ email: 'new@example.com', displayName: 'New' })).toEqual(person)
+    await api(contracts.people, { q: 'new@example.com' })
+    expect(await api(contracts.people, { ids: ['p/1', 'p 2'] })).toEqual([person])
+    await api(contracts.person, 'p/1')
+    expect(await api(contracts.createPerson, { email: 'new@example.com', displayName: 'New' })).toEqual(person)
     await gateway.console(groupsContract, undefined)
-    await api.directory.members('g/1')
-    await api.directory.users('山田')
-    expect(await api.admin.directoryMigrate()).toEqual({ imported: { people: 1, groups: 0, memberships: 0 }, conflicts: [] })
+    await api(contracts.members, 'g/1')
+    await api(contracts.directoryUsers, '山田')
+    expect(await api(contracts.migrateDirectory, undefined)).toEqual({ imported: { people: 1, groups: 0, memberships: 0 }, conflicts: [], merged: [] })
     expect(calls.map((call) => `${call.init.method} ${call.input}`)).toEqual([
       'GET /api/console/directory/people?q=new%40example.com',
       'GET /api/console/directory/people?ids=p%2F1%2Cp+2',
-      `GET /api/console/directory/people?ids=${many.slice(0, 100).join('%2C')}`,
-      'GET /api/console/directory/people?ids=p100',
       'GET /api/console/directory/people/p%2F1',
       'POST /api/console/directory/people',
       'GET /api/console/directory/groups',
@@ -173,7 +172,7 @@ describe('createConsoleApi', () => {
       'GET /api/console/directory/directory-users?q=%E5%B1%B1%E7%94%B0',
       'POST /api/console/admin/directory-migrate',
     ])
-    expect(JSON.parse(String(calls[5].init.body))).toEqual({ email: 'new@example.com', displayName: 'New' })
+    expect(JSON.parse(String(calls[3].init.body))).toEqual({ email: 'new@example.com', displayName: 'New' })
   })
 
   test('avatars and pages live on the Directory public origin; the avatar URL carries the version', () => {

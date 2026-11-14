@@ -33,6 +33,11 @@ export function platformErrorEnvelope(error: unknown): PlatformErrorEnvelope | u
   return message ? { status, message } : undefined
 }
 
+/** The Platform API rejected the edge-issued credentials even after a fresh sign-in. */
+export function isAccessDenied(error: unknown): boolean {
+  return error instanceof ORPCError && error.status === 401
+}
+
 /** The Platform API answered 404: the resource is gone or is not visible to this account. Retrying cannot help. */
 export function isPlatformNotFound(error: unknown): boolean {
   return platformErrorEnvelope(error)?.status === 404 || (error instanceof ORPCError && error.status === 404)

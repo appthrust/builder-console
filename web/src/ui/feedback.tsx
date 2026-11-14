@@ -1,6 +1,6 @@
 import { AlertTriangle, CheckCircle2, Info, Loader2, RotateCw, XCircle } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { isAccessDenied } from '../api/client'
+import { isAccessDenied } from '../api/platform-error'
 import { isConsoleError } from '../api/console'
 import { isResponseContractError } from '../api/boundary'
 import { AccessForbiddenError } from '../api/access'

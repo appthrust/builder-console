@@ -5,7 +5,7 @@
 // Inferred at the canonical boundary; no parallel handwritten conversation
 // domain declarations. Features import these types, never the raw schemas.
 export type {
-  BuildSession, BuildTurn, BuildReply, BuildSpecification, BuildSpecRevision, BuildError,
+  BuildSession, BuildSessionList, BuildTurn, BuildTurnList, BuildReply, BuildSpecification, BuildSpecRevision, BuildError,
   BuildCreateSessionInput, BuildTurnInput, BuildResolutionInput, BuildPublishInput,
   BuildPublishResult, BuildResolveResult, BuildListQuery, BuildMutationHeaders, BuildCreateHeaders, BuildETag,
 } from '../../api/contracts/console/build-sessions'
