@@ -5,6 +5,7 @@
 // may have happened, so callers read back instead of sending it again.
 import type { BusinessApp, Resolved } from '../model/contracts/console'
 import type {
+  RepositoryDestination,
   SourceRepository,
   SourceRepositoryList,
   SourceRepositoryRequest,
@@ -15,6 +16,7 @@ import type {
 } from '../model/contracts/catalog'
 import {
   createSourceRepositoryContract,
+  getRepositoryDestinationContract,
   createStackContract,
   listSourceRepositoriesContract,
   listStacksContract,
@@ -48,6 +50,8 @@ export interface CreateApi {
   resolve(path: string): Promise<Resolved>
   stacks(projectId: string): Promise<StackIdentity[]>
   sourceRepositories(projectId: string): Promise<SourceRepositoryList>
+  /** Where Platform creates a new repository now; blocked and unknown states are values, a failed read rejects. */
+  repositoryDestination(projectId: string): Promise<RepositoryDestination>
   validateSourceRepository(projectId: string, request: SourceRepositoryRequest): Promise<SourceRepositoryValidation>
   /** `idempotencyKey`: the attempt's key; a resend with it is replayed by Platform, never applied twice. */
   createSourceRepository(projectId: string, request: SourceRepositoryRequest, idempotencyKey: string): Promise<SourceRepository>
@@ -68,6 +72,7 @@ export function createCreateApi(gateway: ApiGateway): CreateApi {
     resolve: (path) => gateway.console(resolveContract, path),
     stacks: async (projectId) => (await gateway.platform(listStacksContract, { projectId })).data,
     sourceRepositories: (projectId) => gateway.platform(listSourceRepositoriesContract, { projectId }),
+    repositoryDestination: (projectId) => gateway.platform(getRepositoryDestinationContract, { projectId }),
     validateSourceRepository: (projectId, request) => gateway.platform(validateSourceRepositoryContract, { projectId, ...request }),
     createSourceRepository: (projectId, request, idempotencyKey) => gateway.platform(createSourceRepositoryContract, { projectId, ...request }, { idempotencyKey }),
     deleteSourceRepository: async (projectId, id) => { await gateway.platform(deleteApplicationSourceRepositoryContract, { params: { projectId, id } }) },

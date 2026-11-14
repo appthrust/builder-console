@@ -23,6 +23,11 @@ export interface BuildProposal {
   rules: string[]
   /** Planned address only, rendered as non-clickable text until a screen release succeeds. */
   url?: string
+  /**
+   * Where a new repository is created and its image pushed (Platform's resolved destination), or
+   * `blocked` when none is resolved. Absent: the plan makes no new repository, or the destination is still read.
+   */
+  newRepository?: { repository: string; image: string } | 'blocked'
   /** What the AI builds (handoff tasks): the first few, product language only. */
   tasks: { title: string; detail?: string }[]
   moreTasks: number
@@ -62,10 +67,18 @@ export interface BuildPrimary {
   enabled: boolean
 }
 export interface BuildFailure {
-  /** `unconfirmed`: a write answered 2xx with an answer this console could not read; it may have happened. */
-  kind: 'workspace' | 'unavailable' | 'policy' | 'quota' | 'limit' | 'forbidden' | 'timeout' | 'failed' | 'name-taken' | 'interrupted' | 'platform' | 'group' | 'unconfirmed'
+  /**
+   * `unconfirmed`: a write answered 2xx with an answer this console could not read; it may have happened.
+   * `destination`: Platform's repository destination moved, is not set, or did not match; nothing was created.
+   */
+  kind: 'workspace' | 'unavailable' | 'policy' | 'quota' | 'limit' | 'forbidden' | 'timeout' | 'failed' | 'name-taken' | 'interrupted' | 'platform' | 'group' | 'unconfirmed' | 'destination'
   title: string
   reason: string
+  /**
+   * `destination` only: how the destination stopped it. `changed`: the plan now shows the current destination and
+   * the user approves again (「この内容で作る」, nothing to clean up); `blocked`: only a Project administrator can set it.
+   */
+  destination?: 'changed' | 'blocked' | 'mismatch'
   suggestedName?: string
   reasonCode?: 'PublishURLConflict'
   raw?: string

@@ -3,10 +3,11 @@
 // (contracts/platform/catalog.ts); a failed read is the query's error, never
 // an empty list.
 import { keepPreviousData, queryOptions, skipToken, useQueries, useQuery } from '@tanstack/react-query'
-import type { CreateConnections } from '../../model/contracts/catalog'
+import type { CreateConnections, SourceRepositoryRequest } from '../../model/contracts/catalog'
 import { publishDomainPending } from '../../model/create'
 import {
   creationToolsContract,
+  getRepositoryDestinationContract,
   listDomainsContract,
   listGitHubRepositoriesContract,
   listRegistryConnectionsContract,
@@ -14,6 +15,7 @@ import {
   listSourceRepositoriesContract,
   listStackDefinitionsContract,
   listTemplatesContract,
+  validateSourceRepositoryContract,
 } from '../contracts/platform/catalog'
 import { apiGateway } from '../gateway'
 import { keys } from './shared'
@@ -43,6 +45,45 @@ export function createConnectionsQuery(projectId: string) {
 
 export function useCreateConnections(projectId: string) {
   return useQuery(createConnectionsQuery(projectId))
+}
+
+/**
+ * Where Platform creates a new repository (ひな形, AI). Not polled and not
+ * re-read on focus: the destination shown is the one a create binds, and it is
+ * re-read only when Platform says it changed (the wizard shows the new one
+ * before anything is sent again). A failed read is the query's error, never
+ * "not configured".
+ */
+export function repositoryDestinationQuery(projectId: string) {
+  return queryOptions({
+    queryKey: keys.repositoryDestination(projectId),
+    queryFn: () => apiGateway.platform(getRepositoryDestinationContract, { projectId }),
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
+  })
+}
+
+export function useRepositoryDestination(projectId: string, enabled = true) {
+  return useQuery({ ...repositoryDestinationQuery(projectId), enabled })
+}
+
+/**
+ * 作ったコードから: Platform's validation of the adoption request, read for the
+ * image path Platform derives for it (the console never computes one). The
+ * create validates again; this answer only informs the confirmation.
+ */
+export function adoptionValidationQuery(projectId: string, request: SourceRepositoryRequest | undefined) {
+  const existing = request?.existing
+  return queryOptions({
+    queryKey: keys.adoptionValidation(projectId, request?.sourceConnectionId ?? '', existing?.repository ?? '', existing?.ref ?? ''),
+    queryFn: request && existing ? () => apiGateway.platform(validateSourceRepositoryContract, { projectId, ...request }) : skipToken,
+    refetchInterval: false,
+    refetchOnWindowFocus: false,
+  })
+}
+
+export function useAdoptionValidation(projectId: string, request: SourceRepositoryRequest | undefined) {
+  return useQuery(adoptionValidationQuery(projectId, request))
 }
 
 /**

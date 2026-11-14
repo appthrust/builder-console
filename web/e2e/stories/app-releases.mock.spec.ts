@@ -74,7 +74,7 @@ test.describe('App releases @app-releases', () => {
     }
     const publish: Publish = {
       id: scope.componentId, projectId: seed.projectId, ...scope, phase: 'succeeded',
-      publicUrl: 'https://quality-issues.example.test/', access: { mode: 'Public' }, pendingSync: false,
+      publicUrl: 'https://quality-issues.example.test/', access: { mode: 'Public' }, pendingSync: false, serving: true, servingReason: 'Serving',
     }
     // The obsolete stack comes first, but only the recreated stack's component
     // is projected into production. Application.sourceId still names its creator.

@@ -3,7 +3,9 @@
 // Console send it, so each step's success is read by its production reader.
 import { describe, expect, test } from 'bun:test'
 import { createCreateApi, type CreateApi } from '../../api/create'
-import { appOf, definitionOf, registryOf, sourceConnectionOf, templateOf } from '../../api/testing/catalog-domain'
+import { decodeResponse } from '../../api/boundary'
+import { getRepositoryDestinationContract } from '../../api/contracts/platform/catalog'
+import { appOf, definitionOf, resolvedDestinationOf, sourceConnectionOf, templateOf } from '../../api/testing/catalog-domain'
 import { createTestGateway } from '../../api/testing/gateway'
 import { copy } from '../../copy'
 import { MOCK_PROJECT_ID, platformRoutes } from '../../dev/mock-platform'
@@ -43,10 +45,9 @@ const definition = definitionOf({
     { id: 'database', definitionRef: { name: 'postgresql' } },
   ],
 })
-const connections = {
-  source: sourceConnectionOf({ id: 'gh', displayName: 'gh', account: { login: 'acme', type: 'Organization' }, capabilities: ['createRepositories'], status: 'ready', source: 'github-source-connection-cr' }),
-  registry: registryOf({ id: 'ghcr', displayName: 'ghcr', registryHost: 'ghcr.io', registryType: 'ghcr', status: 'ready', source: 'registry-connection-cr' }),
-}
+/** The destination the wizard showed (GHCR under `acme`), and the connection a picked repository is adopted with. */
+const destination = resolvedDestinationOf()
+const adoption = sourceConnectionOf({ id: 'gh', displayName: 'gh', account: { login: 'acme', type: 'Organization' }, capabilities: ['createRepositories'], status: 'ready', source: 'github-source-connection-cr' })
 
 const person = { id: 'p1', subject: 's', pending: false, email: 'a@example.test', displayName: '山田', avatarVersion: null }
 /** The console app as the Console server answers it. */
@@ -144,7 +145,8 @@ function deps(answers: Partial<Record<Op, Answer>> = {}, state: { apps?: unknown
     api,
     catalog: resolveCreateCatalog([template], [definition], 'github-template')!,
     domain: 'pj.appthrust.test',
-    connections,
+    destination,
+    adoption,
     onPhase: () => {},
   }
   return { value, api, calls, bodies, keys }
@@ -189,7 +191,7 @@ describe('submitCreate', () => {
   test('a stale catalog reaches the mock allowlist rejection and returns to the template step', async () => {
     const viaMock: Answer = (_body, request) => platformRoutes(request, new URL(request.url)).then((response) => response!)
     const { value } = deps({ validateSource: viaMock, createSource: viaMock })
-    value.connections = { ...connections, source: sourceConnectionOf({ id: 'github-source-207cb7ce', displayName: 'gh', account: { login: 'acme', type: 'Organization' }, capabilities: ['createRepositories'], status: 'ready', source: 'github-source-connection-cr' }) }
+    // The mock resolves the same GHCR destination the fixture shows, so only the template allowlist refuses.
     value.catalog = {
       ...value.catalog,
       template: templateOf({
@@ -340,7 +342,8 @@ describe('submitCreate', () => {
     const retry = deps()
     await submitCreate({ ...request, urlName: 'test2' }, failure.progress, retry.value)
     expect(retry.calls).toEqual(['updateApp', 'deleteSource:test-src', 'validateSource', 'createSource', 'validateStack', 'createStack', 'bindApp:mitsumori:test2'])
-    expect(retry.bodies.createSource?.[0]).toMatchObject({ destination: { repositoryName: 'test2' }, image: { imagePath: 'ghcr.io/acme/test2' } })
+    expect(retry.bodies.createSource?.[0]).toMatchObject({ destination: { repositoryName: 'test2' }, destinationRevision: 'rd-ghcr-1' })
+    expect(retry.bodies.createSource?.[0]).not.toHaveProperty('image')
     expect(retry.bodies.createStack?.[0]?.source).toEqual({ kind: 'application-source-repository', sourceRepositoryId: 'test2-src' })
   })
 
@@ -372,9 +375,9 @@ describe('submitCreate', () => {
     await submitCreate({ ...request, urlName: 'claude-mitsumori', path: { kind: 'existing', repository } }, {}, value)
     expect(calls).toEqual(['createApp', 'validateSource', 'createSource', 'validateStack', 'createStack', 'bindApp:mitsumori:claude-mitsumori'])
     const body = bodies.validateSource?.[0]
-    expect(body).toMatchObject({ existing: { repository: 'acme/claude-mitsumori', ref: 'main' }, image: { imagePath: 'ghcr.io/acme/claude-mitsumori' } })
-    expect(body?.template).toBeUndefined()
-    expect(body?.destination).toBeUndefined()
+    // Adoption keeps its connection; Platform derives the image path and its registry access.
+    expect(body).toMatchObject({ sourceConnectionId: 'gh', existing: { repository: 'acme/claude-mitsumori', ref: 'main' } })
+    for (const field of ['image', 'registryConnectionRef', 'registryProviderConnectionRef', 'destinationRevision', 'template', 'destination']) expect(body).not.toHaveProperty(field)
   })
 
   test('same URL name with a different existing repository deletes the orphan and adopts the new repository', async () => {
@@ -474,7 +477,7 @@ describe('an unreadable 2xx answer to a create step (X5: no resend, readback onl
     expect(first.calls).toEqual(['createApp', 'validateSource', 'createSource'])
 
     const readback = deps({}, { repositories: [wireRepository({ destination: { repositoryName: 'other' } }, 'other-src'), wireRepository({ destination: { repositoryName: 'mitsumori' } }, 'mitsumori-src')] })
-    const confirmed = await confirmCreate(request, failure.progress, { ...readback.value, connections })
+    const confirmed = await confirmCreate(request, failure.progress, readback.value)
     expect(readback.calls).toEqual(['app', 'sources'])
     expect(confirmed.progress).toEqual({ draft, sourceRepositoryId: 'mitsumori-src', sourceRepositoryOrigin: templateOrigin })
 
@@ -583,11 +586,93 @@ describe('an unreadable 2xx answer to a create step (X5: no resend, readback onl
   test('another owner\'s repository of the same name is never adopted', async () => {
     const failure = await fail(submitCreate(request, {}, deps({ createSource: malformed }).value))
     const otherOwner = { ...wireRepository({ destination: { repositoryName: 'mitsumori' } }, 'other-src'), image: { imagePath: 'ghcr.io/someone-else/mitsumori' } }
-    const otherConnection = wireRepository({ destination: { repositoryName: 'mitsumori' }, sourceConnectionId: 'gh-other' }, 'other-connection-src')
+    const otherConnection = wireRepository({ destination: { repositoryName: 'mitsumori' }, sourceConnectionId: 'github-other' }, 'other-connection-src')
     const readback = deps({}, { repositories: [otherOwner, otherConnection] })
     const confirmed = await confirmCreate(request, failure.progress, readback.value)
     expect(confirmed.progress.sourceRepositoryId).toBeUndefined()
-    const mine = deps({}, { repositories: [wireRepository({ destination: { repositoryName: 'mitsumori' }, sourceConnectionId: 'gh' }, 'mitsumori-src')] })
+    const mine = deps({}, { repositories: [wireRepository({ destination: { repositoryName: 'mitsumori' }, sourceConnectionId: 'github-source-207cb7ce' }, 'mitsumori-src')] })
     expect((await confirmCreate(request, failure.progress, mine.value)).progress.sourceRepositoryId).toBe('mitsumori-src')
+  })
+})
+
+describe('the repository destination at submit', () => {
+  const mockCall = async (method: string, path: string, body?: unknown) => {
+    const url = new URL(path, 'http://mock.test')
+    const response = await platformRoutes(new Request(url, { method, ...(body ? { body: JSON.stringify(body), headers: { 'content-type': 'application/json' } } : {}) }), url)
+    return response!.json()
+  }
+  /** The destination the mock Platform resolves now, read through the production contract. */
+  const mockDestination = async (state: string) => {
+    await mockCall('POST', '/api/v1/__mock/repository-destination', { state })
+    const decoded = decodeResponse(getRepositoryDestinationContract, await mockCall('GET', `/api/v1/projects/${MOCK_PROJECT_ID}/repository-destination`))
+    if (!decoded.ok || decoded.value.kind !== 'resolved') throw new Error('the mock destination did not read as resolved')
+    return decoded.value
+  }
+  const viaMock: Answer = (_body, request) => platformRoutes(request, new URL(request.url)).then((response) => response!)
+
+  test.each([
+    ['ghcr', 'ghcr.io/acme'],
+    ['builtin', 'registry.appthrust.test/commerce'],
+  ] as const)('a resolved %s destination makes a valid create through Platform’s checks (mock)', async (state, namespace) => {
+    const shown = await mockDestination(state)
+    expect(shown.registryNamespace).toBe(namespace)
+    const { value, bodies } = deps({ validateSource: viaMock, createSource: viaMock })
+    value.destination = shown
+    const urlName = `dest-${state}`
+    const app = await submitCreate({ ...request, projectId: MOCK_PROJECT_ID, urlName }, {}, value)
+    expect(app.stackId).toBe('mitsumori')
+    expect(bodies.createSource?.[0]).toMatchObject({ destinationRevision: shown.revision, destination: { repositoryName: urlName } })
+    const made = (await mockCall('GET', `/api/v1/projects/${MOCK_PROJECT_ID}/application-source-repositories/${urlName}-src`)) as { image: { imagePath: string }; sourceConnectionId: string }
+    expect(made.image.imagePath).toBe(`${namespace}/${urlName}`)
+    expect(made.sourceConnectionId).toBe('github-source-207cb7ce')
+    await mockCall('POST', '/api/v1/__mock/reset')
+  })
+
+  test('a destination that moved after it was shown: 409 DestinationChanged, nothing created or resent, never a taken name', async () => {
+    const changed = () => platformError(409, 'conflict', `The repository destination changed. ${SECRET}`, { reason: 'DestinationChanged' })
+    const { value, calls } = deps({ validateSource: changed })
+    const failure = await fail(submitCreate(request, {}, value))
+    expect(failure.destination).toBe('changed')
+    expect(failure.nameTaken).toBe(false)
+    expect(failure.forbidden).toBe(false)
+    expect(failure.data).toBeUndefined()
+    expect(calls).toEqual(['createApp', 'validateSource'])
+    expect(failure.progress).toEqual({ draft })
+  })
+
+  test('the moved destination answered at the create itself ends the attempt without a resend', async () => {
+    const { value, calls } = deps({ createSource: () => platformError(409, 'conflict', 'changed', { reason: 'DestinationChanged' }) })
+    const failure = await fail(submitCreate(request, {}, value))
+    expect(failure.destination).toBe('changed')
+    expect(calls).toEqual(['createApp', 'validateSource', 'createSource'])
+    // The refused write did not happen: its key is not kept for a replay.
+    expect(failure.progress.attempts).toBeUndefined()
+  })
+
+  test('DestinationMismatch is a typed failure, not a retry and not a taken name', async () => {
+    const { value } = deps({ validateSource: () => platformError(409, 'conflict', SECRET, { reason: 'DestinationMismatch' }) })
+    const failure = await fail(submitCreate(request, {}, value))
+    expect([failure.destination, failure.nameTaken, failure.retryable, failure.data]).toEqual(['mismatch', false, false, undefined])
+  })
+
+  test.each([
+    [412, 'failed_precondition', 'NotConfigured'],
+    [412, 'failed_precondition', 'Ambiguous'],
+    [412, 'failed_precondition', 'NotReady'],
+    [403, 'forbidden', 'NotVisible'],
+  ] as const)('a destination blocked at submit (%s %s %s) is no permission and keeps the draft', async (status, code, reason) => {
+    const { value, calls } = deps({ validateSource: () => platformError(status, code, SECRET, { reason }) })
+    const failure = await fail(submitCreate(request, {}, value))
+    expect([failure.destination, failure.forbidden, failure.data]).toEqual(['blocked', false, undefined])
+    expect(calls).not.toContain('removeApp')
+    expect(failure.progress.draft).toEqual(draft)
+  })
+
+  test('without a resolved destination the ひな形 path sends nothing to Platform', async () => {
+    const { value, calls } = deps()
+    value.destination = undefined
+    const failure = await fail(submitCreate(request, {}, value))
+    expect(failure.message).toBe(text.destinationUnavailable)
+    expect(calls).toEqual(['createApp'])
   })
 })

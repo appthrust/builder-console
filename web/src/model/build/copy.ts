@@ -19,6 +19,10 @@ export const textJa = {
     urlLater: '公開先はあとで決めます',
     tasks: '作る内容',
     moreTasks: (n: number) => `ほか ${n} 件`,
+    /** Where Platform creates the new repository and pushes its image (its resolved destination). */
+    repository: '新しく作る置き場',
+    image: 'アプリの保管場所',
+    destinationBlocked: '置き場をどこに作るかが決まっていません。プロジェクトの管理者に設定を依頼してください。',
   },
   progress: {
     workspace: { title: 'AI の準備をしています', hint: '初回は 1–2 分かかります' },
@@ -96,6 +100,12 @@ export const textJa = {
     /** A write answered 2xx but its answer could not be read: it may have happened. Never resent automatically. */
     unconfirmed: { title: '処理結果を確認できませんでした', reason: '送った操作は届いているかもしれません。最新の状態を確かめてから続けてください。自動ではくり返しません。' },
     confirm: '最新の状態を確認する',
+    /** The repository destination's answers (never the server's reason). */
+    destination: {
+      changed: { title: '置き場の作成先が変わりました', reason: 'まだ何も作っていません。提案の「新しく作る置き場」と「アプリの保管場所」を新しい作成先にしました。確かめてから「この内容で作る」を押してください。' },
+      blocked: { title: '置き場の作成先が決まっていません', reason: '新しいアプリの置き場をどこに作るかが、まだ決まっていません。プロジェクトの管理者に、置き場の作成先を設定するよう依頼してください。' },
+      mismatch: { title: '置き場の作成先を確かめられませんでした', reason: 'まだ何も作っていません。この画面を開き直しても続くときは、管理者に相談してください。' },
+    },
   },
   /** A state this console version does not know: the known parts stay visible, only what depends on it stops. */
   unsupported: { title: 'この状態はいまの画面では扱えません', detail: 'ほかの内容はそのまま見られます。この状態に関わる操作は、状態がわかるまで止めています。' },

@@ -15,7 +15,7 @@ import { joinBusinessTemplates, type BusinessTemplate } from '../templates'
 
 export type EntryBlocks = Record<CreateEntry, string | undefined>
 
-export function StartStep({ form, disabled, loading, catalogFailed, onRetryCatalog, stale, blocked, setupLink, catalog, codexAvailable, codexUnavailableReason, codexPolicy, onBuild, onCustomize, startingBuild, onTemplate, onExisting, onUseImage }: {
+export function StartStep({ form, disabled, loading, catalogFailed, onRetryCatalog, stale, blocked, destinationNotice, setupLink, catalog, codexAvailable, codexUnavailableReason, codexPolicy, onBuild, onCustomize, startingBuild, onTemplate, onExisting, onUseImage }: {
   form: CreateFormApi
   disabled: boolean
   loading: boolean
@@ -24,6 +24,11 @@ export function StartStep({ form, disabled, loading, catalogFailed, onRetryCatal
   /** The "could not update" notice while a re-read of the shown catalog failed: every create entry waits for a fresh read. */
   stale: ReactNode
   blocked: EntryBlocks
+  /**
+   * Why no new repository can be made (no resolved repository destination). Only a Project
+   * administrator can set it, so it never carries the platform-setup link.
+   */
+  destinationNotice?: string
   setupLink: boolean
   catalog: TemplateSummary[]
   codexAvailable: boolean
@@ -43,12 +48,14 @@ export function StartStep({ form, disabled, loading, catalogFailed, onRetryCatal
   // An omitted category is a framework template (canonical rule); an unknown one is neither.
   const frameworks = catalog.filter((item) => (item.category === undefined || isOneOf(item.category, 'framework')) && item.sourceKinds.some((kind) => isOneOf(kind, 'github-template')))
   const setupAction = setupLink ? <LinkButton to="/-/admin/platform" size="sm" icon={<Settings className="size-4" />}>{text.openPlatform}</LinkButton> : undefined
-  const reasons = [...new Set([blocked.existing, blocked.template].filter((reason) => reason !== undefined))]
+  const reasons = [...new Set([blocked.existing, blocked.template].filter((reason) => reason !== undefined && reason !== destinationNotice))]
   const policyExplanation = aiPolicyExplanation(codexUnavailableReason, codexPolicy)
   const showAi = codexAvailable || Boolean(policyExplanation)
 
   return (
     <div className="space-y-7">
+      {/* Read first: it is why the AI and template entries below are unavailable (existing code still works). */}
+      {!loading && !catalogFailed && destinationNotice ? <div data-testid="create-destination-blocked"><Notice tone="warning">{destinationNotice}</Notice></div> : null}
       <div className="space-y-3">
         <form.Field name="intent">
           {(field) => (
@@ -58,7 +65,8 @@ export function StartStep({ form, disabled, loading, catalogFailed, onRetryCatal
           )}
         </form.Field>
         {showAi ? <Button onClick={onBuild} tone="primary" loading={startingBuild} disabled={!codexAvailable || Boolean(policyExplanation) || !ready('ai') || !values.intent.trim()} icon={<Sparkles className="size-4" />}>{copy.create.start.build}</Button> : null}
-        {showAi && (policyExplanation || blocked.ai) && !loading ? <p className="text-sm text-stone-500">{policyExplanation ?? blocked.ai}</p> : null}
+        {/* The destination notice stands once, above, not again under this button. */}
+        {showAi && (policyExplanation || (blocked.ai && blocked.ai !== destinationNotice)) && !loading ? <p className="text-sm text-stone-500">{policyExplanation ?? blocked.ai}</p> : null}
       </div>
 
       <HrefLink href={paths.excel2app()} data-testid="create-excel2app" className="flex w-full items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50/40 p-4 text-left hover:bg-emerald-50 focus-visible:outline-2 focus-visible:outline-accent">
@@ -73,19 +81,23 @@ export function StartStep({ form, disabled, loading, catalogFailed, onRetryCatal
         {loading ? <div className="grid gap-3 sm:grid-cols-2" aria-busy>{[0, 1, 2, 3].map((id) => <Skeleton key={id} className="h-48" />)}</div> : (
           <div className="grid gap-3 sm:grid-cols-2">
             {templates.map((template) => {
-              const selected = values.entry === 'template' && values.templateId === template.id
               const reason = !templateUsableFor(template, 'github-template')
                 ? template.githubTemplate ? copy.create.start.templateNotAdmitted(template.githubTemplate.repository) : copy.create.start.templateUnavailable
                 : blocked.template
+              // A remembered choice of a template that cannot be used now is not shown as chosen.
+              const selected = values.entry === 'template' && values.templateId === template.id && !reason
               const Icon = template.icon
               return (
                 <div key={template.id} className="flex flex-col gap-2">
-                <button type="button" aria-pressed={selected} disabled={disabled || catalogFailed || Boolean(stale) || Boolean(reason)} onClick={() => onTemplate(template.id)} className={`relative flex flex-1 flex-col rounded-lg border p-4 text-left transition-colors focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:bg-stone-50 ${selected ? 'border-accent bg-accent-soft' : 'border-stone-200 hover:border-stone-400'}`} data-testid={`template-${template.id}`}>
-                  <span className="flex items-center gap-2 font-semibold text-stone-900"><Icon aria-hidden className="size-5 text-accent-strong" />{template.name}{selected ? <Check aria-hidden className="ml-auto size-4 text-accent-strong" /> : null}</span>
-                  <span className="mt-2 text-sm leading-relaxed text-stone-600">{template.lead}</span>
-                  <span className="mt-3 text-xs font-medium text-stone-500">{copy.create.start.includes}</span>
-                  <span className="mt-1 space-y-1 text-xs text-stone-600">{template.includes.map((item) => <span className="block" key={item}>・{item}</span>)}</span>
-                  {reason ? <span className="mt-3 text-xs leading-relaxed text-amber-800">{reason}</span> : null}
+                <button type="button" aria-pressed={selected} disabled={disabled || catalogFailed || Boolean(stale) || Boolean(reason)} onClick={() => onTemplate(template.id)} className={`group relative flex flex-1 flex-col rounded-lg border p-4 text-left transition-colors focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:bg-stone-50 ${selected ? 'border-accent bg-accent-soft' : 'border-stone-200 hover:border-stone-400'}`} data-testid={`template-${template.id}`}>
+                  {/* A card that cannot be chosen reads as unavailable; why stays at full contrast below. */}
+                  <span className="flex flex-col group-disabled:opacity-60">
+                    <span className="flex items-center gap-2 font-semibold text-stone-900"><Icon aria-hidden className="size-5 text-accent-strong" />{template.name}{selected ? <Check aria-hidden className="ml-auto size-4 text-accent-strong" /> : null}</span>
+                    <span className="mt-2 text-sm leading-relaxed text-stone-600">{template.lead}</span>
+                    <span className="mt-3 text-xs font-medium text-stone-500">{copy.create.start.includes}</span>
+                    <span className="mt-1 space-y-1 text-xs text-stone-600">{template.includes.map((item) => <span className="block" key={item}>・{item}</span>)}</span>
+                  </span>
+                  {reason && reason !== destinationNotice ? <span className="mt-3 text-xs leading-relaxed text-amber-800">{reason}</span> : null}
                 </button>
                 {showAi ? <Button tone="ghost" disabled={!codexAvailable || Boolean(policyExplanation) || !ready('ai')} onClick={() => onCustomize(template)}>{text.customizeWithAi}</Button> : null}
                 </div>

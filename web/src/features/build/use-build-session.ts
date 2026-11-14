@@ -58,14 +58,14 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
   draftRef.current = draft
   // The created app, its preparation, the plan's default publish address and the implementation run (shared with console-v1).
   const creation = useDraftCreation({ projectId, draft, tab: session, hasPending: session.pending.length > 0, now })
-  const { app, appView, appProgress, generation, execution, domain, proposalDraft, published, implementation, implementing } = creation
+  const { app, appView, appProgress, generation, execution, domain, proposalDraft, published, implementation, implementing, destination } = creation
   const turn = draft.conversationTurns.at(-1)
   const running = [generation, turn, execution].some(isBuildPending)
   const result = deriveStage({ draft, generation, turn, execution, appProgress, implementation: { phase: implementation.state.phase, done: implementation.state.phase === 'done', implemented: implemented(implementation.state), activityTail: implementation.state.activityTail }, published, lastPlannedIntent: session.lastPlannedIntent, now })
   const { spec } = useMemo(() => parseSpec(draft.specMarkdown), [draft.specMarkdown])
   const preparationDone = Boolean(appView?.platform) && !appProgress
-  const messages = useMemo(() => messagesFromDraft(proposalDraft, session.messages, { lastPlannedIntent: session.lastPlannedIntent, preparationDone }), [proposalDraft, session.messages, session.lastPlannedIntent, preparationDone])
-  const proposal = useMemo(() => planProposal(proposalDraft, session.lastPlannedIntent), [proposalDraft, session.lastPlannedIntent])
+  const messages = useMemo(() => messagesFromDraft(proposalDraft, session.messages, { lastPlannedIntent: session.lastPlannedIntent, preparationDone, destination }), [proposalDraft, session.messages, session.lastPlannedIntent, preparationDone, destination])
+  const proposal = useMemo(() => planProposal(proposalDraft, session.lastPlannedIntent, destination), [proposalDraft, session.lastPlannedIntent, destination])
   const initialMessage: BuildMessage = { role: 'user', text: decomposeBuildIntent(session.baseIntent), at: draft.createdAt }
   // 用意する: the draft is read-only while the execution runs, but the AI can still ask preparation questions.
   const preparing = isBuildPending(execution)
@@ -100,8 +100,11 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
       // The same failure repeated (retry, reload) stays one notice.
       const last = current.messages.at(-1)
       const messages = last?.role === 'notice' && last.title === next.title && last.detail === next.reason ? current.messages.slice(0, -1) : current.messages
+      // The repository destination moved (approve again, labelled 「この内容で作る」) or is not set (retry once a
+      // Project administrator has set it): neither is an error of this session, and nothing was made to clean up.
+      const calm = unconfirmed || next.destination === 'changed' || next.destination === 'blocked'
       const retry = unconfirmed ? 'confirm' as const : next.kind !== 'policy' ? context : undefined
-      return { ...current, ...(next.kind === 'quota' || next.kind === 'policy' ? { planRequested: false } : {}), messages: [...messages, { role: 'notice', tone: unconfirmed ? 'warning' : 'error', title: next.title, detail: next.reason, ...(retry ? { retry } : {}), at, ...(next.reference ? { reference: next.reference } : {}) }] }
+      return { ...current, ...(next.kind === 'quota' || next.kind === 'policy' ? { planRequested: false } : {}), messages: [...messages, { role: 'notice', tone: calm ? 'warning' : 'error', title: next.title, detail: next.reason, ...(retry ? { retry } : {}), at, ...(next.reference ? { reference: next.reference } : {}) }] }
     })
   }
   async function perform(context: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish', action: () => Promise<void>) {
@@ -289,11 +292,17 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
   function retry(context?: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish' | 'confirm') {
     const last = session.messages.at(-1)
     context ??= last?.role === 'notice' && last.retry ? last.retry : retryContext.current
+    // A stop at the repository destination made nothing: trying again is a fresh preparation (it reads the
+    // destination again and binds the plan to it), never a cleanup of a creation that did not start.
+    const destinationTitles: string[] = [buildCopy.failure.destination.changed.title, buildCopy.failure.destination.blocked.title]
+    const reapprove = context === 'prepare' && !draftRef.current.creationExecutions.length &&
+      ((failure?.destination !== undefined && failure.destination !== 'mismatch') || (last?.role === 'notice' && destinationTitles.includes(last.title)))
     setFailure(undefined)
     creationEffects.resetBinding()
     patch((current) => ({ ...current, messages: current.messages.filter((message) => message.role !== 'notice' || !message.retry) }))
     // After an unreadable write answer only the draft is read again; the write itself is never resent from here.
     if (context === 'confirm') void queryClient.invalidateQueries({ queryKey: buildDraftOptions(projectId, draft.id).queryKey })
+    else if (reapprove) creationEffects.prepare()
     else if (context === 'publish' || context === 'implement' || context === 'prepare') creationEffects.retry(context)
     else if (context === 'plan') patch({ planRequested: true })
     else if (context === 'turn' && !store.state.pending.length && isOneOf(turn?.status, 'failed')) send(turn!.userMessage)

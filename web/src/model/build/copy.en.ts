@@ -17,6 +17,9 @@ export const textEn: typeof textJa = {
     urlLater: 'Choose an address later',
     tasks: 'What we will build',
     moreTasks: (n: number) => `${n} more`,
+    repository: 'New repository',
+    image: 'Image location',
+    destinationBlocked: 'Where new repositories are created has not been set. Ask a project administrator to set it.',
   },
   progress: {
     workspace: { title: 'Getting AI ready', hint: 'The first time takes 1–2 minutes' },
@@ -93,6 +96,11 @@ export const textEn: typeof textJa = {
     /** A write answered 2xx but its answer could not be read: it may have happened. Never resent automatically. */
     unconfirmed: { title: 'We could not confirm the result', reason: 'What you sent may have gone through. Check the latest state before doing it again; nothing is resent automatically.' },
     confirm: 'Check the latest state',
+    destination: {
+      changed: { title: 'The repository destination changed', reason: 'Nothing has been created yet. The proposal now shows the new destination under “New repository” and “Image location”. Check it, then select “Build this app”.' },
+      blocked: { title: 'The repository destination is not set', reason: 'Where new repositories are created has not been set yet. Ask a project administrator to set the repository destination.' },
+      mismatch: { title: 'The repository destination could not be confirmed', reason: 'Nothing has been created yet. If this continues after reopening this page, contact your administrator.' },
+    },
   },
   /** A state this console version does not know: the known parts stay visible, only what depends on it stops. */
   unsupported: { title: 'This state cannot be shown on this screen', detail: 'Everything else stays available. Actions that depend on this state are paused until it is known.' },

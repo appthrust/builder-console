@@ -28,6 +28,8 @@ test.describe('App create from an existing repository @create', () => {
     await pickShareScope(page, '全社')
     await expect(page.getByTestId('confirm-summary')).toContainText(`「${displayName}」を ${group.name} のアプリとして作り、全社に公開します`)
     await expect(page.getByText(repositoryName, { exact: true })).toBeVisible()
+    // The image location is Platform's answer to the adoption validation, never computed here.
+    await expect(page.getByText('ghcr.io/acme/sales-dashboard', { exact: true })).toBeVisible()
 
     const writes = await submitCreateWizard(page, 'repository')
     const draft = writes.draft.body
@@ -47,11 +49,10 @@ test.describe('App create from an existing repository @create', () => {
     if (!repository || typeof repository !== 'object' || !('existing' in repository) || !('sourceConnectionId' in repository)) {
       throw new Error('Repository adoption did not send its existing repository and source connection')
     }
+    // Adoption names its connection and repository only; Platform derives the image path and its access.
     expect(repository).toEqual({
       sourceConnectionId: 'github-source-207cb7ce',
-      registryConnectionRef: 'ghcr-acme',
       existing: { repository: repositoryName, ref: 'develop' },
-      image: { imagePath: 'ghcr.io/acme/sales-dashboard', tagFilter: 'edge-', versioningScheme: 'Alphabetical' },
     })
 
     const stack = writes.stack.body

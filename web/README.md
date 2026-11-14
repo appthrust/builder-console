@@ -287,7 +287,7 @@ schema declares a default).
 (console) switch states for browser checks; see the comments at the top of
 `src/dev/mock-platform.ts`, `src/dev/mock-console.ts` and
 `src/dev/mock-build-sessions.ts` for the current list
-(`role`, `registry`, `codex`, `stack-conflict`, `github-repository`,
+(`role`, `registry`, `repository-destination`, `codex`, `stack-conflict`, `github-repository`,
 `plan-generation`, `implementation-run`, `logs`, `bare-500`, `app-draft`, ...).
 The dev `/config` (`vite.config.ts`) reports the mock's NEW-APP flag:
 `POST /api/console/__mock/new-app-conversation {on?}` makes `/new` start a
@@ -488,6 +488,22 @@ non-engineers, with engineering words only under 「詳しい人向け」
   suspension); normal focus refetch catches up after resume.
 - A source repository kept from a failed create attempt is reused only when
   its origin (URL name, entry, picked repository, template) matches the retry.
+- A new repository (ひな形, AI) goes where the Project's repository destination
+  says (`GET repository-destination`, read as resolved / blocked / unknown in
+  `contracts/platform/catalog.ts`); the console never picks a connection or
+  joins an image path. The confirm step and the AI proposal show
+  `owner/name` and the image location; the request names only the template,
+  the name and the shown `destinationRevision`. Adoption sends only
+  `sourceConnectionId` and `existing`, and shows the image path from
+  Platform's validation answer. Blocked or unknown disables the ひな形 and AI
+  entries with one fixed notice (only a Project administrator can set it);
+  adoption still works. 409 `DestinationChanged` re-reads and shows the new
+  destination and sends nothing until the user presses 作る again; in the AI
+  build, 「この内容で作る」 re-binds the plan to the current revision first and
+  stops with a fixed notice when it moved, and approving again needs no
+  cleanup. 409 `DestinationMismatch` is a fixed-copy failure. Stories:
+  `e2e/stories/app-create-destination.mock.spec.ts` (mock toggle
+  `repository-destination {state}`).
 - AI build sessions default an absent/disabled plan publish to the wizard's
   `pickCreateEnvironment(...).domain`, using the application's name as the
   wildcard subdomain. Enabled publish destinations are preserved; a rename

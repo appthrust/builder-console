@@ -16,6 +16,18 @@ export const textEn: typeof textJa = {
   },
   alreadyCreated: (name: string) => `This app was already created as "${name}"; finish it with that URL name.`,
   sourceUnavailable: 'The GitHub connection is unavailable.',
+  destinationUnavailable: 'The repository destination is not set.',
+  destination: {
+    blocked: 'Where new repositories are created has not been set, so apps cannot be made with AI or from a template yet. Ask a project administrator to set it.',
+    repository: 'New repository',
+    image: 'Image location',
+    imageChecking: 'Checking…',
+    imageUnknown: 'Could not be checked',
+    changedTitle: 'The repository destination changed',
+    changed: 'Nothing has been created yet. “New repository” and “Image location” above now show the new destination. Check them, then select “Create”.',
+    mismatchTitle: 'The repository destination could not be confirmed',
+    mismatch: 'Nothing has been created yet. The current destination is shown; check it, then create again. If this continues, contact your administrator.',
+  },
   unconfirmed: {
     title: 'Could not confirm what was created',
     body: 'The create request may have gone through. Check the latest state before continuing, so nothing is created twice.',

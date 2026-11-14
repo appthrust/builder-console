@@ -5,6 +5,8 @@ import type { z } from 'zod'
 import type {
   PublishDomain,
   RegistryConnection,
+  RepositoryDestination,
+  ResolvedRepositoryDestination,
   SourceConnection,
   SourceRepository,
   StackDefinition,
@@ -12,7 +14,7 @@ import type {
 } from '../../model/contracts/catalog'
 import type { BusinessApp } from '../../model/contracts/console'
 import { decodeResponse } from '../boundary'
-import { publishDomainReader, registryConnectionReader, sourceConnectionReader, sourceRepositoryReader, stackDefinitionReader, templateReader } from '../contracts/platform/catalog'
+import { publishDomainReader, registryConnectionReader, repositoryDestinationReader, sourceConnectionReader, sourceRepositoryReader, stackDefinitionReader, templateReader } from '../contracts/platform/catalog'
 import { appContract } from '../contracts/console/operations'
 
 function read<D>(reader: z.ZodType<D>, wire: unknown, what: string): D {
@@ -27,6 +29,18 @@ export const sourceConnectionOf = (wire: unknown): SourceConnection => read(sour
 export const registryOf = (wire: unknown): RegistryConnection => read(registryConnectionReader, wire, 'registry connection')
 export const domainOf = (wire: unknown): PublishDomain => read(publishDomainReader, wire, 'domain')
 export const sourceRepositoryOf = (wire: unknown): SourceRepository => read(sourceRepositoryReader, wire, 'source repository')
+export const destinationOf = (wire: unknown): RepositoryDestination => read(repositoryDestinationReader, wire, 'repository destination')
+
+/** A resolved destination as `GET repository-destination` answers it (GHCR under `acme` unless patched). */
+export function resolvedDestinationOf(patch: { revision?: string; registryNamespace?: string; imageAccessId?: string } = {}): ResolvedRepositoryDestination {
+  const { revision = 'rd-ghcr-1', ...destination } = patch
+  const read = destinationOf({
+    state: 'Resolved', source: 'Project', revision,
+    destination: { connectionId: 'github-source-207cb7ce', provider: 'github', displayName: 'Acme GitHub', repositoryNamespace: 'acme', registryNamespace: 'ghcr.io/acme', ...destination },
+  })
+  if (read.kind !== 'resolved') throw new Error('resolved destination fixture did not read as resolved')
+  return read
+}
 
 /** A Console app as `GET /api/console/apps/{id}` answers it. */
 export function appOf(wire: unknown): BusinessApp {

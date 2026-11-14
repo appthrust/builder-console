@@ -93,7 +93,10 @@ export function ConversationPane({ messages, stage, answering, unsupported = fal
             // Retrying a prepare with the same name can only fail again: the only way forward is a different name.
             const nameTaken = message.retry === 'prepare' && failure?.kind === 'name-taken' && message.title === failure.title
             // After an unreadable write answer the action only reads the draft back: it is never labelled as a retry.
-            const actions = nameTaken ? <NameChoice suggestion={failure.suggestedName} onUse={onUseName} /> : message.retry ? <Button size="sm" onClick={() => onRetry(message.retry!)}>{message.retry === 'confirm' ? buildCopy.failure.confirm : uiText.conversation.retry}</Button> : undefined
+            // A destination that moved is approved again with the proposal's own words, not "tried again".
+            const reapprove = message.retry === 'prepare' && message.title === buildCopy.failure.destination.changed.title
+            const label = message.retry === 'confirm' ? buildCopy.failure.confirm : reapprove ? buildCopy.primary.prepare : uiText.conversation.retry
+            const actions = nameTaken ? <NameChoice suggestion={failure.suggestedName} onUse={onUseName} /> : message.retry ? <Button size="sm" tone={reapprove ? 'primary' : undefined} onClick={() => onRetry(message.retry!)}>{label}</Button> : undefined
             const reference = message.reference ? buildFailureReference(message.reference) : undefined
             return <Notice key={key} tone={message.tone} title={message.title} actions={actions}>
               {message.detail}
