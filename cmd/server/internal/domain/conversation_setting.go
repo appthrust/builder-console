@@ -34,6 +34,8 @@ func (in ConversationSettingInput) Validate() error {
 	if !slices.Contains([]string{"off", "allowlist", "on"}, in.Mode) || in.Allowlist == nil || len(in.Allowlist) > 200 {
 		return RejectBuild("invalid_argument", "Invalid conversation setting")
 	}
+	// Each subject once, so the bound of 200 counts people; the console never sends a repeat.
+	seen := make(map[string]bool, len(in.Allowlist))
 	for _, entry := range in.Allowlist {
 		// OIDC subjects are case-sensitive ASCII strings, at most 255 bytes.
 		if len(entry.Subject) == 0 || len(entry.Subject) > 255 {
@@ -44,6 +46,10 @@ func (in ConversationSettingInput) Validate() error {
 				return RejectBuild("invalid_argument", "Invalid Directory subject")
 			}
 		}
+		if seen[entry.Subject] {
+			return RejectBuild("invalid_argument", "Duplicate Directory subject")
+		}
+		seen[entry.Subject] = true
 	}
 	return nil
 }

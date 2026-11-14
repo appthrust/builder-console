@@ -63,6 +63,7 @@ test.each([
   ['an entry with a name', { mode: 'allowlist', allowlist: [{ subject: 'sub-sato', displayName: '佐藤' }] }],
   ['a subject with a space', { mode: 'allowlist', allowlist: [{ subject: 'sub sato' }] }],
   ['201 entries', { mode: 'allowlist', allowlist: Array.from({ length: 201 }, (_, index) => ({ subject: `s-${index}` })) }],
+  ['a subject listed twice', { mode: 'allowlist', allowlist: [{ subject: 'sub-sato' }, { subject: 'sub-suzuki' }, { subject: 'sub-sato' }] }],
 ])('PUT refuses %s with 400 and keeps the version', async (_, body) => {
   expect((await put(body, '"cs-0"')).status).toBe(400)
   expect((await (await call('GET', PATH)).json()).version).toBe(0)

@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/appthrust/builder-console/cmd/server/internal/store"
 	"github.com/stretchr/testify/require"
 )
 
@@ -49,12 +51,12 @@ func TestConversationSettingAdminAndPreconditions(t *testing.T) {
 	for _, etag := range []string{`W/"cs-0"`, `"cs-01"`, `"cs--1"`, `"bs-1"`, `"cs-9007199254740992"`, "*"} {
 		request("admin", "PUT", etag, `{"mode":"on","allowlist":[]}`, 400, "BuildError")
 	}
-	for _, body := range []string{`{"mode":"future","allowlist":[]}`, `{"mode":"on"}`, `{"mode":"on","allowlist":null}`, `{"mode":"allowlist","allowlist":[{"subject":""}]}`, `{"mode":"on","allowlist":[{"subject":"x","displayName":"Not writable"}]}`} {
+	for _, body := range []string{`{"mode":"future","allowlist":[]}`, `{"mode":"on"}`, `{"mode":"on","allowlist":null}`, `{"mode":"allowlist","allowlist":[{"subject":""}]}`, `{"mode":"on","allowlist":[{"subject":"x","displayName":"Not writable"}]}`, `{"mode":"allowlist","allowlist":[{"subject":"twice"},{"subject":"once"},{"subject":"twice"}]}`} {
 		request("admin", "PUT", `"cs-0"`, body, 400, "BuildError")
 	}
 	entries := make([]map[string]string, 201)
 	for i := range entries {
-		entries[i] = map[string]string{"subject": "subject"}
+		entries[i] = map[string]string{"subject": "subject-" + strconv.Itoa(i)}
 	}
 	long, err := json.Marshal(map[string]any{"mode": "allowlist", "allowlist": entries})
 	require.NoError(t, err)
@@ -75,6 +77,16 @@ func TestConversationSettingAdminAndPreconditions(t *testing.T) {
 	require.EqualValues(t, 1, *conflict.Details.CurrentVersion)
 	response, _ = request("admin", "GET", "", "", 200, "ConversationSetting")
 	require.Equal(t, `"cs-1"`, response.Header.Get("ETag"))
+
+	// A row written around the API is refused instead of shown as a setting; a valid save replaces it.
+	require.NoError(t, h.database.Do(t.Context(), true, func(tx *store.Tx) error {
+		return tx.Exec(`UPDATE conversation_settings SET mode='on',allowlist='[{"subject":"has space"}]'`)
+	}))
+	_, wire = request("admin", "GET", "", "", 500, "Error")
+	require.NotContains(t, string(wire), "has space")
+	response, wire = request("admin", "PUT", `"cs-1"`, `{"mode":"off","allowlist":[]}`, 200, "ConversationSetting")
+	require.Equal(t, `"cs-2"`, response.Header.Get("ETag"))
+	require.Contains(t, string(wire), `"mode":"off"`)
 }
 
 func TestConversationSettingChangesCreationWithoutRestart(t *testing.T) {

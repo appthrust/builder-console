@@ -33,7 +33,7 @@
 // `GET/PUT /admin/conversation` is the NEW-APP conversation setting (Console administrators only; others 403
 // `forbidden`): answers carry `ETag: "cs-<version>"`; PUT needs `If-Match` (428 `precondition_required` without,
 // 400 when malformed, 412 `version_conflict` with `details.currentVersion` when stale) and validates
-// `{mode, allowlist: [{subject}]}` (≤ 200 printable-ASCII subjects). Seeded off at version 0; reset reseeds it.
+// `{mode, allowlist: [{subject}]}` (≤ 200 distinct printable-ASCII subjects). Seeded off at version 0; reset reseeds it.
 // `GET /api/console/__mock/config` answers `{newAppConversation}` for the current caller from that setting
 // (on → true, allowlist → the caller's subject is listed, off → false): what the dev `/config` (vite.config.ts) passes on.
 import { conversationSettingInput } from '../api/contracts/console/schema/schemas'
@@ -533,8 +533,8 @@ async function putConversation(request: Request): Promise<Response> {
     return json({ error: 'version_conflict', message: 'The setting was changed by someone else', details: { currentVersion: state.conversation.version } } satisfies ApiError, 412)
   }
   const parsed = conversationSettingInput.safeParse(await request.json().catch(() => undefined))
-  if (!parsed.success) return fail(400, 'invalid_argument', 'body must be {mode, allowlist: [{subject}]} with at most 200 printable-ASCII subjects')
-  const allowlist = [...new Set(parsed.data.allowlist.map((entry) => entry.subject))]
+  if (!parsed.success) return fail(400, 'invalid_argument', 'body must be {mode, allowlist: [{subject}]} with at most 200 distinct printable-ASCII subjects')
+  const allowlist = parsed.data.allowlist.map((entry) => entry.subject)
   state.conversation = { mode: parsed.data.mode, allowlist, version: state.conversation.version + 1, updatedAt: new Date().toISOString(), updatedById: state.callerId }
   return conversationAnswer()
 }

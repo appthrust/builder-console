@@ -530,6 +530,37 @@ func TestExplicitSpecConfirmationAndReplay(t *testing.T) {
 	require.True(t, replay.Replay)
 	require.Equal(t, result.Aggregate, replay.Aggregate)
 }
+
+// The observing read that finds the proposal moves the session version (by two:
+// validation and import), so resolve must send the version that read reports,
+// not the one cached before it.
+func TestResolveUsesTheVersionReportedByTheObservingRead(t *testing.T) {
+	f := newServiceFixture(t)
+	f.p.changed = true
+	f.ready(t)
+	before := f.a.Session.Version
+	require.NoError(t, f.observe(t))
+	require.Equal(t, "awaiting_confirmation", f.a.Turn.State)
+	require.EqualValues(t, before+2, f.a.Session.Version)
+	_, err := f.s.ResolveTurn(t.Context(), f.c, f.a.Session.ID, f.a.Turn.ID, before, "resolve-stale", "accept_spec")
+	var conflict *domain.BuildRejection
+	require.ErrorAs(t, err, &conflict)
+	require.Equal(t, "version_conflict", conflict.Code)
+	require.Equal(t, f.a.Session.Version, conflict.CurrentVersion)
+	result, err := f.s.ResolveTurn(t.Context(), f.c, f.a.Session.ID, f.a.Turn.ID, f.a.Session.Version, "resolve", "accept_spec")
+	require.NoError(t, err)
+	require.EqualValues(t, 1, result.Aggregate.Session.CurrentSpecRevision)
+}
+
+// A stored setting the API would refuse (written around it) is treated as off.
+func TestOfferedFailsClosedOnInvalidStoredSetting(t *testing.T) {
+	f := newServiceFixture(t)
+	require.True(t, f.s.Offered(t.Context(), f.c.Access.Scope))
+	require.NoError(t, f.db.Do(t.Context(), true, func(tx *store.Tx) error {
+		return tx.Exec(`UPDATE conversation_settings SET allowlist='[{"subject":"has space"}]'`)
+	}))
+	require.False(t, f.s.Offered(t.Context(), f.c.Access.Scope))
+}
 func TestAdvanceReceiptReplayAfterVersionChanges(t *testing.T) {
 	f := newServiceFixture(t)
 	require.NoError(t, f.create(t))

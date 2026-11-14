@@ -73,12 +73,22 @@ export const settings = z.strictObject({
 
 export const conversationModes = ['off', 'allowlist', 'on'] as const
 export const conversationSubject = z.string().min(1).max(255).regex(/^[!-~]+$/)
+/** Each subject at most once, so the 200 bound counts people (`x-uniqueBy` carries the rule into the OpenAPI document). */
+const conversationAllowlist = <T extends z.ZodType<{ subject: string }>>(entry: T) => z.array(entry).max(200)
+  .superRefine((entries, ctx) => {
+    const seen = new Set<string>()
+    entries.forEach(({ subject }, index) => {
+      if (seen.has(subject)) ctx.addIssue({ code: 'custom', path: [index, 'subject'], message: 'Duplicate subject' })
+      seen.add(subject)
+    })
+  })
+  .meta({ 'x-uniqueBy': ['subject'] })
 export const conversationSettingInput = z.strictObject({
-  mode: z.enum(conversationModes), allowlist: z.array(z.strictObject({ subject: conversationSubject })).max(200),
+  mode: z.enum(conversationModes), allowlist: conversationAllowlist(z.strictObject({ subject: conversationSubject })),
 })
 export const conversationSetting = z.strictObject({
   mode: z.enum(conversationModes),
-  allowlist: z.array(z.strictObject({ subject: conversationSubject, displayName: observed(text) })).max(200),
+  allowlist: conversationAllowlist(z.strictObject({ subject: conversationSubject, displayName: observed(text) })),
   version: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   updatedAt: observed(z.iso.datetime({ offset: true })), updatedBy: observed(personRef),
 })

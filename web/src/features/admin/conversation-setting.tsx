@@ -12,6 +12,8 @@ import { text } from './copy'
 
 type ConversationMode = ConversationSettingInput['mode']
 type Draft = { mode: ConversationMode; allowlist: ConversationSetting['allowlist'] }
+/** The unsaved choice and the version it was started from: saving sends that version as `If-Match`. */
+type Pending = Draft & { base: number }
 
 const MODES: readonly ConversationMode[] = ['off', 'allowlist', 'on']
 /** The contract's bound on the allowlist (`ConversationSettingInput.allowlist` max 200). */
@@ -64,21 +66,25 @@ function ConversationForm({ setting, stale }: { setting: ConversationSetting; st
   const words = text.conversation
   const known = setting.mode.kind === 'known' ? setting.mode.value : undefined
   const server: Draft | undefined = known ? { mode: known, allowlist: setting.allowlist } : undefined
-  // The unsaved choice; undefined while the screen shows what the server holds.
-  const [draft, setDraft] = useState<Draft>()
-  const [conflict, setConflict] = useState(false)
+  // The unsaved choice; undefined while the screen shows (and follows) what the server holds.
+  const [draft, setDraft] = useState<Pending>()
+  // A save answered 412: the conflict stays even if the read-back that names the newer setting fails.
+  const [rejected, setRejected] = useState(false)
   const [saved, setSaved] = useState(false)
   const [notSignedIn, setNotSignedIn] = useState<string>()
   // Addresses of people picked here (the setting stores subjects and names only): marks them 追加済み in the search.
   const [emails, setEmails] = useState<Record<string, string>>({})
   const shown = draft ?? server
   const dirty = draft !== undefined && server !== undefined && !sameDraft(draft, server)
+  // Someone saved since the choice was started (a poll read it, or the save was refused): nothing is saved or edited
+  // until the user discards the choice or keeps it on top of the newer setting.
+  const conflict = draft !== undefined && dirty && (draft.base !== setting.version || rejected)
 
   // A new read that already matches the unsaved choice (a read-back, another administrator's identical save) ends it.
   useEffect(() => {
     if (draft && server && sameDraft(draft, server)) {
       setDraft(undefined)
-      setConflict(false)
+      setRejected(false)
     }
   }, [setting])
 
@@ -88,26 +94,37 @@ function ConversationForm({ setting, stale }: { setting: ConversationSetting; st
     mutationFn: ({ body, version }: { body: ConversationSettingInput; version: number }) => conversationSettingApi.put(body, version),
     onSuccess: (next) => {
       queryClient.setQueryData(consoleKeys.conversationSetting, next)
-      setDraft(undefined)
-      setConflict(false)
+      setDraft(undefined) // the next choice starts from the version this save returned
+      setRejected(false)
       setSaved(true)
     },
-    // Someone saved since this read: show their setting next to the unsaved choice; nothing is resent.
+    // Someone saved since this choice was started: show their setting next to the unsaved choice; nothing is resent.
     onError: (error) => {
       if (!isConversationSettingConflict(error)) return
-      setConflict(true)
+      setRejected(true)
       void readBack().catch(() => undefined) // a failed re-read shows as the stale notice; the conflict notice stays
     },
   })
   // A save whose answer could not be read may have happened: only a successful read-back unlocks saving again.
   const confirmation = useWriteConfirmation([save.error], save.reset, readBack)
   const busy = save.isPending || confirmation.unconfirmed
+  const locked = busy || conflict
   useUnsavedChangesGuard(dirty && !save.isPending, words.unsaved)
 
   const update = (next: (current: Draft) => Draft) => {
-    if (!server) return
+    if (!server || conflict) return
     setSaved(false)
-    setDraft((current) => next(current ?? server))
+    setDraft((current) => {
+      const changed = { ...next(current ?? server), base: current?.base ?? setting.version }
+      // Back to what the server holds: nothing is unsaved, so the card follows new reads again.
+      return sameDraft(changed, server) ? undefined : changed
+    })
+  }
+  const resolveConflict = (keep: boolean) => {
+    // Keeping adopts the newer version as the base: the next 保存 replaces that setting, as the user chose.
+    setDraft((current) => keep && current ? { ...current, base: setting.version } : undefined)
+    setRejected(false)
+    save.reset()
   }
   const lookup = useMutation({
     // The Directory person behind the picked account: the setting lists sign-in subjects.
@@ -141,17 +158,20 @@ function ConversationForm({ setting, stale }: { setting: ConversationSetting; st
       className="space-y-5"
       onSubmit={(event) => {
         event.preventDefault()
-        if (!shown || !dirty || busy) return
-        save.mutate({ body: { mode: shown.mode, allowlist: shown.allowlist.map(({ subject }) => ({ subject })) }, version: setting.version })
+        if (!draft || !dirty || locked) return
+        save.mutate({ body: { mode: draft.mode, allowlist: draft.allowlist.map(({ subject }) => ({ subject })) }, version: draft.base })
       }}
     >
       {stale}
       {editable ? null : <Notice tone="warning">{words.unknownMode}</Notice>}
-      {conflict && dirty ? (
+      {conflict ? (
         <Notice
           tone="warning"
           title={words.conflictTitle}
-          actions={<Button size="sm" onClick={() => { setDraft(undefined); setConflict(false); save.reset() }}>{words.discard}</Button>}
+          actions={<>
+            <Button size="sm" onClick={() => resolveConflict(false)}>{words.discard}</Button>
+            <Button size="sm" onClick={() => resolveConflict(true)}>{words.keep}</Button>
+          </>}
         >
           {words.conflictBody(describe(setting))}
         </Notice>
@@ -161,7 +181,7 @@ function ConversationForm({ setting, stale }: { setting: ConversationSetting; st
         legend={words.legend}
         columns={3}
         value={shown?.mode}
-        disabled={!editable || busy}
+        disabled={!editable || locked}
         onChange={(mode) => update((current) => ({ ...current, mode }))}
         options={MODES.map((mode) => ({ value: mode, title: words.modes[mode].title, description: words.modes[mode].description }))}
       />
@@ -189,7 +209,7 @@ function ConversationForm({ setting, stale }: { setting: ConversationSetting; st
                         size="sm"
                         tone="ghost"
                         icon={<X />}
-                        disabled={busy}
+                        disabled={locked}
                         aria-label={words.removeLabel(name)}
                         onClick={() => update((current) => ({ ...current, allowlist: current.allowlist.filter((item) => item.subject !== entry.subject) }))}
                       >
@@ -211,7 +231,7 @@ function ConversationForm({ setting, stale }: { setting: ConversationSetting; st
                 takenLabel={words.added}
                 pendingId={lookup.isPending ? lookup.variables.id : undefined}
                 onPick={(entry) => lookup.mutate(entry)}
-                disabled={busy || atLimit}
+                disabled={locked || atLimit}
               />
               {atLimit ? <p className="mt-2 text-xs text-stone-600" role="status">{words.limit(CONVERSATION_ALLOWLIST_LIMIT)}</p> : null}
               {notSignedIn ? <p className="mt-2 text-xs text-stone-600" role="status">{notSignedIn}</p> : null}
@@ -221,7 +241,7 @@ function ConversationForm({ setting, stale }: { setting: ConversationSetting; st
         </div>
       ) : null}
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-stone-100 pt-4">
-        {editable ? <SaveRow pending={save.isPending} disabled={!dirty || busy} saved={saved && !dirty} /> : <span />}
+        {editable ? <SaveRow pending={save.isPending} disabled={!dirty || locked} saved={saved && !dirty} /> : <span />}
         <p className="text-xs text-stone-500" data-testid="conversation-updated">
           {updatedAt ? words.updated(updatedBy, updatedAt) : words.neverUpdated}
         </p>

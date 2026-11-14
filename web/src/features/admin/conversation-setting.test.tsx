@@ -1,8 +1,10 @@
 // 新しい AI 会話 on 基盤の設定 (APT-753) over the real page, queries, gateway,
 // transport and canonical contracts against the in-memory Console mock: each
 // mode saves with `If-Match` and round-trips into `/config`, the allowlist is
-// picked from the Directory, a 412 keeps the unsaved choice next to the
-// newer setting, an unreadable 2xx offers only the read-back, an unknown mode
+// picked from the Directory, an unsaved choice saves on the version it started
+// from: a 412 or a poll that reads a newer setting keeps the choice next to it
+// until the user discards or keeps it, while a card without unsaved changes
+// follows polls. An unreadable 2xx offers only the read-back, an unknown mode
 // offers no save, and only Console administrators get the card at all.
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -10,7 +12,7 @@ import { createMemoryHistory, createRootRoute, createRoute, createRouter, Router
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { consoleKeys, groupsQuery, meQuery } from '../../api/queries/console'
-import { queryClient as appQueryClient } from '../../api/queries/shared'
+import { POLL_INTERVAL_MS, queryClient as appQueryClient } from '../../api/queries/shared'
 import { createConsoleMockFetch, resetMocks, type ConsoleMockFetch } from '../../api/testing/console-mock-fetch'
 import { copy } from '../../copy'
 import { setLanguage } from '../../shell/language'
@@ -80,11 +82,11 @@ async function config(): Promise<boolean> {
   return ((await (await call('GET', '/api/console/__mock/config')).json()) as { newAppConversation: boolean }).newAppConversation
 }
 
-/** 基盤の設定 on the app's query defaults, as the signed-in caller. */
-async function renderPage() {
+/** 基盤の設定 on the app's query defaults, as the signed-in caller; the app's polling only when asked for. */
+async function renderPage({ polling = false } = {}) {
   await act(async () => { root?.unmount() })
   container?.remove()
-  client = new QueryClient({ defaultOptions: { queries: { ...appQueryClient.getDefaultOptions().queries, retryDelay: 0, refetchInterval: false, refetchOnWindowFocus: false } } })
+  client = new QueryClient({ defaultOptions: { queries: { ...appQueryClient.getDefaultOptions().queries, retryDelay: 0, ...(polling ? {} : { refetchInterval: false }), refetchOnWindowFocus: false } } })
   await Promise.all([client.fetchQuery(meQuery), client.fetchQuery(groupsQuery)])
   const rootRoute = createRootRoute()
   const page = createRoute({ getParentRoute: () => rootRoute, path: '/-/admin/platform', component: () => null })
@@ -224,6 +226,8 @@ describe('the allowlist', () => {
   })
 })
 
+const conflictNotice = () => [...card()!.querySelectorAll('[role="status"]')].find((item) => item.textContent?.includes(words.conflictTitle))
+
 test('412: the newer setting is read back and named, the unsaved choice stays for comparison, and nothing is resent', async () => {
   await renderPage()
   await click(radio('on'))
@@ -236,18 +240,84 @@ test('412: the newer setting is read back and named, the unsaved choice stays fo
 
   await save()
   expect(mine().map((item) => item.status)).toEqual([412])
-  const notice = [...card()!.querySelectorAll('[role="status"]')].find((item) => item.textContent?.includes(words.conflictTitle))!
-  expect(notice.textContent).toContain(words.conflictBody(words.summaryWithPeople(words.modes.allowlist.title, 1)))
+  expect(conflictNotice()!.textContent).toContain(words.conflictBody(words.summaryWithPeople(words.modes.allowlist.title, 1)))
   expect(radio('on').getAttribute('aria-checked')).toBe('true')
   expect(card()!.querySelector('[data-testid="conversation-updated"]')!.textContent).toBe(words.updated('佐藤 花子', copy.relative.justNow))
-  await settle()
+  // The choice was started on the older version: saving it is locked until the user decides.
+  expect(saveButton()!.disabled).toBe(true)
+  await save()
   expect(mine()).toHaveLength(1)
 
-  // Saving again is the user's decision, on the version just read.
+  // Keeping the choice is the user's decision; it is saved on the version just read.
+  await click(button(words.keep))
+  expect(conflictNotice()).toBeUndefined()
   await save()
   expect(mine().map((item) => [item.status, item.ifMatch])).toEqual([[412, '"cs-0"'], [200, '"cs-1"']])
   expect((await stored()).body.mode).toBe('on')
-  expect(card()!.textContent).not.toContain(words.conflictTitle)
+})
+
+describe('with the app\'s polling on', () => {
+  const reads = () => mock.requests.filter((item) => item.method === 'GET' && SETTING.test(item.path)).length
+  /** Waits for the card's own poll (the app's refetchInterval) to read the setting again. */
+  async function nextPoll() {
+    const before = reads()
+    for (let waited = 0; reads() === before; waited += 100) {
+      if (waited > POLL_INTERVAL_MS * 2) throw new Error('the setting was not polled')
+      await act(async () => { await Bun.sleep(100) })
+    }
+    await settle()
+  }
+
+  test('another administrator\'s save read by a poll stops the older unsaved choice at once; keeping it saves on the new version', async () => {
+    expect((await call('PUT', '/api/console/admin/conversation', { mode: 'allowlist', allowlist: [{ subject: 'sub-sato' }, { subject: 'sub-suzuki' }] }, { 'If-Match': '"cs-0"' })).status).toBe(200)
+    await renderPage({ polling: true })
+    // 山田 starts from version 1 and takes 佐藤 off the list.
+    await click(button(words.removeLabel('佐藤 花子')))
+    expect(people()).toEqual(['鈴木 一郎'])
+    // Meanwhile 佐藤 (also an administrator) takes 鈴木 off: version 2.
+    await signIn('p-sato', 'Admin')
+    expect((await call('PUT', '/api/console/admin/conversation', { mode: 'allowlist', allowlist: [{ subject: 'sub-sato' }] }, { 'If-Match': '"cs-1"' })).status).toBe(200)
+    await signIn('p-yamada', 'Admin')
+
+    await nextPoll()
+    // Before any save: the newer setting is named, 山田's choice stays, and nothing can be saved or edited on it.
+    expect(conflictNotice()!.textContent).toContain(words.conflictBody(words.summaryWithPeople(words.modes.allowlist.title, 1)))
+    expect(card()!.querySelector('[data-testid="conversation-updated"]')!.textContent).toBe(words.updated('佐藤 花子', copy.relative.justNow))
+    expect(people()).toEqual(['鈴木 一郎'])
+    expect(saveButton()!.disabled).toBe(true)
+    expect(radio('on').disabled).toBe(true)
+    await save()
+    expect(puts().map((item) => item.ifMatch)).toEqual(['"cs-0"', '"cs-1"'])
+    // Further polls keep the choice and the notice; they never move its base.
+    await nextPoll()
+    expect(conflictNotice()).toBeDefined()
+    expect(people()).toEqual(['鈴木 一郎'])
+
+    await click(button(words.keep))
+    expect(conflictNotice()).toBeUndefined()
+    expect(saveButton()!.disabled).toBe(false)
+    await save()
+    expect(puts().slice(2).map((item) => [item.status, item.ifMatch])).toEqual([[200, '"cs-2"']])
+    expect((await stored()).body).toMatchObject({ version: 3, allowlist: [{ subject: 'sub-suzuki' }] })
+  }, 30_000)
+
+  test('a card without unsaved changes follows the poll, even after a change that was undone; the next save uses the version it shows', async () => {
+    await renderPage({ polling: true })
+    await click(radio('on'))
+    await click(radio('off'))
+    await signIn('p-sato', 'Admin')
+    expect((await call('PUT', '/api/console/admin/conversation', { mode: 'allowlist', allowlist: [{ subject: 'sub-suzuki' }] }, { 'If-Match': '"cs-0"' })).status).toBe(200)
+    await signIn('p-yamada', 'Admin')
+
+    await nextPoll()
+    expect(conflictNotice()).toBeUndefined()
+    expect(radio('allowlist').getAttribute('aria-checked')).toBe('true')
+    expect(people()).toEqual(['鈴木 一郎'])
+    expect(saveButton()!.disabled).toBe(true)
+    await click(radio('on'))
+    await save()
+    expect(puts().slice(1).map((item) => [item.status, item.ifMatch])).toEqual([[200, '"cs-1"']])
+  }, 30_000)
 })
 
 test('412 then 変更をやめる shows the other administrator\'s setting', async () => {

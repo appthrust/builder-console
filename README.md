@@ -281,11 +281,16 @@ Those writes require the next authenticated `advance` request.
 Console administrators change the NEW-APP conversation setting on **基盤の設定**.
 It is stored in the Console PostgreSQL database per installation/Project and
 defaults to `off`, both on a fresh install and when upgrading an existing database.
+Upgrading does not import the former `BUILDER_CONSOLE_NEW_APP_CONVERSATION*`
+environment variables: an estate that had them on starts `off` until an administrator sets it again.
 `allowlist` enables it only for the listed Directory subjects of this installation's
 issuer (not email addresses); `on` enables it for all authenticated callers.
 The list is retained but ignored in `off` and `on`. Unknown subjects are accepted
 and displayed as 不明な利用者. The list is limited to 200 OIDC subjects (1–255
-printable ASCII characters each). There is no environment-variable override.
+printable ASCII characters each, each listed once; a repeat is refused with 400).
+There is no environment-variable override. A stored row that the API would refuse
+(for example one edited directly in the database) counts as `off` for new sessions,
+and the admin GET fails until a valid PUT replaces it.
 
 Administrators can also use `GET` / `PUT /api/console/admin/conversation`.
 GET returns a strong `ETag: "cs-<version>"`; PUT requires that value in `If-Match`
@@ -296,7 +301,11 @@ The database is read on each `/config` decision and new-session creation, so a
 committed change takes effect on the next request without a restart or setting cache.
 `GET /config` always includes the caller-resolved boolean `newAppConversation`,
 ANDed with the existing Platform-capability verdict cache.
-Existing console-v1 sessions and draft resolution remain available when disabled.
+`off`, or removing someone from the list, stops only new sessions: sessions already
+started continue (turns, proposals, plan and creation), and draft resolution stays available.
+Rolling back to a binary older than this setting leaves migration 009 in place but
+ignores it, and that binary again obeys its `BUILDER_CONSOLE_NEW_APP_CONVERSATION*`
+environment variables, so check them before rolling back.
 `BUILDER_CONSOLE_INSTALLATION_ID` may pin the receipt namespace; the default is
 the singleton `builder-console/<configured Project>`. Keep it stable across upgrades.
 Prompt registration records `BUILDER_CONSOLE_RELEASE_VERSION`, or `development`

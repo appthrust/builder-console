@@ -88,6 +88,38 @@ func TestConversationSettingDefaultAndConcurrentVersions(t *testing.T) {
 	}
 }
 
+// A row written around the API (a manual edit, a restore) must not be read as a
+// setting, so it can never widen who is offered the conversation.
+func TestConversationSettingStoredRowMustValidate(t *testing.T) {
+	for _, tc := range []struct{ name, mode, allowlist string }{
+		{"subject with a space", "on", `[{"subject":"has space"}]`},
+		{"subject listed twice", "allowlist", `[{"subject":"alice"},{"subject":"alice"}]`},
+		{"entry that is not an object", "allowlist", `["alice"]`},
+		{"empty subject", "allowlist", `[{"subject":""}]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, _ := testutil.Database(t, Open)
+			require.NoError(t, db.Do(t.Context(), true, func(tx *Tx) error {
+				return tx.Exec(`INSERT INTO conversation_settings(installation_id,project_id,mode,allowlist,version,updated_at,updated_by) VALUES($1,$2,$3,$4,4,now(),'manual')`, conversationScope.InstallationID, conversationScope.ProjectID, tc.mode, tc.allowlist)
+			}))
+			err := db.Do(t.Context(), false, func(tx *Tx) error {
+				setting, err := tx.ConversationSetting(conversationScope)
+				require.Equal(t, domain.ConversationSetting{}, setting)
+				return err
+			})
+			require.ErrorIs(t, err, errInvalidStoredConversationSetting)
+			// A valid save on the stored version replaces it.
+			require.NoError(t, db.Do(t.Context(), true, func(tx *Tx) error {
+				_, err := tx.SetConversationSetting(conversationScope, 4, domain.ConversationSettingInput{Mode: "off", Allowlist: []domain.ConversationSubject{}}, "admin", time.Now())
+				return err
+			}))
+			repaired := readConversationSetting(t, db, conversationScope)
+			require.Equal(t, "off", repaired.Mode)
+			require.EqualValues(t, 5, repaired.Version)
+		})
+	}
+}
+
 func TestConversationSettingMigrationFrom008PreservesData(t *testing.T) {
 	previous := fstest.MapFS{}
 	entries, err := fs.ReadDir(migrations, "migrations")

@@ -120,6 +120,24 @@
     }
   },
   {
+    "name": "duplicate-subject",
+    "schema": "ConversationSettingInput",
+    "raw": "{\"mode\":\"allowlist\",\"allowlist\":[{\"subject\":\"twice\"},{\"subject\":\"once\"},{\"subject\":\"twice\"}]}",
+    "expected": {
+      "accept": false,
+      "path": "/allowlist/2/subject"
+    }
+  },
+  {
+    "name": "duplicate-subject-answer",
+    "schema": "ConversationSetting",
+    "raw": "{\"mode\":\"allowlist\",\"allowlist\":[{\"subject\":\"twice\",\"displayName\":\"Twice\"},{\"subject\":\"twice\"}],\"version\":1}",
+    "expected": {
+      "accept": false,
+      "path": "/allowlist/1/subject"
+    }
+  },
+  {
     "name": "missing-allowlist",
     "schema": "ConversationSettingInput",
     "raw": "{\"mode\":\"off\"}",
