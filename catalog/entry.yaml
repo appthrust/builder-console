@@ -2,6 +2,8 @@ apiVersion: appthrust.io/v1alpha1
 kind: ApplicationStackDefinition
 metadata:
   name: builder-console
+# Publisher-only exact-version metadata, stripped from the emitted definition.
+publisherReleases: {}
 spec:
   access:
     audiences:

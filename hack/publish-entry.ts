@@ -34,6 +34,8 @@ interface Definition {
   apiVersion: string
   kind: string
   metadata: { name: string }
+  // Publisher-only metadata; never emitted as part of the definition.
+  publisherReleases?: Record<string, { minPlatformVersion: string }>
   spec: {
     display: { category: string; iconRef?: { name: string } }
     versions: CatalogVersion[]
@@ -58,6 +60,11 @@ export function renderEntry(template: string, version: string, digest: string, p
   }
   if (previous && previous.slug !== 'builder-console') throw new Error('previous entry must have slug builder-console')
 
+  const releases = definition.publisherReleases ?? {}
+  delete definition.publisherReleases
+  if (typeof releases !== 'object' || Array.isArray(releases)) {
+    throw new Error('publisherReleases must map exact app versions to { minPlatformVersion }')
+  }
   // Every tag starts from the committed floor. Merge the store's history so the
   // second app release cannot silently remove the first one from the catalog.
   const versions = new Map<string, CatalogVersion>()
@@ -67,7 +74,25 @@ export function renderEntry(template: string, version: string, digest: string, p
       Object.entries(existing.images).some(([slot, image]) => candidate.images[slot] !== image))) {
       throw new Error(`version ${candidate.name} already has different immutable images`)
     }
+    if (existing && existing.minPlatformVersion !== candidate.minPlatformVersion) {
+      throw new Error(`version ${candidate.name} already has different immutable minPlatformVersion`)
+    }
     versions.set(candidate.name, { ...candidate, images: { ...candidate.images }, default: false, served: true })
+  }
+  for (const [release, metadata] of Object.entries(releases)) {
+    validateRelease(release, digest)
+    const minimum = metadata?.minPlatformVersion
+    if (typeof minimum !== 'string' || minimum.length > 63 || /\s/.test(minimum) ||
+      !versionPattern.test(minimum.startsWith('v') ? minimum.slice(1) : minimum)) {
+      throw new Error(`version ${release} minPlatformVersion must be SemVer with optional v prefix and prerelease, without build metadata (1-63 characters, no whitespace)`)
+    }
+    const recorded = versions.get(release)
+    if (release !== version && !recorded) {
+      throw new Error(`publisherReleases version ${release} is neither the published version ${version} nor recorded catalog history`)
+    }
+    if (recorded && recorded.minPlatformVersion !== minimum) {
+      throw new Error(`version ${release} already has different immutable minPlatformVersion`)
+    }
   }
   const image = `${imageRepository}@${digest}`
   const existing = versions.get(version)
@@ -81,6 +106,7 @@ export function renderEntry(template: string, version: string, digest: string, p
     stream: version.split('.').slice(0, 2).join('.'),
     served: true,
     default: true,
+    ...(releases[version] ? { minPlatformVersion: releases[version].minPlatformVersion } : {}),
   })
   definition.spec.versions = [...versions.values()]
   if (listing) validateListing(listing)
