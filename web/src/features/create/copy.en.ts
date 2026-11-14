@@ -17,6 +17,7 @@ export const textEn: typeof textJa = {
   alreadyCreated: (name: string) => `This app was already created as "${name}"; finish it with that URL name.`,
   sourceUnavailable: 'The GitHub connection is unavailable.',
   destinationUnavailable: 'The repository destination is not set.',
+  pendingCreate: (name: string) => `The earlier request to create "${name}" has no known result yet. Change the URL name back to "${name}", then try again.`,
   destination: {
     blocked: 'Where new repositories are created has not been set, so apps cannot be made with AI or from a template yet. Ask a project administrator to set it.',
     repository: 'New repository',
@@ -27,6 +28,17 @@ export const textEn: typeof textJa = {
     changed: 'Nothing has been created yet. “New repository” and “Image location” above now show the new destination. Check them, then select “Create”.',
     mismatchTitle: 'The repository destination could not be confirmed',
     mismatch: 'Nothing has been created yet. The current destination is shown; check it, then create again. If this continues, contact your administrator.',
+    created: 'Repository already created',
+    createdNote: 'This repository was created earlier. The app continues with this repository and image location.',
+    pending: 'Repository requested earlier',
+    pendingNote: 'The earlier create request has no known result yet. So nothing is created twice, the same request is sent again to check: if it arrived, that repository is used; if not, the destination at that time is shown again.',
+    retainedChecking: 'Checking the repository created earlier…',
+    retainedUnknown: 'Where the repository created earlier is cannot be shown, so the app cannot continue from it. Select “Start over” to leave that repository unused and create a new one at the current destination.',
+    startOver: 'Start over',
+  },
+  keyConflict: {
+    title: 'The earlier create request does not match',
+    body: 'The earlier create request was already accepted with different contents. So nothing is created twice, this page cannot continue.',
   },
   unconfirmed: {
     title: 'Could not confirm what was created',

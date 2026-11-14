@@ -24,10 +24,12 @@ export interface BuildProposal {
   /** Planned address only, rendered as non-clickable text until a screen release succeeds. */
   url?: string
   /**
-   * Where a new repository is created and its image pushed (Platform's resolved destination), or
-   * `blocked` when none is resolved. Absent: the plan makes no new repository, or the destination is still read.
+   * Where a new repository is created and its image pushed as the proposal shows it (Platform's resolved destination,
+   * with the `revision` an approval binds), `blocked` when none is resolved, `loading` while it is read and `failed`
+   * when it could not be read. Only a shown destination (the object form) can be approved. Absent: the plan makes no
+   * new repository.
    */
-  newRepository?: { repository: string; image: string } | 'blocked'
+  newRepository?: { repository: string; image: string; revision: string } | 'blocked' | 'loading' | 'failed'
   /** What the AI builds (handoff tasks): the first few, product language only. */
   tasks: { title: string; detail?: string }[]
   moreTasks: number

@@ -142,10 +142,12 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
   const canCreate = readiness.kind === 'current' && !started && !creation.defaultPending && !busy && !view.write && !session.activeTurnId && !view.unsupported
   // A stop at the repository destination (it moved, or is not set) made nothing. After a move the proposal shows the
   // current destination and its own 「この内容で作る」 is the approval (it clears the notice); with no destination the
-  // proposal says only a Project administrator can set it, and nothing is approved.
+  // proposal says only a Project administrator can set it, and nothing is approved. Only a destination on screen can be
+  // approved (the approval binds its revision): while it is read, or after its read failed (read it again here), nothing is.
   const destinationStop = failure?.failure.kind === 'destination' && failure.failure.destination !== 'mismatch' && !execution ? failure.failure.destination : undefined
+  const approve = <Button tone="primary" loading={preparing} disabled={!canCreate || preparing || typeof proposal?.newRepository === 'string'} onClick={effects.prepare}>{buildCopy.primary.prepare}</Button>
   const proposalAction = started ? undefined
-    : readiness.kind === 'current' ? <Button tone="primary" loading={preparing} disabled={!canCreate || preparing || proposal?.newRepository === 'blocked'} onClick={effects.prepare}>{buildCopy.primary.prepare}</Button>
+    : readiness.kind === 'current' ? (proposal?.newRepository === 'failed' ? <><Button onClick={creation.retryDestination}>{buildCopy.proposal.destinationRetry}</Button>{approve}</> : approve)
       : readiness.kind === 'stale' ? <div className="space-y-2" data-testid="console-plan-stale">
         <p className="text-xs leading-relaxed text-busy-ink">{text.console.plan.stale}</p>
         <Button tone="primary" disabled={!view.canRequestPlan} onClick={() => actions.requestPlan()}>{text.console.plan.replan}</Button>

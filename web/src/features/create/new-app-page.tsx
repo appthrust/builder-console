@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { buildGroupTree, flattenGroupTree, membershipRoots, type BusinessApp } from '../../model/contracts/console'
 import type { ShareChoice } from '../../model/contracts/catalog'
 import { createApi } from '../../api/create'
-import { useAdoptionValidation, useCreateCatalog, useCreateConnections, useCreationTools, useRepositoryDestination } from '../../api/queries/catalog'
+import { useAdoptionValidation, useCreateCatalog, useCreateConnections, useCreationTools, useRepositoryDestination, useSourceRepositories } from '../../api/queries/catalog'
 import { copy } from '../../copy'
 import { aiPolicyExplanation } from '../../copy/ai-policy'
 import {
@@ -38,16 +38,19 @@ import { BuildStartFailure } from '../build/start-failure'
 import { consoleConfigQuery } from '../../api/queries/console'
 import { clearCreateSession, createSteps, readCreateSession, restoreCreateDraft, saveCreateSession, type Step } from './persistence'
 import { businessTemplateById, joinBusinessTemplates } from './templates'
-import { ConfirmStep, type AdoptionImage } from './steps/confirm-step'
+import { ConfirmStep, type AdoptionImage, type KeptSourceState } from './steps/confirm-step'
 import { DetailsStep, type TakenUrlName } from './steps/details-step'
 import { ShareStep } from './steps/share-step'
 import { StartStep, type EntryBlocks } from './steps/start-step'
 import {
   confirmCreate,
   CreateFailed,
+  keptSource,
+  sourceOrigin,
   submitCreate,
   type CreatePath,
   type CreateProgress,
+  type SourceBinding,
   type SubmitPhase,
 } from './submit'
 
@@ -113,7 +116,7 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
 
   const initialStep = createSteps.indexOf(search.step ?? saved?.step ?? 'start') as Step
   const run = useCreateStore<RunState>({ step: initialStep, resume: saved?.progress ?? {} })
-  const { step, phase, failure, checkingName, advancing, nameTaken } = useSelector(run)
+  const { step, phase, failure, checkingName, advancing, nameTaken, resume } = useSelector(run)
   const [startingBuild, setStartingBuild] = useState(false)
   const [buildError, setBuildError] = useState<{ error: unknown }>()
   const [completed, setCompleted] = useState(false)
@@ -227,17 +230,37 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
 
   const catalog = values.entry === 'image' ? imageCatalog : templateCatalog
   const url = domain && isValidAppName(values.urlName) ? appUrl(values.urlName, domain) : undefined
-  const newRepository = values.entry === 'template' && resolvedDestination && isValidAppName(values.urlName)
-    ? { repository: destinationRepository(resolvedDestination, values.urlName), image: destinationImage(resolvedDestination, values.urlName) }
-    : undefined
-  // 作ったコードから: the image path is Platform's (its validation answer), read once the confirmation is shown.
-  const adoptionRequest = step === 3 && values.entry === 'existing' && values.repository && environment.adoption
+  // An earlier attempt's repository for the source on screen is shown where it is (made, or sent with an outcome not
+  // known yet), never at the destination resolved now: the next attempt reuses it, or resends exactly that create.
+  const shownOrigin = catalog && values.entry === 'template' ? sourceOrigin(values.urlName, { kind: 'template' }, catalog)
+    : catalog && values.entry === 'existing' && values.repository ? sourceOrigin(values.urlName, { kind: 'existing', repository: values.repository }, catalog) : undefined
+  const kept = keptSource(resume, shownOrigin)
+  // Progress saved before where the repository is was kept names only its id: Platform's record of it says where it is.
+  const keptRead = useSourceRepositories(projectId, kept?.state === 'created' && !kept.binding)
+  const keptRecord = kept?.state === 'created' && !kept.binding ? keptRead.data?.data.find((repository) => repository.id === kept.id) : undefined
+  const keptWhere = keptRecord?.repositoryUrl ?? keptRecord?.existing?.repository
+  const keptBinding: SourceBinding | undefined = kept?.binding ?? (keptRecord && keptWhere ? { repository: keptWhere, image: keptRecord.image.imagePath } : undefined)
+  // Once a stack exists (or may), the source is only shown; otherwise one that cannot be shown holds the create.
+  const stackStarted = Boolean(resume.stackId || resume.attempts?.stack)
+  const keptState: KeptSourceState | undefined = !kept ? undefined
+    : keptBinding ? kept.state
+      : stackStarted ? undefined
+        : keptRead.isPending ? 'checking' : 'unknown'
+  const newRepository = values.entry !== 'template' ? undefined
+    : kept ? (keptBinding ? { repository: keptBinding.repository, image: keptBinding.image } : undefined)
+      : resolvedDestination && isValidAppName(values.urlName)
+        ? { repository: destinationRepository(resolvedDestination, values.urlName), image: destinationImage(resolvedDestination, values.urlName) }
+        : undefined
+  // 作ったコードから: the image path is Platform's (its validation answer), read once the confirmation is shown; an
+  // adopted (or pending) repository says it itself.
+  const adoptionRequest = step === 3 && values.entry === 'existing' && values.repository && environment.adoption && !kept
     ? buildExistingSourceRepositoryRequest(values.repository, environment.adoption)
     : undefined
   const adoptionValidation = useAdoptionValidation(projectId, adoptionRequest)
-  const adoptionImage: AdoptionImage = adoptionValidation.data?.valid && adoptionValidation.data.imagePath
-    ? { kind: 'known', path: adoptionValidation.data.imagePath }
-    : adoptionValidation.isFetching || (adoptionRequest && adoptionValidation.isPending) ? { kind: 'checking' } : { kind: 'unknown' }
+  const adoptionImage: AdoptionImage = keptBinding?.image ? { kind: 'known', path: keptBinding.image }
+    : adoptionValidation.data?.valid && adoptionValidation.data.imagePath
+      ? { kind: 'known', path: adoptionValidation.data.imagePath }
+      : adoptionValidation.isFetching || (adoptionRequest && adoptionValidation.isPending) ? { kind: 'checking' } : { kind: 'unknown' }
 
   const chooseTemplate = (id: string) => {
     const selected = templateRows.find((item) => item.id === id)
@@ -519,7 +542,7 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
     setConfirming(true)
     setStillUnknown(false)
     try {
-      const confirmed = await confirmCreate({ ...details, path }, run.state.resume, { api: createApi, catalog, destination: resolvedDestination, adoption: environment.adoption })
+      const confirmed = await confirmCreate({ ...details, path }, run.state.resume, { api: createApi, catalog })
       patch({ resume: confirmed.progress, failure: undefined })
       if (confirmed.app) await finish(confirmed.app)
     } catch {
@@ -529,14 +552,33 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
     }
   }
 
+  const [startingOver, setStartingOver] = useState(false)
+  /**
+   * 「最初から作り直す」: where the earlier repository is cannot be shown, so it is left unused. Its platform record is
+   * removed (best effort, as for a renamed attempt) and the next 作る makes a new one at the destination shown.
+   */
+  const startOver = async () => {
+    const current = run.state.resume
+    if (startingOver || !current.sourceRepositoryId) return
+    setStartingOver(true)
+    try {
+      await createApi.deleteSourceRepository(projectId, current.sourceRepositoryId).catch(() => undefined)
+      patch({ resume: { ...current, sourceRepositoryId: undefined, sourceRepositoryOrigin: undefined, sourceRepositoryBinding: undefined }, failure: undefined })
+    } finally {
+      setStartingOver(false)
+    }
+  }
+
   const busy = phase !== undefined || startingBuild
   // A moved destination is a new confirmation of what is shown now, not a retry of the refused one.
   const retrying = failure !== undefined && !failure.forbidden && failure.destination !== 'changed'
   // After a destination answer the shown destination is re-read; nothing is sent until the new one is on screen.
   const destinationRereading = failure?.destination !== undefined && destinationRead.isFetching
-  const blockedSubmit = !canCreate || busy || failure?.forbidden === true || unconfirmed || destinationRereading
+  const keptHold = keptState === 'checking' || keptState === 'unknown'
+  const blockedSubmit = !canCreate || busy || failure?.forbidden === true || unconfirmed || destinationRereading || keptHold
   // The confirm step's own fixed notice when no destination is resolved; a blocked answer at submit says the same and is not repeated.
-  const destinationBlockedShown = step === 3 && values.entry === 'template' && destination !== undefined && !resolvedDestination
+  // An earlier attempt's repository does not need the destination resolved now.
+  const destinationBlockedShown = step === 3 && values.entry === 'template' && destination !== undefined && !resolvedDestination && !kept
   const primary =
     step === 0
       ? { label: copy.create.next, disabled: !entryReady(values.entry) }
@@ -641,6 +683,9 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
                   sourceProblem={templateProblem}
                   onChooseTemplate={() => patch({ step: 0 })}
                   newRepository={newRepository}
+                  kept={keptState}
+                  onStartOver={keptState === 'unknown' ? () => void startOver() : undefined}
+                  startingOver={startingOver}
                   destinationBlocked={destinationBlockedShown}
                   adoptionImage={adoptionImage}
                 />

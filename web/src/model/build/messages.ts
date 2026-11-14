@@ -13,6 +13,9 @@ import { isProductLanguage } from './wording'
 /** Handoff tasks the proposal lists before 「ほか n 件」. */
 export const PROPOSAL_TASKS = 6
 
+/** The repository destination as the page holds it: Platform's answer, or its read still running / failed. */
+export type ShownDestination = RepositoryDestination | { kind: 'loading' } | { kind: 'failed' }
+
 type AssistantBuildMessage = Extract<BuildMessage, { role: 'assistant' }>
 
 /** The three parts of an AI reply (conversation-turn.tmpl: 要約 / 変えたところ / 次の質問). */
@@ -111,13 +114,14 @@ export function assistantMessage(turn: BuildTurn, draftId: string): BuildMessage
  * image go (Platform's resolved destination, the one the approval binds) and what the AI
  * will build. Infrastructure wording stays in 「詳しい人向け」.
  */
-export function planProposal(draft: BuildDraft, lastPlannedIntent?: string, destination?: RepositoryDestination): BuildProposal | undefined {
+export function planProposal(draft: BuildDraft, lastPlannedIntent?: string, destination?: ShownDestination): BuildProposal | undefined {
   const plan = draft.creationPlan
   if (!plan) return undefined
   const repositoryName = newRepositoryRequest(plan)?.destination?.repositoryName
   const newRepository = !repositoryName || !destination ? undefined
-    : destination.kind === 'resolved' ? { repository: destinationRepository(destination, repositoryName), image: destinationImage(destination, repositoryName) }
-      : 'blocked' as const
+    : destination.kind === 'resolved'
+      ? { repository: destinationRepository(destination, repositoryName), image: destinationImage(destination, repositoryName), revision: destination.revision }
+      : destination.kind === 'loading' || destination.kind === 'failed' ? destination.kind : 'blocked' as const
   const { spec } = parseSpec(draft.specMarkdown)
   const handoff = plan.implementationHandoff?.tasks ?? []
   const readable = handoff.filter((task) => isProductLanguage(task.title))
@@ -145,7 +149,7 @@ export function planProposal(draft: BuildDraft, lastPlannedIntent?: string, dest
 }
 
 /** The proposal sits in the conversation where the plan finished, as the AI's own message. */
-function proposalMessage(draft: BuildDraft, lastPlannedIntent?: string, destination?: RepositoryDestination): BuildMessage | undefined {
+function proposalMessage(draft: BuildDraft, lastPlannedIntent?: string, destination?: ShownDestination): BuildMessage | undefined {
   const proposal = planProposal(draft, lastPlannedIntent, destination)
   if (!proposal) return undefined
   const generation = [...draft.creationPlanGenerations].reverse().find((item) => isOneOf(item.status, 'succeeded'))
@@ -153,7 +157,7 @@ function proposalMessage(draft: BuildDraft, lastPlannedIntent?: string, destinat
   return { role: 'assistant', text: proposal.lead ?? proposal.name, proposal, at, turnId: `proposal:${generation?.id ?? draft.id}` }
 }
 
-export function messagesFromDraft(draft: BuildDraft, extra: BuildMessage[], options: { lastPlannedIntent?: string; preparationDone?: boolean; destination?: RepositoryDestination } = {}): BuildMessage[] {
+export function messagesFromDraft(draft: BuildDraft, extra: BuildMessage[], options: { lastPlannedIntent?: string; preparationDone?: boolean; destination?: ShownDestination } = {}): BuildMessage[] {
   const messages: BuildMessage[] = []
   const all = [...draft.conversationTurns].sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt))
   // Excel → app's analysis and screen-design turns read as one line before the conversation,

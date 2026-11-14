@@ -20,6 +20,9 @@ export const textEn: typeof textJa = {
     repository: 'New repository',
     image: 'Image location',
     destinationBlocked: 'Where new repositories are created has not been set. Ask a project administrator to set it.',
+    destinationLoading: 'Checking where it will be created…',
+    destinationFailed: 'Where it will be created could not be loaded. The app cannot be built until it is shown.',
+    destinationRetry: 'Load the destination again',
   },
   progress: {
     workspace: { title: 'Getting AI ready', hint: 'The first time takes 1–2 minutes' },

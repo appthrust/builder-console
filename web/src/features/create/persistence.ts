@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { knownValue } from '../../model/contracts/build'
+import type { SourceRepositoryRequest, StackRequest } from '../../model/contracts/catalog'
 import type { BusinessApp } from '../../model/contracts/console'
 import { initialValues, type CreateValues } from './form'
 import type { CreateProgress, SubmitPhase } from './submit'
@@ -18,6 +19,10 @@ export interface CreateSession {
 }
 
 const phases = z.enum(['draft', 'source', 'checking', 'platform', 'bind'])
+const origin = z.object({ appName: z.string(), kind: z.enum(['template', 'existing']), repository: z.string().optional(), templateId: z.string().optional() })
+const binding = z.object({ repository: z.string(), image: z.string().optional(), revision: z.string().optional(), connectionId: z.string().optional() })
+/** A create request this tab built and sent: resent exactly as it was (Platform compares it with the first one). */
+const sentRequest = <T,>() => z.custom<T>((value) => typeof value === 'object' && value !== null && !Array.isArray(value))
 
 const sessionSchema = z.object({
   version: z.literal(1),
@@ -34,14 +39,17 @@ const sessionSchema = z.object({
     // This tab's own record of the console app the attempt made (read through the boundary when it was made).
     draft: z.custom<BusinessApp>((value) => typeof value === 'object' && value !== null && 'id' in value && typeof value.id === 'string').optional(),
     sourceRepositoryId: z.string().optional(),
-    sourceRepositoryOrigin: z.object({ appName: z.string(), kind: z.enum(['template', 'existing']), repository: z.string().optional(), templateId: z.string().optional() }).optional(),
+    sourceRepositoryOrigin: origin.optional(),
+    // Where the kept repository is: a resumed attempt shows it, not the destination resolved now.
+    sourceRepositoryBinding: binding.optional(),
     stackId: z.string().optional(), stackAppName: z.string().optional(),
     // A reload keeps an unconfirmed step unconfirmed: only the readback may follow.
     unconfirmed: phases.optional(),
-    // Keys of creates that may have been applied: a resend reuses them so Platform replays instead of creating twice.
+    // Creates that may have been applied: their key and exact request, resent before anything else so Platform
+    // replays instead of creating twice. `request`/`binding` are optional for progress saved before they were kept.
     attempts: z.object({
-      source: z.object({ key: z.string(), origin: z.object({ appName: z.string(), kind: z.enum(['template', 'existing']), repository: z.string().optional(), templateId: z.string().optional() }) }).optional(),
-      stack: z.object({ key: z.string(), appName: z.string(), sourceRepositoryId: z.string().optional() }).optional(),
+      source: z.object({ key: z.string(), origin, request: sentRequest<SourceRepositoryRequest>().optional(), binding: binding.optional() }).optional(),
+      stack: z.object({ key: z.string(), appName: z.string(), sourceRepositoryId: z.string().optional(), request: sentRequest<StackRequest>().optional() }).optional(),
     }).optional(),
   }),
   phase: phases.optional(),

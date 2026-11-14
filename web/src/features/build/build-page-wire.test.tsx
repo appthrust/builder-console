@@ -33,10 +33,13 @@ interface Rewrite { method: string; path: RegExp; body: (wire: Json) => unknown;
 
 let rewrites: Rewrite[] = []
 let requests: { method: string; path: string; status: number }[] = []
+/** A read the page waits on until the test releases it (a slow Platform answer). */
+let held: { path: RegExp; until: Promise<void> } | undefined
 
 async function mockFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const request = input instanceof Request ? input : new Request(new URL(String(input), window.location.href), init)
   const url = new URL(request.url)
+  if (request.method === 'GET' && held?.path.test(url.pathname)) await held.until
   const response = await (url.pathname.startsWith('/api/console/') ? consoleRoutes : platformRoutes)(request, url)
   requests.push({ method: request.method, path: url.pathname, status: response?.status ?? 404 })
   if (!response) return Response.json({ error: { message: 'unhandled' } }, { status: 404 })
@@ -128,6 +131,7 @@ beforeEach(async () => {
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: window.localStorage })
   window.sessionStorage.clear()
   rewrites = []
+  held = undefined
   requests = []
   globalThis.fetch = mockFetch as typeof globalThis.fetch
   // The boundary reports a contract failure with console.warn (safe metadata only); keep test output quiet.
@@ -143,6 +147,8 @@ afterEach(async () => {
   await act(async () => { root?.unmount() })
   root = undefined
   container?.remove()
+  // The mock is one module-level state shared with later test files: leave it as the next file expects it.
+  await call('POST', '/api/v1/__mock/reset')
   client?.clear()
   globalThis.fetch = originalFetch
   window.sessionStorage.clear()
@@ -498,5 +504,69 @@ describe('the session\'s own writes', () => {
     await tick(key)
     await settle(20)
     expect(count('POST', turns)).toBe(1)
+  })
+})
+
+describe('the approval binds the destination the proposal showed (review finding 2)', () => {
+  const destinationGet = new RegExp(`${PROJECT}/repository-destination$`)
+  const creationWrites = (draftId: string) => requests.filter((item) => item.method !== 'GET' && item.path.startsWith(draftPath(draftId)))
+  const approve = () => button(buildCopy.primary.prepare)
+  const proposal = () => container.querySelector('[data-testid="build-proposal"]')?.textContent ?? ''
+
+  test('a direct visit approves nothing while the destination is read, and nothing after its read failed until it is read again and shown', async () => {
+    const draftId = await plannedDraft()
+    const read = Promise.withResolvers<void>()
+    held = { path: destinationGet, until: read.promise }
+    await renderBuild(draftId)
+    expect(stage()).toBe('decide')
+    expect(proposal()).toContain(buildCopy.proposal.destinationLoading)
+    expect(approve().disabled).toBe(true)
+    await click(approve())
+
+    // The read answers with something this console cannot read: the read failed, and it says so.
+    rewrites.push({ method: 'GET', path: destinationGet, once: true, body: () => ({ state: 42 }) })
+    held = undefined
+    read.resolve()
+    await settle()
+    expect(proposal()).toContain(buildCopy.proposal.destinationFailed)
+    expect(proposal()).not.toContain('ghcr.io/acme/')
+    expect(approve().disabled).toBe(true)
+    expect(creationWrites(draftId)).toEqual([])
+
+    await click(button(buildCopy.proposal.destinationRetry))
+    expect(count('GET', destinationGet)).toBe(2)
+    expect(proposal()).toContain('ghcr.io/acme/')
+    expect(approve().disabled).toBe(false)
+    expect(creationWrites(draftId)).toEqual([])
+  })
+
+  test('the plan and Platform agree on B while the proposal showed A: the approval stops, B is shown, and only the next approval creates', async () => {
+    const draftId = await plannedDraft()
+    const { key } = await renderBuild(draftId)
+    const shownA = (await call('GET', `${PROJECT}/repository-destination`)).revision
+    expect(proposal()).toContain('ghcr.io/acme/')
+
+    // An administrator moves the default to B, and the plan is bound to B elsewhere (another tab, a regenerated plan).
+    await call('POST', '/api/v1/__mock/repository-destination', { state: 'builtin' })
+    const revisionB = (await call('GET', `${PROJECT}/repository-destination`)).revision
+    expect(revisionB).not.toBe(shownA)
+    const plan = (await call('GET', draftPath(draftId))).creationPlan as Json
+    await call('PATCH', draftPath(draftId), { creationPlan: { ...plan, applicationSourceRepositoryRequest: { ...(plan.applicationSourceRepositoryRequest as Json), destinationRevision: revisionB } } })
+    await tick(key)
+    // The page still shows A: nothing re-read the destination yet.
+    expect(proposal()).toContain('ghcr.io/acme/')
+    expect(proposal()).not.toContain('registry.appthrust.test/commerce/')
+
+    await click(approve())
+    // Platform's B matches the plan but not what the user saw (A): nothing is validated, begun or written.
+    expect(creationWrites(draftId)).toEqual([])
+    expect(notices(buildCopy.failure.destination.changed.title, '#build-conversation')).toHaveLength(1)
+    expect(proposal()).toContain('registry.appthrust.test/commerce/')
+    expect(proposal()).not.toContain('ghcr.io/acme/')
+
+    // The user approves B, now shown: the preparation starts.
+    await click(approve())
+    expect(count('POST', new RegExp(`${draftPath(draftId)}/creation-plan-validations$`))).toBe(1)
+    expect(count('POST', new RegExp(`${draftPath(draftId)}/creation-executions$`))).toBe(1)
   })
 })

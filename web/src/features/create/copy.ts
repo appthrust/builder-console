@@ -20,6 +20,8 @@ export const textJa = {
   alreadyCreated: (name: string) => `this app was already created as "${name}"; finish it with that URL name`,
   sourceUnavailable: 'source connections unavailable',
   destinationUnavailable: 'repository destination unavailable',
+  /** Progress saved before create requests were kept, whose create of `name` is still unsettled, while another name is chosen. */
+  pendingCreate: (name: string) => `「${name}」で前回送った作成の結果がまだ分かりません。URL になる名前を「${name}」に戻してから、もう一度試してください。`,
   /** Where a new repository goes (Platform's resolved repository destination); never its reason or message. */
   destination: {
     blocked: '新しい置き場の作成先が決まっていないため、AI やテンプレートからは作れません。プロジェクトの管理者に設定を依頼してください。',
@@ -31,6 +33,20 @@ export const textJa = {
     changed: 'まだ何も作っていません。上の「新しく作る置き場」と「アプリの保管場所」を新しい作成先にしました。確かめてから「作る」を押してください。',
     mismatchTitle: '置き場の作成先を確かめられませんでした',
     mismatch: 'まだ何も作っていません。最新の作成先を表示しました。確かめてから、もう一度作ってください。続くときは管理者に相談してください。',
+    /** A repository already made (or adopted) by an earlier attempt: the next attempt uses it where it is. */
+    created: '作成済みの置き場',
+    createdNote: 'この置き場は前回の操作で作成済みです。続きは、この置き場とアプリの保管場所で作ります。',
+    /** An earlier create whose outcome is unknown: the next attempt resends it exactly, to where it went. */
+    pending: '前回作ろうとした置き場',
+    pendingNote: '前回の作成の結果がまだ分かりません。二重に作らないよう、前回と同じ内容でもう一度送って確かめます。届いていればその置き場を使い、届いていなければ、そのときの作成先をあらためて表示します。',
+    retainedChecking: '作成済みの置き場を確認しています…',
+    retainedUnknown: '前回作成した置き場がどこにあるかを表示できないため、続きから作れません。「最初から作り直す」を選ぶと、その置き場は使わずに、いまの作成先へ新しく作ります。',
+    startOver: '最初から作り直す',
+  },
+  /** Platform accepted an earlier create of this attempt with another request (an older console's): it cannot be resent. */
+  keyConflict: {
+    title: '前回の作成と内容が合いません',
+    body: '前回送った作成は、別の内容ですでに受け付けられています。二重に作らないよう、この画面からは続けられません。',
   },
   /** A create step answered 2xx with an answer this console cannot read: it may have happened (never resent blindly). */
   unconfirmed: {

@@ -96,6 +96,15 @@ export function FailureNotice({ failure }: { failure: CreateFailed }) {
       </Notice>
     )
   }
+  // An earlier create of this attempt exists with another request: it cannot be resent, so nothing goes on from here.
+  if (failure.keyConflict) {
+    return (
+      <Notice tone="error" title={text.keyConflict.title} actions={abandon}>
+        <p>{text.keyConflict.body}</p>
+        {failure.progress.draft ? <p className="mt-1 opacity-80">{copy.create.draftKept}</p> : null}
+      </Notice>
+    )
+  }
   // The repository destination's answers have fixed words: never the server's reason or message.
   if (failure.destination) {
     const [title, body] = failure.destination === 'changed'

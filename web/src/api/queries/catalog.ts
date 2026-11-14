@@ -91,10 +91,11 @@ export function useAdoptionValidation(projectId: string, request: SourceReposito
  * decoded at the boundary: a build or readiness state this console does not
  * know is an unknown value, never "failed" or "ready".
  */
-export function useSourceRepositories(projectId: string) {
+export function useSourceRepositories(projectId: string, enabled = true) {
   return useQuery({
     queryKey: keys.sourceRepositories(projectId),
     queryFn: () => apiGateway.platform(listSourceRepositoriesContract, { projectId }),
+    enabled,
   })
 }
 

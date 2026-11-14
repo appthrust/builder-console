@@ -31,6 +31,8 @@ const sessionSchema = z.object({
   executionRequestId: z.string().optional(),
   /** The template release observed before any implementation task is pushed. */
   initialReleaseId: z.string().optional(),
+  /** The destination revision the proposal showed when 「この内容で作る」 was pressed; the approval binds only that one. */
+  approvedDestinationRevision: z.string().optional(),
 })
 export type BuildSession = z.infer<typeof sessionSchema>
 export const stageLabels: Record<BuildStage, string> = localized({ ja: textJa.session.stageLabels, en: textEn.session.stageLabels })

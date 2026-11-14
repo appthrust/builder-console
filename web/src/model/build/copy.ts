@@ -23,6 +23,10 @@ export const textJa = {
     repository: '新しく作る置き場',
     image: 'アプリの保管場所',
     destinationBlocked: '置き場をどこに作るかが決まっていません。プロジェクトの管理者に設定を依頼してください。',
+    /** The destination is still read: nothing can be approved before it is shown. */
+    destinationLoading: '作成先を確認しています…',
+    destinationFailed: '作成先を読み込めませんでした。表示できるまで、この内容では作れません。',
+    destinationRetry: '作成先を読み込み直す',
   },
   progress: {
     workspace: { title: 'AI の準備をしています', hint: '初回は 1–2 分かかります' },

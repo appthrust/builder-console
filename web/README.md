@@ -515,23 +515,42 @@ non-engineers, with engineering words only under 「詳しい人向け」
   Active draft polling continues while the tab is hidden (subject to browser
   suspension); normal focus refetch catches up after resume.
 - A source repository kept from a failed create attempt is reused only when
-  its origin (URL name, entry, picked repository, template) matches the retry.
+  its origin (URL name, entry, picked repository, template) matches the retry,
+  and the confirm step shows it where it is (「作成済みの置き場」: the
+  repository and image location the attempt used, kept with the progress),
+  never at the destination resolved now. Progress saved with only its id reads
+  Platform's record back; when that record cannot place it, nothing is created
+  until 「最初から作り直す」 leaves it unused.
+- A Platform create whose outcome is unknown (no answer, a 5xx, an unread 2xx
+  the readback did not find) keeps its Idempotency-Key, its exact request and
+  where it went. Before anything else is validated or sent, the next 作る resends
+  that request under that key: Platform replays an accepted one, also after the
+  default moved, and answers an unaccepted one as new. Only that answer (the
+  resource, or Platform's 4xx refusal of that very write) ends the attempt; a
+  validation answer, a moved destination or another name never does. Until then
+  the confirm step shows 「前回作ろうとした置き場」, not the current default.
+  The readback after an unread 2xx matches the repository where the attempt sent
+  it, not where the destination resolves now.
 - A new repository (ひな形, AI) goes where the Project's repository destination
   says (`GET repository-destination`, read as resolved / blocked / unknown in
-  `contracts/platform/catalog.ts`); the console never picks a connection or
-  joins an image path. The confirm step and the AI proposal show
-  `owner/name` and the image location; the request names only the template,
-  the name and the shown `destinationRevision`. Adoption sends only
-  `sourceConnectionId` and `existing`, and shows the image path from
-  Platform's validation answer. Blocked or unknown disables the ひな形 and AI
-  entries with one fixed notice (only a Project administrator can set it);
-  adoption still works. 409 `DestinationChanged` re-reads and shows the new
-  destination and sends nothing until the user presses 作る again; in the AI
-  build, 「この内容で作る」 re-binds the plan to the current revision first and
-  stops with a fixed notice when it moved, and approving again needs no
-  cleanup. 409 `DestinationMismatch` is a fixed-copy failure. Stories:
-  `e2e/stories/app-create-destination.mock.spec.ts` (mock toggle
-  `repository-destination {state}`).
+  `contracts/platform/catalog.ts`); the console never picks a connection, and
+  no request carries an image path. For display only, the confirm step and the
+  AI proposal join the destination's namespaces with the app name (`owner/name`
+  and the image location; `model/create.ts` `destinationRepository` /
+  `destinationImage`); the request names only the template, the name and the
+  shown `destinationRevision`. Adoption sends only `sourceConnectionId` and
+  `existing`, and shows the image path from Platform's validation answer.
+  Blocked or unknown disables the ひな形 and AI entries with one fixed notice
+  (only a Project administrator can set it); adoption still works. 409
+  `DestinationChanged` re-reads and shows the new destination and sends nothing
+  until the user presses 作る again. In the AI build, 「この内容で作る」 is
+  offered only once the destination is shown (disabled while it is read; a
+  failed read offers 「作成先を読み込み直す」) and approves the revision shown:
+  when Platform's current one differs from it (or from the plan's), the plan is
+  re-bound to the current revision and the approval stops with a fixed notice;
+  approving again needs no cleanup. 409 `DestinationMismatch` is a fixed-copy
+  failure. Stories: `e2e/stories/app-create-destination.mock.spec.ts` (mock
+  toggle `repository-destination {state}`).
 - AI build sessions default an absent/disabled plan publish to the wizard's
   `pickCreateEnvironment(...).domain`, using the application's name as the
   wildcard subdomain. Enabled publish destinations are preserved; a rename

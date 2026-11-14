@@ -21,6 +21,7 @@ import { appQuery, writeAppCache } from '../../api/queries/console'
 import { destinationRejection, platformErrorEnvelope } from '../../api/platform-error'
 import { isPublishPreparationPending, publishPreparationRetryDelay } from '../../api/publish-retry'
 import { classifyBuildFailure, destinationFailure, unconfirmedFailure } from '../../model/build/failure'
+import type { ShownDestination } from '../../model/build/messages'
 import { newRepositoryRequest, renameCreationPlan, withDefaultPublish, withDestinationRevision } from '../../model/build/plan'
 import { appPreparationProgress, sourceBuildFailureProgress } from '../../model/build/progress'
 import { draftPublished } from '../../model/build/stage'
@@ -73,25 +74,33 @@ export class PlanDestinationError extends Error {
 }
 
 /**
- * Before the plan is validated and approved, its new repository is bound to the destination the
- * proposal shows now (Platform rejects an approval without a revision, and a create whose revision
- * is no longer current). Not resolved: nothing is approved. Another revision (the plan was made
- * against an older one, or the destination moved): the plan is rebound to the current one and the
- * approval stops, so the user sees the new destination and approves again; nothing is sent for them.
- * A plan without a new repository (adoption, reuse) is not bound.
+ * Before the plan is validated and approved, its new repository is bound to the destination the user approved: the
+ * revision the proposal showed when 「この内容で作る」 was pressed (`approvedRevision`). Platform's answer now must be
+ * that very revision, and the plan must carry it (Platform rejects an approval without a revision, and a create whose
+ * revision is no longer current). Not resolved: nothing is approved. Any other revision (the destination moved after
+ * it was shown, or the plan was made against another one): the approval stops, the plan is bound to the current
+ * revision, and the proposal shows the current destination for the user to approve again; nothing is sent for them.
+ * `stop` withdraws the approval before either stop is reported. A plan without a new repository (adoption, reuse) is not bound.
  */
 export async function bindPlanDestination(
   projectId: string,
   draft: BuildDraft,
-  deps: { readDestination: () => Promise<RepositoryDestination>; updateDraft: typeof api.updateDraft; receive: (next: BuildDraft) => Promise<void> },
+  approvedRevision: string | undefined,
+  deps: { readDestination: () => Promise<RepositoryDestination>; updateDraft: typeof api.updateDraft; receive: (next: BuildDraft) => Promise<void>; stop: () => void },
 ): Promise<void> {
   const plan = draft.creationPlan
   const request = newRepositoryRequest(plan)
   if (!plan || !request) return
   const destination = await deps.readDestination()
-  if (destination.kind !== 'resolved') throw new PlanDestinationError('blocked')
-  if (request.destinationRevision === destination.revision) return
-  await deps.receive(await deps.updateDraft(projectId, draft.id, { creationPlan: withDestinationRevision(plan, destination.revision) }))
+  if (destination.kind !== 'resolved') {
+    deps.stop()
+    throw new PlanDestinationError('blocked')
+  }
+  if (approvedRevision === destination.revision && request.destinationRevision === destination.revision) return
+  deps.stop()
+  if (request.destinationRevision !== destination.revision) {
+    await deps.receive(await deps.updateDraft(projectId, draft.id, { creationPlan: withDestinationRevision(plan, destination.revision) }))
+  }
   throw new PlanDestinationError('changed')
 }
 
@@ -125,6 +134,8 @@ export interface CreationTab {
   executionRequestId?: string
   /** The template release observed before any implementation task is pushed. */
   initialReleaseId?: string
+  /** The destination revision the proposal showed when the user approved it; the approval binds only that one. */
+  approvedDestinationRevision?: string
 }
 
 export interface DraftCreationInput {
@@ -165,9 +176,14 @@ export function useDraftCreation({ projectId, draft, tab, hasPending, now }: Dra
   const published = draftPublished(draft) && tab.continuedAfterPublishAt !== draft.publishedAt && !hasPending
   const implementation = useImplementation({ projectId, draft, handoff: execution?.approval?.implementationHandoff ?? draft.creationPlan?.implementationHandoff, enabled: Boolean(draft.createdApplicationStackId) && !published })
   const implementing = implementation.pending || implementation.state.phase === 'starting-workspace' || implementation.state.phase === 'running' || implementation.state.phase === 'pushing'
-  // Where the plan's new repository goes, shown on the proposal before 「この内容で作る」 (and bound to it then).
-  const destination = useQuery({ ...repositoryDestinationQuery(projectId), enabled: Boolean(newRepositoryRequest(draft.creationPlan)) && !execution }).data
-  return { app, appViews, appView, appProgress, generation, execution, domain, creationPlan, defaultPending, proposalDraft, published, implementation, implementing, destination }
+  // Where the plan's new repository goes, shown on the proposal before 「この内容で作る」: the approval binds the
+  // revision shown, so nothing is approved while it is still read or could not be read.
+  const needsDestination = Boolean(newRepositoryRequest(draft.creationPlan)) && !execution
+  const destinationRead = useQuery({ ...repositoryDestinationQuery(projectId), enabled: needsDestination })
+  const destination: ShownDestination | undefined = !needsDestination ? undefined
+    : destinationRead.data ?? (destinationRead.isError ? { kind: 'failed' } : { kind: 'loading' })
+  const retryDestination = () => { void destinationRead.refetch() }
+  return { app, appViews, appView, appProgress, generation, execution, domain, creationPlan, defaultPending, proposalDraft, published, implementation, implementing, destination, retryDestination }
 }
 
 export interface DraftCreationHost {
@@ -247,10 +263,11 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
     void host.perform('prepare', async () => {
       // Plan replacement is forbidden once an execution exists; a fresh approval binds the shown destination first.
       if (!host.draftRef.current.creationExecutions.length) {
-        await bindPlanDestination(projectId, host.draftRef.current, {
+        await bindPlanDestination(projectId, host.draftRef.current, host.currentTab().approvedDestinationRevision, {
           readDestination: () => queryClient.fetchQuery({ ...repositoryDestinationQuery(projectId), staleTime: 0 }),
           updateDraft: api.updateDraft,
-          receive: async (next) => { host.patch({ prepareRequested: false }); await host.receive(next) },
+          receive: host.receive,
+          stop: () => host.patch({ prepareRequested: false, approvedDestinationRevision: undefined }),
         })
       }
       const creationPlanFingerprint = await validatePreparationPlan(projectId, draft.id)
@@ -344,8 +361,21 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
     })
   }
 
-  /** 「この内容で作る」: request the preparation (the preparation effect starts it once nothing holds it). */
-  function prepare() { bindingFailed.current = false; host.clearFailure(); host.patch({ prepareRequested: true }) }
+  /**
+   * 「この内容で作る」: approve what the proposal shows. A plan that makes a new repository is approved only with its
+   * destination on screen, bound to the revision shown (the preparation checks Platform's current one against it);
+   * while the destination is read, unreadable or not set, it is read again instead and nothing is approved.
+   */
+  function prepare() {
+    host.clearFailure()
+    const shown = creation.destination
+    if (shown && shown.kind !== 'resolved') {
+      creation.retryDestination()
+      return
+    }
+    bindingFailed.current = false
+    host.patch({ prepareRequested: true, approvedDestinationRevision: shown?.revision })
+  }
 
   return {
     waitingForPublish: publishRetries.current >= 4,
