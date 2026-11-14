@@ -3,7 +3,7 @@
 // Japanese tree (owning keys and signatures) and an English sibling of the same
 // type, joined with `localized()` so call sites read `copy.section.key` and get
 // the current language. No screen hardcodes user-facing text.
-import type { ComponentSummaryStatusReasonKey } from '@appthrust/api-schema/platform-api'
+import type { ComponentReasonKey } from './model/contracts/app'
 import { apps, reasonCopy, reasonHelp as reasonHelpJa } from './copy/apps'
 import { appsEn, reasonCopyEn, reasonHelpEn } from './copy/apps.en'
 import { shell } from './copy/shell'
@@ -25,7 +25,7 @@ export type { ConsoleStatus } from './copy/apps'
 export const reasonHelp = localized({ ja: appsByLanguage.ja.reasonHelp, en: appsByLanguage.en.reasonHelp })
 
 /** Plain-language explanation of a component-summaries reasonKey. */
-export function reasonText(reasonKey: ComponentSummaryStatusReasonKey): string {
+export function reasonText(reasonKey: ComponentReasonKey): string {
   return appsByLanguage[currentLanguage()].reasonCopy[reasonKey]
 }
 

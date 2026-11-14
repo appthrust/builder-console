@@ -26,7 +26,7 @@ const readers = {
   BuildSpecRevision: wire.buildSpecRevision,
   BuildPublishResult: publishReader,
 }
-// Response boundaries only. No client/route/handler is registered by S4-0.
+// Responses are decoded here before the client exposes domain values.
 export const buildSessionContracts = {
   create: defineResponseContract({ ...buildSessionOperations.create, source: 'console', reader: readers.BuildSession }),
   list: defineResponseContract({ ...buildSessionOperations.list, source: 'console', reader: readers.BuildSessionList }),
@@ -42,7 +42,9 @@ export const buildSessionContracts = {
   archive: defineResponseContract({ ...buildSessionOperations.archive, source: 'console', reader: readers.BuildSession }),
 }
 export type BuildSession = z.output<typeof buildSessionReader>
+export type BuildSessionList = z.output<typeof readers.BuildSessionList>
 export type BuildTurn = z.output<typeof buildTurnReader>
+export type BuildTurnList = z.output<typeof readers.BuildTurnList>
 export type BuildReply = z.output<typeof wire.buildReply>
 export type BuildSpecification = z.output<typeof wire.buildSpecification>
 export type BuildSpecRevision = z.output<typeof wire.buildSpecRevision>

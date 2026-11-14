@@ -36,12 +36,34 @@
 // `{mode, allowlist: [{subject}]}` (≤ 200 distinct printable-ASCII subjects). Seeded off at version 0; reset reseeds it.
 // `GET /api/console/__mock/config` answers `{newAppConversation}` for the current caller from that setting
 // (on → true, allowlist → the caller's subject is listed, off → false): what the dev `/config` (vite.config.ts) passes on.
+import type { z } from 'zod'
 import { conversationSettingInput } from '../api/contracts/console/schema/schemas'
-import type { AccessRequest, AppTool, AppTools, BusinessApp, DirectoryEntry, DirectoryUser, MemberRole, Membership, PersonProfile, PlatformSettings, Resolved, Screenshot, SharePolicy } from '../api/console-unverified'
-import type { ApiError } from '../api/console'
-import { isValidSlug, type AppComment, type ConversationSettingInput, type DirectoryMigration, type DirectoryMigrationResult, type Group, type Me, type Person } from '../model/contracts/console'
+import type * as wire from '../api/contracts/console/schema/schemas'
+import { isValidSlug, type ConversationSettingInput } from '../model/contracts/console'
 import { buildSessionMockControl, buildSessionRoutes, resetBuildSessions } from './mock-build-sessions'
 import { imageInfo, mockAvatarPng, mockScreenPng, type Rgb, type ScreenshotType } from './mock-images'
+
+// Mock responses use the writer's inferred wire types, not the reader's domain projections.
+type AccessRequest = z.output<typeof wire.accessRequest>
+type AppTool = z.output<typeof wire.tool>
+type AppTools = z.output<typeof wire.tools>
+type BusinessApp = z.output<typeof wire.app>
+type DirectoryEntry = z.output<typeof wire.directoryEntry>
+type DirectoryUser = z.output<typeof wire.directoryUser>
+type Membership = z.output<typeof wire.membership>
+type MemberRole = Membership['role']
+type PersonProfile = z.output<typeof wire.personProfile>
+type PlatformSettings = z.output<typeof wire.settings>
+type Resolved = z.output<typeof wire.resolved>
+type Screenshot = z.output<typeof wire.screenshot>
+type SharePolicy = z.output<typeof wire.share>
+type ApiError = z.output<typeof wire.error>
+type AppComment = z.output<typeof wire.comment>
+type DirectoryMigration = z.output<typeof wire.me>['migration']
+type DirectoryMigrationResult = z.output<typeof wire.migrationResult>
+type Group = z.output<typeof wire.group>
+type Me = z.output<typeof wire.me>
+type Person = z.output<typeof wire.person>
 
 type Role = 'Admin' | 'Editor' | 'Viewer'
 type StoredGroup = Omit<Group, 'path' | 'subgroupCount' | 'memberCount'>

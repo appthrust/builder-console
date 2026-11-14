@@ -397,20 +397,25 @@ test('a save that lands after the notice is drawn and before 置き換えて続�
 })
 
 test('a long difference lists the first five of each group with a count, 「すべて表示」 lists all, and people the Directory does not know are told apart by subject', async () => {
-  const long = 'https://issuer.example/subjects/0123456789-abcdef'
-  const subjects = [...Array.from({ length: 7 }, (_, index) => `sub-extra-${index}`), long]
+  // Three long subjects: one alone, and a pair that differs only in the middle a shortened form leaves out.
+  const alone = 'https://other.example/people/0123456789-zzzzzzzz'
+  const pair = ['https://issuer.example/subjects/0123456789-abcdef', 'https://issuer.example/subjects/9999999999-abcdef']
+  const subjects = [alone, ...pair, ...Array.from({ length: 5 }, (_, index) => `sub-extra-${index}`)]
   await foreignSave('p-yamada', 0, subjects)
   await renderPage()
   await click(radio('on'))
   await foreignSave('p-sato', 1, ['sub-sato'], 'allowlist')
   await save()
-  const shortLong = `${long.slice(0, 12)}…${long.slice(-8)}`
   const label = (subject: string) => words.unknownSubject(copy.common.unknownPerson, subject)
+  const shortAlone = `${alone.slice(0, 12)}…${alone.slice(-8)}`
+  expect(`${pair[0]!.slice(0, 12)}…${pair[0]!.slice(-8)}`).toBe(`${pair[1]!.slice(0, 12)}…${pair[1]!.slice(-8)}`)
   expect(diff('mode')).toBe(words.diffMode(words.modes.allowlist.title, words.modes.on.title))
   expect(diff('removed')).toBe(`${words.diffRemoved(1)} 佐藤 花子`)
-  expect(diff('added')).toBe(`${words.diffAdded(8)} ${subjects.slice(0, 5).map(label).join(words.separator)} ${words.diffMore(3)}`)
+  // Collapsed: the lone long subject is shortened, the pair is shown whole so the two stay apart.
+  expect(diff('added')).toBe(`${words.diffAdded(8)} ${[shortAlone, ...pair, 'sub-extra-0', 'sub-extra-1'].map(label).join(words.separator)} ${words.diffMore(3)}`)
   await click(button(words.showAll))
-  expect(diff('added')).toBe(`${words.diffAdded(8)} ${[...subjects.slice(0, 7), shortLong].map(label).join(words.separator)}`)
+  // Expanded: everyone, every subject whole.
+  expect(diff('added')).toBe(`${words.diffAdded(8)} ${subjects.map(label).join(words.separator)}`)
   expect(button(words.showFewer).getAttribute('aria-expanded')).toBe('true')
 })
 

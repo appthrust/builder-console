@@ -2,7 +2,7 @@
 // slice; merged into `copy` by ../copy.ts. 敬体; status line ≤ 20 chars,
 // second line ≤ 40 chars (ux-design §10). Engineering words (§4 隠す語) only
 // appear inside 「詳しい人向け」 keys (`create.advanced`, `app.overview.advanced`).
-import type { ComponentSummaryStatusReasonKey, PublishPhase } from '@appthrust/api-schema/platform-api'
+import type { ComponentReasonKey, PublishPhase } from '../model/contracts/app'
 
 /** `unfinished`: a draft nobody is working on; a neutral word, never counted as 問題あり. */
 export type ConsoleStatus = 'live' | 'deploying' | 'failed' | 'unfinished' | 'unknown'
@@ -333,7 +333,7 @@ export const apps = {
   },
 }
 
-export const reasonCopy: Record<ComponentSummaryStatusReasonKey, string> = {
+export const reasonCopy: Record<ComponentReasonKey, string> = {
   ComponentReady: '正常に動いています。',
   PendingSync: '変更を反映しています。',
   DeletionInProgress: '削除しています。',
@@ -350,7 +350,7 @@ export const reasonCopy: Record<ComponentSummaryStatusReasonKey, string> = {
 }
 
 /** The next action for a component-summaries reasonKey, when it is more specific than 「ログを確認」. */
-export const reasonHelp: Partial<Record<ComponentSummaryStatusReasonKey, string>> = {
+export const reasonHelp: Partial<Record<ComponentReasonKey, string>> = {
   PortUnresolved:
     'Dockerfile に「EXPOSE 番号」（例: EXPOSE 3000）を 1 つだけ書いて push し直すか、開発者に相談してください。',
 }

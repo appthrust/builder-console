@@ -9,7 +9,7 @@ import { copy } from '../copy'
 import { SessionExpiryBoundary } from '../ui/session-expired'
 import { getDraft } from './build'
 import { buildDraftOptions } from './queries/build'
-import { platformFetch } from './client'
+import { createPlatformFetch } from './client'
 import { groupsContract } from './contracts/console/groups'
 import { meContract } from './contracts/console/me'
 import { createTestGateway } from './testing/gateway'
@@ -36,15 +36,16 @@ const expiredResponses: Array<[string, () => Response]> = [
 test.each(expiredResponses)('Platform API %s settles as session expiry and blocks subsequent polling', async (_name, response) => {
   const fetch = mock(async () => response())
   globalThis.fetch = fetch as unknown as typeof globalThis.fetch
+  const send = createPlatformFetch(fetch)
   const request = new Request('https://console.example.test/api/v1/projects/p/application-drafts/d')
-  const error = await platformFetch(request).catch((error: unknown) => error)
+  const error = await send(request).catch((error: unknown) => error)
   expect(isSessionExpiredError(error)).toBe(true)
   expect(error).toMatchObject({ status: 401, code: 'SESSION_EXPIRED' })
   expect(retryReadQuery(0, error)).toBe(false)
   expect(retryQuery(0, error)).toBe(false)
   expect(sessionExpiryStore.state).toBe(true)
   expect((fetch.mock.calls[0] as unknown as [Request])[0].redirect).toBe('manual')
-  await expect(platformFetch(request)).rejects.toMatchObject({ code: 'SESSION_EXPIRED' })
+  await expect(send(request)).rejects.toMatchObject({ code: 'SESSION_EXPIRED' })
   expect(fetch).toHaveBeenCalledTimes(1)
 })
 

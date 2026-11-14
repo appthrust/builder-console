@@ -4,7 +4,6 @@ import { QueryClient } from '@tanstack/react-query'
 import { openAPIDocument } from './schema/generate'
 import { operations } from './schema/operations'
 import { schemas } from './schema/schemas'
-import { createConsoleApi } from '../../console-unverified'
 import { createConsoleTransport, isConsoleError, type ConsoleRequest } from '../../console'
 import { createApiGateway } from '../../gateway'
 import { decodeResponse, isResponseContractError, type ResponseContract } from '../../boundary'
@@ -62,63 +61,6 @@ for (const [key, operation] of Object.entries(operations)) {
   })
 }
 
-test('all SPA facade operations have a registered HTTP success contract', async () => {
-  const seen: ConsoleRequest[] = []
-  const api = createConsoleApi({ send: async (request) => {
-    seen.push(request)
-    // This test observes requests only; responses are never used as domain evidence.
-    return { status: 200, body: { kind: 'json', value: { items: [] } } }
-  } })
-  const args: Record<string, unknown[]> = {
-    resolve: ['/group/app'], 'apps.list': [{}], 'apps.byPath': ['group', 'app'],
-    'apps.create': [{ displayName: 'App', groupId: 'group' }], 'apps.bind': ['app', { stackId: 'stack', appName: 'app' }],
-    'apps.remove': ['app'], 'apps.directory': [{}], 'apps.directoryEntry': ['app'], 'apps.tools': ['app'],
-    'directory.searchPeople': ['person'], 'directory.people': [['person']],
-    'directory.person': ['person'], 'directory.createPerson': [{ email: 'person@example.test', displayName: 'Person' }],
-    'directory.members': ['group'], 'directory.users': ['person'],
-    'screenshots.upload': ['app', new File(['bytes'], 'screen.png')], 'screenshots.remove': ['app', 'shot'], 'screenshots.reorder': ['app', []],
-    'admin.directoryMigrate': [],
-  }
-  const invoked: string[] = []
-  async function visit(object: object, prefix = '') {
-    for (const [key, value] of Object.entries(object)) {
-      const name = prefix ? `${prefix}.${key}` : key
-      if (typeof value === 'function') {
-        expect(args[name], `new SPA operation needs an inventory fixture: ${name}`).toBeDefined()
-        await value(...args[name]!)
-        invoked.push(name)
-      } else await visit(value, name)
-    }
-  }
-  await visit(api)
-  expect(invoked.sort()).toEqual(Object.keys(args).sort())
-  // Already-migrated callers are exercised through their real query functions
-  // in bootstrap.test; add their transport requests to the same inventory.
-  for (const contract of [consoleContracts.me, consoleContracts.config, consoleContracts.groups]) seen.push(contract.request(undefined))
-  seen.push(consoleContracts.comments.request('app'), consoleContracts.postComment.request({ appId: 'app', body: 'Hi' }), consoleContracts.removeComment.request({ appId: 'app', commentId: 'comment' }))
-  // Operations whose facade calls are gone: the SPA sends their contract requests.
-  seen.push(
-    consoleContracts.app.request('app'), consoleContracts.updateApp.request({ appId: 'app', input: {} }),
-    consoleContracts.myAccessRequest.request('app'), consoleContracts.createAccessRequest.request({ appName: 'app', message: '' }),
-    consoleContracts.pendingAccessRequests.request(undefined), consoleContracts.appAccessRequests.request('app'),
-    consoleContracts.approveAccessRequest.request({ appId: 'app', requestId: 'request' }), consoleContracts.declineAccessRequest.request({ appId: 'app', requestId: 'request' }),
-    consoleContracts.settings.request(undefined),
-  )
-  const matched = new Set<string>()
-  for (const request of seen) {
-    const url = new URL(request.path, 'https://console.test')
-    const found = Object.values(operations).filter((operation) => {
-      if (request.method !== operation.method) return false
-      if (operation === operations.apps && url.searchParams.get('scope') === 'directory') return false
-      if (operation === operations.directoryApps && url.searchParams.get('scope') !== 'directory') return false
-      return new RegExp(`^${operation.routeTemplate.replace(/\{path\}/g, '.+').replace(/\{[^}]+\}/g, '[^/]+')}$`).test(url.pathname)
-    })
-    expect(found.length, `${request.method} ${url.pathname}`).toBe(1)
-    matched.add(found[0]!.operationId)
-  }
-  expect([...matched].sort()).toEqual(Object.values(operations).map((operation) => operation.operationId).sort())
-})
-
 test('Person variants retain identity without inventing contact or granting owner capabilities', () => {
   const app = fixture('App') as Record<string, unknown>
   const parsed = decodeResponse(consoleContracts.app, app)
@@ -152,8 +94,8 @@ test('every write rejects malformed success before side effects and never resend
     const send = mock(async () => ({ status: contract.successStatuses[0]!, body: { kind: 'json' as const, value: { [SECRET]: SECRET } } }))
     const reports: unknown[] = []
     const gateway = createApiGateway({ platformTransport, consoleTransport: { send }, reportFailure: (report) => { reports.push(report) } })
-    // The response side is uniform; the request seam is exercised separately by
-    // the inventory and the multipart test below, not by casts to domain values.
+    // The response side is uniform; real requests are exercised by mock-wires.test
+    // and the multipart test below, not by casts to domain values.
     const responseContract: ConsoleOperationContract<undefined, unknown> = { ...contract, request: () => ({ method: contract.method, path: contract.routeTemplate }) }
     const success = mock(() => {})
     const failure = await gateway.console(responseContract, undefined).then(success).catch((error: unknown) => error)

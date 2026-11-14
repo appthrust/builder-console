@@ -36,11 +36,8 @@ function describe(setting: ConversationSetting): string {
 /** Names listed per group before 「すべて表示」. */
 const DIFF_PREVIEW = 5
 
-/** A person in the difference: the Directory name, else 不明な利用者 with enough of the sign-in subject to tell two apart. */
-function personLabel({ subject, displayName }: ConversationSetting['allowlist'][number]): string {
-  if (displayName) return displayName
-  return text.conversation.unknownSubject(copy.common.unknownPerson, subject.length > 24 ? `${subject.slice(0, 12)}…${subject.slice(-8)}` : subject)
-}
+/** A long sign-in subject cut to its start and end, for the collapsed difference. */
+const shortSubject = (subject: string) => subject.length > 24 ? `${subject.slice(0, 12)}…${subject.slice(-8)}` : subject
 
 /**
  * Another administrator saved first: what replacing their setting with the unsaved choice would change, in plain terms
@@ -56,6 +53,17 @@ function ConflictNotice({ current, server, draft, onDiscard, onKeep }: { current
     { kind: 'removed', label: words.diffRemoved, people: server.allowlist.filter((entry) => !mine.has(entry.subject)) },
   ].filter((group) => group.people.length > 0)
   const long = groups.some((group) => group.people.length > DIFF_PREVIEW)
+  // A shortened subject is used only while no other unknown person here shortens to the same text; 「すべて表示」 shows them whole.
+  const shortened = new Map<string, number>()
+  for (const { subject } of groups.flatMap((group) => group.people).filter((entry) => !entry.displayName)) {
+    shortened.set(shortSubject(subject), (shortened.get(shortSubject(subject)) ?? 0) + 1)
+  }
+  /** The Directory name, else 不明な利用者 with enough of the sign-in subject to tell any two apart. */
+  const personLabel = ({ subject, displayName }: ConversationSetting['allowlist'][number]) => {
+    if (displayName) return displayName
+    const whole = expanded || (shortened.get(shortSubject(subject)) ?? 0) > 1
+    return words.unknownSubject(copy.common.unknownPerson, whole ? subject : shortSubject(subject))
+  }
   return (
     <Notice
       tone="warning"
@@ -73,7 +81,7 @@ function ConflictNotice({ current, server, draft, onDiscard, onKeep }: { current
         {groups.map(({ kind, label, people }) => {
           const listed = expanded ? people : people.slice(0, DIFF_PREVIEW)
           return (
-            <li key={kind} data-testid={`conversation-conflict-${kind}`}>
+            <li key={kind} className="[overflow-wrap:anywhere]" data-testid={`conversation-conflict-${kind}`}>
               <span className="font-medium">{label(people.length)}</span> {listed.map(personLabel).join(words.separator)}
               {listed.length < people.length ? ` ${words.diffMore(people.length - listed.length)}` : null}
             </li>
