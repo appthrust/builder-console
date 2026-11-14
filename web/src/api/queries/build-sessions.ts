@@ -23,7 +23,6 @@ export const buildSessionKeys = {
   session: (id: string) => ['build-session', id, 'session'] as const,
   turns: (id: string) => ['build-session', id, 'turns'] as const,
   turn: (id: string, turnId: string) => ['build-session', id, 'turn', turnId] as const,
-  specRevision: (id: string, revision: number) => ['build-session', id, 'spec', revision] as const,
 }
 
 type NextAction = BuildSession['nextAction']
@@ -172,16 +171,6 @@ export function buildTurnOptions(sessionId: string, turnId: string | undefined, 
     refetchIntervalInBackground: true,
     refetchInterval: pollInterval<BuildTurn>((turn) =>
       ({ nextAction: turn.nextAction, pollAfterMs: turn.pollAfterMs, phase: `${openText(turn.state)}/${openText(turn.progress?.stage)}` })),
-  })
-}
-
-export function buildSpecRevisionOptions(sessionId: string, revision: number | undefined, api: BuildSessionsApi = buildSessionsApi) {
-  return queryOptions({
-    queryKey: buildSessionKeys.specRevision(sessionId, revision ?? -1),
-    queryFn: sessionId && revision !== undefined ? () => api.specRevision(sessionId, revision) : skipToken,
-    // A revision is immutable once written.
-    staleTime: Infinity,
-    refetchInterval: false,
   })
 }
 

@@ -29,10 +29,8 @@ const NAME_RETRY_DELAYS = [1_000, 3_000, 10_000, 30_000]
 export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, ownerGroupName?: string) {
   const { projectId } = me
   const queryClient = useQueryClient()
-  // The session's writes reach the draft cache at once (`receive`), but the page re-renders with them only after
-  // React Query's batched observer notification. The session store changes synchronously (a reply acknowledged, a
-  // request cleared), so a render in between must already read the written draft: with the observed one the write
-  // looks undone and is sent again (the hidden preparation turn was queued twice and answered 409).
+  // This hook receives a prop, not a useQuery result: its store can re-render before the parent's batched
+  // query notification. Read the written draft now or the hidden preparation turn can be sent twice.
   const draft = queryClient.getQueryData<BuildDraft>(buildDraftOptions(projectId, observed.id).queryKey) ?? observed
   const [initial] = useState(() => {
     const saved = readBuildSession(draft.id)

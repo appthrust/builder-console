@@ -225,12 +225,7 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
   const codexAvailable = tools.data?.codexAvailable !== false
   const draftQuery = useQuery({ ...buildDraftOptions(projectId, draftId ?? ''), enabled: Boolean(draftId) })
   const [storedDraft, setStoredDraft] = useState<BuildDraft>()
-  const observed = draftQuery.data ?? (storedDraft?.projectId === projectId && (!draftId || storedDraft.id === draftId) ? storedDraft : undefined)
-  // This flow's writes reach the draft cache at once (`receive`), but the page re-renders with them only after
-  // React Query's batched observer notification. A render in between must already read the written draft: with
-  // the observed one, `draftRef` goes back to the older draft and the next write builds on it (a turn appended
-  // to the draft as it was before the PATCH that preceded it, undoing that PATCH in the cache).
-  const draft = observed ? queryClient.getQueryData<BuildDraft>(buildDraftOptions(projectId, observed.id).queryKey) ?? observed : undefined
+  const draft = draftQuery.data ?? (storedDraft?.projectId === projectId && (!draftId || storedDraft.id === draftId) ? storedDraft : undefined)
   const members = draft?.source?.workbooks ?? EMPTY_MEMBERS
   const [previewRequested, setPreviewRequested] = useState(false)
   const [offline, setOffline] = useState(() => (draftId ? readOffline(draftId) : false))
