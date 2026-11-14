@@ -152,6 +152,7 @@ export const textEn: typeof textJa = {
     nameHint: 'Shown in the app list and in the app’s header.',
     nameRequired: 'Enter a name.',
     audience: 'Who can see it',
+    audienceUnknown: 'The saved audience is one this version cannot show. It is kept as it is.',
     audienceHint: {
       private: 'Only you can use it.',
       group: 'Members of your group can use it.',

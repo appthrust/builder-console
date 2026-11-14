@@ -1,6 +1,6 @@
 // Collect a workbook set, review its integrated business design, then hand the
 // same draft and screen decisions to the build flow.
-import { isOneOf, knownValue, type BuildTurn } from '../../model/contracts/build'
+import { excelSource, isOneOf, knownValue, type BuildTurn } from '../../model/contracts/build'
 import type { Capability, ColumnKind, ExcelAnalysis, ReadingSheet, SheetRole, UiDesign, WorkbookEntry, WorkbookList, WorkbookSummary } from '../../model/contracts/excel'
 import { useNavigate } from '@tanstack/react-router'
 import { ArrowRight, Calculator, CalendarClock, Check, CircleDashed, ClipboardList, Database, Download, Eye, FileSpreadsheet, GitBranch, ListChecks, Loader2, Pencil, PieChart, RotateCcw, Search, Sparkles, Table2, Upload } from 'lucide-react'
@@ -178,7 +178,7 @@ function Excel2AppFlow({ draftId, onCreatedDraft }: { draftId?: string; onCreate
     specEditRef.current = undefined
     setSpecEdit(undefined)
     setEditing(false)
-  }, [draft?.source?.revision])
+  }, [excelSource(draft)?.revision])
 
   const next = async () => {
     if (step === SPEC_STEP && !readOnly) {
@@ -193,7 +193,9 @@ function Excel2AppFlow({ draftId, onCreatedDraft }: { draftId?: string; onCreate
   const design = flow.design.current
   // The name the preview settled; the specification's name and the title stand in until a design exists.
   const chosenName = publishName ?? draft?.publishPreferences?.name ?? (design?.appName || (draft ? parseSpec(draft.specMarkdown).spec.name || draft.title : ''))
-  const chosenScope = shareChoice ?? draft?.publishPreferences?.shareScope ?? 'group'
+  // A saved audience this console does not know is not offered back: like the publish step, the choice starts from the narrowest.
+  const savedScope = draft?.publishPreferences?.shareScope
+  const chosenScope = shareChoice ?? (savedScope?.kind === 'unknown' ? 'private' : knownValue(savedScope) ?? 'group')
 
   const startBuild = async () => {
     if (!draft || readOnly) return
@@ -248,6 +250,12 @@ function Excel2AppFlow({ draftId, onCreatedDraft }: { draftId?: string; onCreate
           </Notice>
         </div>
       ) : null}
+      {flow.sourceUnsupported && draft ? (
+        // The draft's source is not an Excel workbook set this console knows: what it shows stays, nothing is written from here.
+        <div className="mt-6" data-testid="excel2app-source-unsupported">
+          <Notice tone="warning" title={buildCopy.unsupported.title}>{buildCopy.unsupported.detail}</Notice>
+        </div>
+      ) : null}
       <div className="mt-6">
         <Stepper step={step} labels={text.steps} />
       </div>
@@ -257,13 +265,13 @@ function Excel2AppFlow({ draftId, onCreatedDraft }: { draftId?: string; onCreate
           {draftId && draft ? <ResourceBoundary query={flow.draftQuery} resetKey={draftId} loading={null}>{(_read, stale) => stale ? <div className="mb-5">{stale}</div> : null}</ResourceBoundary> : null}
           {flow.unconfirmed ? <div className="mb-5" data-testid="excel2app-unconfirmed"><UnconfirmedNotice onConfirm={() => void flow.confirm()} /></div> : null}
 
-          {step === 0 && !readOnly ? <PickStep busy={flow.collecting || flow.starting || flow.turnRunning} closed={flow.unconfirmed} error={pickError} files={flow.files} budget={flow.budget} hint={flow.hint} onHint={flow.setHint} onFiles={(files) => void collected(files)} onSample={(grids) => void collected(grids, true)} onRemove={(file) => void remove(file)} onRetry={(file) => void flow.retryFile(file.key)} onStart={() => { setStep(ANALYSIS_STEP); void flow.startAnalysis() }} /> : null}
+          {step === 0 && !readOnly && !flow.sourceUnsupported ? <PickStep busy={flow.collecting || flow.starting || flow.turnRunning} closed={flow.unconfirmed} error={pickError} files={flow.files} budget={flow.budget} hint={flow.hint} onHint={flow.setHint} onFiles={(files) => void collected(files)} onSample={(grids) => void collected(grids, true)} onRemove={(file) => void remove(file)} onRetry={(file) => void flow.retryFile(file.key)} onStart={() => { setStep(ANALYSIS_STEP); void flow.startAnalysis() }} /> : null}
           {step === ANALYSIS_STEP && draft ? (
             reading ? (
-              <AnalysisStep reading={reading} workbooks={draft.source?.workbooks ?? []} entries={flow.offlineEntries} readings={flow.workbooksQuery} resetKey={draft.id} offline={flow.offline} />
+              <AnalysisStep reading={reading} workbooks={excelSource(draft)?.workbooks ?? []} entries={flow.offlineEntries} readings={flow.workbooksQuery} resetKey={draft.id} offline={flow.offline} />
             ) : !readOnly ? (
               <AnalysingStep
-                workbooks={draft.source?.workbooks ?? []}
+                workbooks={excelSource(draft)?.workbooks ?? []}
                 turn={flow.analysis.turn}
                 problem={flow.analysis.problem}
                 error={flow.analysis.error}
@@ -318,6 +326,7 @@ function Excel2AppFlow({ draftId, onCreatedDraft }: { draftId?: string; onCreate
               design={design}
               name={chosenName}
               shareChoice={chosenScope}
+              savedAudienceUnknown={savedScope?.kind === 'unknown'}
               ownerGroupName={ownerGroupName}
               nameMissing={nameMissing}
               onName={setPublishName}
@@ -676,12 +685,14 @@ function SpecStep({ body, specMarkdown, editing, readOnly, status, fileName, onE
   )
 }
 
-function ImplementStep({ reading, plan, design, name, shareChoice, ownerGroupName, nameMissing, onName, onShareChoice }: {
+function ImplementStep({ reading, plan, design, name, shareChoice, savedAudienceUnknown, ownerGroupName, nameMissing, onName, onShareChoice }: {
   reading: ExcelAnalysis
   plan: AppPlan
   design: UiDesign
   name: string
   shareChoice: DraftShareScope
+  /** The draft's saved audience is one this console does not know: it is kept (the hand-off withholds it), not offered. */
+  savedAudienceUnknown: boolean
   ownerGroupName?: string
   nameMissing: boolean
   onName: (name: string) => void
@@ -749,14 +760,14 @@ function ImplementStep({ reading, plan, design, name, shareChoice, ownerGroupNam
         <Field id={PUBLISH_NAME_ID} label={text.implement.name} hint={text.implement.nameHint} error={nameMissing && !name.trim() ? text.implement.nameRequired : undefined} required>
           <TextInput id={PUBLISH_NAME_ID} data-testid="excel2app-publish-name" value={name} maxLength={200} autoComplete="off" invalid={nameMissing && !name.trim()} onChange={(event) => onName(event.target.value)} />
         </Field>
-        <RadioCards<DraftShareScope>
+        {savedAudienceUnknown ? <p role="note" data-testid="excel2app-audience-unknown" className="text-sm text-stone-600">{text.implement.audienceUnknown}</p> : <RadioCards<DraftShareScope>
           name="excel2app-audience"
           legend={text.implement.audience}
           columns={3}
           value={shareChoice}
           onChange={onShareChoice}
           options={SHARE_CHOICES.map((choice) => ({ value: choice, title: shareScopeLabel(choice, ownerGroupName), description: text.implement.audienceHint[choice] }))}
-        />
+        />}
       </section>
       <p className="flex items-center gap-1.5 text-xs text-stone-500"><Sparkles aria-hidden className="size-3.5 shrink-0 text-accent" />{text.implement.startHint}</p>
     </div>

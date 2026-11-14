@@ -1,4 +1,4 @@
-import { isOneOf, jobState, knownValue, type BuildDraft, type BuildExecution, type BuildGeneration, type BuildTurn } from '../contracts/build'
+import { draftKind, isOneOf, jobState, knownValue, type BuildDraft, type BuildExecution, type BuildGeneration, type BuildTurn } from '../contracts/build'
 import { buildCopy } from './copy'
 import { isBuildPending, progressCard } from './progress'
 import { conversationTurns, isKickoffReply, prepareAnswers } from './questions'
@@ -51,7 +51,10 @@ export interface StageInput {
   now: number
 }
 
-/** `unsupported`: the draft's phase or its latest job's state is unknown to this console; no stage action is offered. */
+/**
+ * `unsupported`: the draft's phase or kind, its latest job's state, or a value in its plan is unknown to this
+ * console; no stage action is offered (the plan is what creating, renaming and binding the app are made from).
+ */
 export interface StageResult { stage: BuildStage; build?: { phase: BuildPhase }; primary: BuildPrimary; progress?: ProgressCard; unsupported?: true }
 
 export function deriveStage(input: StageInput): StageResult {
@@ -60,9 +63,10 @@ export function deriveStage(input: StageInput): StageResult {
   const turn = input.turn ?? draft?.conversationTurns.at(-1)
   const execution = input.execution ?? draft?.creationExecutions.at(-1)
   const result = knownStage({ ...input, generation, turn, execution })
-  // The draft's phase or the state of its latest job is a value this console does not know:
-  // keep showing what is known, but nothing that depends on that state can be started.
-  const unsupported = draft?.phase.kind === 'unknown' || [generation, turn, execution].some((job) => jobState(job) === 'unknown')
+  // The draft's phase or kind, the state of its latest job or a value in its plan is one this console does not
+  // know: keep showing what is known, but nothing that depends on it can be started.
+  const unsupported = draft?.phase.kind === 'unknown' || (draft !== undefined && draftKind(draft) === 'unknown') || draft?.creationPlan?.kind === 'unsupported'
+    || [generation, turn, execution].some((job) => jobState(job) === 'unknown')
   return unsupported ? { ...result, primary: { action: 'none', label: '', enabled: false }, unsupported: true } : result
 }
 

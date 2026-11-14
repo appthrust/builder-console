@@ -14,7 +14,7 @@ const wireWorkspace = {
   previewDatabase: { engine: 'PostgreSQL', ready: true, resetGeneration: 0 }, conditions: [ready],
 }
 const domainWorkspace: PreviewWorkspace = {
-  id: 'ws-1', projectId: 'project-1', scope: 'applicationDraft', draftId: 'draft-1', displayName: '見積の作業場所', ownerUserId: 'owner-1',
+  id: 'ws-1', projectId: 'project-1', scope: { kind: 'known', value: 'applicationDraft' }, draftId: 'draft-1', displayName: '見積の作業場所', ownerUserId: 'owner-1',
   phase: { kind: 'known', value: 'Ready' }, branchName: 'appthrust/draft-1', baseRef: 'main', previewUrl: '/api/v1/projects/project-1/dev-workspaces/ws-1/proxy/preview/',
   previewDatabase: { engine: { kind: 'known', value: 'PostgreSQL' }, ready: true, resetGeneration: 0 }, conditions: [{ ...ready, status: { kind: 'known', value: 'True' } }],
 }
@@ -61,6 +61,17 @@ describe('DevWorkspace read (platformApiGetDevWorkspace)', () => {
         wire: { ...wireWorkspace, conditions: [{ ...ready, status: SECRET }] },
         expect: { accept: true, check: (workspace) => { expect(workspace.conditions[0]?.status).toEqual({ kind: 'unknown' }); expect(previewReady(workspace)).toBe(false) } },
       },
+      {
+        name: 'a scope, sandbox runtime and source volume state added later keep the preview readable (and Ready)', variant: 'unknown', path: '/scope',
+        wire: { ...wireWorkspace, scope: SECRET, runtime: { sandboxRuntime: SECRET }, sourceVolume: { state: SECRET } },
+        expect: { accept: true, check: (workspace) => {
+          expect([workspace.scope, workspace.runtime?.sandboxRuntime, workspace.sourceVolume?.state]).toEqual([{ kind: 'unknown' }, { kind: 'unknown' }, { kind: 'unknown' }])
+          expect(previewReady(workspace)).toBe(true)
+          expect(JSON.stringify(workspace)).not.toContain(SECRET)
+        } },
+      },
+      { name: 'a scope that is not a string is broken, not unknown', variant: 'unknown', path: '/scope', wire: { ...wireWorkspace, scope: 3 }, expect: { accept: false, issues: [{ path: '/scope', code: 'invalid_type' }] } },
+      { name: 'a source volume without its state is broken', variant: 'absent', path: '/sourceVolume/state', wire: { ...wireWorkspace, sourceVolume: {} }, expect: { accept: false, issues: [{ path: '/sourceVolume/state', code: 'missing' }] } },
       { name: 'a phase that is not a string is broken, not unknown', variant: 'unknown', path: '/phase', wire: { ...wireWorkspace, phase: 7 }, expect: { accept: false, issues: [{ path: '/phase', code: 'invalid_type' }] } },
       { name: 'an absent phase is broken', variant: 'absent', path: '/phase', wire: without('phase'), expect: { accept: false, issues: [{ path: '/phase', code: 'missing' }] } },
       { name: 'a null condition status is broken, not unknown', variant: 'null', path: '/conditions', wire: { ...wireWorkspace, conditions: [{ ...ready, status: null }] }, expect: { accept: false, issues: [{ path: '/conditions/*/status', code: 'invalid_type' }] } },

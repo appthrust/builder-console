@@ -28,4 +28,5 @@ export const textEn: typeof textJa = {
   unmetCriteria: (count: number) => `${count} unmet acceptance criteria`,
   skip: 'Skip this task',
   nothingImplemented: 'No screens have been built yet; try again to build them.',
+  workspaceLoadFailed: 'We could not load the preview status. Progress is still shown as usual.',
 }

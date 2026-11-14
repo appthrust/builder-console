@@ -79,6 +79,8 @@ export const textJa = {
     missingExecution: 'The server did not return a creation execution',
     operationFailed: 'The operation failed',
     missingAppName: 'The creation plan has no application name',
+    /** A readiness gate whose id or state this console does not know: creation stops at it. */
+    unknownGate: '作成前の確認に、この画面では判断できない項目があります。作成を止めています。',
   },
   header: {
     stateWord: { ask: '作りかけ', decide: '作りかけ', build: '作っています', publish: '公開中' } satisfies Record<BuildStage, string>,
@@ -125,6 +127,8 @@ export const textJa = {
   },
   /** The console-v1 conversation (APT-753): typed reply, confirmation, progress and publish settings. */
   console: {
+    /** The conversation's turns could not be read at all: what is shown may miss replies. */
+    turnsLoadFailed: 'やり取りを読み込めませんでした。まだ表示していない返事があるかもしれません。',
     candidates: '候補',
     candidatesHint: '選ぶと、その内容で仕様の変更案を作ります。',
     /** What a chosen candidate sends: the user's choice, as a change request that still needs confirming. */

@@ -3,7 +3,7 @@
 // app. Pure derivations for the session page, the 作りかけ list and the app
 // page entry; the server owns turns, runs and task identity.
 import { implementationTodoId } from '../features/build/implement/state'
-import { isOneOf, jobState, type BuildDraft, type BuildTurn, type ImplementationRun } from './contracts/build'
+import { draftKind, isOneOf, jobState, planOverview, type BuildDraft, type BuildTurn, type ImplementationRun } from './contracts/build'
 import { isBuildPending } from './build/progress'
 import { isProductLanguage } from './build/wording'
 
@@ -41,8 +41,9 @@ export interface ImproveState {
   busy: boolean
 }
 
+/** Only a draft known to be an improvement; a kind this console does not know is neither this nor a new app. */
 export function isImprovementDraft(draft: Pick<BuildDraft, 'kind'>): boolean {
-  return draft.kind === 'improvement'
+  return draftKind(draft) === 'improvement'
 }
 
 const time = (value: string | undefined) => (value ? Date.parse(value) : Number.NaN)
@@ -57,10 +58,14 @@ function detailOf(text: string): string | undefined {
   return sentence && isProductLanguage(sentence) ? sentence : undefined
 }
 
-/** Handoff tasks the next run would make. Task identity follows `implementationTodoId`, like the server. */
+/**
+ * Handoff tasks the next run would make. Task identity follows `implementationTodoId`, like the server. The tasks
+ * are the plan's known part: a plan holding a value this console does not know still shows and runs them (the
+ * console never sends that plan back; the server runs the handoff).
+ */
 export function pendingProposal(draft: Pick<BuildDraft, 'creationPlan' | 'implementationRuns'>): ImproveTask[] {
   const finished = new Set((draft.implementationRuns.at(-1)?.tasks ?? []).filter((task) => isOneOf(task.status, 'done', 'skipped')).map((task) => task.id))
-  return (draft.creationPlan?.implementationHandoff?.tasks ?? []).flatMap((task, index) => {
+  return (planOverview(draft)?.implementationHandoff?.tasks ?? []).flatMap((task, index) => {
     const id = implementationTodoId(task.title, index)
     if (finished.has(id)) return []
     const detail = detailOf(task.description)

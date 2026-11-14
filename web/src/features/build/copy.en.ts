@@ -72,6 +72,7 @@ export const textEn: typeof textJa = {
     missingExecution: 'The server did not return a creation execution',
     operationFailed: 'The operation failed',
     missingAppName: 'The creation plan has no application name',
+    unknownGate: 'A check before creating cannot be judged on this screen, so creation has stopped.',
   },
   header: {
     stateWord: { ask: 'Draft', decide: 'Draft', build: 'Building', publish: 'Published' },
@@ -116,6 +117,7 @@ export const textEn: typeof textJa = {
     submit: 'Use this name',
   },
   console: {
+    turnsLoadFailed: 'We could not load the conversation. Some replies may not be shown yet.',
     candidates: 'Options',
     candidatesHint: 'Choose one to get a proposed change to the app details.',
     candidateMessage: (label: string) => `I’d like “${label}”`,

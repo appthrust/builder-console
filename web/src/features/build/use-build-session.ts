@@ -1,5 +1,5 @@
 import { isResponseContractError } from '../../api/boundary'
-import { isOneOf, type BuildDraft, type BuildExecutionStep } from '../../model/contracts/build'
+import { draftKind, isOneOf, knownValue, type BuildDraft, type BuildExecutionStep } from '../../model/contracts/build'
 import { useQueryClient } from '@tanstack/react-query'
 import { useCreateStore, useSelector } from '@tanstack/react-store'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -257,13 +257,18 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
 
   // Draft preferences are authoritative across tabs. During implementation only the
   // preferences/title are writable; specification alignment waits for its lock.
+  // A saved audience this console does not know is never rewritten: preferences are written whole, so they are left as saved.
   useEffect(() => {
     const name = answers.name
-    const preferences = { ...draft.publishPreferences, ...(name ? { name } : {}), ...(answers.shareChoice ? { shareScope: answers.shareChoice } : {}) }
-    const preferencesChanged = preferences.name !== draft.publishPreferences?.name || preferences.shareScope !== draft.publishPreferences?.shareScope
+    const saved = draft.publishPreferences
+    const savedScope = knownValue(saved?.shareScope)
+    const shareScope = answers.shareChoice ?? savedScope
+    const preferences = { ...(saved?.name ? { name: saved.name } : {}), ...(name ? { name } : {}), ...(shareScope ? { shareScope } : {}) }
+    const preferencesChanged = saved?.shareScope?.kind !== 'unknown' && (preferences.name !== saved?.name || preferences.shareScope !== savedScope)
     const titleChanged = Boolean(name && draft.title !== name)
     const specChanged = Boolean(name && spec.name !== name && !implementing)
-    if ((!preferencesChanged && !titleChanged && !specChanged) || running || busy || lock.current || failure || nameRetryAt) return
+    // A draft of a kind this console does not know is kept off the session's automatic writes (use-draft-creation.ts).
+    if (draftKind(draft) === 'unknown' || (!preferencesChanged && !titleChanged && !specChanged) || running || busy || lock.current || failure || nameRetryAt) return
     void perform('prepare', async () => {
       const current = parseSpec(draftRef.current.specMarkdown)
       try {

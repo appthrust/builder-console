@@ -1,5 +1,5 @@
 import type { OpenValue } from '../../api/boundary'
-import { isOneOf, jobState, knownValue, type BuildExecution, type RunStep, type TaskStatus } from '../contracts/build'
+import { isOneOf, jobState, knownValue, type BuildExecution, type CreationTool, type RunStep, type TaskStatus } from '../contracts/build'
 import type { SourceRepository } from '../contracts/catalog'
 import { buildCopy } from './copy'
 import { classifyBuildFailure } from './failure'
@@ -19,13 +19,20 @@ export function isBuildPending(operation: { status: OpenValue<string> } | undefi
 
 type StepState = NonNullable<ProgressCard['steps']>[number]['state']
 
-export function executionSteps(execution: BuildExecution): NonNullable<ProgressCard['steps']> {
+/** A step's label by its tool; a tool this console does not know gets a generic label, never another tool's. */
+function stepLabel(tool: CreationTool | undefined, publishRequested: boolean): string {
   const copy = buildCopy.progress.steps
+  if (!tool) return copy.other
+  if (tool.endsWith('.validate')) return copy.check
+  if (tool.startsWith('appthrust.applicationSourceRepository.')) return copy.source
+  if (tool === 'appthrust.applicationStack.create') return copy.release
+  if (tool === 'appthrust.applicationStack.observe') return publishRequested ? copy.url : copy.ready
+  return copy.records
+}
+
+export function executionSteps(execution: BuildExecution): NonNullable<ProgressCard['steps']> {
   return execution.steps.map((step) => ({
-    label: step.tool.endsWith('.validate') ? copy.check
-      : step.tool.startsWith('appthrust.applicationSourceRepository.') ? copy.source
-        : step.tool === 'appthrust.applicationStack.create' ? copy.release
-          : step.tool === 'appthrust.applicationStack.observe' ? execution.approval?.applicationStackRequest?.publish ? copy.url : copy.ready : copy.records,
+    label: stepLabel(knownValue(step.tool), execution.approval?.publishRequested ?? false),
     state: stepState(knownValue(step.status)),
     ...(knownValue(step.status) === 'failed' ? { detail: classifyBuildFailure(step.message ?? execution.error ?? '', undefined, 'prepare').reason } : {}),
   }))
@@ -72,7 +79,7 @@ function stagedProgress(phase: PreparationPhase, now: number, since?: string, re
 }
 
 function observeProgress(execution: BuildExecution, now: number): Partial<ProgressCard> | undefined {
-  const observe = execution.steps.find((step) => step.tool === 'appthrust.applicationStack.observe')
+  const observe = execution.steps.find((step) => isOneOf(step.tool, 'appthrust.applicationStack.observe'))
   if (observe && knownValue(observe.phase) === 'syncing') return { ...stagedProgress('syncing', now, observe.detail?.since, observe.detail?.reason, observe.title), hint: undefined }
   const steps = executionSteps(execution)
   const sourceDone = steps.some((step) => step.label === buildCopy.progress.steps.source && step.state === 'done')

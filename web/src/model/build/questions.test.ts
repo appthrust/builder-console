@@ -145,8 +145,8 @@ describe('用意する answers', () => {
     expect(prepareAnswers([opening, analysis, design]).open).toBe(true)
   })
   test('Excel hand-off answers skip name and audience without manufacturing conversation turns', () => {
-    const preferences = { name: '営業見積', shareScope: 'group' as const }
-    const answered = { name: preferences.name, shareChoice: preferences.shareScope }
+    const preferences = { name: '営業見積', shareScope: { kind: 'known' as const, value: 'group' as const } }
+    const answered = { name: preferences.name, shareChoice: 'group' as const }
     const analysis = turn('t-excel', 'この Excel を読み取ってください', 0, { kind: 'excel-analysis' })
     const design = turn('t-ui', '__init__', 1, { kind: 'ui-design' })
     expect(prepareAnswers([analysis, design], preferences)).toEqual({ ...answered, turnIds: [], open: false })

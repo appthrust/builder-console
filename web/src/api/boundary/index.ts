@@ -21,5 +21,5 @@ export {
   type ResponseSource,
 } from './error'
 export { MAX_ISSUES, ROOT_PATH, safePath, type ResponseIssue, type ResponseIssueCode } from './issues'
-export { absentMeansEmpty, openEnum, openUnion, selectVariant, type OpenValue, type Supported } from './readers'
+export { absentMeansEmpty, openEnum, openUnion, selectVariant, supportedIfKnown, type OpenValue, type Supported } from './readers'
 export { contractFailureReport, createConsoleWarnReporter, type ContractFailureReport, type ReportFailure } from './report'

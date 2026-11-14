@@ -1,4 +1,4 @@
-import { isOneOf, type BuildDraft, type BuildTurn } from '../contracts/build'
+import { isOneOf, knownPlan, planOverview, type BuildDraft, type BuildTurn } from '../contracts/build'
 import { summarizeCreationPlan } from '../create'
 import { buildCopy } from './copy'
 import { classifyBuildFailure } from './failure'
@@ -109,14 +109,16 @@ export function assistantMessage(turn: BuildTurn, draftId: string): BuildMessage
  * Infrastructure wording stays in 「詳しい人向け」.
  */
 export function planProposal(draft: BuildDraft, lastPlannedIntent?: string): BuildProposal | undefined {
-  const plan = draft.creationPlan
+  // A plan with a value this console does not know still reads as its summary and tasks; only its address needs the whole plan.
+  const plan = planOverview(draft)
   if (!plan) return undefined
   const { spec } = parseSpec(draft.specMarkdown)
   const handoff = plan.implementationHandoff?.tasks ?? []
   const readable = handoff.filter((task) => isProductLanguage(task.title))
   // A task's description reads as one line: its first sentence, if it is business language.
   const detail = (text: string) => { const sentence = text.split(/(?<=[。！？])|(?<=[.!?])(?=\s|$)|\n/)[0]?.trim() ?? ''; return sentence && isProductLanguage(sentence) ? sentence : undefined }
-  const { url } = summarizeCreationPlan(plan)
+  const known = knownPlan(draft)
+  const url = known ? summarizeCreationPlan(known).url : undefined
   return {
     ...(isProductLanguage(plan.summary) ? { lead: plan.summary.trim() } : {}),
     name: spec.name ?? draft.title,

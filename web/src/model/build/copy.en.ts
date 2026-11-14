@@ -38,7 +38,7 @@ export const textEn: typeof textJa = {
       status: { pending: 'Up next', running: 'In progress', done: 'Done', failed: 'Stopped', skipped: 'Skipped', unknown: 'State not shown here' },
     },
     interrupted: { title: 'Paused for an update; work will resume automatically.', hint: 'This may take up to 15 minutes; you can leave this page open.' },
-    steps: { check: 'Check the details', source: 'Saved app files', release: 'First version', url: 'URL', ready: 'Check app readiness', records: 'Set up records' },
+    steps: { check: 'Check the details', source: 'Saved app files', release: 'First version', url: 'URL', ready: 'Check app readiness', records: 'Set up records', other: 'Other preparation' },
     publishReady: 'Ready to publish',
     observe: {
       source: 'Saved files',

@@ -55,6 +55,52 @@ export function openUnion<I extends z.ZodObject, V extends Record<string, z.ZodT
   return schema
 }
 
+/** The wire value at `path`, or undefined when a step is missing. */
+function valueAt(input: unknown, path: readonly PropertyKey[]): unknown {
+  let current = input
+  for (const segment of path) {
+    if (current === null || typeof current !== 'object' || typeof segment === 'symbol' || !Object.hasOwn(current, segment)) return undefined
+    current = (current as Record<PropertyKey, unknown>)[segment]
+  }
+  return current
+}
+
+/**
+ * Whether an issue is only something added later: a string outside a closed
+ * enum or literal, a discriminator tag this client has no variant for, or a
+ * field a strict object does not declare. A number, boolean or null out of set,
+ * a missing or mistyped field and a failed refinement are not additions.
+ */
+function isAddition(issue: z.core.$ZodIssue, input: unknown): boolean {
+  if (issue.code === 'unrecognized_keys') return true
+  if (issue.code === 'invalid_value') return typeof valueAt(input, issue.path) === 'string'
+  // zod reports a tag outside a discriminated union's variants with this note on the discriminator's path.
+  if (issue.code === 'invalid_union') return 'note' in issue && issue.note === 'No matching discriminator' && typeof valueAt(input, issue.path) === 'string'
+  return false
+}
+
+/**
+ * A value this client can only act on whole (it sends it back, or every part
+ * of it decides an action), validated against its canonical schema `full`.
+ * When the only differences are additions (`isAddition`: a newer server's
+ * values, tags or fields) it is `unsupported`, carrying the part this client
+ * can still show, validated strictly by `overview`. Anything else broken is a
+ * failure, never `unsupported`.
+ */
+export function supportedIfKnown<T, O>(full: z.ZodType<T>, overview: z.ZodType<O>): z.ZodType<Supported<T, O>> {
+  const schema = z.unknown().transform((input, ctx): Supported<T, O> => {
+    const parsed = full.safeParse(input)
+    if (parsed.success) return { kind: 'supported', value: parsed.data }
+    const broken = parsed.error.issues.filter((issue) => !isAddition(issue, input))
+    const shown = overview.safeParse(input)
+    if (broken.length === 0 && shown.success) return { kind: 'unsupported', identity: shown.data }
+    for (const issue of broken.length ? broken : shown.error?.issues ?? []) ctx.addIssue(issue as never)
+    return z.NEVER
+  })
+  registerDelegates(schema, [full, overview])
+  return schema
+}
+
 /**
  * A closed union whose variant is chosen from the raw value (a flag rather
  * than a tag string). The chosen variant is validated strictly and its issues

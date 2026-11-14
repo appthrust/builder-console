@@ -5,7 +5,7 @@ import * as api from '../../api/build'
 import { buildDraftOptions, buildKeys } from '../../api/queries/build'
 import { platformErrorEnvelope } from '../../api/platform-error'
 import { classifyBuildFailure, unconfirmedFailure, type BuildFailure } from '../../model/build'
-import { isOneOf, type BuildDraft } from '../../model/contracts/build'
+import { isOneOf, planOverview, type BuildDraft } from '../../model/contracts/build'
 import { deriveImprove } from '../../model/improve'
 import { useImplementation } from '../build/implement'
 import { proposalOptions } from '../../api/queries/proposal'
@@ -22,7 +22,7 @@ export function useImproveSession(projectId: string, draft: BuildDraft) {
   const [sending, setSending] = useState(false)
   const [sendFailure, setSendFailure] = useState<{ text: string; failure: BuildFailure }>()
   const state = deriveImprove(draft)
-  const implementation = useImplementation({ projectId, draft, handoff: draft.creationPlan?.implementationHandoff, enabled: true })
+  const implementation = useImplementation({ projectId, draft, handoff: planOverview(draft)?.implementationHandoff, enabled: true })
   const proposal = useQuery(proposalOptions(projectId, draft.proposalId))
   const phase = proposal.data?.phase
   const reviewLocked = !!draft.proposalId && improvementLocked(phase)

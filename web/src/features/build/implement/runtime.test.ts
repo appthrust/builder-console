@@ -49,6 +49,8 @@ test.each([
   ['PreviewDatabaseResetting', 'starting'], ['StorageVolumeProvisioning', 'starting'],
   ['PreviewDatabaseUnavailable', 'unavailable'], ['PreviewDatabaseUnsupported', 'unavailable'],
   ['WorkspaceSleeping', 'sleeping'], ['WorkspaceStopped', 'sleeping'], ['BudgetExceeded', 'unavailable'], [undefined, 'unavailable'],
+  // A free-text reason equal to an inherited object name is no waiting reason.
+  ['constructor', 'unavailable'], ['toString', 'unavailable'], ['__proto__', 'unavailable'],
 ] as const)('not ready because of %s is %s', (reason, status) => {
   expect(previewDatabaseStatus({ ...workspace, previewDatabase: { engine: 'PostgreSQL', ready: false, reason, resetGeneration: 0 } }, [])).toBe(status)
 })

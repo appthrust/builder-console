@@ -215,3 +215,11 @@ test.each([
 ] as const)('file admission status %s / %s maps to %s', (status, reason, problem) => {
   expect(classifyStoreError({ data: { status, body: { error: { code: 'conflict', details: { reason } } } } }).problem).toBe(problem)
 })
+
+test('the hand-off never overwrites a saved audience this console does not know: the request body has no publish preferences', () => {
+  const draft = draftOf({ id: 'draft-1', projectId: 'p', title: '見積', intent: 'i', phase: 'planned', specMarkdown: '', ownerUserId: 'o', createdAt: '2026-11-15T00:00:00Z', updatedAt: '2026-11-15T00:00:00Z', publishPreferences: { name: '見積', shareScope: 'department' } })
+  // The hook passes `keepSavedAudience` from the draft's saved scope (use-excel2app-draft.ts `handOff`).
+  expect(draft.publishPreferences?.shareScope).toEqual({ kind: 'unknown' })
+  expect(handOffPatch(draft, '', { name: '見積台帳', shareScope: 'private' }, draft.publishPreferences?.shareScope?.kind === 'unknown')).toEqual({ title: '見積台帳' })
+  expect(handOffPatch(draft, '', { name: '見積台帳', shareScope: 'private' })).toEqual({ title: '見積台帳', publishPreferences: { name: '見積台帳', shareScope: 'private' } })
+})

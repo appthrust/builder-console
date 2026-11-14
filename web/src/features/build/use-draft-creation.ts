@@ -25,7 +25,7 @@ import { renameCreationPlan, withDefaultPublish } from '../../model/build/plan'
 import { appPreparationProgress, sourceBuildFailureProgress } from '../../model/build/progress'
 import { draftPublished } from '../../model/build/stage'
 import type { BuildFailure } from '../../model/build/types'
-import { isOneOf, knownValue, type BuildDraft, type BuildExecutionStep, type CreationPlanValidation } from '../../model/contracts/build'
+import { draftKind, isOneOf, knownPlan, knownValue, planOverview, validationGates, type BuildDraft, type BuildExecutionStep, type CreationPlanValidation } from '../../model/contracts/build'
 import { pickCreateEnvironment, summarizeCreationPlan } from '../../model/create'
 import { sourceRepositoryFor } from '../app/platform'
 import { useAppViews } from '../app/use-app-views'
@@ -60,7 +60,12 @@ export function draftFailure(error: unknown, context: 'turn' | CreationContext, 
   return classifyBuildFailure(failedStep?.message ?? raw, status, context, reference, failedStep?.detail?.reason ?? (isConsoleError(error) ? error.code : envelope?.code), error instanceof ConsoleAppCreationError ? 'apps.create' : undefined, undefined, envelope?.details)
 }
 
-/** Only the stale validation conflict gets one fresh validation; no cleanup or execution is retried here. */
+/**
+ * Only the stale validation conflict gets one fresh validation; no cleanup or execution is retried here.
+ * Creation stops when the server says not `valid` (or gives no fingerprint), and also when a gate is `blocking` and
+ * its state is not one this console knows as passed (`ready`): an unknown state on a blocking gate stops creation
+ * whatever the server's verdict. A gate's id, known or not, is not judged; a non-blocking gate never stops creation.
+ */
 export async function validatePreparationPlan(projectId: string, draftId: string, validatePlan: (projectId: string, draftId: string) => Promise<CreationPlanValidation> = api.validatePlan): Promise<string> {
   let validation: CreationPlanValidation
   try {
@@ -72,10 +77,17 @@ export async function validatePreparationPlan(projectId: string, draftId: string
     if (status !== 409 || !/changed while validating the creation plan/i.test(message)) throw error
     validation = await validatePlan(projectId, draftId)
   }
-  if (!validation.valid || !validation.creationPlanFingerprint) {
+  const stopping = validationGates(validation).filter((gate) => gate.blocking && !isOneOf(gate.state, 'ready'))
+  if (!validation.valid || !validation.creationPlanFingerprint || stopping.length > 0) {
     const stack = validation.applicationStackValidation
     const diagnostics = [stack?.source, stack?.runtime, stack?.publish].filter((section) => section && !section.valid).map((section) => section!.message)
-    throw new Error([validation.message, ...(validation.staticErrors ?? []), ...diagnostics].filter(Boolean).join('\n'))
+    const unknownState = stopping.some((gate) => gate.state.kind === 'unknown')
+    const lines = [
+      // A plan the server accepted but a gate here stops: the server's "ready" message would contradict the stop.
+      ...(validation.valid && stopping.length > 0 ? [] : [validation.message]), ...(validation.staticErrors ?? []),
+      ...(unknownState ? [text.session.unknownGate] : []), ...diagnostics, ...stopping.map((gate) => gate.message),
+    ]
+    throw new Error([...new Set(lines.filter(Boolean))].join('\n'))
   }
   return validation.creationPlanFingerprint
 }
@@ -121,14 +133,16 @@ export function useDraftCreation({ projectId, draft, tab, hasPending, now }: Dra
   const appProgress = preparationInput ? appPreparationProgress(preparationInput, now, preparationClock.current.since) : sourceBuildFailureProgress(sourceRepository?.build)
   const generation = draft.creationPlanGenerations.at(-1)
   const execution = draft.creationExecutions.at(-1)
-  const needsPublishDefault = Boolean(draft.creationPlan?.applicationStackRequest && !draft.creationPlan.applicationStackRequest.publish?.enabled)
+  // Only a plan whose every value this console knows is changed and sent back; another is shown, never written.
+  const plan = knownPlan(draft)
+  const needsPublishDefault = Boolean(plan?.applicationStackRequest && !plan.applicationStackRequest.publish?.enabled)
   const connections = useQuery({ ...createConnectionsQuery(projectId), enabled: needsPublishDefault || (isOneOf(draft.phase, 'created') && !appView?.platform?.publish) })
   const domain = connections.data ? pickCreateEnvironment(connections.data.sources, connections.data.registries, connections.data.domains).domain : undefined
-  const creationPlan = draft.creationPlan ? withDefaultPublish(draft.creationPlan, { domain }) : undefined
-  const defaultPending = !execution && (creationPlan !== draft.creationPlan || (needsPublishDefault && connections.isPending))
-  const proposalDraft = creationPlan === draft.creationPlan ? draft : { ...draft, creationPlan }
+  const creationPlan = plan ? withDefaultPublish(plan, { domain }) : undefined
+  const defaultPending = !execution && (creationPlan !== plan || (needsPublishDefault && connections.isPending))
+  const proposalDraft: BuildDraft = creationPlan === plan || !creationPlan ? draft : { ...draft, creationPlan: { kind: 'supported', value: creationPlan } }
   const published = draftPublished(draft) && tab.continuedAfterPublishAt !== draft.publishedAt && !hasPending
-  const implementation = useImplementation({ projectId, draft, handoff: execution?.approval?.implementationHandoff ?? draft.creationPlan?.implementationHandoff, enabled: Boolean(draft.createdApplicationStackId) && !published })
+  const implementation = useImplementation({ projectId, draft, handoff: execution?.approval?.implementationHandoff ?? planOverview(draft)?.implementationHandoff, enabled: Boolean(draft.createdApplicationStackId) && !published })
   const implementing = implementation.pending || implementation.state.phase === 'starting-workspace' || implementation.state.phase === 'running' || implementation.state.phase === 'pushing'
   return { app, appViews, appView, appProgress, generation, execution, domain, creationPlan, defaultPending, proposalDraft, published, implementation, implementing }
 }
@@ -174,6 +188,13 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
   const queryClient = useQueryClient()
   const { projectId, draft, tab, busy, lock, failure, running } = host
   const { app, appView, appViews, generation, execution, domain, creationPlan, defaultPending, implementation, published } = creation
+  // A draft of a kind this console does not know is kept off the creation session: none of the automatic writes
+  // below fire for it (design §5: nothing starts from a value this console cannot judge). stage.ts shows it read-only.
+  const offSession = draftKind(draft) === 'unknown'
+  // The default address PATCH carries only the (whole, known) creation plan. An unknown saved audience or source kind
+  // is not part of that body, so it does not close this write; closing it would leave creation unable to start with
+  // no notice (the plan would wait for its default forever).
+  const planWritesClosed = offSession
   const [publishRetryAt, setPublishRetryAt] = useState(0)
   const publishRetries = useRef(0)
   const publishRepairAppId = useRef<string | undefined>(undefined)
@@ -193,17 +214,20 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
 
   useEffect(() => {
     // Plan replacement is forbidden after an execution exists.
-    if (execution || !isOneOf(generation?.status, 'succeeded') || !creationPlan || creationPlan === draft.creationPlan || running || busy || lock.current || failure) return
+    if (planWritesClosed || execution || !isOneOf(generation?.status, 'succeeded') || !creationPlan || creationPlan === knownPlan(draft) || running || busy || lock.current || failure) return
     void host.perform('plan', async () => {
       const current = host.draftRef.current
-      if (current.creationExecutions.length || !current.creationPlan) return
-      const plan = withDefaultPublish(current.creationPlan, { domain })
-      if (plan !== current.creationPlan) await host.receive(await api.updateDraft(projectId, draft.id, { creationPlan: plan }))
+      const stored = knownPlan(current)
+      if (current.creationExecutions.length || !stored) return
+      const plan = withDefaultPublish(stored, { domain })
+      if (plan !== stored) await host.receive(await api.updateDraft(projectId, draft.id, { creationPlan: plan }))
     })
   }, [draft.creationPlan, knownValue(generation?.status), execution, domain, running, busy, failure])
 
   useEffect(() => {
     // A phase or job state this console does not know starts nothing on its own (stage.ts `unsupported`).
+    // A request made while the draft cannot be created from is dropped, never kept to start creation later on its own.
+    if (tab.prepareRequested && host.unsupported) { host.patch({ prepareRequested: false }); return }
     if (running || busy || lock.current || failure || draft.createdApplicationStackId || host.unsupported || host.holdPreparation) return
     if (isOneOf(execution?.status, 'failed') && !host.observedFailures.current.has(execution!.id)) return
     if (!tab.prepareRequested || defaultPending) return
@@ -222,7 +246,7 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
 
   useEffect(() => {
     // A reload between begin and run resumes the existing execution, never begins a second one.
-    if (!execution || !isOneOf(execution.status, 'running') || execution.runStartedAt || busy || lock.current || failure) return
+    if (offSession || !execution || !isOneOf(execution.status, 'running') || execution.runStartedAt || busy || lock.current || failure) return
     void host.perform('prepare', async () => { await host.receive(await api.runExecution(projectId, draft.id, execution.id)) })
   }, [execution, busy, failure])
 
@@ -233,12 +257,14 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
   }, [execution])
 
   useEffect(() => {
-    if (!draft.createdApplicationStackId || (!isOneOf(draft.phase, 'created') && !isOneOf(execution?.status, 'succeeded')) || app?.stackId || busy || lock.current || bindingFailed.current) return
+    // The created app's name comes from the plan: a plan this console cannot read whole binds nothing (stage.ts reports it unsupported).
+    if (offSession || !draft.createdApplicationStackId || draft.creationPlan?.kind === 'unsupported' || (!isOneOf(draft.phase, 'created') && !isOneOf(execution?.status, 'succeeded')) || app?.stackId || busy || lock.current || bindingFailed.current) return
     void host.perform('prepare', async () => {
       try {
         // A previously selected department stays fixed; repair only old empty sessions.
         if (!host.currentTab().groupId) host.patch({ groupId: host.groupId })
-        const appName = draft.creationPlan ? summarizeCreationPlan(draft.creationPlan).appName : undefined
+        const plan = knownPlan(draft)
+        const appName = plan ? summarizeCreationPlan(plan).appName : undefined
         const kept = await bindCreatedConsoleApp(
           { projectId, displayName: host.displayName, description: host.description, tags: [], groupId: host.currentTab().groupId, urlName: appName ?? '', share: { scope: 'private', groupIds: [], extraPersonIds: [] } },
           { stackId: draft.createdApplicationStackId!, createdAppId: host.currentTab().createdAppId },
@@ -250,11 +276,11 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
         await queryClient.invalidateQueries({ queryKey: ['console', 'apps'] })
       } catch (error) { bindingFailed.current = true; throw error }
     })
-  }, [draft.createdApplicationStackId, knownValue(draft.phase), knownValue(execution?.status), app?.stackId, busy, host.groupId])
+  }, [draft.createdApplicationStackId, draft.creationPlan?.kind, knownValue(draft.phase), knownValue(execution?.status), app?.stackId, busy, host.groupId])
 
   useEffect(() => {
     const platform = appView?.platform
-    if (!isOneOf(draft.phase, 'created') || appViews.loading || appViews.failed || !platform?.webComponentId || !domain || busy || lock.current || failure) return
+    if (offSession || !isOneOf(draft.phase, 'created') || appViews.loading || appViews.failed || !platform?.webComponentId || !domain || busy || lock.current || failure) return
     const hasPublish = appViews.input.publishes.some((publish) => publish.applicationId === platform.id && publish.branchId === platform.branchId && publish.componentId === platform.webComponentId)
       || (platform.publish?.branchId === platform.branchId && platform.publish.componentId === platform.webComponentId)
     if (hasPublish) {
@@ -288,7 +314,7 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
   }, [knownValue(draft.phase), appView?.platform, appViews.loading, appViews.failed, domain, busy, failure, publishRetryAt])
 
   useEffect(() => {
-    if (draft.createdApplicationStackId && implementation.state.phase === 'idle' && !published) implementation.start()
+    if (!offSession && draft.createdApplicationStackId && implementation.state.phase === 'idle' && !published) implementation.start()
   }, [draft.createdApplicationStackId, implementation.state.phase, published])
 
   async function markPublished() {
@@ -313,13 +339,14 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
      * the host drop what it showed about the collision.
      */
     rename(name: string, failure: BuildFailure | undefined, onRenamed: (updated: BuildDraft) => void) {
-      if (!draft.creationPlan) return
+      const plan = knownPlan(draft)
+      if (!plan) return
       void host.perform('prepare', async () => {
         const publishConflict = failure?.reasonCode === 'PublishURLConflict'
         if (!publishConflict) await api.cleanupCreation(projectId, draft.id)
         const updated = await api.updateDraft(projectId, draft.id, publishConflict
           ? { renameApplication: { name } }
-          : { creationPlan: renameCreationPlan(draft.creationPlan!, name, { domain }) })
+          : { creationPlan: renameCreationPlan(plan, name, { domain }) })
         await host.receive(updated)
         host.patch({ reusePlan: true, executionRequestId: undefined })
         onRenamed(updated)
@@ -332,7 +359,9 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
     retry(context: 'publish' | 'implement' | 'prepare') {
       if (context === 'publish') void markPublished()
       else if (context === 'implement') implementation.retry()
-      else if (!draft.createdApplicationStackId) {
+      // A clean preparation removes what was made and creates again from the plan: not while creation could not start
+      // again (no whole plan, or a kind, phase or job state this console does not know).
+      else if (!offSession && !host.unsupported && !draft.createdApplicationStackId && knownPlan(draft)) {
         void host.perform('prepare', async () => {
           await host.receive(await api.cleanupCreation(projectId, draft.id))
           host.patch({ prepareRequested: true, reusePlan: true, executionRequestId: undefined })

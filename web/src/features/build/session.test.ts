@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, mock, test } from 'bun:test'
 import { ORPCError } from '@orpc/client'
-import type { ApplicationDraftCreationPlanValidation } from '@appthrust/api-schema/platform-api'
+import type { CreationPlanValidation } from '../../model/contracts/build'
 import { buildCopy } from '../../model/build/copy'
 import { preserveLanguage } from '../../../test/language'
 import { setLanguage } from '../../shell/language'
@@ -197,10 +197,10 @@ describe('build session persistence', () => {
 describe('prepare validation recovery', () => {
   const conflictText = 'application draft changed while validating the creation plan; validate the latest plan again'
   const conflict = new ORPCError('CONFLICT', { status: 409, data: { body: { error: { code: 'conflict', message: conflictText } } } })
-  const valid: ApplicationDraftCreationPlanValidation = { valid: true, message: 'Ready', creationPlanFingerprint: 'fresh-fingerprint' }
+  const valid: CreationPlanValidation = { valid: true, message: 'Ready', creationPlanFingerprint: 'fresh-fingerprint' }
 
   test('a stale validation conflict is retried once and returns only the fresh fingerprint', async () => {
-    const validate = mock(async (_projectId: string, _draftId: string): Promise<ApplicationDraftCreationPlanValidation> => valid)
+    const validate = mock(async (_projectId: string, _draftId: string): Promise<CreationPlanValidation> => valid)
       .mockRejectedValueOnce(conflict)
     expect(await validatePreparationPlan('project-1', 'draft-ae97efbc', validate)).toBe('fresh-fingerprint')
     expect(validate.mock.calls).toEqual([['project-1', 'draft-ae97efbc'], ['project-1', 'draft-ae97efbc']])
@@ -211,7 +211,7 @@ describe('prepare validation recovery', () => {
     expect(validate).toHaveBeenCalledTimes(1)
   })
   test('a second stale conflict is surfaced without an unbounded retry', async () => {
-    const validate = mock(async (): Promise<ApplicationDraftCreationPlanValidation> => { throw conflict })
+    const validate = mock(async (): Promise<CreationPlanValidation> => { throw conflict })
     await expect(validatePreparationPlan('project-1', 'draft-1', validate)).rejects.toBe(conflict)
     expect(validate).toHaveBeenCalledTimes(2)
   })
@@ -222,7 +222,7 @@ describe('prepare validation recovery', () => {
     [403, conflictText],
   ])('does not automatically retry unrelated failure %s %s', async (status, message) => {
     const error = new ORPCError('ERROR', { status, data: { body: { error: { message } } } })
-    const validate = mock(async (): Promise<ApplicationDraftCreationPlanValidation> => { throw error })
+    const validate = mock(async (): Promise<CreationPlanValidation> => { throw error })
     await expect(validatePreparationPlan('project-1', 'draft-1', validate)).rejects.toBe(error)
     expect(validate).toHaveBeenCalledTimes(1)
   })
@@ -232,13 +232,12 @@ describe('prepare validation recovery', () => {
     expect(validate).toHaveBeenCalledTimes(2)
   })
   test('invalid validation keeps the runtime rejection for the advanced disclosure, without retrying', async () => {
-    const validate = mock(async (): Promise<ApplicationDraftCreationPlanValidation> => ({
+    const validate = mock(async (): Promise<CreationPlanValidation> => ({
       valid: false, message: 'Launch needs changes before resources can be created.',
       staticErrors: ['Invalid generated plan'],
       applicationStackValidation: {
         valid: false, message: 'Stack needs changes', source: { valid: true, message: 'Ready' },
         runtime: { valid: false, message: "'definitionRef' is required" },
-        resolvedBranch: { applicationId: 'inventory', branchId: 'main', state: 'pending', management: { source: 'applicationStack', mutableFields: [] } },
       },
     }))
     await expect(validatePreparationPlan('project-1', 'draft-1', validate)).rejects.toThrow("Launch needs changes before resources can be created.\nInvalid generated plan\n'definitionRef' is required")

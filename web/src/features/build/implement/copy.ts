@@ -32,6 +32,8 @@ export const textJa = {
   skip: 'この作業を飛ばす',
   /** Every task was skipped or nothing was pushed: the app is still the bare template. */
   nothingImplemented: 'まだ画面は作られていません。もう一度試すと、画面を作り直せます。',
+  /** The workspace behind the preview could not be read at all: the preview and its database are not shown; progress comes from the draft. */
+  workspaceLoadFailed: 'プレビューの状態を読み込めませんでした。作業の進み具合は、そのまま表示しています。',
 }
 
 export const implementationCopy = localized({ ja: textJa, en: textEn })
