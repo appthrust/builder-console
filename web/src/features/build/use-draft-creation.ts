@@ -191,9 +191,10 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
   // A draft of a kind this console does not know is kept off the creation session: none of the automatic writes
   // below fire for it (design §5: nothing starts from a value this console cannot judge). stage.ts shows it read-only.
   const offSession = draftKind(draft) === 'unknown'
-  // The default address is written into the whole plan: not while the kind, the saved audience or the source is one
-  // this console does not know (it would rewrite a draft it cannot read whole).
-  const planWritesClosed = offSession || draft.publishPreferences?.shareScope?.kind === 'unknown' || draft.source?.kind === 'unsupported'
+  // The default address PATCH carries only the (whole, known) creation plan. An unknown saved audience or source kind
+  // is not part of that body, so it does not close this write; closing it would leave creation unable to start with
+  // no notice (the plan would wait for its default forever).
+  const planWritesClosed = offSession
   const [publishRetryAt, setPublishRetryAt] = useState(0)
   const publishRetries = useRef(0)
   const publishRepairAppId = useRef<string | undefined>(undefined)
@@ -358,8 +359,9 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
     retry(context: 'publish' | 'implement' | 'prepare') {
       if (context === 'publish') void markPublished()
       else if (context === 'implement') implementation.retry()
-      // A clean preparation removes what was made and creates again from the plan: not offered without a whole plan.
-      else if (!offSession && !draft.createdApplicationStackId && knownPlan(draft)) {
+      // A clean preparation removes what was made and creates again from the plan: not while creation could not start
+      // again (no whole plan, or a kind, phase or job state this console does not know).
+      else if (!offSession && !host.unsupported && !draft.createdApplicationStackId && knownPlan(draft)) {
         void host.perform('prepare', async () => {
           await host.receive(await api.cleanupCreation(projectId, draft.id))
           host.patch({ prepareRequested: true, reusePlan: true, executionRequestId: undefined })

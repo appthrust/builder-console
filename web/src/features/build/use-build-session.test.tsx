@@ -696,12 +696,18 @@ describe('automatic writes withheld from a draft this console cannot read whole'
 
   test.each([
     ['an unknown kind', { kind: 'fork' }],
-    ['an unknown saved audience', { publishPreferences: { shareScope: 'department' } }],
-    ['an unknown source kind', { source: { kind: 'sheets' } }],
     ['a plan holding an unknown value', { creationPlan: plan({ componentName: 'db', postgresVersion: '19.1' }) }],
   ] as const)('the default address is not written back for %s: no request', async (_name, patch) => {
     await mount(planned(patch))
     expect(sent()).toEqual([])
+  })
+
+  test.each([
+    ['an unknown saved audience', { publishPreferences: { shareScope: 'department' } }],
+    ['an unknown source kind', { source: { kind: 'sheets' } }],
+  ] as const)('with %s the default address is still written, and only the plan is sent', async (_name, patch) => {
+    await mount(planned(patch))
+    expect(update.mock.calls.map((call) => Object.keys(call[2]))).toEqual([['creationPlan']])
   })
 
   test('an unknown-kind draft that was created runs none of the creation page writes (bind, implementation, resume, alignment)', async () => {
