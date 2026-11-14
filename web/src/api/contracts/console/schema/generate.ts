@@ -68,7 +68,7 @@ export function openAPIDocument() {
     }]))
     for (const status of [400, 401, 403, 404, 408, 409, 412, 413, 428, 429, 503, 507]) responses[status] = {
       description: 'Console error; never a success',
-      headers: { 'Cache-Control': headers['Cache-Control'], ...([429, 503].includes(status) ? { 'Retry-After': { schema: { type: 'string' } } } : {}) },
+      headers: { 'Cache-Control': headers['Cache-Control'], ...([429, 503].includes(status) ? { 'Retry-After': { required: true, description: 'Integer delay in seconds, clamped to 1–300; defaults to 2 when absent or invalid upstream. A non-retryable failure still requires intervention.', schema: { type: 'integer', minimum: 1, maximum: 300 } } } : {}) },
       content: { 'application/json': { schema: { $ref: '#/components/schemas/BuildError' } } },
     }
     paths[path] ??= {}

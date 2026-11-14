@@ -15,8 +15,13 @@ import (
 func TestBuildRetentionTextFreeTombstonesAndBounds(t *testing.T) {
 	f := buildFixtureNew(t)
 	f.validating(t)
+	if err := f.db.Do(context.Background(), true, func(tx *Tx) error {
+		return tx.ObserveBuildTurn(buildTestAccess, f.a.Session.ID, f.a.Turn.ID, 0, BuildTurnProgress{Stage: "thinking", ObservedAt: buildTestAt, Activity: []string{}, Events: []json.RawMessage{json.RawMessage(`{"future":"SENSITIVE_SENTINEL"}`)}})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	f.importResult(t, f.result(true))
-	f.command(t, BuildMutation{Command: domain.BuildCommand{Kind: domain.BuildResolve, Decision: "accept_spec"}})
+	f.command(t, BuildMutation{Command: domain.BuildCommand{Kind: domain.BuildResolve, TurnID: f.a.Turn.ID, Decision: "accept_spec"}})
 	cleanup := buildEffectFixture("delete_conversation_workspace")
 	f.command(t, BuildMutation{Command: domain.BuildCommand{Kind: domain.BuildArchive}, Effects: []BuildEffect{cleanup}})
 	// A separate nonterminal session remains byte-for-byte readable after a year.
@@ -51,7 +56,7 @@ func TestBuildRetentionTextFreeTombstonesAndBounds(t *testing.T) {
 	at := buildTestAt.Add(91 * 24 * time.Hour)
 	for i := range 30 {
 		r := purge(at)
-		if r.ContentPurged > 6 || r.AuditPurged != 0 {
+		if r.ContentPurged > 7 || r.AuditPurged != 0 {
 			t.Fatal("unbounded retention", r)
 		}
 		if r.ContentPurged == 0 {
@@ -63,7 +68,7 @@ func TestBuildRetentionTextFreeTombstonesAndBounds(t *testing.T) {
 	}
 	err = f.db.Do(context.Background(), false, func(tx *Tx) error {
 		// Inspect the entire persisted row, not merely known payload fields.
-		for _, query := range []string{`SELECT row_to_json(b)::text FROM build_turns b WHERE session_id=$1`, `SELECT row_to_json(a)::text FROM build_turn_attempts a JOIN build_turns b ON b.id=a.turn_id WHERE b.session_id=$1`, `SELECT row_to_json(r)::text FROM build_spec_revisions r WHERE session_id=$1 AND revision<>1`} {
+		for _, query := range []string{`SELECT row_to_json(b)::text FROM build_turns b WHERE session_id=$1`, `SELECT row_to_json(a)::text FROM build_turn_attempts a JOIN build_turns b ON b.id=a.turn_id WHERE b.session_id=$1`, `SELECT row_to_json(r)::text FROM build_spec_revisions r WHERE session_id=$1 AND revision<>1`, `SELECT row_to_json(p)::text FROM build_turn_progress p JOIN build_turns b ON b.id=p.turn_id WHERE b.session_id=$1`} {
 			rows, err := tx.SQL.QueryContext(tx.Context, query, f.a.Session.ID)
 			if err != nil {
 				return err

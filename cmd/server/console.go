@@ -15,6 +15,8 @@ import (
 	"github.com/appthrust/appserver-go/appserver/pending"
 	platform "github.com/appthrust/appserver-go/appserver/platformclient"
 	"github.com/appthrust/builder-console/cmd/server/internal/api"
+	"github.com/appthrust/builder-console/cmd/server/internal/buildsession"
+	"github.com/appthrust/builder-console/cmd/server/internal/conversation/prompts"
 	"github.com/appthrust/builder-console/cmd/server/internal/store"
 )
 
@@ -50,6 +52,26 @@ func consoleHandler(upstreamURL, projectID string) (*consoleAPI, func(), error) 
 		}
 	}
 	upstream := platform.New(upstreamURL, projectID, platform.WithHTTPClient(auth.HTTPClient()))
+	conversationFlag, err := buildsession.NewFlag(os.Getenv("BUILDER_CONSOLE_NEW_APP_CONVERSATION"), os.Getenv("BUILDER_CONSOLE_NEW_APP_CONVERSATION_ALLOWLIST"))
+	if err != nil {
+		return nil, nil, err
+	}
+	conversationPlatform, err := buildsession.NewClient(upstreamURL, projectID, auth.HTTPClient().Transport)
+	if err != nil {
+		return nil, nil, err
+	}
+	releaseRevision := os.Getenv("BUILDER_CONSOLE_RELEASE_VERSION")
+	if releaseRevision == "" {
+		releaseRevision = "development"
+	}
+	catalog, err := prompts.NewCatalog(releaseRevision, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	installationID := os.Getenv("BUILDER_CONSOLE_INSTALLATION_ID")
+	if installationID == "" {
+		installationID = "builder-console/" + projectID
+	}
 	resolver := link.NewResolver(upstream, "builder-console", os.LookupEnv, map[string]link.Required{
 		"directory": {URLEnv: "BUILDER_CONSOLE_DIRECTORY_URL", PublicURLEnv: "BUILDER_CONSOLE_DIRECTORY_PUBLIC_URL"},
 	})
@@ -78,7 +100,13 @@ func consoleHandler(upstreamURL, projectID string) (*consoleAPI, func(), error) 
 				return nil, err
 			}
 		}
+		conversations, err := buildsession.NewService(ctx, database, conversationPlatform, catalog, conversationFlag)
+		if err != nil {
+			_ = database.Close()
+			return nil, err
+		}
 		connected := api.New(database, auth, upstream, links, publicURL)
+		connected.ConfigureBuildSessions(conversations, installationID)
 		console.current.Store(connected)
 		console.Swap(connected)
 		return database, nil

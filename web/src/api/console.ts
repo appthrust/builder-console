@@ -18,14 +18,17 @@ export type ApiError = { error: string; message: string; details?: unknown }
  * `transient` = no contract envelope came back: a 5xx from a proxy or gateway
  * in front of the console server (e.g. during a rollout), or no response at
  * all. Retrying shortly is the fix, so the message says exactly that.
+ * `retryAfterMs` = the answer's `Retry-After` (delta seconds or an HTTP date),
+ * the only response header the transport passes on; callers bound it.
  */
 export class ConsoleApiError extends Error {
   readonly status: number
   readonly code: string
   readonly details: unknown
   readonly transient: boolean
+  readonly retryAfterMs: number | undefined
 
-  constructor(status: number, body: Partial<ApiError> | undefined) {
+  constructor(status: number, body: Partial<ApiError> | undefined, retryAfterMs?: number) {
     const code = typeof body?.error === 'string' ? body.error : undefined
     const transient = code === undefined && (status === 0 || status >= 500)
     super(transient ? copy.errors.transient : body?.message || `console api ${status}`)
@@ -34,7 +37,17 @@ export class ConsoleApiError extends Error {
     this.code = code ?? (status === 404 ? 'not_found' : 'unknown')
     this.details = body?.details
     this.transient = transient
+    this.retryAfterMs = retryAfterMs
   }
+}
+
+/** `Retry-After` as milliseconds from `now`: delta seconds or an HTTP date; absent or unreadable is undefined. */
+export function parseRetryAfter(value: string | null, now = Date.now()): number | undefined {
+  if (value === null) return undefined
+  const trimmed = value.trim()
+  if (/^\d+$/.test(trimmed)) return Number(trimmed) * 1000
+  const at = Date.parse(trimmed)
+  return Number.isNaN(at) ? undefined : Math.max(0, at - now)
 }
 
 export function isConsoleError(error: unknown, code?: string): error is ConsoleApiError {
@@ -57,6 +70,8 @@ export interface ConsoleRequest {
   /** JSON body; a `FormData` body is sent as multipart (the browser sets the boundary). */
   body?: unknown
   cache?: RequestCache
+  /** Request preconditions (`Idempotency-Key`, `If-Match`); never logged. */
+  headers?: Readonly<Record<string, string>>
 }
 
 /** A success body: JSON (still unknown), nothing at all, or bytes that are not JSON. */
@@ -90,7 +105,7 @@ async function readBody(response: Response): Promise<ConsoleBody> {
 
 export function createConsoleTransport(fetcher: Fetcher = (input, init) => fetch(input, init)): ConsoleTransport {
   return {
-    async send({ method, path, body, cache }) {
+    async send({ method, path, body, cache, headers }) {
       assertSessionActive()
       const read = method === 'GET'
       const form = body instanceof FormData
@@ -99,7 +114,7 @@ export function createConsoleTransport(fetcher: Fetcher = (input, init) => fetch
       try {
         response = await fetcher(path, {
           method,
-          headers: json ? { Accept: 'application/json', 'Content-Type': 'application/json' } : { Accept: 'application/json' },
+          headers: { ...headers, ...(json ? { Accept: 'application/json', 'Content-Type': 'application/json' } : { Accept: 'application/json' }) },
           body: form ? body : json ? JSON.stringify(body) : undefined,
           credentials: 'same-origin',
           redirect: 'manual',
@@ -114,7 +129,7 @@ export function createConsoleTransport(fetcher: Fetcher = (input, init) => fetch
       const answer = await readBody(response)
       if (!response.ok) {
         const parsed = answer.kind === 'json' ? consoleErrorBody.safeParse(answer.value) : undefined
-        throw new ConsoleApiError(response.status, parsed?.success ? parsed.data : undefined)
+        throw new ConsoleApiError(response.status, parsed?.success ? parsed.data : undefined, parseRetryAfter(response.headers.get('Retry-After')))
       }
       return { status: response.status, body: answer }
     },

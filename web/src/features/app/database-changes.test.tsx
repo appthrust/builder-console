@@ -104,7 +104,7 @@ test('a 412 membership-unbound list or action names the cause like the データ
   const unbound = new ORPCError('UNKNOWN', { status: 412, data: { body: { error: { code: 'failed_precondition', message: 'refused', details: { reason: 'database_access_membership_unbound', membershipReason: 'NotPersisted', teamId: 'tm-1' } } } } })
   const settingsUrl = 'https://dashboard.example.test/dashboard/settings'
   const client = new QueryClient()
-  client.setQueryData(consoleConfigQuery.queryKey, { projectId: 'commerce', dashboardUrl: settingsUrl })
+  client.setQueryData(consoleConfigQuery.queryKey, { projectId: 'commerce', dashboardUrl: settingsUrl, newAppConversation: false })
   const render = (props: Partial<Parameters<typeof DatabaseChangesView>[0]>) => renderToStaticMarkup(
     <QueryClientProvider client={client}>
       <DatabaseChangesView changes={undefined} error={null} actionError={null} onAction={noop} onReload={noop} {...props} />

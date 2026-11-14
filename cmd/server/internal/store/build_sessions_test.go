@@ -214,7 +214,7 @@ func TestBuildReceiptsVersionsAndRollback(t *testing.T) {
 	})
 	buildErrorCode(t, err, "conflict")
 	receipt := buildReceiptFixture("resolution", "resolve-key")
-	mutation := BuildMutation{Command: domain.BuildCommand{Kind: domain.BuildResolve, Decision: "accept_spec", At: buildTestAt.Add(time.Hour)}}
+	mutation := BuildMutation{Command: domain.BuildCommand{Kind: domain.BuildResolve, TurnID: f.a.Turn.ID, Decision: "accept_spec", At: buildTestAt.Add(time.Hour)}}
 	err = f.db.Do(context.Background(), true, func(tx *Tx) error {
 		_, err := tx.ApplyBuildCommand(buildTestAccess, f.a.Session.ID, 1, receipt, mutation)
 		return err

@@ -1,5 +1,5 @@
 import { SendHorizontal } from 'lucide-react'
-import { forwardRef, useCallback, useImperativeHandle, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Button } from '../../ui'
 import { cn } from '../../ui/cn'
 import { text as uiText } from './copy'
@@ -19,6 +19,11 @@ export interface ComposerProps {
   /** Why nothing can be sent right now, shown above the input while it is disabled (e.g. a state this console does not know). */
   disabledReason?: string
   placeholder: string
+  /**
+   * Puts a message back (e.g. one a conflict kept from being sent); each new `nonce` is one request. An empty
+   * input takes it; text typed since is never replaced without asking: the composer offers the swap instead.
+   */
+  restore?: { text: string; nonce: number }
   /** Trimmed, non-empty, at most `MAX_LENGTH` characters. */
   onSubmit(text: string): void
   onChip(value: string, label: string): void
@@ -28,12 +33,23 @@ export const MAX_LENGTH = 4000
 const MIN_ROWS = 3
 const MAX_ROWS = 8
 
-export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function Composer({ chips, chipsTitle, disabled, disabledReason, placeholder, onSubmit, onChip }, ref) {
+export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function Composer({ chips, chipsTitle, disabled, disabledReason, placeholder, restore, onSubmit, onChip }, ref) {
   const textarea = useRef<HTMLTextAreaElement>(null)
   useImperativeHandle(ref, () => textarea.current as HTMLTextAreaElement)
   const [text, setText] = useState('')
+  const [offer, setOffer] = useState<string>()
+  const typed = useRef(text)
+  typed.current = text
   const trimmed = text.trim()
   const canSend = !disabled && trimmed.length > 0 && trimmed.length <= MAX_LENGTH
+
+  useEffect(() => {
+    if (!restore) return
+    if (typed.current.trim()) { setOffer(restore.text); return }
+    setText(restore.text)
+    setOffer(undefined)
+    textarea.current?.focus()
+  }, [restore?.nonce])
 
   // Grow with the content between MIN_ROWS and MAX_ROWS; beyond that the textarea scrolls.
   useLayoutEffect(() => {
@@ -64,6 +80,11 @@ export const Composer = forwardRef<HTMLTextAreaElement, ComposerProps>(function 
   const reason = disabled ? disabledReason : undefined
   return <div className="shrink-0 border-t border-stone-200 pt-3">
     {reason ? <p id="build-reply-disabled" className="mb-2 text-xs leading-relaxed text-stone-500">{reason}</p> : null}
+    {offer !== undefined ? <div role="status" className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-stone-600">
+      <span className="min-w-0">{uiText.composer.restoreOffer}</span>
+      <Button size="sm" onClick={() => { setText(offer); setOffer(undefined); textarea.current?.focus() }}>{uiText.composer.restoreReplace}</Button>
+      <Button size="sm" tone="ghost" onClick={() => setOffer(undefined)}>{uiText.composer.restoreKeep}</Button>
+    </div> : null}
     {chips?.length ? <div className="mb-2" role="group" aria-label={chipsTitle ?? uiText.composer.suggestions}>
       {chipsTitle ? <p className="mb-1.5 text-sm font-medium text-stone-800">{chipsTitle}</p> : null}
       <div className="flex flex-wrap gap-1.5">

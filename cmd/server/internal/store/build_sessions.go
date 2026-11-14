@@ -266,6 +266,14 @@ func (t *Tx) ApplyBuildCommand(scope BuildAccess, id string, expected int64, r B
 	if err = checkBuildVersion(a.Session, expected); err != nil {
 		return BuildResult{}, err
 	}
+	switch m.Command.Kind {
+	case domain.BuildAcceptConversation, domain.BuildAcceptPlan, domain.BuildSetPublish:
+		if _, pendingErr := t.PendingBuildEffect(scope, id); pendingErr == nil {
+			return BuildResult{}, domain.RejectBuild("session_busy", "A durable build effect is still unresolved")
+		} else if !errors.Is(pendingErr, sql.ErrNoRows) {
+			return BuildResult{}, pendingErr
+		}
+	}
 	next, err := t.applyBuildMutation(scope, a, m, r.Key)
 	if err != nil {
 		return BuildResult{}, err
@@ -467,12 +475,4 @@ func (t *Tx) BuildSessions(scope domain.BuildScope, groupIDs []string, cursor st
 		page.Items = page.Items[:limit]
 	}
 	return page, nil
-}
-func (t *Tx) ResolveBuildDraft(scope BuildAccess, draftID string) (string, error) {
-	if !scope.Valid() {
-		return "", domain.RejectBuild("invalid_argument", "Invalid build access")
-	}
-	var id string
-	err := t.SQL.QueryRowContext(t.Context, `SELECT s.id FROM build_sessions s WHERE `+buildScopeWhere+` AND s.platform_draft_id=$6`, append(buildScopeArgs(scope), draftID)...).Scan(&id)
-	return id, err
 }

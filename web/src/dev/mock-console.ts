@@ -28,9 +28,12 @@
 // 日報 has none yet, 勤怠申請 waits for Tools to install, 会議室予約 cannot reach it,
 // the rest have no Tools built-in app (panel hidden), and drafts answer as unbound apps. `POST
 // /api/console/__mock/tools {appId, state: 'list' | 'empty' | 'pending' | 'unavailable' | 'absent'}` switches one app.
+// `/api/console/v1/build-sessions*` (NEW-APP conversation sessions) is ./mock-build-sessions; reset clears it too,
+// and its `__mock` controls (the `/config` NEW-APP flag, a failed start, 503 + Retry-After reads) are documented there.
 import type { AccessRequest, AppTool, AppTools, BusinessApp, DirectoryEntry, DirectoryUser, MemberRole, Membership, PersonProfile, PlatformSettings, Resolved, Screenshot, SharePolicy } from '../api/console-unverified'
 import type { ApiError } from '../api/console'
 import { isValidSlug, type AppComment, type DirectoryMigration, type DirectoryMigrationResult, type Group, type Me, type Person } from '../model/contracts/console'
+import { buildSessionMockControl, buildSessionRoutes, resetBuildSessions } from './mock-build-sessions'
 import { imageInfo, mockAvatarPng, mockScreenPng, type Rgb, type ScreenshotType } from './mock-images'
 
 type Role = 'Admin' | 'Editor' | 'Viewer'
@@ -501,6 +504,7 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
   const [head, id, sub, subId] = segments
   if (head === '__mock' && id === 'reset' && method === 'POST') {
     state = seedConsole()
+    resetBuildSessions()
     return json({ reset: true })
   }
   if (head === '__mock' && id === 'caller' && method === 'POST') {
@@ -576,6 +580,10 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
     state.migrationResult = undefined
     return json(state.migration)
   }
+  if (head === '__mock' && id && !sub) {
+    const controlled = await buildSessionMockControl(request, id)
+    if (controlled) return controlled
+  }
   if (method !== 'GET' && state.bare500Writes > 0) {
     // What the gateway answers while the console server rolls out: no contract envelope.
     state.bare500Writes--
@@ -588,6 +596,8 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
   if (head === 'me' && method === 'GET') return json(me())
   // The same-origin Directory proxy; the Directory does not gate reads on Project membership.
   if (head === 'directory') return directoryRoutes(request, url, segments.slice(1))
+  // NEW-APP conversation sessions (`/api/console/v1/build-sessions*`, ./mock-build-sessions): the caller's own.
+  if (head === 'v1' && id === 'build-sessions') return buildSessionRoutes(request, url, { owner: state.callerId, member: !state.notMember })
   const needsRoles = head === 'resolve' || head === 'apps' || head === 'admin' || (head === 'access-requests' && !id && method === 'GET')
   if (state.notMember && needsRoles) {
     return fail(403, 'not_project_member', state.teamSlug

@@ -6,15 +6,17 @@ import { buildSessionOperations } from './schema/build-session-operations'
 const failure = wire.buildReadError.extend({ error: openEnum(wire.buildErrorCodes) })
 const projection = wire.buildReadProjection.extend({ state: openEnum(wire.buildProjectionStates) })
 const progress = wire.buildReadProgress.extend({ stage: openEnum(wire.buildStages) })
+const publishSync = wire.buildReadPublishSync.extend({ state: openEnum(wire.buildSyncStates), failure: failure.optional() })
 export const buildSessionReader = wire.buildReadSession.extend({
   lifecycle: openEnum(wire.buildLifecycles), nextAction: openEnum(wire.buildNextActions), projection, failure: failure.optional(),
+  publish: wire.buildReadPublishObservation.extend({ sync: publishSync }).optional(),
 })
 const turnFields = { state: openEnum(wire.buildTurnStates), nextAction: openEnum(wire.buildNextActions), progress: progress.optional(), failure: failure.optional() }
 export const buildTurnReader = z.discriminatedUnion('kind', [
   wire.buildReadConversationTurn.extend(turnFields),
   wire.buildReadPlanTurn.extend({ ...turnFields, projection }),
 ])
-const publishReader = wire.buildPublishResult.extend({ sync: wire.buildPublishResult.shape.sync.extend({ state: openEnum(wire.buildSyncStates), failure: failure.optional() }) })
+const publishReader = wire.buildPublishResult.extend({ sync: publishSync })
 const readers = {
   BuildSession: buildSessionReader,
   BuildSessionList: wire.buildSchemas.BuildSessionList.extend({ items: z.array(buildSessionReader) }),

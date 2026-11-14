@@ -117,19 +117,23 @@ export const buildPlanTurn = buildTurnCommon.extend({
   state: z.enum(buildTurnStates).extract(['accepted', 'syncing_spec', 'starting_plan', 'planning', 'succeeded', 'failed']),
 })
 export const buildTurn = z.discriminatedUnion('kind', [buildConversationTurn, buildPlanTurn])
+export const buildPublishInput = z.strictObject({
+  name: nonblank(40).refine((value) => !/[\r\n\u0085\u2028\u2029]/u.test(value), 'Name must be one line').meta({ not: { pattern: '[\r\n\u0085\u2028\u2029]' } }),
+  shareScope: z.enum(['private', 'group', 'company']),
+})
+export const buildPublishSync = z.strictObject({ state: z.enum(buildSyncStates), failure: observed(buildError) })
+export const buildPublishObservation = z.strictObject({ desired: buildPublishInput, sync: buildPublishSync })
 export const buildSession = z.strictObject({
   id, kind: z.literal('new-app'), engine: z.literal('console-v1'), version, lifecycle: z.enum(buildLifecycles),
   groupId: opaqueID, locale: z.enum(['ja', 'en']), createdAt: timestamp, updatedAt: timestamp, archivedAt: observed(timestamp),
   draftId: observed(opaqueID), specification: buildSpecification, activeTurnId: observed(id), projection: buildProjection,
   capabilities: z.strictObject({ canConverse: z.boolean(), canRequestPlan: z.boolean() }), nextAction: z.enum(buildNextActions),
   pollAfterMs: observed(z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)), failure: observed(buildError),
+  plan: observed(z.strictObject({ specRevision: revision, stale: z.boolean() })),
+  publish: observed(buildPublishObservation),
 })
 export const buildCreateSession = z.strictObject({ kind: z.literal('new-app'), groupId: opaqueID, intent: nonblank(4000, 4000), locale: z.enum(['ja', 'en']) })
-export const buildPublishInput = z.strictObject({
-  name: nonblank(40).refine((value) => !/[\r\n\u0085\u2028\u2029]/u.test(value), 'Name must be one line').meta({ not: { pattern: '[\r\n\u0085\u2028\u2029]' } }),
-  shareScope: z.enum(['private', 'group', 'company']),
-})
-export const buildPublishResult = z.strictObject({ desired: buildPublishInput, sessionVersion: version, sync: z.strictObject({ state: z.enum(buildSyncStates), failure: observed(buildError) }) })
+export const buildPublishResult = buildPublishObservation.extend({ sessionVersion: version })
 export const buildResolve = z.discriminatedUnion('engine', [z.strictObject({ engine: z.literal('console-v1'), sessionId: id }), z.strictObject({ engine: z.literal('platform-v1'), draftId: opaqueID })])
 export const buildListQuery = z.strictObject({ cursor: observed(nonblank(2048)), limit: z.number().int().min(1).max(50).optional() })
 const page = <T extends z.ZodType>(item: T) => z.strictObject({ items: total(item), nextCursor: observed(nonblank(2048)) })
@@ -142,7 +146,9 @@ const readTurnFields = { state: z.string(), nextAction: z.string(), progress: ob
 export const buildReadConversationTurn = buildConversationTurn.extend(readTurnFields)
 export const buildReadPlanTurn = buildPlanTurn.extend({ ...readTurnFields, projection: buildReadProjection })
 export const buildReadTurn = z.discriminatedUnion('kind', [buildReadConversationTurn, buildReadPlanTurn])
-export const buildReadSession = buildSession.extend({ lifecycle: z.string(), nextAction: z.string(), projection: buildReadProjection, failure: observed(buildReadError) })
+export const buildReadPublishSync = buildPublishSync.extend({ state: z.string(), failure: observed(buildReadError) })
+export const buildReadPublishObservation = buildPublishObservation.extend({ sync: buildReadPublishSync })
+export const buildReadSession = buildSession.extend({ lifecycle: z.string(), nextAction: z.string(), projection: buildReadProjection, failure: observed(buildReadError), publish: observed(buildReadPublishObservation) })
 export const buildSchemas = {
   BuildReply: buildReply, BuildReplyContext: buildReplyContext, BuildReplyValidation: buildReplyValidation,
   BuildSession: buildSession, BuildSessionList: page(buildSession), BuildTurn: buildTurn, BuildTurnList: page(buildTurn),

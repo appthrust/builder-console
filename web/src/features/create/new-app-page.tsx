@@ -33,6 +33,9 @@ import { effectiveShareGroupIds, stepFields, syncUrlName, useCreateForm, type Cr
 import { CreatingPanel, FailureNotice, FieldFailureNotice, StaleCatalogNotice, UnconfirmedCreateNotice } from './run-status'
 import { beginBuild, resolveBuildGroup } from '../build/entry'
 import { text as buildText } from '../build/copy'
+import { newSessionEngine } from '../build/new-session-engine'
+import { BuildStartFailure } from '../build/start-failure'
+import { consoleConfigQuery } from '../../api/queries/console'
 import { clearCreateSession, createSteps, readCreateSession, restoreCreateDraft, saveCreateSession, type Step } from './persistence'
 import { businessTemplateById, joinBusinessTemplates } from './templates'
 import { ConfirmStep } from './steps/confirm-step'
@@ -111,7 +114,7 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
   const run = useCreateStore<RunState>({ step: initialStep, resume: saved?.progress ?? {} })
   const { step, phase, failure, checkingName, advancing, nameTaken } = useSelector(run)
   const [startingBuild, setStartingBuild] = useState(false)
-  const [buildError, setBuildError] = useState(false)
+  const [buildError, setBuildError] = useState<{ error: unknown }>()
   const [completed, setCompleted] = useState(false)
   const completedRef = useRef(false)
   const persist = () => {
@@ -442,18 +445,23 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
     if (startingBuild || !aiGroupId || !entryReady('ai') || !intent.trim()) return
     buildRequest.current = { intent }
     setStartingBuild(true)
-    setBuildError(false)
+    setBuildError(undefined)
     try {
-      const session = await beginBuild(projectId, intent, { groupId: aiGroupId, ownerSubject: me.person.subject })
+      const config = await queryClient.ensureQueryData(consoleConfigQuery)
+      const session = await beginBuild(projectId, intent, { groupId: aiGroupId, ownerSubject: me.person.subject, newSessionEngine: newSessionEngine(config) })
       completedRef.current = true
       setCompleted(true)
       await navigate({ href: paths.build(session.id) })
-    } catch {
-      setBuildError(true)
+    } catch (error) {
+      setBuildError({ error })
     } finally {
       setStartingBuild(false)
     }
   }
+  // The start's failure is shown under the whole form; bring it into view where the action was pressed.
+  useEffect(() => {
+    if (buildError) document.getElementById('build-start-failure')?.scrollIntoView?.({ block: 'nearest' })
+  }, [buildError])
   const autoStarted = useRef(false)
   useEffect(() => {
     if (!search.intent?.trim() || autoStarted.current || !entryReady('ai')) return
@@ -647,7 +655,7 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
           </form>
         </CardBody>
       </Card>
-      {buildError ? <Notice tone="error" className="mt-4" title={text.buildFailed} actions={<Button loading={startingBuild} onClick={() => { const request = buildRequest.current; if (request) void startBuild(request.intent) }}>{text.retryBuild}</Button>}>{text.inputKept}</Notice> : null}
+      {buildError ? <div id="build-start-failure" className="mt-4"><BuildStartFailure error={buildError.error} busy={startingBuild} onRetry={() => { const request = buildRequest.current; if (request) void startBuild(request.intent) }} /></div> : null}
     </div>
   )
 }

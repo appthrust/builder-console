@@ -20,21 +20,30 @@ type BuildScope struct{ InstallationID, ProjectID, OwnerIssuer, OwnerSubject, Gr
 type BuildRejection struct {
 	Code, Message  string
 	CurrentVersion int64
+	Reason         string
 }
 
 func (e *BuildRejection) Error() string      { return e.Code + ": " + e.Message }
 func RejectBuild(code, message string) error { return &BuildRejection{Code: code, Message: message} }
 
 type BuildFailure struct {
-	Code    string `json:"error"`
-	Message string `json:"message"`
-	Reason  string `json:"reason,omitempty"`
+	Code      string `json:"error"`
+	Message   string `json:"message"`
+	Reason    string `json:"reason,omitempty"`
+	Policy    string `json:"policy,omitempty"`
+	Field     string `json:"field,omitempty"`
+	Resource  string `json:"resource,omitempty"`
+	Limit     string `json:"limit,omitempty"`
+	Retryable *bool  `json:"retryable,omitempty"`
 }
 type BuildProjection struct {
 	State           string
 	AppliedRevision *int64
 }
-type BuildPublishPreferences struct{ Name, ShareScope, State string }
+type BuildPublishPreferences struct {
+	Name, ShareScope, State string
+	Failure                 *BuildFailure
+}
 type BuildSession struct {
 	ID                                   string
 	Scope                                BuildScope
@@ -126,26 +135,29 @@ func NewBuildSession(in BuildSessionInput) (BuildAggregate, error) {
 type BuildCommandKind string
 
 const (
-	BuildDraftCreated       BuildCommandKind = "draft_created"
-	BuildWorkspaceReady     BuildCommandKind = "workspace_ready"
-	BuildAcceptConversation BuildCommandKind = "accept_conversation"
-	BuildAcceptPlan         BuildCommandKind = "accept_plan"
-	BuildDispatch           BuildCommandKind = "dispatch"
-	BuildRunning            BuildCommandKind = "running"
-	BuildValidate           BuildCommandKind = "validate"
-	BuildImportReply        BuildCommandKind = "import_reply"
-	BuildRejectReply        BuildCommandKind = "reject_reply"
-	BuildRepair             BuildCommandKind = "repair"
-	BuildResolve            BuildCommandKind = "resolve"
-	BuildSyncSpec           BuildCommandKind = "sync_spec"
-	BuildSpecSynced         BuildCommandKind = "spec_synced"
-	BuildPlanStarted        BuildCommandKind = "plan_started"
-	BuildPlanSucceeded      BuildCommandKind = "plan_succeeded"
-	BuildFailTurn           BuildCommandKind = "fail_turn"
-	BuildMarkCreated        BuildCommandKind = "mark_created"
-	BuildArchive            BuildCommandKind = "archive"
-	BuildSetPublish         BuildCommandKind = "set_publish"
-	BuildPublishSynced      BuildCommandKind = "publish_synced"
+	BuildDraftCreated         BuildCommandKind = "draft_created"
+	BuildWorkspaceReady       BuildCommandKind = "workspace_ready"
+	BuildAcceptConversation   BuildCommandKind = "accept_conversation"
+	BuildAcceptPlan           BuildCommandKind = "accept_plan"
+	BuildDispatch             BuildCommandKind = "dispatch"
+	BuildRunning              BuildCommandKind = "running"
+	BuildValidate             BuildCommandKind = "validate"
+	BuildImportReply          BuildCommandKind = "import_reply"
+	BuildRejectReply          BuildCommandKind = "reject_reply"
+	BuildRepair               BuildCommandKind = "repair"
+	BuildResolve              BuildCommandKind = "resolve"
+	BuildSyncSpec             BuildCommandKind = "sync_spec"
+	BuildSpecSynced           BuildCommandKind = "spec_synced"
+	BuildPlanStarted          BuildCommandKind = "plan_started"
+	BuildPlanSucceeded        BuildCommandKind = "plan_succeeded"
+	BuildFailTurn             BuildCommandKind = "fail_turn"
+	BuildMarkCreated          BuildCommandKind = "mark_created"
+	BuildArchive              BuildCommandKind = "archive"
+	BuildSetPublish           BuildCommandKind = "set_publish"
+	BuildPublishSynced        BuildCommandKind = "publish_synced"
+	BuildInitializationFailed BuildCommandKind = "initialization_failed"
+	BuildPublishFailed        BuildCommandKind = "publish_failed"
+	BuildObserveCreated       BuildCommandKind = "observe_created"
 )
 
 // BuildCommand contains already-validated adapter/Reply-validator results, never
@@ -188,6 +200,46 @@ func ApplyBuildCommand(in BuildAggregate, c BuildCommand) (BuildAggregate, error
 	}
 	finish := func(state string) { turn.State = state; s.ActiveTurnID = "" }
 	switch c.Kind {
+	case BuildObserveCreated:
+		if s.Lifecycle == "created" {
+			return in, nil
+		}
+		if s.Lifecycle != "specifying" && s.Lifecycle != "planning" && s.Lifecycle != "planned" {
+			return invalid()
+		}
+		s.Lifecycle = "created"
+		s.EndedAt = &c.At
+		if turn != nil && turn.Active() && (turn.Request.Kind == "conversation" || turn.PlatformGenerationID == "") {
+			turn.Failure = &BuildFailure{Code: "failed_precondition", Message: "The application has already been created", Reason: "SessionCreated"}
+			if turn.State == "awaiting_confirmation" {
+				turn.Resolution = "keep_spec"
+			}
+			finish("failed")
+		}
+	case BuildInitializationFailed:
+		if s.Lifecycle != "initializing" || s.ActiveTurnID != "" || c.Failure == nil {
+			return invalid()
+		}
+		failure := *c.Failure
+		s.Failure = &failure
+		if c.DraftID != "" {
+			s.DraftID = c.DraftID
+		}
+		// Archived is the existing terminal session state. A fresh session is
+		// required after a definitive initialization failure; uncertain writes
+		// remain initializing and replay their original intent instead.
+		s.Lifecycle = "archived"
+		s.ArchivedAt = &c.At
+		s.EndedAt = &c.At
+	case BuildPublishFailed:
+		if s.Publish == nil || s.Publish.State != "pending" || c.Failure == nil {
+			return invalid()
+		}
+		p := *s.Publish
+		failure := *c.Failure
+		p.State = "failed"
+		p.Failure = &failure
+		s.Publish = &p
 	case BuildDraftCreated:
 		if s.Lifecycle != "initializing" || s.InitStage != "create_draft" || c.DraftID == "" {
 			return invalid()
@@ -286,11 +338,17 @@ func ApplyBuildCommand(in BuildAggregate, c BuildCommand) (BuildAggregate, error
 		turn.State = "dispatching"
 		turn.Failure = nil
 	case BuildResolve:
+		if s.Lifecycle == "created" {
+			return reject("failed_precondition", "The application has already been created")
+		}
+		if turn == nil || c.TurnID == "" || turn.ID != c.TurnID {
+			return reject("failed_precondition", "Resolution must address the exact proposal turn")
+		}
 		if turn != nil && turn.Resolution != "" {
 			if turn.Resolution == c.Decision {
 				return in, nil
 			}
-			return reject("conflict", "Specification decision is already recorded")
+			return in, &BuildRejection{Code: "conflict", Message: "Specification decision is already recorded", Reason: "SpecificationAlreadyResolved"}
 		}
 		if !requireTurn("conversation", "awaiting_confirmation") {
 			return invalid()
@@ -341,7 +399,9 @@ func ApplyBuildCommand(in BuildAggregate, c BuildCommand) (BuildAggregate, error
 		}
 		revision := turn.BaseSpecRevision
 		s.PlannedSpecRevision = &revision
-		s.Lifecycle = "planned"
+		if s.Lifecycle != "created" {
+			s.Lifecycle = "planned"
+		}
 		finish("succeeded")
 	case BuildFailTurn:
 		if turn == nil || !turn.Active() || s.ActiveTurnID != turn.ID || c.Failure == nil {
@@ -350,7 +410,9 @@ func ApplyBuildCommand(in BuildAggregate, c BuildCommand) (BuildAggregate, error
 		failure := *c.Failure
 		turn.Failure = &failure
 		if turn.Request.Kind == "request_plan" {
-			s.Lifecycle = "specifying"
+			if s.Lifecycle != "created" {
+				s.Lifecycle = "specifying"
+			}
 			if failure.Code == "draft_spec_conflict" {
 				s.Projection.State = "conflict"
 			} else {
@@ -388,6 +450,7 @@ func ApplyBuildCommand(in BuildAggregate, c BuildCommand) (BuildAggregate, error
 			return reject("session_busy", "Publish preferences are still pending")
 		}
 		p.State = "pending"
+		p.Failure = nil
 		s.Publish = &p
 	case BuildPublishSynced:
 		if s.Publish == nil || s.Publish.State != "pending" {

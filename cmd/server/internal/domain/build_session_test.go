@@ -57,7 +57,7 @@ func TestBuildConversationConfirmation(t *testing.T) {
 				t.Fatal(a)
 			}
 			before := a
-			a = stepBuild(t, a, BuildCommand{Kind: BuildResolve, Decision: decision})
+			a = stepBuild(t, a, BuildCommand{Kind: BuildResolve, TurnID: a.Turn.ID, Decision: decision})
 			if a.Turn.State != "succeeded" || a.Session.ActiveTurnID != "" {
 				t.Fatal(a)
 			}
@@ -71,7 +71,7 @@ func TestBuildConversationConfirmation(t *testing.T) {
 			if before.Turn.State != "awaiting_confirmation" || before.Specification.Revision != 0 {
 				t.Fatal("input mutated")
 			}
-			replay := stepBuild(t, a, BuildCommand{Kind: BuildResolve, Decision: decision})
+			replay := stepBuild(t, a, BuildCommand{Kind: BuildResolve, TurnID: a.Turn.ID, Decision: decision})
 			if replay.Session.Version != a.Session.Version {
 				t.Fatal("duplicate resolution increments version")
 			}
@@ -79,7 +79,7 @@ func TestBuildConversationConfirmation(t *testing.T) {
 			if decision == opposite {
 				opposite = "keep_spec"
 			}
-			_, err := ApplyBuildCommand(a, BuildCommand{Kind: BuildResolve, Decision: opposite})
+			_, err := ApplyBuildCommand(a, BuildCommand{Kind: BuildResolve, TurnID: a.Turn.ID, Decision: opposite})
 			requireBuildCode(t, err, "conflict")
 		})
 	}
@@ -186,7 +186,7 @@ func TestBuildConversationLifecycleAndStalePlan(t *testing.T) {
 				}
 				reply := BuildReply{TurnID: next.Turn.ID, BaseSpecRevision: 0, SpecChanged: true}
 				next = stepBuild(t, next, BuildCommand{Kind: BuildImportReply, Reply: &reply, Markdown: "name: New"})
-				next = stepBuild(t, next, BuildCommand{Kind: BuildResolve, Decision: "accept_spec"})
+				next = stepBuild(t, next, BuildCommand{Kind: BuildResolve, TurnID: next.Turn.ID, Decision: "accept_spec"})
 				if next.Session.Lifecycle != "specifying" || *next.Session.PlannedSpecRevision != 0 || next.Session.CurrentSpecRevision != 1 {
 					t.Fatal(next)
 				}
@@ -207,7 +207,7 @@ func TestBuildSpecificRejectionsAndPublish(t *testing.T) {
 		t.Fatal(failed)
 	}
 	a = replyBuild(t, true)
-	_, err = ApplyBuildCommand(a, BuildCommand{Kind: BuildResolve, Decision: "cancel"})
+	_, err = ApplyBuildCommand(a, BuildCommand{Kind: BuildResolve, TurnID: a.Turn.ID, Decision: "cancel"})
 	requireBuildCode(t, err, "invalid_argument")
 	a = replyBuild(t, false)
 	a.Session.Lifecycle = "created"

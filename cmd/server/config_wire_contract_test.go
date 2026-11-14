@@ -33,4 +33,5 @@ func TestConfigWriterMatchesCanonicalSchema(t *testing.T) {
 	body, err := jsonschema.UnmarshalJSON(bytes.NewReader(response.Body.Bytes()))
 	require.NoError(t, err)
 	require.NoError(t, schema.Validate(body))
+	require.Equal(t, false, body.(map[string]any)["newAppConversation"])
 }

@@ -21,15 +21,9 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useSelector } from '@tanstack/react-store'
 import { PanelRightOpen, Users } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
-import { cleanupCreation, updateDraft } from '../../api/build'
 import { buildKeys, useBuildDraft } from '../../api/queries/build'
 import { useGroups } from '../../api/queries/console'
-import { deriveAccess, shareScopeLabel } from '../../model/access'
-import { useCreatedAppAccess } from '../create/access'
-import { AccessForbiddenError } from '../../api/access'
-import { renameCreationPlan } from '../../model/build/plan'
 import { buildCopy } from '../../model/build/copy'
-import { implementedReleaseReady } from '../../model/app'
 import { isBuildPending } from '../../model/build/progress'
 import { paths } from '../../routes/paths'
 import { setArtifactCollapsed, shellStore } from '../../shell/store'
@@ -37,7 +31,6 @@ import { useShell } from '../../shell/use-shell'
 import { ActionError, Button, cn, EmptyState, focusHeading, LinkButton, Loading, Notice, ResourceBoundary, useDocumentTitle } from '../../ui'
 import { DatabaseChanges } from '../app/database-changes'
 import { canEditApp } from '../app/permissions'
-import { useAppViews } from '../app/use-app-views'
 import { ArtifactPane } from './artifact-pane'
 import { ConversationPane } from './conversation-pane'
 import { PublishStep } from './publish-step'
@@ -47,6 +40,7 @@ import { useNameSuggestion } from './use-name-suggestion'
 import { text } from './copy'
 import { resolveBuildGroup } from './entry'
 import { BuildFailureNotice } from './build-failure-notice'
+import { useCreatedAppView } from './use-created-app-view'
 
 export function BuildPage({ draftId }: { draftId: string }) {
   const { me, groups, currentGroup } = useShell()
@@ -70,7 +64,6 @@ function Session({ draft, groupId, stale }: { draft: BuildDraft; groupId: string
   const [tab, setTab] = useState<'conversation' | 'artifact'>('conversation')
   const artifactCollapsed = useSelector(shellStore, (state) => state.artifactCollapsed)
   const [sharing, setSharing] = useState(false)
-  const lookup = useAppViews(me.projectId)
   const { stage, progress } = build.result
   const name = draft.publishPreferences?.name ?? build.spec.name ?? draft.title
   useDocumentTitle(text.page.title(name))
@@ -78,15 +71,7 @@ function Session({ draft, groupId, stale }: { draft: BuildDraft; groupId: string
   // The 作りかけ list (nav count, /-/drafts) gains this draft on arrival and changes its stage word as it moves.
   const queryClient = useQueryClient()
   useEffect(() => { void queryClient.invalidateQueries({ queryKey: buildKeys.drafts(me.projectId) }) }, [queryClient, me.projectId, stage])
-  const appView = build.app ? lookup.viewFor(build.app) : undefined
-  const creationAccess = useCreatedAppAccess(me.projectId, build.app, appView?.platform?.publish)
-  const releases = lookup.input.releasesByApplication[draft.createdApplicationId ?? '']?.components.flatMap((component) => component.releases) ?? []
-  const released = implementedReleaseReady(appView?.platform, releases, {
-    draftId: draft.id, initialReleaseId: build.session.initialReleaseId,
-    taskCount: build.implementation.state.tasks.length, tasks: build.implementation.state.tasks,
-  })
-  const url = released ? appView?.platform?.publish?.publicUrl ?? appView?.platform?.publish?.tailnetUrl : undefined
-  const shareText = build.app ? deriveAccess(appView?.platform?.publish?.access, build.app, groups, creationAccess.error instanceof AccessForbiddenError ? 'forbidden' : creationAccess.error ? 'failed' : undefined).label : shareScopeLabel('private')
+  const { appView, creationAccess, released, url, shareText } = useCreatedAppView({ projectId: me.projectId, draft, app: build.app, groups, initialReleaseId: build.session.initialReleaseId, tasks: build.implementation.state.tasks })
   const planPending = isBuildPending(draft.creationPlanGenerations.at(-1))
   const updatingPlan = build.session.prepareRequested && planPending
   const primary = { ...build.result.primary, enabled: build.result.primary.enabled && !build.busy && !sharing && !updatingPlan }
@@ -106,21 +91,10 @@ function Session({ draft, groupId, stale }: { draft: BuildDraft; groupId: string
     else if (primary.action === 'plan') build.requestPlan()
     else if (primary.action === 'continue') { build.patch({ continuedAfterPublishAt: draft.publishedAt }); setTab('conversation') }
   }
-  const useName = (next: string) => {
-    if (!draft.creationPlan) return
-    void build.perform('prepare', async () => {
-      const publishConflict = build.failure?.reasonCode === 'PublishURLConflict'
-      // URL recovery changes the stored plan, never a schema-defaulted client copy.
-      if (!publishConflict) await cleanupCreation(me.projectId, draft.id)
-      const updated = await updateDraft(me.projectId, draft.id, publishConflict
-        ? { renameApplication: { name: next } }
-        : { creationPlan: renameCreationPlan(draft.creationPlan!, next, { domain: build.domain }) })
-      await build.receive(updated)
-      // The collision is resolved by the new name: its notice must not linger as a stale retry.
-      build.patch((current) => ({ ...current, lastPlannedIntent: updated.intent, reusePlan: true, executionRequestId: undefined, messages: current.messages.filter((message) => message.role !== 'notice' || message.retry !== 'prepare') }))
-      build.prepare()
-    })
-  }
+  // The collision is resolved by the new name: its notice must not linger as a stale retry.
+  const useName = (next: string) => build.rename(next, build.failure, (updated) => build.patch((current) => ({
+    ...current, lastPlannedIntent: updated.intent, messages: current.messages.filter((message) => message.role !== 'notice' || message.retry !== 'prepare'),
+  })))
   return <div className="flex min-h-0 flex-1 flex-col" data-testid="build-session" data-stage={stage}>
     <SessionHeader name={name} stage={stage} released={released} unsupported={build.result.unsupported} action={<StageAction stage={stage} primary={primary} progress={progress} onPrimary={onPrimary} />} />
     {/* Page-level notices share one inset place under the header, whatever raised them. */}

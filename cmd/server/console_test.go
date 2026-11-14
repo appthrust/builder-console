@@ -184,6 +184,7 @@ func TestIdentityCAEnvAndRecoveryIntegration(t *testing.T) {
 		t.Fatalf("unavailable issuer blocked startup: %v", err)
 	}
 	defer cleanup()
+	waitConsoleReady(t, handler)
 	if issuer.Discovery.Load() != 0 {
 		t.Fatal("startup contacted issuer")
 	}
@@ -219,6 +220,7 @@ func TestIdentityCAEnvAndRecoveryIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer closeUntrusted()
+	waitConsoleReady(t, untrusted)
 	request(untrusted, http.StatusServiceUnavailable, "identity_unavailable")
 }
 

@@ -285,9 +285,15 @@ schema declares a default).
 
 `POST /api/v1/__mock/...` (platform) and `POST /api/console/__mock/...`
 (console) switch states for browser checks; see the comments at the top of
-`src/dev/mock-platform.ts` and `src/dev/mock-console.ts` for the current list
+`src/dev/mock-platform.ts`, `src/dev/mock-console.ts` and
+`src/dev/mock-build-sessions.ts` for the current list
 (`role`, `registry`, `codex`, `stack-conflict`, `github-repository`,
 `plan-generation`, `implementation-run`, `logs`, `bare-500`, `app-draft`, ...).
+The dev `/config` (`vite.config.ts`) reports the mock's NEW-APP flag:
+`POST /api/console/__mock/new-app-conversation {on?}` makes `/new` start a
+console-v1 session (off after `__mock/reset`); `build-session-start-failure`
+and `build-session-unavailable {reads?, retryAfterSeconds?}` (503 with
+`Retry-After`) exercise a stopped start and the bounded backoff.
 
 ### Browser stories
 

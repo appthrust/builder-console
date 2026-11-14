@@ -61,14 +61,25 @@ func newHandler(staticDir, upstreamURL, projectID string, console http.Handler, 
 	}
 	// The Dashboard shares the Platform API origin; its
 	// Team settings page is where the データ tab sends membership gaps.
-	config := map[string]string{
-		"projectId":    projectID,
-		"dashboardUrl": upstream.String() + "/dashboard/settings",
-	}
+	config := struct {
+		ProjectID          string `json:"projectId"`
+		DashboardURL       string `json:"dashboardUrl"`
+		NewAppConversation bool   `json:"newAppConversation"`
+	}{ProjectID: projectID, DashboardURL: upstream.String() + "/dashboard/settings"}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /config", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /config", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
-		writeJSON(w, http.StatusOK, config)
+		response := config
+		var current *api.API
+		if provider, ok := console.(interface{ CurrentAPI() *api.API }); ok {
+			current = provider.CurrentAPI()
+		} else {
+			current, _ = console.(*api.API)
+		}
+		if current != nil {
+			response.NewAppConversation = current.NewAppConversation(r)
+		}
+		writeJSON(w, http.StatusOK, response)
 	})
 	mux.Handle("GET /launcher", launcher.NewHandler(catalog, authenticator.Authenticate))
 	mux.Handle("GET /releasez", releaseidentity.NewHandler("BUILDER_CONSOLE", func(w http.ResponseWriter, _ *http.Request) {

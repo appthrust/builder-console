@@ -16,7 +16,7 @@ test('loads the installed project from local config once, never from the project
   const requests: string[] = []
   globalThis.fetch = mock(async (input: RequestInfo | URL) => {
     requests.push(String(input))
-    return Response.json({ projectId: 'pj-eee7fa8eabbc' })
+    return Response.json({ projectId: 'pj-eee7fa8eabbc', newAppConversation: false })
   }) as unknown as typeof fetch
   const client = new QueryClient()
   const query = projectIdQuery()
@@ -44,7 +44,7 @@ test('config failure fails closed without retries or another project', async () 
   client.clear()
 })
 
-test.each([[{}, 'missing'], [{ projectId: '' }, 'invalid_value'], [{ projectId: 'wrong/project' }, 'invalid_value'], [{ projectId: 12 }, 'invalid_type']] as const)(
+test.each([[{ newAppConversation: false }, 'missing'], [{ projectId: '', newAppConversation: false }, 'invalid_value'], [{ projectId: 'wrong/project', newAppConversation: false }, 'invalid_value'], [{ projectId: 12, newAppConversation: false }, 'invalid_type']] as const)(
   'invalid config fails closed: %j', async (config, code) => {
     globalThis.fetch = mock(async () => Response.json(config)) as unknown as typeof fetch
     const error = await projectIdQuery().queryFn().catch((caught: unknown) => caught)
@@ -54,11 +54,11 @@ test.each([[{}, 'missing'], [{ projectId: '' }, 'invalid_value'], [{ projectId: 
 )
 
 test.each([
-  [{ projectId: 'pj-1', dashboardUrl: 'https://dashboard.example.test/dashboard/settings' }, { projectId: 'pj-1', dashboardUrl: 'https://dashboard.example.test/dashboard/settings' }],
-  [{ projectId: 'pj-1' }, { projectId: 'pj-1' }],
-  [{ projectId: 'pj-1', dashboardUrl: 'javascript:alert(1)' }, { projectId: 'pj-1' }],
-  [{ projectId: 'pj-1', dashboardUrl: '/dashboard/settings' }, { projectId: 'pj-1' }],
-  [{ projectId: 'pj-1', dashboardUrl: 7 }, { projectId: 'pj-1' }],
+  [{ projectId: 'pj-1', newAppConversation: false, dashboardUrl: 'https://dashboard.example.test/dashboard/settings' }, { projectId: 'pj-1', newAppConversation: false, dashboardUrl: 'https://dashboard.example.test/dashboard/settings' }],
+  [{ projectId: 'pj-1', newAppConversation: false }, { projectId: 'pj-1', newAppConversation: false }],
+  [{ projectId: 'pj-1', newAppConversation: false, dashboardUrl: 'javascript:alert(1)' }, { projectId: 'pj-1', newAppConversation: false }],
+  [{ projectId: 'pj-1', newAppConversation: false, dashboardUrl: '/dashboard/settings' }, { projectId: 'pj-1', newAppConversation: false }],
+  [{ projectId: 'pj-1', newAppConversation: false, dashboardUrl: 7 }, { projectId: 'pj-1', newAppConversation: false }],
 ])('console config keeps only an absolute http(s) Dashboard URL: %j', async (config, expected) => {
   globalThis.fetch = mock(async () => Response.json(config)) as unknown as typeof fetch
   const client = new QueryClient()

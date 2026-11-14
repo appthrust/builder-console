@@ -1397,8 +1397,12 @@
                 }
               },
               "Retry-After": {
+                "required": true,
+                "description": "Integer delay in seconds, clamped to 1–300; defaults to 2 when absent or invalid upstream. A non-retryable failure still requires intervention.",
                 "schema": {
-                  "type": "string"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300
                 }
               }
             },
@@ -1421,8 +1425,12 @@
                 }
               },
               "Retry-After": {
+                "required": true,
+                "description": "Integer delay in seconds, clamped to 1–300; defaults to 2 when absent or invalid upstream. A non-retryable failure still requires intervention.",
                 "schema": {
-                  "type": "string"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300
                 }
               }
             },
@@ -1695,8 +1703,12 @@
                 }
               },
               "Retry-After": {
+                "required": true,
+                "description": "Integer delay in seconds, clamped to 1–300; defaults to 2 when absent or invalid upstream. A non-retryable failure still requires intervention.",
                 "schema": {
-                  "type": "string"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300
                 }
               }
             },
@@ -1719,8 +1731,12 @@
                 }
               },
               "Retry-After": {
+                "required": true,
+                "description": "Integer delay in seconds, clamped to 1–300; defaults to 2 when absent or invalid upstream. A non-retryable failure still requires intervention.",
                 "schema": {
-                  "type": "string"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300
                 }
               }
             },
@@ -1976,8 +1992,12 @@
                 }
               },
               "Retry-After": {
+                "required": true,
+                "description": "Integer delay in seconds, clamped to 1–300; defaults to 2 when absent or invalid upstream. A non-retryable failure still requires intervention.",
                 "schema": {
-                  "type": "string"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300
                 }
               }
             },
@@ -2000,8 +2020,12 @@
                 }
               },
               "Retry-After": {
+                "required": true,
+                "description": "Integer delay in seconds, clamped to 1–300; defaults to 2 when absent or invalid upstream. A non-retryable failure still requires intervention.",
                 "schema": {
-                  "type": "string"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300
                 }
               }
             },
@@ -2252,8 +2276,12 @@
                 }
               },
               "Retry-After": {
+                "required": true,
+                "description": "Integer delay in seconds, clamped to 1–300; defaults to 2 when absent or invalid upstream. A non-retryable failure still requires intervention.",
                 "schema": {
-                  "type": "string"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300
                 }
               }
             },
@@ -2276,8 +2304,12 @@
                 }
               },
               "Retry-After": {
+                "required": true,
+                "description": "Integer delay in seconds, clamped to 1–300; defaults to 2 when absent or invalid upstream. A non-retryable failure still requires intervention.",
                 "schema": {
-                  "type": "string"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300
                 }
               }
             },
@@ -2554,8 +2586,12 @@
                 }
               },
               "Retry-After": {
+                "required": true,
+                "description": "Integer delay in seconds, clamped to 1–300; defaults to 2 when absent or invalid upstream. A non-retryable failure still requires intervention.",
                 "schema": {
-                  "type": "string"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300
                 }
               }
             },
@@ -2578,8 +2614,12 @@
                 }
               },
               "Retry-After": {
+                "required": true,
+                "description": "Integer delay in seconds, clamped to 1–300; defaults to 2 when absent or invalid upstream. A non-retryable failure still requires intervention.",
                 "schema": {
-                  "type": "string"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300
                 }
               }
             },
@@ -2873,8 +2913,12 @@
                 }
               },
               "Retry-After": {
+                "required": true,
+                "description": "Integer delay in seconds, clamped to 1–300; defaults to 2 when absent or invalid upstream. A non-retryable failure still requires intervention.",
                 "schema": {
-                  "type": "string"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300
                 }
               }
             },
@@ -2897,8 +2941,12 @@
                 }
               },
               "Retry-After": {
+                "required": true,
+                "description": "Integer delay in seconds, clamped to 1–300; defaults to 2 when absent or invalid upstream. A non-retryable failure still requires intervention.",
                 "schema": {
-                  "type": "string"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300
                 }
               }
             },
@@ -3180,8 +3228,12 @@
                 }
               },
               "Retry-After": {
+                "required": true,
+                "description": "Integer delay in seconds, clamped to 1–300; defaults to 2 when absent or invalid upstream. A non-retryable failure still requires intervention.",
                 "schema": {
-                  "type": "string"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300
                 }
               }
             },
@@ -3204,8 +3256,12 @@
                 }
               },
               "Retry-After": {
+                "required": true,
+                "description": "Integer delay in seconds, clamped to 1–300; defaults to 2 when absent or invalid upstream. A non-retryable failure still requires intervention.",
                 "schema": {
-                  "type": "string"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300
                 }
               }
             },
@@ -3470,8 +3526,12 @@
                 }
               },
               "Retry-After": {
+                "required": true,
+                "description": "Integer delay in seconds, clamped to 1–300; defaults to 2 when absent or invalid upstream. A non-retryable failure still requires intervention.",
                 "schema": {
-                  "type": "string"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300
                 }
               }
             },
@@ -3494,8 +3554,12 @@
                 }
               },
               "Retry-After": {
+                "required": true,
+                "description": "Integer delay in seconds, clamped to 1–300; defaults to 2 when absent or invalid upstream. A non-retryable failure still requires intervention.",
                 "schema": {
-                  "type": "string"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300
                 }
               }
             },
@@ -3781,8 +3845,12 @@
                 }
               },
               "Retry-After": {
+                "required": true,
+                "description": "Integer delay in seconds, clamped to 1–300; defaults to 2 when absent or invalid upstream. A non-retryable failure still requires intervention.",
                 "schema": {
-                  "type": "string"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300
                 }
               }
             },
@@ -3805,8 +3873,12 @@
                 }
               },
               "Retry-After": {
+                "required": true,
+                "description": "Integer delay in seconds, clamped to 1–300; defaults to 2 when absent or invalid upstream. A non-retryable failure still requires intervention.",
                 "schema": {
-                  "type": "string"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300
                 }
               }
             },
@@ -4076,8 +4148,12 @@
                 }
               },
               "Retry-After": {
+                "required": true,
+                "description": "Integer delay in seconds, clamped to 1–300; defaults to 2 when absent or invalid upstream. A non-retryable failure still requires intervention.",
                 "schema": {
-                  "type": "string"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300
                 }
               }
             },
@@ -4100,8 +4176,12 @@
                 }
               },
               "Retry-After": {
+                "required": true,
+                "description": "Integer delay in seconds, clamped to 1–300; defaults to 2 when absent or invalid upstream. A non-retryable failure still requires intervention.",
                 "schema": {
-                  "type": "string"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300
                 }
               }
             },
@@ -4378,8 +4458,12 @@
                 }
               },
               "Retry-After": {
+                "required": true,
+                "description": "Integer delay in seconds, clamped to 1–300; defaults to 2 when absent or invalid upstream. A non-retryable failure still requires intervention.",
                 "schema": {
-                  "type": "string"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300
                 }
               }
             },
@@ -4402,8 +4486,12 @@
                 }
               },
               "Retry-After": {
+                "required": true,
+                "description": "Integer delay in seconds, clamped to 1–300; defaults to 2 when absent or invalid upstream. A non-retryable failure still requires intervention.",
                 "schema": {
-                  "type": "string"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300
                 }
               }
             },
@@ -4690,8 +4778,12 @@
                 }
               },
               "Retry-After": {
+                "required": true,
+                "description": "Integer delay in seconds, clamped to 1–300; defaults to 2 when absent or invalid upstream. A non-retryable failure still requires intervention.",
                 "schema": {
-                  "type": "string"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300
                 }
               }
             },
@@ -4714,8 +4806,12 @@
                 }
               },
               "Retry-After": {
+                "required": true,
+                "description": "Integer delay in seconds, clamped to 1–300; defaults to 2 when absent or invalid upstream. A non-retryable failure still requires intervention.",
                 "schema": {
-                  "type": "string"
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300
                 }
               }
             },
@@ -5584,6 +5680,196 @@
               "message"
             ],
             "additionalProperties": false
+          },
+          "plan": {
+            "presence": "optionalObservation",
+            "type": "object",
+            "properties": {
+              "specRevision": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "stale": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "specRevision",
+              "stale"
+            ],
+            "additionalProperties": false
+          },
+          "publish": {
+            "presence": "optionalObservation",
+            "type": "object",
+            "properties": {
+              "desired": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "[^\\t\\n\\x0B\\f\\r    -     　﻿]",
+                    "minLength": 1,
+                    "maxLength": 40,
+                    "not": {
+                      "pattern": "[\r\n  ]"
+                    }
+                  },
+                  "shareScope": {
+                    "type": "string",
+                    "enum": [
+                      "private",
+                      "group",
+                      "company"
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "shareScope"
+                ],
+                "additionalProperties": false
+              },
+              "sync": {
+                "type": "object",
+                "properties": {
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "pending",
+                      "syncing",
+                      "applied",
+                      "failed"
+                    ]
+                  },
+                  "failure": {
+                    "presence": "optionalObservation",
+                    "type": "object",
+                    "properties": {
+                      "error": {
+                        "type": "string",
+                        "enum": [
+                          "invalid_argument",
+                          "unauthorized",
+                          "forbidden",
+                          "not_found",
+                          "idempotency_conflict",
+                          "precondition_required",
+                          "version_conflict",
+                          "session_busy",
+                          "workspace_busy",
+                          "needs_runtime",
+                          "conflict",
+                          "artifact_path_changed",
+                          "failed_precondition",
+                          "draft_spec_conflict",
+                          "artifact_upload_timeout",
+                          "input_too_large",
+                          "payload_too_large",
+                          "artifact_uploads_busy",
+                          "artifact_store_unsupported",
+                          "artifact_store_unavailable",
+                          "service_unavailable",
+                          "status_unavailable",
+                          "insufficient_storage",
+                          "artifact_lost",
+                          "reply_invalid",
+                          "artifact_integrity_failed",
+                          "agent_failed",
+                          "agent_timed_out",
+                          "agent_interaction_required"
+                        ]
+                      },
+                      "message": {
+                        "type": "string",
+                        "pattern": "[^\\t\\n\\x0B\\f\\r    -     　﻿]",
+                        "minLength": 1,
+                        "maxLength": 2000
+                      },
+                      "details": {
+                        "presence": "optionalObservation",
+                        "type": "object",
+                        "properties": {
+                          "field": {
+                            "presence": "optionalObservation",
+                            "type": "string",
+                            "pattern": "[^\\t\\n\\x0B\\f\\r    -     　﻿]",
+                            "minLength": 1,
+                            "maxLength": 256
+                          },
+                          "reason": {
+                            "presence": "optionalObservation",
+                            "type": "string",
+                            "pattern": "[^\\t\\n\\x0B\\f\\r    -     　﻿]",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "policy": {
+                            "presence": "optionalObservation",
+                            "type": "string",
+                            "pattern": "[^\\t\\n\\x0B\\f\\r    -     　﻿]",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "currentVersion": {
+                            "presence": "optionalObservation",
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          },
+                          "resource": {
+                            "presence": "optionalObservation",
+                            "type": "string",
+                            "enum": [
+                              "session",
+                              "operation",
+                              "workspace",
+                              "artifact"
+                            ]
+                          },
+                          "retryable": {
+                            "presence": "optionalObservation",
+                            "type": "boolean"
+                          },
+                          "limit": {
+                            "presence": "optionalObservation",
+                            "type": "string",
+                            "enum": [
+                              "files",
+                              "bytes",
+                              "entries",
+                              "depth"
+                            ]
+                          },
+                          "observedAt": {
+                            "presence": "optionalObservation",
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "error",
+                      "message"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "state"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "desired",
+              "sync"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -5880,6 +6166,196 @@
                   "required": [
                     "error",
                     "message"
+                  ],
+                  "additionalProperties": false
+                },
+                "plan": {
+                  "presence": "optionalObservation",
+                  "type": "object",
+                  "properties": {
+                    "specRevision": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "stale": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "specRevision",
+                    "stale"
+                  ],
+                  "additionalProperties": false
+                },
+                "publish": {
+                  "presence": "optionalObservation",
+                  "type": "object",
+                  "properties": {
+                    "desired": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "pattern": "[^\\t\\n\\x0B\\f\\r    -     　﻿]",
+                          "minLength": 1,
+                          "maxLength": 40,
+                          "not": {
+                            "pattern": "[\r\n  ]"
+                          }
+                        },
+                        "shareScope": {
+                          "type": "string",
+                          "enum": [
+                            "private",
+                            "group",
+                            "company"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "shareScope"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "sync": {
+                      "type": "object",
+                      "properties": {
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "pending",
+                            "syncing",
+                            "applied",
+                            "failed"
+                          ]
+                        },
+                        "failure": {
+                          "presence": "optionalObservation",
+                          "type": "object",
+                          "properties": {
+                            "error": {
+                              "type": "string",
+                              "enum": [
+                                "invalid_argument",
+                                "unauthorized",
+                                "forbidden",
+                                "not_found",
+                                "idempotency_conflict",
+                                "precondition_required",
+                                "version_conflict",
+                                "session_busy",
+                                "workspace_busy",
+                                "needs_runtime",
+                                "conflict",
+                                "artifact_path_changed",
+                                "failed_precondition",
+                                "draft_spec_conflict",
+                                "artifact_upload_timeout",
+                                "input_too_large",
+                                "payload_too_large",
+                                "artifact_uploads_busy",
+                                "artifact_store_unsupported",
+                                "artifact_store_unavailable",
+                                "service_unavailable",
+                                "status_unavailable",
+                                "insufficient_storage",
+                                "artifact_lost",
+                                "reply_invalid",
+                                "artifact_integrity_failed",
+                                "agent_failed",
+                                "agent_timed_out",
+                                "agent_interaction_required"
+                              ]
+                            },
+                            "message": {
+                              "type": "string",
+                              "pattern": "[^\\t\\n\\x0B\\f\\r    -     　﻿]",
+                              "minLength": 1,
+                              "maxLength": 2000
+                            },
+                            "details": {
+                              "presence": "optionalObservation",
+                              "type": "object",
+                              "properties": {
+                                "field": {
+                                  "presence": "optionalObservation",
+                                  "type": "string",
+                                  "pattern": "[^\\t\\n\\x0B\\f\\r    -     　﻿]",
+                                  "minLength": 1,
+                                  "maxLength": 256
+                                },
+                                "reason": {
+                                  "presence": "optionalObservation",
+                                  "type": "string",
+                                  "pattern": "[^\\t\\n\\x0B\\f\\r    -     　﻿]",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "policy": {
+                                  "presence": "optionalObservation",
+                                  "type": "string",
+                                  "pattern": "[^\\t\\n\\x0B\\f\\r    -     　﻿]",
+                                  "minLength": 1,
+                                  "maxLength": 128
+                                },
+                                "currentVersion": {
+                                  "presence": "optionalObservation",
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 9007199254740991
+                                },
+                                "resource": {
+                                  "presence": "optionalObservation",
+                                  "type": "string",
+                                  "enum": [
+                                    "session",
+                                    "operation",
+                                    "workspace",
+                                    "artifact"
+                                  ]
+                                },
+                                "retryable": {
+                                  "presence": "optionalObservation",
+                                  "type": "boolean"
+                                },
+                                "limit": {
+                                  "presence": "optionalObservation",
+                                  "type": "string",
+                                  "enum": [
+                                    "files",
+                                    "bytes",
+                                    "entries",
+                                    "depth"
+                                  ]
+                                },
+                                "observedAt": {
+                                  "presence": "optionalObservation",
+                                  "type": "string",
+                                  "format": "date-time",
+                                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": [
+                            "error",
+                            "message"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "state"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "desired",
+                    "sync"
                   ],
                   "additionalProperties": false
                 }
@@ -8962,11 +9438,6 @@
             ],
             "additionalProperties": false
           },
-          "sessionVersion": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9007199254740991
-          },
           "sync": {
             "type": "object",
             "properties": {
@@ -9099,12 +9570,17 @@
               "state"
             ],
             "additionalProperties": false
+          },
+          "sessionVersion": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
           "desired",
-          "sessionVersion",
-          "sync"
+          "sync",
+          "sessionVersion"
         ],
         "additionalProperties": false
       },
@@ -9395,6 +9871,159 @@
             "required": [
               "error",
               "message"
+            ],
+            "additionalProperties": false
+          },
+          "plan": {
+            "presence": "optionalObservation",
+            "type": "object",
+            "properties": {
+              "specRevision": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "stale": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "specRevision",
+              "stale"
+            ],
+            "additionalProperties": false
+          },
+          "publish": {
+            "presence": "optionalObservation",
+            "type": "object",
+            "properties": {
+              "desired": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "[^\\t\\n\\x0B\\f\\r    -     　﻿]",
+                    "minLength": 1,
+                    "maxLength": 40,
+                    "not": {
+                      "pattern": "[\r\n  ]"
+                    }
+                  },
+                  "shareScope": {
+                    "type": "string",
+                    "enum": [
+                      "private",
+                      "group",
+                      "company"
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "shareScope"
+                ],
+                "additionalProperties": false
+              },
+              "sync": {
+                "type": "object",
+                "properties": {
+                  "state": {
+                    "type": "string"
+                  },
+                  "failure": {
+                    "presence": "optionalObservation",
+                    "type": "object",
+                    "properties": {
+                      "error": {
+                        "type": "string"
+                      },
+                      "message": {
+                        "type": "string",
+                        "pattern": "[^\\t\\n\\x0B\\f\\r    -     　﻿]",
+                        "minLength": 1,
+                        "maxLength": 2000
+                      },
+                      "details": {
+                        "presence": "optionalObservation",
+                        "type": "object",
+                        "properties": {
+                          "field": {
+                            "presence": "optionalObservation",
+                            "type": "string",
+                            "pattern": "[^\\t\\n\\x0B\\f\\r    -     　﻿]",
+                            "minLength": 1,
+                            "maxLength": 256
+                          },
+                          "reason": {
+                            "presence": "optionalObservation",
+                            "type": "string",
+                            "pattern": "[^\\t\\n\\x0B\\f\\r    -     　﻿]",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "policy": {
+                            "presence": "optionalObservation",
+                            "type": "string",
+                            "pattern": "[^\\t\\n\\x0B\\f\\r    -     　﻿]",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "currentVersion": {
+                            "presence": "optionalObservation",
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          },
+                          "resource": {
+                            "presence": "optionalObservation",
+                            "type": "string",
+                            "enum": [
+                              "session",
+                              "operation",
+                              "workspace",
+                              "artifact"
+                            ]
+                          },
+                          "retryable": {
+                            "presence": "optionalObservation",
+                            "type": "boolean"
+                          },
+                          "limit": {
+                            "presence": "optionalObservation",
+                            "type": "string",
+                            "enum": [
+                              "files",
+                              "bytes",
+                              "entries",
+                              "depth"
+                            ]
+                          },
+                          "observedAt": {
+                            "presence": "optionalObservation",
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "error",
+                      "message"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "state"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "desired",
+              "sync"
             ],
             "additionalProperties": false
           }
@@ -12067,10 +12696,14 @@
           "dashboardUrl": {
             "presence": "optionalObservation",
             "type": "string"
+          },
+          "newAppConversation": {
+            "type": "boolean"
           }
         },
         "required": [
-          "projectId"
+          "projectId",
+          "newAppConversation"
         ],
         "additionalProperties": false
       },
