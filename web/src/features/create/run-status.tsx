@@ -96,6 +96,20 @@ export function FailureNotice({ failure }: { failure: CreateFailed }) {
       </Notice>
     )
   }
+  // The repository destination's answers have fixed words: never the server's reason or message.
+  if (failure.destination) {
+    const [title, body] = failure.destination === 'changed'
+      ? [text.destination.changedTitle, text.destination.changed]
+      : failure.destination === 'mismatch'
+        ? [text.destination.mismatchTitle, text.destination.mismatch]
+        : [undefined, text.destination.blocked]
+    return (
+      <Notice tone={failure.destination === 'changed' ? 'warning' : 'error'} title={title} actions={abandon}>
+        <p>{body}</p>
+        {failure.progress.draft ? <p className="mt-1 opacity-80">{copy.create.draftKept}</p> : null}
+      </Notice>
+    )
+  }
   const title = failure.transient ? copy.errors.transient : failure.retryable ? copy.create.retryable : copy.create.failed
   return (
     <Notice tone="error" title={title} actions={abandon}>

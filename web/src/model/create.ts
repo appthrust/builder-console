@@ -6,10 +6,16 @@
 // The catalog values are evidence for whether creation is allowed: a source
 // kind, capability, connection status or domain source this console does not
 // know is never available, never a capability and never ready.
+//
+// Where a new repository and its image go is Platform's resolved repository
+// destination, never a connection this console picks or an owner/registry it
+// joins: a new-repository request names only the template, the repository
+// name and the destination revision the user saw.
 import { isOneOf, type CreationPlan } from './contracts/build'
 import type {
   PublishDomain,
   RegistryConnection,
+  ResolvedRepositoryDestination,
   SourceConnection,
   SourceRepositoryRequest,
   StackDefinition,
@@ -189,16 +195,11 @@ export function resolveCreateCatalog(
   }
 }
 
-export interface SourceConnections {
-  source: SourceConnection
-  registry: RegistryConnection
-}
-
-/** What the create paths need from the platform besides the catalog. */
+/** What the create paths need from the platform besides the catalog and the repository destination. */
 export interface CreateEnvironment {
-  /** First ready GitHub connection able to create repositories and, if selected, read the template. */
-  source?: SourceConnection
-  /** First ready registry connection. */
+  /** 作ったコードから only: the connection an existing repository is listed and adopted with. It never decides where a new repository goes. */
+  adoption?: SourceConnection
+  /** イメージ only: the first ready registry connection (Platform rejects a sample-image source without one). */
   registry?: RegistryConnection
   /** Publish-ready domain base; the app URL is `https://<appName>.<domain>` (ux-design §7.1.1). */
   domain?: string
@@ -228,37 +229,14 @@ function templateRepository(template: TemplateSummary): string {
   return template.githubTemplate?.repository ?? `appthrust/template-${template.id.replace(/-postgres$/, '')}`
 }
 
-function canCreateFromSource(source: SourceConnection, template?: TemplateSummary): boolean {
-  const can = (capability: 'createRepositories' | 'readTemplateRepositories') => source.capabilities.some((item) => isOneOf(item, capability))
-  return isOneOf(source.status, 'ready') && can('createRepositories') && (!template || can('readTemplateRepositories'))
-}
-
-/** Trimmed, case-insensitive matching mirrors the Platform API's validateSourceRepositoryAllowlist. */
-export function pickSourceConnection(
-  sources: readonly SourceConnection[],
-  template?: TemplateSummary
-): SourceConnection | undefined {
-  const repository = template ? templateRepository(template).trim().toLowerCase() : undefined
-  return sources.find((source) => canCreateFromSource(source, template) &&
-    (!repository || !source.allowedRepositories?.length || source.allowedRepositories.some((allowed) => allowed.trim().toLowerCase() === repository)))
-}
-
-export function templateSourceProblem(
-  template: TemplateSummary,
-  sources: readonly SourceConnection[]
-): 'not-admitted' | 'no-connection' | undefined {
-  if (pickSourceConnection(sources, template)) return undefined
-  return sources.some((source) => canCreateFromSource(source, template)) ? 'not-admitted' : 'no-connection'
-}
-
 export function pickCreateEnvironment(
   sources: readonly SourceConnection[],
   registries: readonly RegistryConnection[],
-  domains: readonly PublishDomain[],
-  template?: TemplateSummary
+  domains: readonly PublishDomain[]
 ): CreateEnvironment {
   return {
-    source: pickSourceConnection(sources, template),
+    // Adoption keeps naming its connection explicitly (Platform does not resolve a destination for it).
+    adoption: sources.find((source) => isOneOf(source.status, 'ready') && source.capabilities.some((item) => isOneOf(item, 'createRepositories'))),
     registry: registries.find((item) => isOneOf(item.status, 'ready')),
     domain: pickPublishDomain(domains),
   }
@@ -268,21 +246,36 @@ export function pickCreateEnvironment(
 export type CreateEntry = 'existing' | 'template' | 'ai' | 'image'
 
 /**
- * What is missing for an entry, in display order. Every entry publishes and
- * needs a ready registry (the platform rejects a sample-image source without
- * one); all but the image entry work on a GitHub repository.
+ * What is missing for an entry, in display order. Every entry publishes. The
+ * existing-work entry lists and adopts through a GitHub connection; the image
+ * entry names its registry. A new repository's connection and image access
+ * come from the repository destination instead (`newRepositoryEntry`).
  */
 export function missingPrerequisites(environment: CreateEnvironment, entry: CreateEntry): CreatePrerequisite[] {
   const missing: CreatePrerequisite[] = []
-  if (entry !== 'image' && !environment.source) missing.push('github')
-  if (!environment.registry) missing.push('registry')
+  if (entry === 'existing' && !environment.adoption) missing.push('github')
+  if (entry === 'image' && !environment.registry) missing.push('registry')
   if (!environment.domain) missing.push('domain')
   return missing
 }
 
-export function sourceConnectionsOf(environment: CreateEnvironment): SourceConnections | undefined {
-  const { source, registry } = environment
-  return source && registry ? { source, registry } : undefined
+/** The entries that create a new repository, and so need a resolved repository destination. */
+export function newRepositoryEntry(entry: CreateEntry | undefined): entry is 'template' | 'ai' {
+  return entry === 'template' || entry === 'ai'
+}
+
+/** `owner/name` of the repository Platform creates for `appName` at `destination`. */
+export function destinationRepository(destination: ResolvedRepositoryDestination, appName: string): string {
+  return `${destination.repositoryNamespace}/${appName}`
+}
+
+/**
+ * Where its images go: Platform derives the image path as the destination's
+ * registry namespace plus the repository name (platform-api
+ * internal/repositorydestination/request.go:60), and asserts it at create.
+ */
+export function destinationImage(destination: ResolvedRepositoryDestination, appName: string): string {
+  return `${destination.registryNamespace}/${appName}`
 }
 
 export function appUrl(appName: string, domain: string): string {
@@ -290,28 +283,26 @@ export function appUrl(appName: string, domain: string): string {
 }
 
 /**
- * The ひな形 path's first platform call, mirroring the Dashboard github-template
- * submission: a new private repository from the template, owned by the source
- * connection's account, whose pushed images (`edge-*`) are observed.
+ * The ひな形 path's first platform call: a new private repository from the
+ * template, whose pushed images (`edge-*`) are observed. Connection, owner,
+ * image path and image access are Platform's resolved destination; the request
+ * binds the revision the user saw, so a destination that moved meanwhile
+ * answers 409 DestinationChanged instead of creating elsewhere.
  */
 export function buildSourceRepositoryRequest(
   appName: string,
   catalog: CreateCatalog,
-  connections: SourceConnections
+  destination: ResolvedRepositoryDestination
 ): SourceRepositoryRequest {
-  const owner = connections.source.account.login.toLowerCase()
-  const host = connections.registry.registryHost.trim().toLowerCase() || 'ghcr.io'
   const github = catalog.template.githubTemplate
   const ref = github?.branch ?? DEFAULT_TEMPLATE_REF
   return {
-    sourceConnectionId: connections.source.id,
-    registryConnectionRef: connections.registry.id,
     template: {
       repository: templateRepository(catalog.template),
       ref,
     },
     destination: { repositoryName: appName, visibility: 'private' },
-    image: { imagePath: `${host}/${owner}/${appName}`, tagFilter: 'edge-', versioningScheme: 'Alphabetical' },
+    destinationRevision: destination.revision,
     build: { mode: 'observed-image', ref },
   }
 }
@@ -330,21 +321,19 @@ export function urlNameFromRepository(fullName: string): string {
 
 /**
  * The 作ったコードから path's first platform call: adopt the picked repository
- * on its default branch. The build (`workflow-dispatch` of `deploy.yml`) is
- * the platform default for existing repositories, so it is not sent; that
- * workflow pushes `edge-<timestamp>` tags to `<registry>/<owner>/<name>`,
- * observed like the ひな形 path.
+ * on its default branch with the connection that listed it. Platform resolves
+ * no destination for adoption: it derives the image path itself (GHCR,
+ * `ghcr.io/<owner>/<name>`) and picks the registry access for that host, so
+ * neither is sent. The build (`workflow-dispatch` of `deploy.yml`) is the
+ * platform default for existing repositories.
  */
 export function buildExistingSourceRepositoryRequest(
   repository: PickedRepository,
-  connections: SourceConnections
+  adoption: SourceConnection
 ): SourceRepositoryRequest {
-  const host = connections.registry.registryHost.trim().toLowerCase() || 'ghcr.io'
   return {
-    sourceConnectionId: connections.source.id,
-    registryConnectionRef: connections.registry.id,
+    sourceConnectionId: adoption.id,
     existing: { repository: repository.fullName, ...(repository.defaultBranch ? { ref: repository.defaultBranch } : {}) },
-    image: { imagePath: `${host}/${repository.fullName.toLowerCase()}`, tagFilter: 'edge-', versioningScheme: 'Alphabetical' },
   }
 }
 

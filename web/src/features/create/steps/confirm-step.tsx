@@ -1,5 +1,6 @@
-// Step 3 確認して作る: one sentence of what will be made, the answers, and the
-// 詳しい人向け pieces (ひな形 choice, the image reference).
+// Step 3 確認して作る: one sentence of what will be made, the answers, where
+// the repository and its image go, and the 詳しい人向け pieces (ひな形
+// choice, the image reference).
 import { useStore } from '@tanstack/react-form'
 import { useEffect, type ReactNode } from 'react'
 import { copy } from '../../../copy'
@@ -7,6 +8,9 @@ import { Button, Disclosure, focusHeading, Notice } from '../../../ui'
 import { text } from '../copy'
 import type { CreateFormApi } from '../form'
 import { SummaryList } from './summary-list'
+
+/** 作ったコードから: the image path from Platform's validation of the adoption, while it is read. */
+export type AdoptionImage = { kind: 'checking' } | { kind: 'known'; path: string } | { kind: 'unknown' }
 
 export function ConfirmStep({
   form,
@@ -16,6 +20,9 @@ export function ConfirmStep({
   templateName,
   sourceProblem,
   onChooseTemplate,
+  newRepository,
+  destinationBlocked,
+  adoptionImage,
 }: {
   form: CreateFormApi
   /** `https://<urlName>.<domain>`. */
@@ -25,6 +32,11 @@ export function ConfirmStep({
   templateName: string | undefined
   sourceProblem: string | undefined
   onChooseTemplate: () => void
+  /** ひな形: where Platform creates the repository and pushes its image (the resolved destination shown before 作る). */
+  newRepository?: { repository: string; image: string }
+  /** ひな形: no destination is resolved, so nothing is created. */
+  destinationBlocked?: boolean
+  adoptionImage?: AdoptionImage
 }) {
   const values = useStore(form.store, (state) => state.values)
   useEffect(() => {
@@ -32,10 +44,17 @@ export function ConfirmStep({
     focusHeading('create-template-problem')
     document.getElementById('create-template-problem')?.scrollIntoView({ block: 'nearest' })
   }, [sourceProblem])
+  const mono = (value: string) => <span className="font-mono break-all">{value}</span>
+  const adoptionImageValue = adoptionImage?.kind === 'known' ? mono(adoptionImage.path)
+    : adoptionImage?.kind === 'checking' ? <span className="text-stone-500">{text.destination.imageChecking}</span>
+      : <span className="text-stone-500">{text.destination.imageUnknown}</span>
   const rows: Array<[string, ReactNode]> = [
     ...(values.entry === 'template' && templateName ? [[copy.create.confirm.labels.template, templateName] as [string, ReactNode]] : []),
+    ...(values.entry === 'template' && newRepository
+      ? [[text.destination.repository, mono(newRepository.repository)], [text.destination.image, mono(newRepository.image)]] as Array<[string, ReactNode]>
+      : []),
     ...(values.entry === 'existing' && values.repository
-      ? [[copy.create.confirm.labels.repository, <span className="font-mono">{values.repository.fullName}</span>] as [string, ReactNode]]
+      ? [[copy.create.confirm.labels.repository, mono(values.repository.fullName)], [text.destination.image, adoptionImageValue]] as Array<[string, ReactNode]>
       : []),
     [copy.create.details.name, values.displayName],
     [copy.create.confirm.labels.description, values.description || '—'],
@@ -52,6 +71,9 @@ export function ConfirmStep({
             {sourceProblem}
           </Notice>
         </div>
+      ) : null}
+      {values.entry === 'template' && destinationBlocked ? (
+        <div data-testid="create-destination-blocked"><Notice tone="warning">{text.destination.blocked}</Notice></div>
       ) : null}
       <p className="text-base leading-relaxed text-stone-900" data-testid="confirm-summary">
         {copy.create.confirm.summary(values.displayName, groupName, shareText)}

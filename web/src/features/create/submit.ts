@@ -13,17 +13,17 @@ import { ORPCError } from '@orpc/client'
 import { isResponseContractError } from '../../api/boundary'
 import { isConsoleError } from '../../api/console'
 import type { CreateApi } from '../../api/create'
-import { isTransientError, platformErrorEnvelope } from '../../api/platform-error'
+import { destinationRejection, isTransientError, platformErrorEnvelope, type DestinationRejection } from '../../api/platform-error'
 import { knownValue } from '../../model/contracts/build'
-import type { ShareChoice, SourceRepository, SourceRepositoryRequest, StackValidation } from '../../model/contracts/catalog'
+import type { ResolvedRepositoryDestination, ShareChoice, SourceConnection, SourceRepository, SourceRepositoryRequest, StackValidation } from '../../model/contracts/catalog'
 import type { BusinessApp } from '../../model/contracts/console'
 import {
   buildCreateStackRequest,
   buildExistingSourceRepositoryRequest,
   buildSourceRepositoryRequest,
+  destinationImage,
   type CreateCatalog,
   type PickedRepository,
-  type SourceConnections,
   type StackSource,
 } from '../../model/create'
 import { queueCreatedAppAccess } from './access'
@@ -85,13 +85,17 @@ type CreateCalls = Pick<CreateApi,
   | 'validateStack' | 'createStack'
 >
 
-export interface CreateDeps {
+/** What a source repository is made at: ひな形 = the resolved destination the user saw, 作ったコードから = the adopting connection. */
+export interface SourceTargets {
+  destination?: ResolvedRepositoryDestination
+  adoption?: SourceConnection
+}
+
+export interface CreateDeps extends SourceTargets {
   api: CreateCalls
   catalog: CreateCatalog
   /** Publish-ready domain base for the app URL. */
   domain: string
-  /** Required for the ひな形 and 作ったコードから paths. */
-  connections?: SourceConnections
   onPhase: (phase: SubmitPhase) => void
   onProgress?: (progress: CreateProgress) => void
 }
@@ -112,6 +116,11 @@ export interface ValidationIssue {
  * succeeds shortly: the platform's delivery was converging, or the console
  * did not answer (`transient`). `unconfirmed` = a step's answer could not be
  * read: only a readback (`confirmCreate`) may follow, never a resend.
+ * `destination` = Platform refused the new repository at its destination: it
+ * moved since it was shown (`changed`), it is no longer resolvable
+ * (`blocked`), or the request asserted another one (`mismatch`). Each is a
+ * typed failure, never resent: the wizard re-reads the destination and shows
+ * it, and only the user's next confirmation sends again.
  * Otherwise `progress` is what to resume from.
  */
 export class CreateFailed extends Error {
@@ -123,6 +132,7 @@ export class CreateFailed extends Error {
   readonly field?: { path: string; step: 0 | 1 }
   /** No answer from the console (gateway 5xx, network); its message is `copy.errors.transient`. */
   readonly transient: boolean
+  readonly destination?: DestinationRejection
   readonly progress: CreateProgress
   /** Server-provided detail (not localized); ActionError reads `data.message`. */
   readonly data: { message: string } | undefined
@@ -134,19 +144,21 @@ export class CreateFailed extends Error {
     this.name = 'CreateFailed'
     this.forbidden = forbidden
     this.unconfirmed = isResponseContractError(cause)
+    this.destination = destinationRejection(cause)
     // Every Platform API 409 carries code `conflict`; the delivery-root
     // rejections (apierror.DeliveryBlocked) say `details.reason`
     // `delivery_pending` (converging, retry the same request) or
-    // `delivery_blocked` (an operator must restore delivery). Neither is about
-    // the caller's name.
+    // `delivery_blocked` (an operator must restore delivery); the repository
+    // destination says DestinationChanged / DestinationMismatch. None of them
+    // is about the caller's name.
     const conflict = cause instanceof ORPCError && cause.status === 409
     const reason = conflict ? platformErrorEnvelope(cause)?.details?.reason : undefined
     this.transient = isConsoleError(cause) && cause.transient
     this.retryable = reason === 'delivery_pending' || this.transient
     this.nameTaken =
-      isConsoleError(cause, 'slug_taken') || (conflict && reason !== 'delivery_pending' && reason !== 'delivery_blocked')
+      isConsoleError(cause, 'slug_taken') || (conflict && reason !== 'delivery_pending' && reason !== 'delivery_blocked' && this.destination === undefined)
     this.progress = progress
-    const detail = detailOf(cause)
+    const detail = this.destination ? undefined : detailOf(cause)
     this.data = detail ? { message: detail } : undefined
     this.issues = cause instanceof ValidationRejected ? cause.issues : []
     const envelope = cause instanceof ORPCError && cause.status === 400 ? platformErrorEnvelope(cause) : undefined
@@ -215,7 +227,8 @@ export async function ensureDraft(request: AppDetails, progress: CreateProgress,
  * unreadable answer marks its phase unconfirmed.
  */
 async function failed(error: unknown, progress: CreateProgress, phase: SubmitPhase, api: CreateCalls, platformTouched: boolean): Promise<never> {
-  const forbidden = error instanceof ORPCError && error.status === 403
+  // A destination the Project cannot use (NotVisible answers 403) is not the caller's permission.
+  const forbidden = error instanceof ORPCError && error.status === 403 && destinationRejection(error) === undefined
   if (forbidden && progress.draft && !platformTouched) {
     await api.removeApp(progress.draft.id).catch(() => undefined)
     throw new CreateFailed(error, {}, true)
@@ -236,26 +249,34 @@ function sourceOrigin(appName: string, path: SourcePath, catalog: CreateCatalog)
   }
 }
 
-function sourceRequest(appName: string, path: SourcePath, catalog: CreateCatalog, connections: SourceConnections): SourceRepositoryRequest {
-  return path.kind === 'existing'
-    ? buildExistingSourceRepositoryRequest(path.repository, connections)
-    : buildSourceRepositoryRequest(appName, catalog, connections)
+function sourceRequest(appName: string, path: SourcePath, catalog: CreateCatalog, targets: SourceTargets): SourceRepositoryRequest {
+  if (path.kind === 'existing') {
+    if (!targets.adoption) throw new Error(text.sourceUnavailable)
+    return buildExistingSourceRepositoryRequest(path.repository, targets.adoption)
+  }
+  if (!targets.destination) throw new Error(text.destinationUnavailable)
+  return buildSourceRepositoryRequest(appName, catalog, targets.destination)
 }
 
 const sameName = (a: string | undefined, b: string | undefined) => a !== undefined && b !== undefined && a.trim().toLowerCase() === b.trim().toLowerCase()
 
 /**
- * The source repository `request` made. The adopted repository is named with
- * its owner (`owner/name`). A new repository's name is unique per owner only,
- * so it must also carry this request's owner: the same image path
- * (`<registry>/<owner>/<name>`) and, when the record still names it, the same
- * source connection. Anything less is not adopted (the resend replays instead).
+ * The source repository this attempt made. The adopted repository is named
+ * with its owner (`owner/name`) and its connection. A new repository's name is
+ * unique per owner only, so it must also be at this destination: the image
+ * path Platform derives there and, when the record still names it, the
+ * destination's connection. Anything less is not adopted (the resend replays instead).
  */
-function madeBy(repository: SourceRepository, request: SourceRepositoryRequest): boolean {
-  if (repository.sourceConnectionId !== undefined && repository.sourceConnectionId !== request.sourceConnectionId) return false
-  return request.existing
-    ? sameName(repository.existing?.repository, request.existing.repository)
-    : sameName(repository.destination?.repositoryName, request.destination?.repositoryName) && sameName(repository.image.imagePath, request.image?.imagePath)
+function madeBy(repository: SourceRepository, appName: string, path: SourcePath, targets: SourceTargets): boolean {
+  if (path.kind === 'existing') {
+    const connection = targets.adoption?.id
+    return (repository.sourceConnectionId === undefined || repository.sourceConnectionId === connection) &&
+      sameName(repository.existing?.repository, path.repository.fullName)
+  }
+  const destination = targets.destination
+  if (!destination) return false
+  return (repository.sourceConnectionId === undefined || repository.sourceConnectionId === destination.connectionId) &&
+    sameName(repository.destination?.repositoryName, appName) && sameName(repository.image.imagePath, destinationImage(destination, appName))
 }
 
 /** The attempts left once `step`'s resource is recorded. */
@@ -297,7 +318,7 @@ export async function submitCreate(
       if (request.path.kind === 'image') {
         source = { kind: 'sample-image', imageRef: request.path.imageRef }
       } else {
-        if (!deps.connections) throw new Error(text.sourceUnavailable)
+        const body = sourceRequest(appName, request.path, deps.catalog, deps)
         const origin = sourceOrigin(appName, request.path, deps.catalog)
         const keptOrigin = progress.sourceRepositoryOrigin
         if (progress.sourceRepositoryId && (
@@ -316,7 +337,7 @@ export async function submitCreate(
         }
         if (!progress.sourceRepositoryId) {
           enter('source')
-          const body = sourceRequest(appName, request.path, deps.catalog, deps.connections)
+          // `body` carries the destination revision the user confirmed; a moved destination answers 409, never a create elsewhere.
           const validation = await deps.api.validateSourceRepository(request.projectId, body)
           if (!validation.valid) {
             const message = validation.message ?? ''
@@ -382,7 +403,7 @@ export interface ConfirmedCreate {
 export async function confirmCreate(
   request: CreateRequest,
   resume: CreateProgress,
-  deps: { api: Pick<CreateApi, 'app' | 'myApps' | 'sourceRepositories' | 'stacks'>; catalog: CreateCatalog; connections?: SourceConnections }
+  deps: SourceTargets & { api: Pick<CreateApi, 'app' | 'myApps' | 'sourceRepositories' | 'stacks'>; catalog: CreateCatalog }
 ): Promise<ConfirmedCreate> {
   const progress: CreateProgress = { ...resume, unconfirmed: undefined }
   const phase = resume.unconfirmed
@@ -396,9 +417,9 @@ export async function confirmCreate(
   if (draft?.stackId && draft.appName === appName && (!progress.stackId || progress.stackId === draft.stackId)) {
     return { progress: { ...progress, stackId: draft.stackId, stackAppName: appName }, app: draft }
   }
-  if (phase === 'source' && request.path.kind !== 'image' && !progress.sourceRepositoryId && deps.connections) {
-    const body = sourceRequest(appName, request.path, deps.catalog, deps.connections)
-    const made = (await deps.api.sourceRepositories(request.projectId)).data.find((repository) => madeBy(repository, body))
+  if (phase === 'source' && request.path.kind !== 'image' && !progress.sourceRepositoryId) {
+    const path = request.path
+    const made = (await deps.api.sourceRepositories(request.projectId)).data.find((repository) => madeBy(repository, appName, path, deps))
     if (made) {
       progress.sourceRepositoryId = made.id
       progress.sourceRepositoryOrigin = sourceOrigin(appName, request.path, deps.catalog)

@@ -75,9 +75,13 @@ function Session({ draft, groupId, stale }: { draft: BuildDraft; groupId: string
   const planPending = isBuildPending(draft.creationPlanGenerations.at(-1))
   const updatingPlan = build.session.prepareRequested && planPending
   const primary = { ...build.result.primary, enabled: build.result.primary.enabled && !build.busy && !sharing && !updatingPlan }
-  // 決める: the prepare action is attached to the AI's proposal, labelled by what pressing it will do.
-  const preparing = stage === 'decide' && build.proposal && (primary.action === 'prepare' || primary.action === 'prepare-after-plan')
-  const proposalAction = preparing ? <Button tone="primary" loading={Boolean(updatingPlan)} disabled={!primary.enabled} onClick={() => build.prepare()}>
+  // 決める: the prepare action is attached to the AI's proposal, labelled by what pressing it will do. After the
+  // destination moved, the notice right below the proposal carries the same action (once, beside its explanation).
+  const lastMessage = build.messages.at(-1)
+  const reapproveNotice = lastMessage?.role === 'notice' && lastMessage.retry === 'prepare' && lastMessage.title === buildCopy.failure.destination.changed.title
+  const preparing = stage === 'decide' && build.proposal && !reapproveNotice && (primary.action === 'prepare' || primary.action === 'prepare-after-plan')
+  // No destination for the new repository: the proposal says only a Project administrator can set it, and nothing is approved.
+  const proposalAction = preparing ? <Button tone="primary" loading={Boolean(updatingPlan)} disabled={!primary.enabled || build.proposal!.newRepository === 'blocked'} onClick={() => build.prepare()}>
     {updatingPlan ? text.page.updatingPlan(progress?.elapsedLabel ?? '0:00') : build.proposal!.stale ? buildCopy.primary.refresh : buildCopy.primary.prepare}
   </Button> : undefined
   // The first plan (or a retried one) is being written: the AI says so where the proposal will appear.

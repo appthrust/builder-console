@@ -70,6 +70,9 @@ export const keys = {
     ['logs', projectId, componentId, branchId] as const,
   sourceRepositories: (projectId: string) => ['application-source-repositories', projectId] as const,
   createConnections: (projectId: string) => ['create-connections', projectId] as const,
+  repositoryDestination: (projectId: string) => ['repository-destination', projectId] as const,
+  adoptionValidation: (projectId: string, connectionId: string, repository: string, ref: string) =>
+    ['adoption-validation', projectId, connectionId, repository, ref] as const,
   creationTools: (projectId: string) => ['creation-tools', projectId] as const,
   githubRepositories: (projectId: string, connectionId: string, q: string) =>
     ['github-repositories', projectId, connectionId, q] as const,

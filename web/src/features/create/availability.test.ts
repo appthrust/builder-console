@@ -2,7 +2,7 @@
 // the network is in memory (wire answers as Platform and the Console send them).
 import { describe, expect, test } from 'bun:test'
 import { createCreateApi } from '../../api/create'
-import { appOf, definitionOf, registryOf, sourceConnectionOf, templateOf } from '../../api/testing/catalog-domain'
+import { appOf, definitionOf, resolvedDestinationOf, templateOf } from '../../api/testing/catalog-domain'
 import { createTestGateway } from '../../api/testing/gateway'
 import { resolveCreateCatalog } from '../../model/create'
 import { checkNameAvailability, suggestFreeUrlName, type AvailabilityDeps, type AvailabilityRequest } from './availability'
@@ -29,10 +29,7 @@ const definition = definitionOf({
     { id: 'database', definitionRef: { name: 'postgresql' } },
   ],
 })
-const connections = {
-  source: sourceConnectionOf({ id: 'gh', displayName: 'gh', account: { login: 'acme', type: 'Organization' }, capabilities: ['createRepositories'], status: 'ready', source: 'github-source-connection-cr' }),
-  registry: registryOf({ id: 'ghcr', displayName: 'ghcr', registryHost: 'ghcr.io', registryType: 'ghcr', status: 'ready', source: 'registry-connection-cr' }),
-}
+const destination = resolvedDestinationOf()
 
 const base: AvailabilityRequest = {
   projectId: 'pj',
@@ -40,7 +37,7 @@ const base: AvailabilityRequest = {
   urlName: 'mitsumori',
   entry: 'template',
   catalog: resolveCreateCatalog([template], [definition], 'github-template'),
-  connections,
+  destination,
 }
 
 const person = { id: 'p1', subject: 's', pending: false, email: 'a@example.test', displayName: '山田', avatarVersion: null }
@@ -104,7 +101,9 @@ describe('checkNameAvailability', () => {
     expect(await checkNameAvailability(base, deps)).toEqual({ taken: undefined, checked: true })
     expect(calls.resolve).toEqual(['/sales/east/mitsumori'])
     expect(calls.stacks).toBe(1)
-    expect(calls.validate[0]).toMatchObject({ destination: { repositoryName: 'mitsumori' } })
+    // The check's request is bound like the create's: the shown destination revision, no connection or image.
+    expect(calls.validate[0]).toMatchObject({ template: { repository: 'appthrust/template-nextjs', ref: 'main' }, destination: { repositoryName: 'mitsumori', visibility: 'private' }, destinationRevision: 'rd-ghcr-1', build: { mode: 'observed-image', ref: 'main' } })
+    expect(Object.keys(calls.validate[0]!).filter((key) => key !== 'projectId').sort()).toEqual(['build', 'destination', 'destinationRevision', 'template'])
   })
 
   test('console: the group path is taken; the suggestion is the first free number', async () => {
@@ -153,6 +152,19 @@ describe('checkNameAvailability', () => {
   test('repository: a delivery_pending 409 is not an answer about the name', async () => {
     const { deps } = world({ validateAnswer: () => conflict({ reason: 'delivery_pending' }) })
     expect(await checkNameAvailability(base, deps)).toEqual({ taken: undefined, checked: false })
+  })
+
+  test('repository: a 409 about the destination (it moved, or did not match) is not an answer about the name', async () => {
+    for (const reason of ['DestinationChanged', 'DestinationMismatch']) {
+      const { deps } = world({ validateAnswer: () => conflict({ reason }) })
+      expect(await checkNameAvailability(base, deps)).toEqual({ taken: undefined, checked: false })
+    }
+  })
+
+  test('repository: without a resolved destination nothing is checked against GitHub', async () => {
+    const { deps, calls } = world({ repositories: ['mitsumori'] })
+    expect((await checkNameAvailability({ ...base, destination: undefined }, deps)).taken).toBeUndefined()
+    expect(calls.validate).toEqual([])
   })
 
   test('an aborted check stops looking for a suggestion', async () => {

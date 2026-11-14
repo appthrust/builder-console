@@ -30,6 +30,11 @@ test.describe('App create from a business template @create', () => {
     await expect(page.getByTestId('share-preview')).toContainText(`${group.name} に公開`)
     await pickShareScope(page, group.name)
     await expect(page.getByTestId('confirm-summary')).toContainText(`「${displayName}」を ${group.name} のアプリとして作り`)
+    // Where the repository and its image go is the Project's resolved destination (GHCR under acme by default).
+    const destination = await (await page.request.get(`/api/v1/projects/${seed.projectId}/repository-destination`)).json()
+    expect(destination).toMatchObject({ state: 'Resolved', destination: { registryNamespace: 'ghcr.io/acme' } })
+    await expect(page.getByText(`acme/${slug}`, { exact: true })).toBeVisible()
+    await expect(page.getByText(`ghcr.io/acme/${slug}`, { exact: true })).toBeVisible()
 
     const writes = await submitCreateWizard(page, 'repository')
     const draft = writes.draft.body
@@ -46,15 +51,14 @@ test.describe('App create from a business template @create', () => {
     })
 
     const repository = writes.repository?.body
-    if (!repository || typeof repository !== 'object' || !('template' in repository) || !('sourceConnectionId' in repository) || !('destination' in repository)) {
-      throw new Error('Template create did not send its source connection, template, and destination')
+    if (!repository || typeof repository !== 'object' || !('template' in repository) || !('destinationRevision' in repository) || !('destination' in repository)) {
+      throw new Error('Template create did not send its template, destination and destination revision')
     }
+    // Only the template, the name and the revision shown: Platform picks the connection, registry and image path.
     expect(repository).toEqual({
-      sourceConnectionId: 'github-source-207cb7ce',
-      registryConnectionRef: 'ghcr-acme',
       template: { repository: 'appthrust/template-biz-inventory', ref: 'main' },
       destination: { repositoryName: slug, visibility: 'private' },
-      image: { imagePath: `ghcr.io/acme/${slug}`, tagFilter: 'edge-', versioningScheme: 'Alphabetical' },
+      destinationRevision: destination.revision,
       build: { mode: 'observed-image', ref: 'main' },
     })
 

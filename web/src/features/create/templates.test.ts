@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import { decodeResponse } from '../../api/boundary'
-import { listSourceConnectionsContract, listTemplatesContract } from '../../api/contracts/platform/catalog'
-import { definitionOf, registryOf, sourceConnectionOf, templateOf } from '../../api/testing/catalog-domain'
+import { listTemplatesContract } from '../../api/contracts/platform/catalog'
+import { definitionOf, resolvedDestinationOf, templateOf } from '../../api/testing/catalog-domain'
 import { MOCK_PROJECT_ID, platformRoutes } from '../../dev/mock-platform'
-import { buildSourceRepositoryRequest, resolveCreateCatalog, templateSourceProblem, templateUsableFor } from '../../model/create'
+import { buildSourceRepositoryRequest, resolveCreateCatalog, templateUsableFor } from '../../model/create'
 import { businessTemplates, joinBusinessTemplates } from './templates'
 
 const wireRows = businessTemplates.map((metadata, index) => ({
@@ -41,10 +41,7 @@ describe('business template × platform catalog', () => {
   test('the selected business template controls the source repository; unavailable ids never fall back', () => {
     const definitions = [definitionOf({ id: 'web', title: 'Web', category: 'application', components: [{ id: 'web', definitionRef: { name: 'web' } }] })]
     const catalog = resolveCreateCatalog(rows, definitions, 'github-template', 'biz-master-postgres')!
-    const request = buildSourceRepositoryRequest('customer-book', catalog, {
-      source: sourceConnectionOf({ id: 'github', displayName: 'GitHub', account: { login: 'acme', type: 'Organization' }, capabilities: ['createRepositories'], status: 'ready', source: 'github-source-connection-cr' }),
-      registry: registryOf({ id: 'registry', displayName: 'Registry', registryHost: 'ghcr.io', registryType: 'ghcr', status: 'ready', source: 'registry-connection-cr' }),
-    })
+    const request = buildSourceRepositoryRequest('customer-book', catalog, resolvedDestinationOf())
     expect(request.template).toEqual({ repository: 'appthrust/template-biz-master', ref: 'main' })
     expect(resolveCreateCatalog(rows, definitions, 'github-template', 'biz-reservation-postgres')).toBeUndefined()
     expect(resolveCreateCatalog(rows, definitions, 'github-template', 'not-a-template')).toBeUndefined()
@@ -52,20 +49,14 @@ describe('business template × platform catalog', () => {
 
   test('the mock catalog exposes source availability and blocks approval but admits framework templates', async () => {
     const templatesUrl = new URL(`/api/v1/projects/${MOCK_PROJECT_ID}/application-templates`, 'http://mock.test')
-    const sourcesUrl = new URL(`/api/v1/projects/${MOCK_PROJECT_ID}/source-connections`, 'http://mock.test')
     const templatesResponse = await platformRoutes(new Request(templatesUrl), templatesUrl)
-    const sourcesResponse = await platformRoutes(new Request(sourcesUrl), sourcesUrl)
     const decodedTemplates = decodeResponse(listTemplatesContract, await templatesResponse!.json())
-    const decodedSources = decodeResponse(listSourceConnectionsContract, await sourcesResponse!.json())
-    if (!decodedTemplates.ok || !decodedSources.ok) throw new Error('the mock catalog does not match its contracts')
+    if (!decodedTemplates.ok) throw new Error('the mock catalog does not match its contract')
     const catalog = decodedTemplates.value.data
-    const sources = decodedSources.value.data
     const approval = catalog.find((item) => item.id === 'biz-approval-postgres')!
     const framework = catalog.find((item) => item.id === 'nextjs-postgres')!
     expect(templateUsableFor(approval, 'github-template')).toBe(false)
-    expect(templateSourceProblem(approval, sources)).toBe('not-admitted')
     expect(templateUsableFor(framework, 'github-template')).toBe(true)
-    expect(templateSourceProblem(framework, sources)).toBeUndefined()
     for (const template of catalog) {
       expect(template.availability.sources.map((source) => source.kind)).toEqual(template.sourceKinds)
       expect(template.availability.available).toBe(template.availability.sources.some((source) => source.available))

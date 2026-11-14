@@ -16,16 +16,17 @@ import * as api from '../../api/build'
 import { isConsoleError } from '../../api/console'
 import { buildDraftOptions } from '../../api/queries/build'
 import { createApi } from '../../api/create'
-import { createConnectionsQuery, useSourceRepositories } from '../../api/queries/catalog'
+import { createConnectionsQuery, repositoryDestinationQuery, useSourceRepositories } from '../../api/queries/catalog'
 import { appQuery, writeAppCache } from '../../api/queries/console'
-import { platformErrorEnvelope } from '../../api/platform-error'
+import { destinationRejection, platformErrorEnvelope } from '../../api/platform-error'
 import { isPublishPreparationPending, publishPreparationRetryDelay } from '../../api/publish-retry'
-import { classifyBuildFailure, unconfirmedFailure } from '../../model/build/failure'
-import { renameCreationPlan, withDefaultPublish } from '../../model/build/plan'
+import { classifyBuildFailure, destinationFailure, unconfirmedFailure } from '../../model/build/failure'
+import { newRepositoryRequest, renameCreationPlan, withDefaultPublish, withDestinationRevision } from '../../model/build/plan'
 import { appPreparationProgress, sourceBuildFailureProgress } from '../../model/build/progress'
 import { draftPublished } from '../../model/build/stage'
 import type { BuildFailure } from '../../model/build/types'
 import { isOneOf, knownValue, type BuildDraft, type BuildExecutionStep, type CreationPlanValidation } from '../../model/contracts/build'
+import type { RepositoryDestination } from '../../model/contracts/catalog'
 import { pickCreateEnvironment, summarizeCreationPlan } from '../../model/create'
 import { sourceRepositoryFor } from '../app/platform'
 import { useAppViews } from '../app/use-app-views'
@@ -54,10 +55,44 @@ export async function writeDraft(queryClient: QueryClient, projectId: string, dr
  */
 export function draftFailure(error: unknown, context: 'turn' | CreationContext, reference: { draftId: string; at: string; executionId?: string }, failedStep?: BuildExecutionStep): BuildFailure {
   if (isResponseContractError(error)) return unconfirmedFailure(reference)
+  if (error instanceof PlanDestinationError) return destinationFailure(error.rejection, reference)
+  const rejection = destinationRejection(error)
+  if (rejection) return destinationFailure(rejection, reference)
   const envelope = platformErrorEnvelope(error)
   const status = typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number' ? error.status : envelope?.status
   const raw = envelope?.message ?? (error instanceof Error ? error.message : String(error))
   return classifyBuildFailure(failedStep?.message ?? raw, status, context, reference, failedStep?.detail?.reason ?? (isConsoleError(error) ? error.code : envelope?.code), error instanceof ConsoleAppCreationError ? 'apps.create' : undefined, undefined, envelope?.details)
+}
+
+/** The approval stopped at the repository destination before anything was sent to create. */
+export class PlanDestinationError extends Error {
+  constructor(readonly rejection: 'changed' | 'blocked') {
+    super(`repository destination ${rejection}`)
+    this.name = 'PlanDestinationError'
+  }
+}
+
+/**
+ * Before the plan is validated and approved, its new repository is bound to the destination the
+ * proposal shows now (Platform rejects an approval without a revision, and a create whose revision
+ * is no longer current). Not resolved: nothing is approved. Another revision (the plan was made
+ * against an older one, or the destination moved): the plan is rebound to the current one and the
+ * approval stops, so the user sees the new destination and approves again; nothing is sent for them.
+ * A plan without a new repository (adoption, reuse) is not bound.
+ */
+export async function bindPlanDestination(
+  projectId: string,
+  draft: BuildDraft,
+  deps: { readDestination: () => Promise<RepositoryDestination>; updateDraft: typeof api.updateDraft; receive: (next: BuildDraft) => Promise<void> },
+): Promise<void> {
+  const plan = draft.creationPlan
+  const request = newRepositoryRequest(plan)
+  if (!plan || !request) return
+  const destination = await deps.readDestination()
+  if (destination.kind !== 'resolved') throw new PlanDestinationError('blocked')
+  if (request.destinationRevision === destination.revision) return
+  await deps.receive(await deps.updateDraft(projectId, draft.id, { creationPlan: withDestinationRevision(plan, destination.revision) }))
+  throw new PlanDestinationError('changed')
 }
 
 /** Only the stale validation conflict gets one fresh validation; no cleanup or execution is retried here. */
@@ -130,7 +165,9 @@ export function useDraftCreation({ projectId, draft, tab, hasPending, now }: Dra
   const published = draftPublished(draft) && tab.continuedAfterPublishAt !== draft.publishedAt && !hasPending
   const implementation = useImplementation({ projectId, draft, handoff: execution?.approval?.implementationHandoff ?? draft.creationPlan?.implementationHandoff, enabled: Boolean(draft.createdApplicationStackId) && !published })
   const implementing = implementation.pending || implementation.state.phase === 'starting-workspace' || implementation.state.phase === 'running' || implementation.state.phase === 'pushing'
-  return { app, appViews, appView, appProgress, generation, execution, domain, creationPlan, defaultPending, proposalDraft, published, implementation, implementing }
+  // Where the plan's new repository goes, shown on the proposal before 「この内容で作る」 (and bound to it then).
+  const destination = useQuery({ ...repositoryDestinationQuery(projectId), enabled: Boolean(newRepositoryRequest(draft.creationPlan)) && !execution }).data
+  return { app, appViews, appView, appProgress, generation, execution, domain, creationPlan, defaultPending, proposalDraft, published, implementation, implementing, destination }
 }
 
 export interface DraftCreationHost {
@@ -208,6 +245,14 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
     if (isOneOf(execution?.status, 'failed') && !host.observedFailures.current.has(execution!.id)) return
     if (!tab.prepareRequested || defaultPending) return
     void host.perform('prepare', async () => {
+      // Plan replacement is forbidden once an execution exists; a fresh approval binds the shown destination first.
+      if (!host.draftRef.current.creationExecutions.length) {
+        await bindPlanDestination(projectId, host.draftRef.current, {
+          readDestination: () => queryClient.fetchQuery({ ...repositoryDestinationQuery(projectId), staleTime: 0 }),
+          updateDraft: api.updateDraft,
+          receive: async (next) => { host.patch({ prepareRequested: false }); await host.receive(next) },
+        })
+      }
       const creationPlanFingerprint = await validatePreparationPlan(projectId, draft.id)
       const clientRequestId = host.currentTab().executionRequestId ?? crypto.randomUUID()
       host.patch({ executionRequestId: clientRequestId })

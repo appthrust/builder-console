@@ -17,6 +17,16 @@ export function unconfirmedFailure(reference?: BuildFailure['reference']): Build
   return { kind: 'unconfirmed', ...buildCopy.failure.unconfirmed, ...(reference ? { reference } : {}) }
 }
 
+/**
+ * Platform's repository destination stopped the creation before anything was made: it moved
+ * (or the plan was bound to the current one, and the user approves again), it is not set, or the
+ * request did not match it. Fixed words only: never the server's reason or message. Only a mismatch
+ * (a console fault) carries the support reference; a move or an unset destination is not a fault to report.
+ */
+export function destinationFailure(rejection: 'changed' | 'blocked' | 'mismatch', reference?: BuildFailure['reference']): BuildFailure {
+  return { kind: 'destination', destination: rejection, ...buildCopy.failure.destination[rejection], ...(reference && rejection === 'mismatch' ? { reference } : {}) }
+}
+
 /** Raw diagnostics stay in the advanced disclosure; stable console codes do not depend on server wording. */
 export function classifyBuildFailure(text: string, status: number | undefined, context: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish', reference?: BuildFailure['reference'], code?: string, operation?: 'apps.create', failureReason?: OpenValue<ImplementationFailureReason>, details?: Record<string, unknown>): BuildFailure {
   const copy = buildCopy.failure

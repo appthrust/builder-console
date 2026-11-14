@@ -137,11 +137,15 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
   const { appView, creationAccess, released, url, shareText } = useCreatedAppView({ projectId, draft, app, groups, initialReleaseId: tab.initialReleaseId, tasks: implementation.state.tasks })
   const started = Boolean(execution || draft.createdApplicationStackId)
   const created = session.lifecycle.kind === 'known' && session.lifecycle.value === 'created'
-  const proposal = planProposal(creation.proposalDraft)
+  const proposal = planProposal(creation.proposalDraft, undefined, creation.destination)
   const preparing = tab.prepareRequested && !execution
   const canCreate = readiness.kind === 'current' && !started && !creation.defaultPending && !busy && !view.write && !session.activeTurnId && !view.unsupported
+  // A stop at the repository destination (it moved, or is not set) made nothing. After a move the proposal shows the
+  // current destination and its own 「この内容で作る」 is the approval (it clears the notice); with no destination the
+  // proposal says only a Project administrator can set it, and nothing is approved.
+  const destinationStop = failure?.failure.kind === 'destination' && failure.failure.destination !== 'mismatch' && !execution ? failure.failure.destination : undefined
   const proposalAction = started ? undefined
-    : readiness.kind === 'current' ? <Button tone="primary" loading={preparing} disabled={!canCreate || preparing} onClick={effects.prepare}>{buildCopy.primary.prepare}</Button>
+    : readiness.kind === 'current' ? <Button tone="primary" loading={preparing} disabled={!canCreate || preparing || proposal?.newRepository === 'blocked'} onClick={effects.prepare}>{buildCopy.primary.prepare}</Button>
       : readiness.kind === 'stale' ? <div className="space-y-2" data-testid="console-plan-stale">
         <p className="text-xs leading-relaxed text-busy-ink">{text.console.plan.stale}</p>
         <Button tone="primary" disabled={!view.canRequestPlan} onClick={() => actions.requestPlan()}>{text.console.plan.replan}</Button>
@@ -170,14 +174,18 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
   const retry = failure && shown?.kind === 'name-taken'
     // The checked suggestion arrives after the failure: start over with it offered instead of an open field.
     ? <NameChoice key={shown.suggestedName ?? ''} suggestion={shown.suggestedName} onUse={(name) => effects.rename(name, failure.failure, () => setFailure(undefined))} />
-    : failure && failure.failure.kind !== 'policy'
-      ? <Button size="sm" onClick={() => {
-        const { context, failure: reported } = failure
-        setFailure(undefined)
-        effects.resetBinding()
-        if (reported.kind === 'unconfirmed') void queryClient.invalidateQueries({ queryKey: buildDraftOptions(projectId, draft.id).queryKey })
-        else if (context !== 'plan') effects.retry(context)
-      }}>{failure.failure.kind === 'unconfirmed' ? buildCopy.failure.confirm : text.conversation.retry}</Button> : undefined
+    : destinationStop === 'changed' ? undefined
+      : failure && destinationStop
+        // Retry once an administrator has set it: a fresh approval that reads the destination again, never a cleanup.
+        ? <Button size="sm" onClick={() => { effects.resetBinding(); effects.prepare() }}>{text.conversation.retry}</Button>
+        : failure && failure.failure.kind !== 'policy'
+          ? <Button size="sm" onClick={() => {
+            const { context, failure: reported } = failure
+            setFailure(undefined)
+            effects.resetBinding()
+            if (reported.kind === 'unconfirmed') void queryClient.invalidateQueries({ queryKey: buildDraftOptions(projectId, draft.id).queryKey })
+            else if (context !== 'plan') effects.retry(context)
+          }}>{failure.failure.kind === 'unconfirmed' ? buildCopy.failure.confirm : text.conversation.retry}</Button> : undefined
 
   return {
     stage: started ? result.stage : 'decide',
@@ -201,7 +209,7 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
       earlierSpec ? <Notice key="earlier-spec" tone="warning" title={text.console.createdFromEarlier.title} actions={continuing ? undefined : improve}>
         {improvable ? text.console.createdFromEarlier.reason : text.console.createdFromEarlier.waiting}
       </Notice> : null,
-      failure && shown ? <Notice key="creation-failure" tone={shown.kind === 'unconfirmed' ? 'warning' : 'error'} title={shown.title} actions={retry}>{shown.reason}</Notice> : null,
+      failure && shown ? <Notice key="creation-failure" tone={shown.kind === 'unconfirmed' || destinationStop ? 'warning' : 'error'} title={shown.title} actions={retry}>{shown.reason}</Notice> : null,
       creationAccess.error ? <ActionError key="creation-access" error={creationAccess.error} /> : null,
       effects.waitingForPublish || creationAccess.waitingForPublish ? <p key="waiting-publish" role="status" className="text-xs text-stone-500">{text.page.waitingForPublish}</p> : null,
     ].filter(Boolean),

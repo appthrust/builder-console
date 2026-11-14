@@ -8,9 +8,9 @@ import { createTestGateway } from '../../api/testing/gateway'
 import { groupsContract } from '../../api/contracts/console/groups'
 import { meContract } from '../../api/contracts/console/me'
 import { type Group } from '../../model/contracts/console'
-import { createConnectionsQuery, creationToolsQuery } from '../../api/queries/catalog'
+import { createConnectionsQuery, creationToolsQuery, repositoryDestinationQuery } from '../../api/queries/catalog'
 import { decodeResponse, type ResponseContract } from '../../api/boundary'
-import { creationToolsContract, listDomainsContract, listRegistryConnectionsContract, listSourceConnectionsContract, listStackDefinitionsContract, listTemplatesContract } from '../../api/contracts/platform/catalog'
+import { creationToolsContract, getRepositoryDestinationContract, listDomainsContract, listRegistryConnectionsContract, listSourceConnectionsContract, listStackDefinitionsContract, listTemplatesContract } from '../../api/contracts/platform/catalog'
 import { copy } from '../../copy'
 import { aiPolicyExplanation } from '../../copy/ai-policy'
 import { consoleRoutes } from '../../dev/mock-console'
@@ -82,6 +82,7 @@ async function renderPage(path: '/new' | '/-/build/draft-1', hasGroup: boolean, 
     client.setQueryData(['application-stack-definitions'], read(listStackDefinitionsContract, definitions))
     client.setQueryData(createConnectionsQuery(me.projectId).queryKey, { sources: read(listSourceConnectionsContract, sources).data, registries: read(listRegistryConnectionsContract, registries).data, domains: read(listDomainsContract, domains).data })
     client.setQueryData(creationToolsQuery(me.projectId).queryKey, read(creationToolsContract, { ...tools, ...availability }))
+    client.setQueryData(repositoryDestinationQuery(me.projectId).queryKey, read(getRepositoryDestinationContract, await (await fixture(`/api/v1/projects/${me.projectId}/repository-destination`)).json()))
   }
   const root = createRootRoute()
   const newRoute = createRoute({ getParentRoute: () => root, path: '/new', component: NewAppPage })

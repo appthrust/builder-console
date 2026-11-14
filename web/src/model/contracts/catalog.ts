@@ -60,13 +60,13 @@ export interface StackDefinition {
   connections?: { name: string }[]
 }
 
-/** A GitHub source connection: who owns new repositories and what the installation may do. */
+/**
+ * A GitHub source connection, as far as adoption reads it: whether it is ready and may act on
+ * repositories. It never decides where a new repository goes (that is the repository destination).
+ */
 export interface SourceConnection {
   id: string
-  account: { login: string }
   capabilities: OpenValue<SourceCapability>[]
-  /** Template allowlist; absent (Go omits an empty list) admits every repository. */
-  allowedRepositories?: string[]
   status: OpenValue<ConnectionStatus>
 }
 
@@ -91,6 +91,30 @@ export interface CreateConnections {
   sources: SourceConnection[]
   registries: RegistryConnection[]
   domains: PublishDomain[]
+}
+
+/**
+ * Where the platform creates a new repository and pushes its image
+ * (`GET repository-destination`, resolved by Platform only). `revision` binds
+ * a create to the destination the user saw: Platform answers a create sent
+ * with an older revision `409 DestinationChanged` instead of creating
+ * elsewhere. A blocked destination and a state this console does not know
+ * both offer no create; neither carries the server's reason or message.
+ */
+export type RepositoryDestination =
+  | ResolvedRepositoryDestination
+  | { kind: 'blocked' }
+  | { kind: 'unknown' }
+
+export interface ResolvedRepositoryDestination {
+  kind: 'resolved'
+  revision: string
+  /** The creating connection's product id (also what a made repository records as `sourceConnectionId`). */
+  connectionId: string
+  /** Owner / group new repositories are created under (`acme`). */
+  repositoryNamespace: string
+  /** Image repository prefix new images are pushed under (`ghcr.io/acme`, `registry.example/pj`). */
+  registryNamespace: string
 }
 
 /**
@@ -131,10 +155,15 @@ export type SourceRepository = Omit<CanonicalSourceRepository, 'status' | 'build
 }
 export type SourceRepositoryList = { data: SourceRepository[] }
 
-/** A platform validation answer (source repository): `valid: false` carries the server's reason. */
+/**
+ * A platform validation answer (source repository): `valid: false` carries the
+ * server's reason; `imagePath` is where the server will look for the images
+ * (computed by Platform, never by this console).
+ */
 export interface SourceRepositoryValidation {
   valid: boolean
   message?: string
+  imagePath?: string
 }
 
 export interface StackValidationSection { valid: boolean; message: string }

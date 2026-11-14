@@ -19,6 +19,19 @@ export const textJa = {
   },
   alreadyCreated: (name: string) => `this app was already created as "${name}"; finish it with that URL name`,
   sourceUnavailable: 'source connections unavailable',
+  destinationUnavailable: 'repository destination unavailable',
+  /** Where a new repository goes (Platform's resolved repository destination); never its reason or message. */
+  destination: {
+    blocked: '新しい置き場の作成先が決まっていないため、AI やテンプレートからは作れません。プロジェクトの管理者に設定を依頼してください。',
+    repository: '新しく作る置き場',
+    image: 'アプリの保管場所',
+    imageChecking: '確認しています…',
+    imageUnknown: '確認できませんでした',
+    changedTitle: '置き場の作成先が変わりました',
+    changed: 'まだ何も作っていません。上の「新しく作る置き場」と「アプリの保管場所」を新しい作成先にしました。確かめてから「作る」を押してください。',
+    mismatchTitle: '置き場の作成先を確かめられませんでした',
+    mismatch: 'まだ何も作っていません。最新の作成先を表示しました。確かめてから、もう一度作ってください。続くときは管理者に相談してください。',
+  },
   /** A create step answered 2xx with an answer this console cannot read: it may have happened (never resent blindly). */
   unconfirmed: {
     title: '作成の結果を確認できませんでした',
