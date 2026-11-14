@@ -431,7 +431,7 @@ configuration through the Go SDK. Runtime-specific settings include:
 | Setting | Purpose |
 | --- | --- |
 | `BUILDER_CONSOLE_DATABASE_URL` / `DATABASE_URL` | PostgreSQL connection (the prefixed value takes precedence). |
-| `BUILDER_CONSOLE_PUBLIC_URL` | HTTPS console origin for access-request redirects. |
+| `BUILDER_CONSOLE_PUBLIC_URL` | Required production HTTPS origin, `https://console.<project-domain>`, for the management Origin guard, CSP and access-request redirects. |
 | `BUILDER_CONSOLE_DIRECTORY_URL` | Internal Directory dependency URL. |
 | `BUILDER_CONSOLE_DIRECTORY_PUBLIC_URL` | Public Directory URL for user-facing links. |
 | `BUILDER_CONSOLE_STATIC_DIR` | SPA directory; defaults to `/srv/console`; `--static-dir` overrides it. |
@@ -439,8 +439,91 @@ configuration through the Go SDK. Runtime-specific settings include:
 | `BUILDER_CONSOLE_RELEASE_VERSION` / `BUILDER_CONSOLE_ARTIFACT_DIGEST` | Identity reported by `/releasez`. |
 
 `--listen` defaults to `:8080`. `/healthz` reports liveness; `/readyz` gates database
-readiness. `/config`, `/launcher`, `/launcher/entries`, `/api/console/*`, `/authz`,
-and the `/api/*` Platform proxy retain their existing contracts.
+readiness. The SDK's existing issuer-less development mode requires a loopback
+listener. In that mode an explicit loopback `BUILDER_CONSOLE_PUBLIC_URL` may use
+HTTP or a development port; an absent value trusts no browser origin. The Platform
+proxy still refuses forwarding without a configured OIDC verifier: decoding
+unsigned local-development claims is not authentication.
+
+### Operations: management origin and preview rollout (APT-798)
+
+Production startup fails if `BUILDER_CONSOLE_PUBLIC_URL` is missing or invalid.
+The shared origin parser rejects userinfo, paths (including `/`), query, fragment
+and malformed hosts. Production requires the `console.<project-domain>` hostname
+and the default HTTPS port (`:443` is normalized); other ports are rejected.
+Neither `Host`, forwarded headers, the IdP issuer nor `PLATFORM_API_URL` supplies
+the Console's public origin. Existing installations receive the value through
+catalog rerender/upgrade: `publish.hostnameLabel: console` and
+`releaseIdentityEnvPrefix: BUILDER_CONSOLE` already generate it.
+
+`/api/console/*` and the `/api/*` Platform proxy share the same exact-origin
+guard. Mutations from sibling apps, preview hosts, the Dashboard, `null`, duplicate
+or malformed Origins receive 403 `request_origin_not_allowed`, even with a valid
+bearer. Missing Origin with any Cookie or `Sec-Fetch-*` header (including empty
+fields) receives 403 `request_origin_required`. Ordinary GET/HEAD/OPTIONS retain
+their authentication/CORS contracts; every WebSocket upgrade requires the exact
+Console Origin, including non-browser clients. `/authz` remains the dedicated
+edge authorization check, not a general mutation bypass.
+
+The Platform proxy first checks the original metadata, then verifies the OIDC
+user bearer with the configured issuer, audience, signature and expiry. Invalid
+or missing credentials return 401 `unauthenticated`; identity outages or a
+missing verifier return 503 `identity_unavailable`. Access Assertions are not
+forwarded. Only then are Cookie, Origin, all `Sec-Fetch-*`, `Forwarded`,
+`X-Forwarded-*` and `X-Real-IP` removed. Ordinary HTTP reaches the Platform as a
+verified-bearer server-to-server request. A legitimate WebSocket gets the validated
+`PLATFORM_API_URL` origin as its upstream Origin so it passes the Platform's
+Dashboard-only upgrade guard. The local Console API keeps its original metadata
+and existing identity/authorization handlers. Do not ship stripping or Origin
+replacement without the guard and real verification. The edge must preserve
+Origin, Cookie and Fetch Metadata until these checks, and management cookies must
+remain host-only.
+
+Management pages, including the SPA viewer at `/-/workspaces/{id}/preview`, send
+`Origin-Agent-Cluster: ?1`, `X-Content-Type-Options: nosniff`, `Referrer-Policy:
+no-referrer`, and CSP with `frame-ancestors 'none'`, `object-src 'none'`,
+`base-uri 'self'` and `form-action 'self'`. Scripts/default resources stay
+same-origin; inline styles and same-origin/data/blob images support the existing
+SPA. `frame-src` and `connect-src` permit `'self'` plus exactly
+`https://*.<project-domain>`, derived only from the configured Console hostname.
+**Approved §7 deviation:** CSP cannot express a partial-label `pv-*` wildcard;
+this static policy additionally permits sibling apps of the same Project. It
+does not authorize a preview or prove isolation. Isolation relies on separate
+origins, the grant's audience/publication binding and the verifier's CORS/cookie
+rules. No estate-wide wildcard or broad `https:` source is allowed. Preview
+documents' own sandbox/CSP and HMR policy belong to the preview edge, not this
+management-page CSP.
+
+Release in this order:
+
+1. Rerender/upgrade installations lacking the generated public URL. Deliver this
+   Console's guard, bearer verification and metadata handling together. The
+   Platform can still run `PLATFORM_API_MANAGEMENT_ORIGIN_MODE=observe` (the
+   temporary default); the new `http-sessions` and dedicated JWKS route always
+   enforce their contracts.
+2. Switch the installation's Platform API to
+   `PLATFORM_API_MANAGEMENT_ORIGIN_MODE=enforce`. This Console already sends the
+   required HTTP and WebSocket metadata in either mode.
+3. Enable slice I's new viewer only after the dedicated signer/JWKS, grant API,
+   fixed workspace endpoints, verifier and Gateway publication are ready.
+   This server introduces no viewer-enablement flag or guard bypass.
+4. After every Console is upgraded and the new path is accepted, retire all
+   legacy preview paths/aliases and remove the temporary migration settings with
+   that retirement. Viewer delivery alone is not M1 isolation completion.
+
+The catalog's `minPlatformVersion` is unchanged: the public-URL renderer already
+exists and this server change does not introduce a new Platform capability.
+The integrated viewer release must be gated on the Platform release containing
+the APT-798 grant/read-model, dedicated JWKS and publication/verifier contracts,
+plus successful `enforce` rollout; choose its concrete version when that Platform
+release is assigned, not a speculative version here. The Go dependency pins
+appserver-go origin-guard commit `7c1b15e3dde1` by pseudo-version
+`v0.5.2-0.20261114101934-7c1b15e3dde1` (no local replacement).
+
+Rollback must fail closed, never restore stripping-only forwarding or the old
+same-origin preview. Development workspaces/preview remain internal-only until
+stage 2's dedicated site is delivered; stage 1 and this CSP do not open the
+external-user release gate.
 
 ## Publication
 

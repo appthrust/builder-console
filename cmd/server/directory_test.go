@@ -13,9 +13,9 @@ import (
 )
 
 func TestMissingDependencyEnvDoesNotBlockOtherSurfaces(t *testing.T) {
+	bearer := testProxyIdentity(t)
 	t.Setenv("BUILDER_CONSOLE_DIRECTORY_URL", "")
 	t.Setenv("BUILDER_CONSOLE_DIRECTORY_PUBLIC_URL", "")
-	t.Setenv("PLATFORM_OIDC_ISSUER", "")
 	t.Setenv("BUILDER_CONSOLE_DATABASE_URL", "")
 	t.Setenv("DATABASE_URL", "")
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -37,7 +37,7 @@ func TestMissingDependencyEnvDoesNotBlockOtherSurfaces(t *testing.T) {
 	}
 	for _, path := range []string{"/", "/-/account", "/healthz", "/readyz", "/config", "/api/v1/projects/pj-test"} {
 		r := httptest.NewRequest(http.MethodGet, path, nil)
-		r.Header.Set("Authorization", "Bearer user")
+		r.Header.Set("Authorization", bearer)
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, r)
 		require.Equal(t, 200, w.Code, path)

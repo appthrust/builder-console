@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
-	"log"
+	"net/netip"
+	"net/url"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/appthrust/appserver-go/appserver/identity"
 	"github.com/appthrust/appserver-go/appserver/link"
+	"github.com/appthrust/appserver-go/appserver/originguard"
 	"github.com/appthrust/appserver-go/appserver/pending"
 	platform "github.com/appthrust/appserver-go/appserver/platformclient"
 	"github.com/appthrust/builder-console/cmd/server/internal/api"
@@ -42,14 +45,9 @@ func consoleHandler(upstreamURL, projectID string) (*consoleAPI, func(), error) 
 	if err != nil {
 		return nil, nil, err
 	}
-	publicURL := os.Getenv("BUILDER_CONSOLE_PUBLIC_URL")
-	if publicURL == "" {
-		log.Print("WARNING: BUILDER_CONSOLE_PUBLIC_URL is unset; denied app URLs will return 403 JSON instead of the access request page")
-	} else {
-		origin, err := parseOrigin(publicURL)
-		if err != nil || origin.Scheme != "https" || origin.Path != "" || strings.Contains(publicURL, "#") {
-			return nil, nil, errors.New("BUILDER_CONSOLE_PUBLIC_URL must be an HTTPS origin without a path, query, or fragment")
-		}
+	origins, err := loadConsoleOrigins()
+	if err != nil {
+		return nil, nil, err
 	}
 	upstream := platform.New(upstreamURL, projectID, platform.WithHTTPClient(auth.HTTPClient()))
 	conversationFlag, err := buildsession.NewFlag(os.Getenv("BUILDER_CONSOLE_NEW_APP_CONVERSATION"), os.Getenv("BUILDER_CONSOLE_NEW_APP_CONVERSATION_ALLOWLIST"))
@@ -105,11 +103,55 @@ func consoleHandler(upstreamURL, projectID string) (*consoleAPI, func(), error) 
 			_ = database.Close()
 			return nil, err
 		}
-		connected := api.New(database, auth, upstream, links, publicURL)
+		connected := api.New(database, auth, upstream, links, origins.publicURL)
 		connected.ConfigureBuildSessions(conversations, installationID)
 		console.current.Store(connected)
 		console.Swap(connected)
 		return database, nil
 	})
 	return console, stop, nil
+}
+
+type consoleOrigins struct {
+	publicURL     string
+	previewSource string
+	trusted       originguard.TrustedOrigins
+}
+
+// Only installation configuration defines the Console's origin. The SDK's
+// existing issuer-less development mode may explicitly use loopback HTTP.
+func loadConsoleOrigins() (consoleOrigins, error) {
+	raw := os.Getenv("BUILDER_CONSOLE_PUBLIC_URL")
+	development := os.Getenv("PLATFORM_OIDC_ISSUER") == ""
+	if raw == "" && !development {
+		return consoleOrigins{}, errors.New("BUILDER_CONSOLE_PUBLIC_URL is required when PLATFORM_OIDC_ISSUER is configured")
+	}
+	var configured []string
+	if raw != "" {
+		configured = []string{raw}
+	}
+	trusted, err := originguard.NewTrustedOrigins(configured, originguard.Options{AllowLoopbackHTTP: development})
+	if err != nil {
+		return consoleOrigins{}, fmt.Errorf("BUILDER_CONSOLE_PUBLIC_URL: %w", err)
+	}
+	result := consoleOrigins{trusted: trusted}
+	if raw == "" {
+		return result, nil
+	}
+	result.publicURL = trusted.Origins()[0]
+	origin, _ := url.Parse(result.publicURL) // Already validated by the shared parser.
+	host := origin.Hostname()
+	address, _ := netip.ParseAddr(host)
+	if development && (host == "localhost" || address.IsLoopback()) {
+		return result, nil
+	}
+	if origin.Port() != "" {
+		return consoleOrigins{}, errors.New("BUILDER_CONSOLE_PUBLIC_URL must use the default HTTPS port")
+	}
+	projectDomain, ok := strings.CutPrefix(host, "console.")
+	if !ok || !strings.Contains(projectDomain, ".") {
+		return consoleOrigins{}, errors.New("BUILDER_CONSOLE_PUBLIC_URL must have hostname console.<project-domain>")
+	}
+	result.previewSource = "https://*." + projectDomain
+	return result, nil
 }
