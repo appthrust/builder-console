@@ -124,6 +124,41 @@ test('policy availability is shared by creation tools, turn and generation admis
   }
 })
 
+test('the migration contract: an unmigrated workspace keeps the legacy URL; the first Ready endpoint records a receipt that never clears', async () => {
+  await call('POST', '/api/v1/__mock/reset')
+  try {
+    await call('POST', '/api/v1/__mock/workspace-http', { endpoint: 'none' })
+    const created = (await call('POST', `${project}/dev-workspaces`, { scope: 'application', applicationId: 'mitsumori', displayName: '見積' })).body.resource
+    const path = `${project}/dev-workspaces/${created.id}`
+    const legacy = `${path}/proxy/preview/`
+    await call('POST', '/api/v1/__mock/advance')
+    const unmigrated = (await call('GET', path)).body
+    expect(unmigrated.phase).toBe('Ready')
+    expect(unmigrated).not.toHaveProperty('httpEndpoints')
+    expect(unmigrated.previewUrl).toBe(legacy)
+    expect(unmigrated.conditions.map((condition: { type: string }) => condition.type)).not.toContain('DirectPreviewActivated')
+    const page = await request('GET', legacy)
+    expect(page.status).toBe(200)
+    expect(await page.text()).toContain('プレビュー: 見積')
+
+    await call('POST', '/api/v1/__mock/workspace-http', { endpoint: 'auto' })
+    const moved = (await call('GET', path)).body
+    expect(moved.httpEndpoints[0].state).toBe('Ready')
+    expect(moved.previewUrl).toBe(moved.httpEndpoints[0].url)
+    expect(moved.conditions).toContainEqual(expect.objectContaining({ type: 'DirectPreviewActivated', status: 'True' }))
+
+    // Gone again (or failing): the receipt stays, beside the legacy URL the Platform still reports.
+    for (const endpoint of ['none', 'conflict', 'sleeping'] as const) {
+      await call('POST', '/api/v1/__mock/workspace-http', { endpoint })
+      const later = (await call('GET', path)).body
+      expect(later.previewUrl).toBe(legacy)
+      expect(later.conditions.filter((condition: { type: string }) => condition.type === 'DirectPreviewActivated')).toEqual([expect.objectContaining({ status: 'True' })])
+    }
+  } finally {
+    await call('POST', '/api/v1/__mock/reset')
+  }
+})
+
 test('implementation workspace serves documents, streamed tasks, preview and one release per push', async () => {
   await call('POST', '/api/v1/__mock/reset')
   const created = await call('POST', `${project}/dev-workspaces`, { scope: 'application', applicationId: 'mitsumori', displayName: '見積 <営業>', codex: { enabled: true, approvalPolicy: 'unattended' }, preview: { port: 3000 } })
@@ -132,10 +167,14 @@ test('implementation workspace serves documents, streamed tasks, preview and one
   const path = `${project}/dev-workspaces/${workspace.id}`
   expect((await call('POST', `${workspace.codexUrl}api/tasks`, { prompt: '見積の画面を作る' })).status).toBe(503)
   await call('POST', '/api/v1/__mock/advance')
-  expect((await call('GET', path)).body.phase).toBe('Ready')
-  const preview = await request('GET', workspace.previewUrl)
-  expect(preview.headers.get('Content-Type')).toContain('text/html')
-  expect(await preview.text()).toContain('プレビュー: 見積 &lt;営業&gt;')
+  // The preview is the workspace's own origin (no legacy same-origin URL); grants go to the Console origin only.
+  const ready = (await call('GET', path)).body
+  expect(ready.phase).toBe('Ready')
+  expect(ready.httpEndpoints).toEqual([expect.objectContaining({ target: 'preview', state: 'Ready', url: expect.stringMatching(/^https:\/\/pv-[0-9a-f]{32}\.commerce\.appthrust\.test\/$/) })])
+  expect(ready.previewUrl).toBe(ready.httpEndpoints[0].url)
+  const grant = await call('POST', `${path}/http-sessions`, { target: 'preview', publishUID: ready.httpEndpoints[0].publishUID, embedderOrigin: 'https://console.commerce.appthrust.test' })
+  expect(grant).toMatchObject({ status: 200, body: { resource: { origin: ready.httpEndpoints[0].url.slice(0, -1), renewAfterSeconds: 30 } } })
+  expect((await call('POST', `${path}/http-sessions`, { target: 'preview', publishUID: ready.httpEndpoints[0].publishUID, embedderOrigin: 'http://127.0.0.1:5199' })).status).toBe(400)
   const documentPath = `${workspace.codexUrl}api/appthrust/spec`
   await call('PUT', documentPath, { markdown: '# 見積の仕様' })
   expect((await call('GET', documentPath)).body).toEqual({ markdown: '# 見積の仕様' })

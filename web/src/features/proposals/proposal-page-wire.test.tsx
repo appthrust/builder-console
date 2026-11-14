@@ -334,3 +334,31 @@ describe('X5: a decision answered 2xx unreadably', () => {
     expect(pageText()).toContain('担当者でも絞り込みたい')
   })
 })
+
+describe('「変更後の画面を見る」', () => {
+  const previewLink = () => [...container.querySelectorAll('a')].find((link) => link.textContent?.includes(text.preview))
+
+  test('opens the Console viewer page for a workspace with a preview endpoint', async () => {
+    await renderProposal()
+    expect(previewLink()?.getAttribute('href')).toMatch(/^\/-\/workspaces\/[^/]+\/preview$/)
+  })
+
+  // Legacy same-origin preview (remove at migration stage 5).
+  test('opens the legacy same-origin URL for a workspace the Platform has not moved yet', async () => {
+    await call('POST', '/api/v1/__mock/workspace-http', { endpoint: 'none' })
+    await renderProposal()
+    expect(previewLink()?.getAttribute('href')).toMatch(/^\/api\/v1\/projects\/commerce\/dev-workspaces\/[^/]+\/proxy\/preview\/$/)
+  })
+
+  test('a moved workspace whose endpoint is gone never links the legacy URL', async () => {
+    await renderProposal()
+    expect(previewLink()).toBeDefined()
+    await act(async () => { root?.unmount() })
+    container.remove()
+    client.clear()
+    await call('POST', '/api/v1/__mock/workspace-http', { endpoint: 'none' })
+    await renderProposal()
+    expect(previewLink()).toBeUndefined()
+    expect(container.innerHTML).not.toContain('proxy/preview')
+  })
+})

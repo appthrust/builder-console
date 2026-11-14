@@ -68,6 +68,8 @@
 //   `__mock/advance`). The `__mock/data` mode `forbidden` makes the list answer 403 too.
 // - `POST /api/v1/__mock/access-forbidden {forbidden}` denies access PUTs without changing policy.
 //   Each accepted access write reports pending for one GET poll, then ready.
+// - `POST /api/v1/__mock/workspace-http {endpoint?, sessions?, host?}` drives the workspace's preview origin
+//   (`httpEndpoints`, `POST …/dev-workspaces/{id}/http-sessions`, the preview host itself); see ./mock-workspace-http.ts.
 // - `POST /api/v1/__mock/reset` returns {reset: true} and reseeds the entire mock,
 //   reapplying MOCK_ROLE (default Editor), MOCK_REGISTRY and MOCK_CODEX.
 import { createHash, randomBytes } from 'node:crypto'
@@ -130,6 +132,7 @@ import { isFirstTurn, isKickoffReply, isPrepareTurn } from '../model/build/quest
 import { dataModeFailure, findTable, resetDatabaseData, selectRows, state as dataState, type DataMode } from './mock-database-data'
 import { dataWriteRoutes } from './mock-database-rows'
 import { mockOwnerSubjects, mockSubject } from './mock-console'
+import { issueSession, previewOriginFetch, publishedWorkspace, resetWorkspaceHttp, setWorkspaceHttp, type EndpointMode, type HostMode, type PreviewOriginServer, type SessionsMode } from './mock-workspace-http'
 
 export const MOCK_PROJECT_ID = 'commerce'
 const TEAM_SLUG = 'commerce-team'
@@ -847,7 +850,7 @@ function ensureApplicationWorkspace(draft: ApplicationDraft, now: string): strin
       id, projectId: draft.projectId, scope: 'application', applicationId: draft.createdApplicationId,
       componentId: `${draft.createdApplicationId}-web`, displayName: draft.title, ownerUserId: draft.ownerUserId,
       phase: 'Ready', branchName: draft.kind === 'improvement' ? `appthrust/proposal/${draft.id}` : 'main', baseRef: 'main', createdAt: now, conditions: [],
-      codexUrl: `${base}/codex/`, previewUrl: `${base}/proxy/preview/`,
+      codexUrl: `${base}/codex/`,
     })
   }
   return id
@@ -1570,24 +1573,26 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
       componentId: body.componentId, sourceRepositoryId: body.sourceRepositoryId,
       displayName: body.displayName ?? body.applicationId ?? '新しいアプリ',
       ownerUserId: 'mock-user', phase: 'Starting', branchName: 'main', baseRef: body.baseRef ?? 'main',
-      codexUrl: `${base}/codex/`, previewUrl: `${base}/proxy/preview/`,
+      codexUrl: `${base}/codex/`,
       createdAt: stamp(), conditions: [],
     }
     state.workspaces.set(id, workspace)
     state.documents.set(id, new Map())
     state.workspaceTodos.set(id, [])
-    return json(mutation('DevWorkspace', id, workspace), 201)
+    return json(mutation('DevWorkspace', id, publishedWorkspace(workspace)), 201)
   }],
   ['GET', new RegExp(`^${P}/dev-workspaces/([^/]+)$`), (m) => {
     const workspace = state.workspaces.get(m[2]!)
-    return workspace ? json(workspace) : error(404, 'not_found', 'workspace not found')
+    return workspace ? json(publishedWorkspace(workspace)) : error(404, 'not_found', 'workspace not found')
   }],
   ['POST', new RegExp(`^${P}/dev-workspaces/([^/]+)/restart$`), (m) => {
     const workspace = state.workspaces.get(m[2]!)
     if (!workspace) return error(404, 'not_found', 'workspace not found')
     workspace.phase = 'Starting'
-    return json(mutation('DevWorkspace', workspace.id, workspace), 202)
+    return json(mutation('DevWorkspace', workspace.id, publishedWorkspace(workspace)), 202)
   }],
+  ['POST', new RegExp(`^${P}/dev-workspaces/([^/]+)/http-sessions$`), (m, request) => issueSession(state.workspaces.get(m[2]!), request)],
+  // Legacy same-origin preview (remove at migration stage 5): the Platform API proxy's preview of an unmigrated workspace.
   ['GET', new RegExp(`^${P}/dev-workspaces/([^/]+)/proxy/preview/$`), (m) => {
     const workspace = state.workspaces.get(m[2]!)
     if (!workspace) return error(404, 'not_found', 'workspace not found')
@@ -1647,7 +1652,12 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
   ['POST', /^\/api\/v1\/__mock\/reset$/, () => {
     state = seedPlatform()
     resetDatabaseData()
+    resetWorkspaceHttp()
     return json({ reset: true })
+  }],
+  ['POST', /^\/api\/v1\/__mock\/workspace-http$/, async (_, request) => {
+    const input = await request.json() as { endpoint?: EndpointMode; sessions?: SessionsMode; host?: HostMode }
+    return json(setWorkspaceHttp(input))
   }],
   ['POST', /^\/api\/v1\/__mock\/access-forbidden$/, async (_, request) => {
     const input = await request.json() as { forbidden?: boolean }
@@ -2715,4 +2725,9 @@ export async function platformRoutes(request: Request, url: URL): Promise<Respon
     if (match) return handler(match, request, url)
   }
   return error(404, 'not_found', `mock platform has no route for ${request.method} ${url.pathname}`)
+}
+
+/** The workspaces' preview origin (served on its own TLS port by ./mock-server.ts). */
+export function previewOriginRoutes(request: Request, server: PreviewOriginServer): Promise<Response | undefined> {
+  return previewOriginFetch(request, server, state.workspaces.values())
 }

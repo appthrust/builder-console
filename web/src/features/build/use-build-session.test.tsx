@@ -67,7 +67,7 @@ let implementationEnabled: boolean
 function implementationFixture() {
   const state: implement.ImplementationState = { phase: 'done', tasks: [] }
   return {
-    state: { ...state, previewUrl: undefined, previewStatus: 'preparing' as const, retryPending: false }, pending: false, requestFailure: undefined,
+    state: { ...state, preview: undefined, retryPending: false }, pending: false, requestFailure: undefined,
     previewDatabaseReset: { busy: false, pending: false, error: undefined, reset: mock(async () => true) },
     start: mock(), confirm: mock(), startPending: mock(), retry: mock(), skipTask: mock(), requestChange: mock(async () => true),
   }

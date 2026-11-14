@@ -5,8 +5,34 @@ export const textJa = {
   title: '作っているアプリ',
   preview: 'アプリのプレビュー',
   preparing: '画面の準備をしています',
+  /** Legacy same-origin preview only (remove at migration stage 5; ./legacy-preview.tsx). */
   previewError: 'プレビューでエラーが発生しています。AI が変更中の可能性があります。新しいタブで確認できます。',
   previewTimedOut: '画面がまだ開きません。もう少し待つか、新しいタブで開いてください。',
+  /** The preview viewer (design §7): one plain sentence per state, the action next to it. */
+  viewer: {
+    connecting: 'プレビューにつないでいます',
+    resuming: 'プレビューにつなぎ直しています',
+    asleep: '作業環境が休止中です。AI が作業を始めると、プレビューも再開します。',
+    unpublished: 'この作業環境では、まだプレビューを表示できません。',
+    conflict: 'プレビュー用のアドレスがほかと重なっているため、表示できません。管理者に連絡してください。',
+    unavailable: 'いまはプレビューを表示できません。しばらくしてから開き直してください。',
+    unknown: 'プレビューの状態を読み取れなかったため、表示していません。',
+    cookieRefused: 'このブラウザが、プレビューに必要な Cookie を受け付けませんでした。ブラウザの設定で Cookie を許可してから、もう一度つないでください。新しいタブで開くこともできます。',
+    renewFailed: 'プレビューとの接続が切れたため、表示を止めました。もう一度つなぐと再開します。',
+    failed: 'プレビューにつなげませんでした。少し待ってから、もう一度つないでください。',
+    revoked: 'このプレビューを見る権限がなくなったため、表示を止めました。',
+    denied: 'このプレビューを見る権限がありません。',
+    credentialNotAllowed: 'いまのサインイン方法では、プレビューを開けません。管理者に連絡してください。',
+    verifierUnavailable: 'この種類の作業環境では、プレビューを表示できません。',
+    notFound: 'この作業環境は見つかりませんでした。削除された可能性があります。',
+    unconfirmed: 'プレビューの準備の結果を確かめられませんでした。最新の状態を確認してから続けてください。',
+    reconnect: 'もう一度つなぐ',
+    pageTitle: (name: string) => `${name} のプレビュー`,
+    pageLoading: 'プレビューを開いています',
+    /** The viewer page's one-line explanation of the separate address (design §7: Workers are not supported). */
+    pageNote: 'プレビューは安全のため、この画面とは別のアドレスで動きます。裏で動き続ける処理は、プレビューでは動きません。',
+    refreshFailed: '作業環境の状態を更新できませんでした。最後に読めた状態で表示しています。',
+  },
   /** Only for workspaces without a preview database (older or analysis-only ones). */
   previewDatabase: (excel: boolean) => `作っている途中のプレビューはデータベースなしで動いています。${excel ? '公開すると Excel のデータが入ります。' : '公開するとデータが保存・表示されます。'}`,
   /** The workspace's own preview database (design §6.4). Non-Excel drafts get schema only, so they never mention rows. */

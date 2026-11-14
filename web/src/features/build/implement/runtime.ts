@@ -1,10 +1,4 @@
-import { devWorkspaceProxyUrl } from '../../../api/workspace'
 import { isOneOf, type ImplementationTask, type PreviewWorkspace } from '../../../model/contracts/build'
-
-/** Only a workspace known to be Ready has a preview; a phase this console does not know is not Ready. */
-export function implementationPreviewUrl(workspace: PreviewWorkspace): string | undefined {
-  return isOneOf(workspace.phase, 'Ready') && workspace.previewUrl ? devWorkspaceProxyUrl(workspace.previewUrl) : undefined
-}
 
 /**
  * The workspace's preview database as the build page tells it (design §6.4). `none`: the

@@ -52,11 +52,21 @@ export const proposalDiffOptions = (proposal: Proposal) => queryOptions({
   refetchInterval: false,
 })
 
+/**
+ * Where 「変更後の画面を見る」 leads once the workspace reports a preview: `viewer`, the Console's viewer page for
+ * the workspace's preview endpoint (it explains the endpoint's state); `legacy` (remove at migration stage 5),
+ * the Console-proxied URL of a workspace the Platform has never moved to its own origin, as before APT-798.
+ * Null while the workspace reports neither.
+ */
+export type ProposalPreviewTarget = { kind: 'viewer'; workspaceId: string } | { kind: 'legacy'; url: string }
+
 export const proposalPreviewOptions = (projectId: string, workspaceId?: string) => queryOptions({
   queryKey: ['proposal-preview', projectId, workspaceId],
-  queryFn: workspaceId ? async ({ signal }) => {
+  queryFn: workspaceId ? async ({ signal }): Promise<ProposalPreviewTarget | null> => {
     const workspace = await getWorkspace(projectId, workspaceId, signal)
-    return workspace.previewUrl ? devWorkspaceProxyUrl(workspace.previewUrl) : null
+    if (workspace.preview) return { kind: 'viewer', workspaceId }
+    // The reader keeps `legacyPreviewUrl` only for a never-moved workspace, and only as a Platform API proxy path.
+    return workspace.legacyPreviewUrl ? { kind: 'legacy', url: devWorkspaceProxyUrl(workspace.legacyPreviewUrl) } : null
   } : skipToken,
   refetchInterval: (query) => query.state.data ? false : POLL_INTERVAL_MS,
 })
