@@ -125,6 +125,8 @@ export const textJa = {
   },
   /** The console-v1 conversation (APT-753): typed reply, confirmation, progress and publish settings. */
   console: {
+    /** The conversation's turns could not be read at all: what is shown may miss replies. */
+    turnsLoadFailed: 'やり取りを読み込めませんでした。まだ表示していない返事があるかもしれません。',
     candidates: '候補',
     candidatesHint: '選ぶと、その内容で仕様の変更案を作ります。',
     /** What a chosen candidate sends: the user's choice, as a change request that still needs confirming. */

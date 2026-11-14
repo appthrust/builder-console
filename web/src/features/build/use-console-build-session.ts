@@ -64,6 +64,13 @@ export interface ConsoleBuildSession {
   query: UseQueryResult<BuildSession>
   /** The turn list read; a failed refresh keeps the last good list. */
   turnsQuery: UseQueryResult<BuildTurn[]>
+  /**
+   * The turn list or the active turn could not be read: `failed` when one has nothing to show, `stale` when a
+   * re-read failed and the conversation shows what was read at `at`. Unset while the reads succeed.
+   */
+  turnsRead?: { kind: 'failed' } | { kind: 'stale'; at: number }
+  /** Reads the turn list (and the active turn) again after a failed read. */
+  rereadTurns(): void
   /** Undefined until the session has been read. */
   view?: ConsoleBuildView
   actions: ConsoleBuildActions
@@ -79,6 +86,11 @@ export function useConsoleBuildSession(sessionId: string, options: { api?: Build
   const session = query.data
   const activeTurnQuery = useQuery({ ...buildTurnOptions(sessionId, session?.activeTurnId, api), enabled: Boolean(session?.activeTurnId) })
   const activeTurn = session?.activeTurnId && activeTurnQuery.data?.id === session.activeTurnId ? activeTurnQuery.data : undefined
+  // A failed turn read is said, never silent; the last good list and turn stay shown.
+  const failedTurnReads = [turnsQuery, ...(session?.activeTurnId ? [activeTurnQuery] : [])].filter((read) => read.isError)
+  const turnsRead = failedTurnReads.length === 0 ? undefined
+    : failedTurnReads.every((read) => read.data !== undefined) ? { kind: 'stale' as const, at: Math.min(...failedTurnReads.map((read) => read.dataUpdatedAt)) }
+      : { kind: 'failed' as const }
   const expired = useSelector(sessionExpiryStore)
   const [intent, setIntent] = useState(() => readConsoleIntent(sessionId, options.storage))
   const [sending, setSending] = useState(false)
@@ -237,5 +249,9 @@ export function useConsoleBuildSession(sessionId: string, options: { api?: Build
   const view = session ? deriveConsoleBuildView({
     session, turns: turnsQuery.data, activeTurn, intent, sending, blocked: expired, failure, conflict, publish, now,
   }) : undefined
-  return { query, turnsQuery, ...(view ? { view } : {}), actions }
+  const rereadTurns = () => {
+    void turnsQuery.refetch()
+    if (session?.activeTurnId) void activeTurnQuery.refetch()
+  }
+  return { query, turnsQuery, ...(turnsRead ? { turnsRead } : {}), rereadTurns, ...(view ? { view } : {}), actions }
 }

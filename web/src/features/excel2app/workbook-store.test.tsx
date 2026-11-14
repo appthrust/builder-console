@@ -8,7 +8,7 @@ import * as api from '../../api/build'
 import * as excelQueries from '../../api/queries/excel'
 import { draftOf, turnOf } from '../../api/testing/build-domain'
 import { workbookListFrom } from '../../api/testing/excel-domain'
-import { isOneOf, type BuildDraft } from '../../model/contracts/build'
+import { excelSource, isOneOf, type BuildDraft } from '../../model/contracts/build'
 import type { ExcelAnalysis } from '../../model/contracts/excel'
 import { buildKeys } from '../../api/queries/build'
 import { keys } from '../../api/queries/shared'
@@ -195,7 +195,7 @@ test('retry keeps the Idempotency-Key and existing draft; starting patches set i
   await act(async () => { await flow.startAnalysis() })
   expect(update.mock.calls.at(-1)?.[2]).toMatchObject({ title: 'April', intent: expect.stringContaining('April.xlsx') })
   expect(turn.mock.calls[0]?.[2]).toEqual({ kind: 'excel-analysis', message: 'April and May belong together' })
-  expect(flow.draft?.source?.workbooks).toHaveLength(1)
+  expect(excelSource(flow.draft)?.workbooks).toHaveLength(1)
 })
 
 test.each([
@@ -216,7 +216,7 @@ test('a sample stores all members and starts exactly one analysis after the last
   expect(add).toHaveBeenCalledTimes(2)
   expect(turn).toHaveBeenCalledTimes(1)
   expect(update.mock.calls[0]?.[2].intent).toContain('1')
-  expect(flow.draft?.source?.workbooks).toHaveLength(2)
+  expect(excelSource(flow.draft)?.workbooks).toHaveLength(2)
 })
 
 test('analysis requires confirmation before set changes; cancelling never writes and removing the last clears the source', async () => {
@@ -302,7 +302,7 @@ test('a later successful file reuses the draft retained after failed cleanup', a
   await act(async () => { await flow.addFiles([new File([], 'good.xlsx')]) })
   expect(create).toHaveBeenCalledTimes(1)
   expect(add.mock.calls.map((call) => call[1])).toEqual(['draft-1', 'draft-1'])
-  expect(flow.draft?.source?.workbooks.map((member) => member.fileName)).toEqual(['good.xlsx'])
+  expect(excelSource(flow.draft)?.workbooks.map((member) => member.fileName)).toEqual(['good.xlsx'])
 })
 
 test.each([['unknown', false], ['text', true]] as const)('on resumption, an analysis field of kind %s with a readable design sets the hand-off gate to %s', async (fieldKind, open) => {
@@ -345,7 +345,7 @@ test('a partially stored sample stays in collection instead of silently analysin
   await act(async () => { result = await flow.addSample([{ ...workbook, fileName: 'April.xlsx' }, { ...workbook, fileName: 'May.xlsx' }]) })
   expect(result?.analysisRequested).toBe(false)
   expect(flow.files.some((file) => file.state === 'tooLarge')).toBe(true)
-  expect(flow.draft?.source?.workbooks).toHaveLength(1)
+  expect(excelSource(flow.draft)?.workbooks).toHaveLength(1)
   expect(turn).not.toHaveBeenCalled()
 })
 
@@ -380,6 +380,6 @@ test('binding a created draft retains failed file rows and retry keys alongside 
   expect(before.map((file) => file.state)).toEqual(['stored', 'unreadable'])
   await render(result!.id)
   expect(flow.files).toEqual(before)
-  expect(flow.draft?.source?.workbooks).toHaveLength(1)
+  expect(excelSource(flow.draft)?.workbooks).toHaveLength(1)
   expect(turn).not.toHaveBeenCalled()
 })

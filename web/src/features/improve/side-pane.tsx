@@ -7,7 +7,7 @@ import { knownValue, type ImplementationTask } from '../../model/contracts/build
 import type { ImproveState, ImproveVersion } from '../../model/improve'
 import { ActivityLog, Card, CardBody, LinkButton } from '../../ui'
 import { text as buildText } from '../build/copy'
-import type { ImplementationState } from '../build/implement'
+import { WorkspaceReadNotice, type ImplementationState } from '../build/implement'
 import { text } from './copy'
 import { useClock } from './use-clock'
 import { text as proposalText } from '../proposals/copy'
@@ -29,12 +29,14 @@ function taskMark(task: ImplementationTask): keyof typeof MARK {
  * they are made (from the server's run projection), then every version made
  * in this session and the app's address.
  */
-export function ImproveSidePane({ state, implementation, versions, appUrl, proposalPending, onCollapse }: {
+export function ImproveSidePane({ state, implementation, versions, appUrl, proposalPending, onRereadWorkspace, onCollapse }: {
   state: ImproveState
   implementation: ImplementationState
   versions: ImproveVersion[]
   appUrl?: string
   proposalPending?: boolean
+  /** Reads the preview's workspace again after a failed read. */
+  onRereadWorkspace?(): void
   onCollapse(): void
 }) {
   // An unsupported run still shows the tasks this console can read.
@@ -47,7 +49,7 @@ export function ImproveSidePane({ state, implementation, versions, appUrl, propo
       </button>
     </div>
     {state.phase === 'proposed' ? <ProposalTasks state={state} />
-      : showRun && state.run ? <RunProgress state={state} implementation={implementation} appUrl={appUrl} proposalPending={proposalPending} />
+      : showRun && state.run ? <RunProgress state={state} implementation={implementation} appUrl={appUrl} proposalPending={proposalPending} onRereadWorkspace={onRereadWorkspace} />
         : <p className="text-sm text-stone-500">{text.pane.empty}</p>}
     {versions.length ? <section aria-label={text.pane.versions}><Card><CardBody>
       <h3 className="text-sm font-semibold text-stone-900">{text.pane.versions}</h3>
@@ -71,7 +73,7 @@ function ProposalTasks({ state }: { state: ImproveState }) {
   </CardBody></Card></section>
 }
 
-function RunProgress({ state, implementation, appUrl, proposalPending }: { state: ImproveState; implementation: ImplementationState; appUrl?: string; proposalPending?: boolean }) {
+function RunProgress({ state, implementation, appUrl, proposalPending, onRereadWorkspace }: { state: ImproveState; implementation: ImplementationState; appUrl?: string; proposalPending?: boolean; onRereadWorkspace?(): void }) {
   const run = state.run!
   const running = state.phase === 'running'
   const now = useClock(running)
@@ -105,6 +107,7 @@ function RunProgress({ state, implementation, appUrl, proposalPending }: { state
     {(running || proposalPending) && implementation.previewUrl ? previewReady
       ? <LinkButton external href={implementation.previewUrl} size="sm" icon={<ExternalLink />} className="mt-3">{text.run.preview}</LinkButton>
       : <p role="status" className="mt-3 text-xs text-stone-500">{text.run.previewPreparing}</p> : null}
+    {(running || proposalPending) && implementation.workspaceRead ? <div className="mt-3"><WorkspaceReadNotice read={implementation.workspaceRead} onReread={onRereadWorkspace} /></div> : null}
     {state.phase === 'done' && appUrl ? <LinkButton external href={appUrl} tone="primary" size="sm" icon={<ExternalLink />} className="mt-4">{text.run.openApp}</LinkButton> : null}
   </CardBody></Card></section>
 }

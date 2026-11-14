@@ -40,7 +40,8 @@ export const textJa = {
       status: { pending: 'これから', running: '作業中', done: 'できました', failed: '止まっています', skipped: '飛ばしました', unknown: '確認できない状態' },
     },
     interrupted: { title: '基盤の更新で中断しました。自動で再開します。', hint: '最大 15 分ほどお待ちください。画面はこのままで大丈夫です。' },
-    steps: { check: '内容を確認する', source: '作ったものの置き場', release: '最初の版', url: 'URL', ready: 'アプリの準備を確認する', records: '記録する内容を整える' },
+    /** `other`: a step whose tool this console does not know (its own title is not shown: it is not product wording). */
+    steps: { check: '内容を確認する', source: '作ったものの置き場', release: '最初の版', url: 'URL', ready: 'アプリの準備を確認する', records: '記録する内容を整える', other: 'そのほかの準備' },
     publishReady: '公開準備',
     observe: {
       source: '置き場',

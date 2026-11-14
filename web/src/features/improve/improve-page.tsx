@@ -92,7 +92,7 @@ function Session({ draft, stale }: { draft: BuildDraft; stale: ReactNode }) {
         {session.proposal.error ? <LoadFailed error={session.proposal.error} onRetry={() => void session.proposal.refetch()} /> : null}
       </div>
       <div id="build-artifact" role="tabpanel" aria-labelledby="build-tab-artifact" className={cn('relative min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain', tab === 'artifact' ? 'block' : 'hidden', collapsed ? 'md:hidden' : 'md:block')}>
-        <ImproveSidePane state={state} implementation={implementation.state} versions={improveVersions(draft).filter((version) => !draft.proposalId || !!version.version)} appUrl={isOneOf(session.proposal.data?.phase, 'Applied') || !draft.proposalId ? appUrl : undefined} proposalPending={!!draft.proposalId && !isOneOf(session.proposal.data?.phase, 'Applied')} onCollapse={() => setArtifactCollapsed(true)} />
+        <ImproveSidePane state={state} implementation={implementation.state} versions={improveVersions(draft).filter((version) => !draft.proposalId || !!version.version)} appUrl={isOneOf(session.proposal.data?.phase, 'Applied') || !draft.proposalId ? appUrl : undefined} proposalPending={!!draft.proposalId && !isOneOf(session.proposal.data?.phase, 'Applied')} onRereadWorkspace={implementation.rereadWorkspace} onCollapse={() => setArtifactCollapsed(true)} />
       </div>
       {collapsed ? (
         <div className="hidden min-h-0 flex-col items-center gap-2 bg-white py-2 md:flex">

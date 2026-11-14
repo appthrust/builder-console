@@ -25,12 +25,31 @@ test.each(['private', 'group', 'company'] as const)('a fresh publish dialog uses
   client.setQueryData(consoleKeys.groups, groups)
   try {
     const html = renderToStaticMarkup(<QueryClientProvider client={client}>
-      <PublishStep app={{ ...app, displayName: '以前の名前', share: { scope: { kind: 'known', value: 'private' }, groupIds: [], extraPersonIds: [] } }} publishPreferences={{ name: '保存された名前', shareScope }} onPublished={() => {}} onCancel={() => {}} />
+      <PublishStep app={{ ...app, displayName: '以前の名前', share: { scope: { kind: 'known', value: 'private' }, groupIds: [], extraPersonIds: [] } }} publishPreferences={{ name: '保存された名前', shareScope: { kind: 'known', value: shareScope } }} onPublished={() => {}} onCancel={() => {}} />
     </QueryClientProvider>)
     const container = document.createElement('div')
     container.innerHTML = html
     expect(container.querySelector<HTMLInputElement>('#publish-name')?.value).toBe('保存された名前')
     expect(container.querySelector<HTMLInputElement>(`input[value="${shareScope}"]`)?.checked).toBe(true)
     expect(html).not.toContain('以前の名前')
+  } finally { client.clear() }
+})
+
+test('a saved audience this console does not know is not offered back: the dialog starts from the narrowest audience', async () => {
+  const gateway = createTestGateway({ consoleFetch: fixture })
+  const [me, groups, apps] = await Promise.all([gateway.console(meContract, undefined), gateway.console(groupsContract, undefined), gateway.console(appsContract, { scope: 'mine' })])
+  const app = apps[0]!
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
+  client.setQueryData(consoleKeys.me, me)
+  client.setQueryData(consoleKeys.groups, groups)
+  try {
+    const html = renderToStaticMarkup(<QueryClientProvider client={client}>
+      <PublishStep app={{ ...app, share: { scope: { kind: 'unknown' }, groupIds: [], extraPersonIds: [] } }} publishPreferences={{ name: '保存された名前', shareScope: { kind: 'unknown' } }} onPublished={() => {}} onCancel={() => {}} />
+    </QueryClientProvider>)
+    const container = document.createElement('div')
+    container.innerHTML = html
+    expect(container.querySelector<HTMLInputElement>('#publish-name')?.value).toBe('保存された名前')
+    expect(container.querySelector<HTMLInputElement>('input[value="private"]')?.checked).toBe(true)
+    expect(container.querySelectorAll('input[name][type="radio"]:checked')).toHaveLength(1)
   } finally { client.clear() }
 })

@@ -1,5 +1,5 @@
 import type { OpenValue } from '../../api/boundary'
-import { isOneOf, type BuildTurn, type DraftExcelAnalysis, type PublishPreferences, type TurnKind } from '../contracts/build'
+import { isOneOf, knownValue, type BuildTurn, type DraftExcelAnalysis, type PublishPreferences, type TurnKind } from '../contracts/build'
 import { shareScopeLabel, type DraftShareScope } from '../access'
 import { apps } from '../../copy/apps'
 import { appsEn } from '../../copy/apps.en'
@@ -137,7 +137,9 @@ type PrepareTurn = Pick<BuildTurn, 'id' | 'kind' | 'status' | 'startedAt' | 'use
  * Explicit Excel hand-off answers supersede the exchange without inventing conversation turns.
  */
 export function prepareAnswers(turns: readonly PrepareTurn[] = [], preferences?: PublishPreferences, ownerGroupName?: string): PrepareAnswers {
-  const answered = { ...(preferences?.name ? { name: preferences.name } : {}), ...(preferences?.shareScope ? { shareChoice: preferences.shareScope } : {}) }
+  // A saved audience this console does not know is not an answer it can repeat, but it is saved: the exchange is closed (below).
+  const savedScope = knownValue(preferences?.shareScope)
+  const answered = { ...(preferences?.name ? { name: preferences.name } : {}), ...(savedScope ? { shareChoice: savedScope } : {}) }
   const ordered = conversationTurns(turns).sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt))
   let start = ordered.length - 1
   while (start >= 0 && !isPrepareTurn(ordered[start]!.userMessage)) start--

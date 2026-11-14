@@ -1,4 +1,4 @@
-import type { PublishPreferences } from '../../model/contracts/build'
+import { knownValue, type PublishPreferences } from '../../model/contracts/build'
 import { useStore } from '@tanstack/react-form'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRef, useState } from 'react'
@@ -18,8 +18,9 @@ export function PublishStep({ app, publishId, publishPreferences, onPublished, o
   const me = useMe().data
   const groups = useGroups().data
   const queryClient = useQueryClient()
-  // A saved scope this console does not know is not offered back: the form starts from the narrowest audience.
-  const scope = publishPreferences?.shareScope ?? knownScope(app.share.scope) ?? 'private'
+  // A saved scope this console does not know (the draft's or the app's) is not offered back: the form starts from the
+  // next known one, else the narrowest audience; the user still chooses before anything is written.
+  const scope = knownValue(publishPreferences?.shareScope) ?? knownScope(app.share.scope) ?? 'private'
   const [name, setName] = useState(publishPreferences?.name ?? app.displayName)
   const form = useCreateForm(app.group.id, { ...initialValues(app.group.id), scope, shareGroupIds: app.share.groupIds.length ? [...app.share.groupIds] : null })
   const values = useStore(form.store, (state) => state.values)

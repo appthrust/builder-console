@@ -1,4 +1,4 @@
-import type { BuildDraft, DraftExcelAnalysis, DraftSource, DraftUiDesign } from '../../model/contracts/build'
+import { excelSource, knownPlan, planOverview, type BuildDraft, type DraftExcelAnalysis, type DraftUiDesign, type ExcelSource } from '../../model/contracts/build'
 import { Circle, PanelRightClose } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { buildCopy } from '../../model/build/copy'
@@ -22,7 +22,7 @@ function Rows({ rows }: { rows: [string, ReactNode][] }) {
  * Only decided rows are shown; what is still open collapses into one 「これから決めること」 line.
  * An uploaded workbook answers 「元のデータ」 itself, whatever the front-matter says.
  */
-export function SpecCard({ spec, title, proposal, source, uiDesign, excelAnalysis }: { spec: BuildSpec; title: string; proposal?: BuildProposal; source?: DraftSource; uiDesign?: DraftUiDesign; excelAnalysis?: DraftExcelAnalysis }) {
+export function SpecCard({ spec, title, proposal, source, uiDesign, excelAnalysis }: { spec: BuildSpec; title: string; proposal?: BuildProposal; source?: ExcelSource; uiDesign?: DraftUiDesign; excelAnalysis?: DraftExcelAnalysis }) {
   const about: [string, ReactNode][] = []
   const open: string[] = []
   const add = (label: string, value: ReactNode | undefined) => { if (value) about.push([label, value]); else open.push(label) }
@@ -83,7 +83,7 @@ export function PublishCard({ url, shareText, published = false }: { url: string
   </CardBody></Card></section>
 }
 
-export function ArtifactPane({ draft, spec, proposal, stage, progress, implementation, failure, url, shareText, shareStep, databaseChanges, previewDatabaseReset, onOpenPreview, onRetry, onSkipTask, onConfirm, onCollapse }: {
+export function ArtifactPane({ draft, spec, proposal, stage, progress, implementation, failure, url, shareText, shareStep, databaseChanges, previewDatabaseReset, onOpenPreview, onRetry, onSkipTask, onConfirm, onRereadWorkspace, onCollapse }: {
   draft: BuildDraft
   spec: BuildSpec
   proposal?: BuildProposal
@@ -103,23 +103,27 @@ export function ArtifactPane({ draft, spec, proposal, stage, progress, implement
   onSkipTask(id: string): void
   /** Reads the draft back after an implementation start whose answer could not be read. */
   onConfirm?(): void
+  /** Reads the preview's workspace again after a failed read (useImplementation().rereadWorkspace). */
+  onRereadWorkspace?(): void
   /** From md the pane folds to a strip; the control lives in its heading so it leaves with the pane. */
   onCollapse(): void
 }) {
   const raw = failure?.raw ?? implementation.failure?.raw
   const reference = failure?.reference ? buildFailureReference(failure.reference) : undefined
-  const specCard = <SpecCard spec={spec} title={draft.title} proposal={proposal} source={draft.source} uiDesign={draft.uiDesign} excelAnalysis={draft.excelAnalysis} />
+  const excel = excelSource(draft)
+  const specCard = <SpecCard spec={spec} title={draft.title} proposal={proposal} source={excel} uiDesign={draft.uiDesign} excelAnalysis={draft.excelAnalysis} />
   // The preview starts with the first task; preparation and implementation remain one ladder.
   const built = stage === 'build' || stage === 'publish'
   // Once published, the working database no longer matters; until then a workspace either has its own or runs without one.
   const databaseStatus = stage === 'publish' ? undefined : implementation.previewDatabaseStatus
-  const previewNotice = databaseStatus === 'none' && draft.creationPlan?.applicationStackRequest?.database
-    ? implementationCopy.previewDatabase(Boolean(draft.source))
+  const previewNotice = databaseStatus === 'none' && knownPlan(draft)?.applicationStackRequest?.database
+    ? implementationCopy.previewDatabase(Boolean(excel))
     : undefined
   const implementing = previewDatabaseReset.busy || implementation.phase === 'starting-workspace' || implementation.phase === 'running' || implementation.phase === 'pushing'
   const previewDatabase = databaseStatus && databaseStatus !== 'none'
-    ? { status: databaseStatus, excel: Boolean(draft.source), busy: implementing, pending: previewDatabaseReset.pending, error: previewDatabaseReset.error, onReset: previewDatabaseReset.reset, onConfirm: previewDatabaseReset.confirm }
+    ? { status: databaseStatus, excel: Boolean(excel), busy: implementing, pending: previewDatabaseReset.pending, error: previewDatabaseReset.error, onReset: previewDatabaseReset.reset, onConfirm: previewDatabaseReset.confirm }
     : undefined
+  const planMarkdown = planOverview(draft)?.markdown
   const progressFailure = !built && failure && progress?.title === failure.title ? failure : undefined
   const showFailureNotice = failure && failure.kind !== 'name-taken' && (built ? !implementation.failure : !progressFailure)
   return <section aria-label={buildCopy.artifact.title} className="mx-auto w-full max-w-4xl min-w-0 space-y-4 p-4 sm:p-5">
@@ -138,7 +142,7 @@ export function ArtifactPane({ draft, spec, proposal, stage, progress, implement
     </Notice> : null}
     {shareStep}
     {stage === 'publish' && url ? <PublishCard url={url} shareText={shareText} published /> : null}
-    {built ? <ImplementPanel state={implementation} preparation={progress} released={Boolean(url)} previewNotice={previewNotice} previewDatabase={previewDatabase} onOpenPreview={onOpenPreview} onRetry={onRetry} onSkipTask={onSkipTask} onConfirm={onConfirm} /> : null}
+    {built ? <ImplementPanel state={implementation} preparation={progress} released={Boolean(url)} previewNotice={previewNotice} previewDatabase={previewDatabase} onOpenPreview={onOpenPreview} onRetry={onRetry} onSkipTask={onSkipTask} onConfirm={onConfirm} onRereadWorkspace={onRereadWorkspace} /> : null}
     {built ? databaseChanges : null}
     {stage === 'build' && url ? <PublishCard url={url} shareText={shareText} /> : null}
     {built && !url ? <p className="text-xs text-stone-500">{text.artifact.waitingForApp}</p> : null}
@@ -146,7 +150,7 @@ export function ArtifactPane({ draft, spec, proposal, stage, progress, implement
     <Disclosure title={text.artifact.advanced}>
       <div className="space-y-4 break-all text-xs text-stone-600">
         {progress?.buildUrl ? <a href={progress.buildUrl} target="_blank" rel="noopener noreferrer" className="block text-accent-strong underline">{buildCopy.sourceBuild.run}: {progress.buildUrl}</a> : null}
-        {draft.creationPlan?.markdown ? <pre className="whitespace-pre-wrap break-words">{draft.creationPlan.markdown}</pre> : null}
+        {planMarkdown ? <pre className="whitespace-pre-wrap break-words">{planMarkdown}</pre> : null}
         {raw ? <pre className="whitespace-pre-wrap break-words text-bad-ink">{raw}</pre> : null}
         {built ? <>
           {implementation.workspaceId ? <p>{text.artifact.workspace(implementation.workspaceId)}</p> : null}

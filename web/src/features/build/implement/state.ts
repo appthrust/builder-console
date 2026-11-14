@@ -15,6 +15,11 @@ export interface ImplementationState {
   previewStatus?: PreviewReadiness
   /** Unset until the workspace has been read. */
   previewDatabaseStatus?: PreviewDatabaseStatus
+  /**
+   * The workspace behind the preview could not be read: `failed` when nothing was ever read, `stale` when a re-read
+   * failed and the preview shows what was read at `at`. Unset while the reads succeed.
+   */
+  workspaceRead?: { kind: 'failed' } | { kind: 'stale'; at: number }
   activityTail?: string
   failure?: BuildFailure
   /** Start/retry is being submitted, or its draft inputs are not ready yet. */

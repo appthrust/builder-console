@@ -8,7 +8,7 @@
 //     the start): listed under the app's name with the session's state word.
 //   - Wizard apps: the caller's console apps that never got a platform binding.
 import type { Proposal } from '../../model/contracts/proposal'
-import { isOneOf, type BuildDraft } from '../../model/contracts/build'
+import { draftKind, isOneOf, type BuildDraft } from '../../model/contracts/build'
 import { useQuery } from '@tanstack/react-query'
 import { PencilLine } from 'lucide-react'
 import { draftsOptions } from '../../api/queries/build'
@@ -30,6 +30,7 @@ import { stateWord } from '../build/session-header'
 import { improveStateWord, text as improveText } from '../improve/copy'
 import { AppListSkeleton, AppStatus, StatusLoadNotice } from './app-list'
 import { StaleNotice } from '../app/notices'
+import { text as appText } from '../app/copy'
 import { text } from './copy'
 import { proposalsOptions } from '../../api/queries/proposal'
 import { proposalTerminal } from '../proposals/model'
@@ -37,14 +38,15 @@ import { ProposalStatus } from '../proposals/proposal-ui'
 import { text as proposalText } from '../proposals/copy'
 
 export type UnfinishedItem =
-  | { kind: 'build'; id: string; name: string; stage: BuildStage; at: string; draft: BuildDraft }
+  | { kind: 'build'; id: string; name: string; stage: BuildStage; unsupported: boolean; at: string; draft: BuildDraft }
   | { kind: 'improve'; id: string; name: string; state: string; working: boolean; at: string; draft: BuildDraft }
   | { kind: 'app'; id: string; name: string; at: string; app: BusinessApp }
   | { kind: 'sent-proposal' | 'review-proposal'; id: string; name: string; at: string; proposal: Proposal }
 
-function buildStage(draft: BuildDraft): BuildStage {
+function buildStage(draft: BuildDraft): { stage: BuildStage; unsupported: boolean } {
   const session = readBuildSession(draft.id)
-  return deriveStage({ draft, published: draftPublished(draft), lastPlannedIntent: session?.lastPlannedIntent, now: Date.now() }).stage
+  const result = deriveStage({ draft, published: draftPublished(draft), lastPlannedIntent: session?.lastPlannedIntent, now: Date.now() })
+  return { stage: result.stage, unsupported: Boolean(result.unsupported) }
 }
 
 /**
@@ -59,13 +61,14 @@ export function useUnfinished(me: Me, { poll = true }: { poll?: boolean } = {}) 
   const bound = (apps.data ?? []).filter((app) => app.stackId)
   // A phase this console does not know is not archived: the draft stays listed rather than disappearing.
   const open = (drafts.data?.data ?? []).filter((draft) => !isOneOf(draft.phase, 'archived') && !draft.proposalId)
-  const builds = open.filter((draft) => !isImprovementDraft(draft) && !bound.some((app) => app.stackId === draft.createdApplicationStackId))
+  // A kind this console does not know is not an improvement: it stays listed as a session (unsupported there), never hidden.
+  const builds = open.filter((draft) => draftKind(draft) !== 'improvement' && !bound.some((app) => app.stackId === draft.createdApplicationStackId))
   // An AI session's own app is briefly unbound before binding; it is listed once, as the session.
   const sessionApps = new Set(builds.map((draft) => readBuildSession(draft.id)?.createdAppId).filter(Boolean))
   const items: UnfinishedItem[] = [
     ...(sent.data?.data ?? []).filter((proposal) => !proposalTerminal(proposal.phase)).map((proposal) => ({ kind: 'sent-proposal' as const, id: proposal.id, name: proposal.title, at: proposal.updatedAt, proposal })),
     ...(incoming.data?.data ?? []).map((proposal) => ({ kind: 'review-proposal' as const, id: proposal.id, name: proposal.title, at: proposal.updatedAt, proposal })),
-    ...builds.map((draft) => ({ kind: 'build' as const, id: draft.id, name: parseSpec(draft.specMarkdown).spec.name ?? draft.title, stage: buildStage(draft), at: draft.updatedAt, draft })),
+    ...builds.map((draft) => ({ kind: 'build' as const, id: draft.id, name: parseSpec(draft.specMarkdown).spec.name ?? draft.title, ...buildStage(draft), at: draft.updatedAt, draft })),
     ...open.filter(isImprovementDraft).map((draft) => {
       const state = deriveImprove(draft)
       const name = bound.find((app) => app.stackId === draft.createdApplicationStackId)?.displayName ?? draft.title
@@ -103,7 +106,7 @@ export function DraftsPage() {
               </p>
             </div>
             {item.kind === 'build' ? <div className="flex items-center gap-3">
-              <StatusPill status={item.stage === 'build' ? 'deploying' : 'unfinished'} label={stateWord[item.stage]} />
+              {item.unsupported ? <StatusPill status="unknown" label={appText.unsupported.label} /> : <StatusPill status={item.stage === 'build' ? 'deploying' : 'unfinished'} label={stateWord[item.stage]} />}
               <HrefLink href={paths.build(item.id)} className="inline-flex min-h-10 items-center text-xs font-medium text-accent-strong underline md:min-h-8">{text.list.resume}</HrefLink>
               <DiscardBuildButton draft={item.draft} />
             </div> : item.kind === 'improve' ? <div className="flex items-center gap-3">

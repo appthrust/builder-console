@@ -25,7 +25,7 @@ import { renameCreationPlan, withDefaultPublish } from '../../model/build/plan'
 import { appPreparationProgress, sourceBuildFailureProgress } from '../../model/build/progress'
 import { draftPublished } from '../../model/build/stage'
 import type { BuildFailure } from '../../model/build/types'
-import { isOneOf, knownValue, type BuildDraft, type BuildExecutionStep, type CreationPlanValidation } from '../../model/contracts/build'
+import { isOneOf, knownPlan, knownValue, planOverview, type BuildDraft, type BuildExecutionStep, type CreationPlanValidation } from '../../model/contracts/build'
 import { pickCreateEnvironment, summarizeCreationPlan } from '../../model/create'
 import { sourceRepositoryFor } from '../app/platform'
 import { useAppViews } from '../app/use-app-views'
@@ -121,14 +121,16 @@ export function useDraftCreation({ projectId, draft, tab, hasPending, now }: Dra
   const appProgress = preparationInput ? appPreparationProgress(preparationInput, now, preparationClock.current.since) : sourceBuildFailureProgress(sourceRepository?.build)
   const generation = draft.creationPlanGenerations.at(-1)
   const execution = draft.creationExecutions.at(-1)
-  const needsPublishDefault = Boolean(draft.creationPlan?.applicationStackRequest && !draft.creationPlan.applicationStackRequest.publish?.enabled)
+  // Only a plan whose every value this console knows is changed and sent back; another is shown, never written.
+  const plan = knownPlan(draft)
+  const needsPublishDefault = Boolean(plan?.applicationStackRequest && !plan.applicationStackRequest.publish?.enabled)
   const connections = useQuery({ ...createConnectionsQuery(projectId), enabled: needsPublishDefault || (isOneOf(draft.phase, 'created') && !appView?.platform?.publish) })
   const domain = connections.data ? pickCreateEnvironment(connections.data.sources, connections.data.registries, connections.data.domains).domain : undefined
-  const creationPlan = draft.creationPlan ? withDefaultPublish(draft.creationPlan, { domain }) : undefined
-  const defaultPending = !execution && (creationPlan !== draft.creationPlan || (needsPublishDefault && connections.isPending))
-  const proposalDraft = creationPlan === draft.creationPlan ? draft : { ...draft, creationPlan }
+  const creationPlan = plan ? withDefaultPublish(plan, { domain }) : undefined
+  const defaultPending = !execution && (creationPlan !== plan || (needsPublishDefault && connections.isPending))
+  const proposalDraft: BuildDraft = creationPlan === plan || !creationPlan ? draft : { ...draft, creationPlan: { kind: 'supported', value: creationPlan } }
   const published = draftPublished(draft) && tab.continuedAfterPublishAt !== draft.publishedAt && !hasPending
-  const implementation = useImplementation({ projectId, draft, handoff: execution?.approval?.implementationHandoff ?? draft.creationPlan?.implementationHandoff, enabled: Boolean(draft.createdApplicationStackId) && !published })
+  const implementation = useImplementation({ projectId, draft, handoff: execution?.approval?.implementationHandoff ?? planOverview(draft)?.implementationHandoff, enabled: Boolean(draft.createdApplicationStackId) && !published })
   const implementing = implementation.pending || implementation.state.phase === 'starting-workspace' || implementation.state.phase === 'running' || implementation.state.phase === 'pushing'
   return { app, appViews, appView, appProgress, generation, execution, domain, creationPlan, defaultPending, proposalDraft, published, implementation, implementing }
 }
@@ -193,12 +195,13 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
 
   useEffect(() => {
     // Plan replacement is forbidden after an execution exists.
-    if (execution || !isOneOf(generation?.status, 'succeeded') || !creationPlan || creationPlan === draft.creationPlan || running || busy || lock.current || failure) return
+    if (execution || !isOneOf(generation?.status, 'succeeded') || !creationPlan || creationPlan === knownPlan(draft) || running || busy || lock.current || failure) return
     void host.perform('plan', async () => {
       const current = host.draftRef.current
-      if (current.creationExecutions.length || !current.creationPlan) return
-      const plan = withDefaultPublish(current.creationPlan, { domain })
-      if (plan !== current.creationPlan) await host.receive(await api.updateDraft(projectId, draft.id, { creationPlan: plan }))
+      const stored = knownPlan(current)
+      if (current.creationExecutions.length || !stored) return
+      const plan = withDefaultPublish(stored, { domain })
+      if (plan !== stored) await host.receive(await api.updateDraft(projectId, draft.id, { creationPlan: plan }))
     })
   }, [draft.creationPlan, knownValue(generation?.status), execution, domain, running, busy, failure])
 
@@ -233,12 +236,14 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
   }, [execution])
 
   useEffect(() => {
-    if (!draft.createdApplicationStackId || (!isOneOf(draft.phase, 'created') && !isOneOf(execution?.status, 'succeeded')) || app?.stackId || busy || lock.current || bindingFailed.current) return
+    // The created app's name comes from the plan: a plan this console cannot read whole binds nothing (stage.ts reports it unsupported).
+    if (!draft.createdApplicationStackId || draft.creationPlan?.kind === 'unsupported' || (!isOneOf(draft.phase, 'created') && !isOneOf(execution?.status, 'succeeded')) || app?.stackId || busy || lock.current || bindingFailed.current) return
     void host.perform('prepare', async () => {
       try {
         // A previously selected department stays fixed; repair only old empty sessions.
         if (!host.currentTab().groupId) host.patch({ groupId: host.groupId })
-        const appName = draft.creationPlan ? summarizeCreationPlan(draft.creationPlan).appName : undefined
+        const plan = knownPlan(draft)
+        const appName = plan ? summarizeCreationPlan(plan).appName : undefined
         const kept = await bindCreatedConsoleApp(
           { projectId, displayName: host.displayName, description: host.description, tags: [], groupId: host.currentTab().groupId, urlName: appName ?? '', share: { scope: 'private', groupIds: [], extraPersonIds: [] } },
           { stackId: draft.createdApplicationStackId!, createdAppId: host.currentTab().createdAppId },
@@ -250,7 +255,7 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
         await queryClient.invalidateQueries({ queryKey: ['console', 'apps'] })
       } catch (error) { bindingFailed.current = true; throw error }
     })
-  }, [draft.createdApplicationStackId, knownValue(draft.phase), knownValue(execution?.status), app?.stackId, busy, host.groupId])
+  }, [draft.createdApplicationStackId, draft.creationPlan?.kind, knownValue(draft.phase), knownValue(execution?.status), app?.stackId, busy, host.groupId])
 
   useEffect(() => {
     const platform = appView?.platform
@@ -313,13 +318,14 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
      * the host drop what it showed about the collision.
      */
     rename(name: string, failure: BuildFailure | undefined, onRenamed: (updated: BuildDraft) => void) {
-      if (!draft.creationPlan) return
+      const plan = knownPlan(draft)
+      if (!plan) return
       void host.perform('prepare', async () => {
         const publishConflict = failure?.reasonCode === 'PublishURLConflict'
         if (!publishConflict) await api.cleanupCreation(projectId, draft.id)
         const updated = await api.updateDraft(projectId, draft.id, publishConflict
           ? { renameApplication: { name } }
-          : { creationPlan: renameCreationPlan(draft.creationPlan!, name, { domain }) })
+          : { creationPlan: renameCreationPlan(plan, name, { domain }) })
         await host.receive(updated)
         host.patch({ reusePlan: true, executionRequestId: undefined })
         onRenamed(updated)

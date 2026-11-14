@@ -7,10 +7,10 @@
 // a state this console does not know stops only what depends on it. The legacy
 // platform-v1 page (`build-page.tsx`) shares presentational parts only.
 import { useSelector } from '@tanstack/react-store'
-import { Loader2, PanelRightOpen } from 'lucide-react'
+import { Loader2, PanelRightOpen, RotateCw } from 'lucide-react'
 import { Fragment, useEffect, useState, type ReactNode } from 'react'
 import { useBuildDraft } from '../../api/queries/build'
-import { copy } from '../../copy'
+import { copy, relativeTime } from '../../copy'
 import { buildCopy } from '../../model/build/copy'
 import { failureKind, failureNext, planPhase, type FailureKind } from '../../model/build/replies'
 import { parseSpec } from '../../model/build/spec'
@@ -31,8 +31,14 @@ import { useConsoleBuildSession, type ConsoleBuildActions } from './use-console-
 
 export function ConsoleBuildPage({ sessionId }: { sessionId: string }) {
   const build = useConsoleBuildSession(sessionId)
+  // A failed turn read sits with the page's other read notice; the conversation keeps the last turns read.
+  const turnsNotice = build.turnsRead ? (
+    <Notice tone="warning" actions={<Button size="sm" icon={<RotateCw />} onClick={build.rereadTurns}>{copy.common.retry}</Button>}>
+      {build.turnsRead.kind === 'failed' ? text.console.turnsLoadFailed : copy.common.refreshFailed(relativeTime(new Date(build.turnsRead.at).toISOString()) ?? '')}
+    </Notice>
+  ) : null
   return <ResourceBoundary query={build.query} resetKey={sessionId} loading={<Loading className="px-5" />}>
-    {(_session, stale) => build.view ? <ConsoleSession view={build.view} actions={build.actions} stale={stale} /> : null}
+    {(_session, stale) => build.view ? <ConsoleSession view={build.view} actions={build.actions} stale={stale || turnsNotice ? <>{stale}{turnsNotice}</> : null} /> : null}
   </ResourceBoundary>
 }
 

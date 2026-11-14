@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { buildSessionsApi, intentKeys, mintIdempotencyKey } from '../../api/build-sessions'
+import { buildSessionsApi, intentKeys, mintIdempotencyKey, type BuildSessionsApi } from '../../api/build-sessions'
+import { ResponseContractError } from '../../api/boundary'
 import { sessionExpiryStore } from '../../api/session-expiry'
 import { createConsoleMockFetch, createSessionApp, resetMocks, type ConsoleMockFetch } from '../../api/testing/console-mock-fetch'
 import { buildCopy } from '../../model/build/copy'
@@ -293,4 +294,39 @@ test('advance is sent once per session version when the server asks for it', asy
   expect(advances).toHaveLength(1)
   expect(advances[0]!.idempotencyKey).toBe(intentKeys.advance(created.id, created.version))
   expect(tab.view.session.draftId).toBeDefined()
+})
+
+test('a turn list that cannot be read is said, never shown as an empty conversation; a failed re-read keeps the turns read', async () => {
+  const created = await api.create({ kind: 'new-app', groupId: 'g-team-a', intent: '在庫を数えるアプリ', locale: 'ja' }, mintIdempotencyKey())
+  let failing = true
+  const unreadable = new ResponseContractError({ source: 'console', operationId: 'consoleListBuildTurns', method: 'GET', routeTemplate: '/api/console/v1/build-sessions/{id}/turns', issues: [{ path: '/items/*/kind', code: 'invalid_value' }] })
+  const flaky: BuildSessionsApi = { ...api, allTurns: async (id) => { if (failing) throw unreadable; return api.allTurns(id) } }
+  const client = new QueryClient({ defaultOptions: { queries: { retryDelay: 0 } } })
+  const tab: { current?: ConsoleBuildSession } = {}
+  function Probe() {
+    tab.current = useConsoleBuildSession(created.id, { api: flaky })
+    return null
+  }
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+  mounted.push({ root, container, client })
+  await act(async () => { root.render(<QueryClientProvider client={client}><Probe /></QueryClientProvider>) })
+  await settle()
+  // The session itself is shown; the conversation says it could not be read.
+  expect(tab.current?.view?.session.id).toBe(created.id)
+  expect(tab.current?.turnsRead).toEqual({ kind: 'failed' })
+
+  failing = false
+  await act(async () => { tab.current!.rereadTurns() })
+  await settle()
+  expect(tab.current?.turnsRead).toBeUndefined()
+  const read = tab.current!.turnsQuery.data
+  expect(read).toBeDefined()
+
+  failing = true
+  await act(async () => { tab.current!.rereadTurns() })
+  await settle()
+  expect(tab.current?.turnsRead?.kind).toBe('stale')
+  expect(tab.current!.turnsQuery.data).toBe(read)
 })

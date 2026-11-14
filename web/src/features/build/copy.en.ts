@@ -116,6 +116,7 @@ export const textEn: typeof textJa = {
     submit: 'Use this name',
   },
   console: {
+    turnsLoadFailed: 'We could not load the conversation. Some replies may not be shown yet.',
     candidates: 'Options',
     candidatesHint: 'Choose one to get a proposed change to the app details.',
     candidateMessage: (label: string) => `I’d like “${label}”`,

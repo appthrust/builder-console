@@ -19,7 +19,7 @@ import { createTestGateway } from '../../api/testing/gateway'
 import { consoleRoutes } from '../../dev/mock-console'
 import { platformRoutes } from '../../dev/mock-platform'
 import { buildCopy } from '../../model/build/copy'
-import type { BuildDraft } from '../../model/contracts/build'
+import { excelSource, type BuildDraft } from '../../model/contracts/build'
 import { paths } from '../../routes/paths'
 import { setLanguage } from '../../shell/language'
 import { UnsavedChangesProvider } from '../../ui/use-unsaved-changes-guard'
@@ -286,7 +286,7 @@ describe('X5: a 2xx Excel write whose answer cannot be read', () => {
     hidden.member = false
     const server = ((await call('GET', draftPath(draftId))).source as { workbooks: { id: string }[] }).workbooks
     expect(server).toHaveLength(1)
-    expect(client.getQueryData<BuildDraft>(buildKeys.draft('commerce', draftId))?.source?.workbooks.map((member) => member.id)).toEqual(server.map((member) => member.id))
+    expect(excelSource(client.getQueryData<BuildDraft>(buildKeys.draft('commerce', draftId)))?.workbooks.map((member) => member.id)).toEqual(server.map((member) => member.id))
   })
 
   test('analysis turn: the turn is not resent, nothing is cached, and the re-read shows the turn the server accepted', async () => {

@@ -60,6 +60,8 @@ export function useImplementation({ projectId, draft, handoff, enabled }: Implem
     },
   })
   const previewUrl = workspace.data ? implementationPreviewUrl(workspace.data) : undefined
+  // A failed read is said, never silent: a first load that failed has nothing to show; a failed re-read keeps the last workspace read.
+  const workspaceRead = workspace.isError ? (workspace.data ? { kind: 'stale' as const, at: workspace.dataUpdatedAt } : { kind: 'failed' as const }) : undefined
   const previewStatus = usePreviewReadiness(previewUrl)
   // An unconfirmed write is settled by the draft read back: once it shows another run, or the run in another state, that is what happened.
   const failure = requestFailure?.draftId === draft.id && !(requestFailure.failure.kind === 'unconfirmed' && runMark(run) !== requestFailure.runBefore) ? requestFailure.failure : undefined
@@ -68,6 +70,7 @@ export function useImplementation({ projectId, draft, handoff, enabled }: Implem
     previewUrl,
     previewStatus,
     ...(workspace.data ? { previewDatabaseStatus: previewDatabaseStatus(workspace.data, projection.tasks) } : {}),
+    ...(workspaceRead ? { workspaceRead } : {}),
     retryPending: pending || !enabled || !projection.tasks.length,
     // An unconfirmed start is not a stopped run: the draft read back shows what actually happened.
     ...(failure ? { ...(failure.kind === 'unconfirmed' ? {} : { phase: 'failed' as const }), failure } : {}),
@@ -147,6 +150,8 @@ export function useImplementation({ projectId, draft, handoff, enabled }: Implem
     start: () => { if (projection.phase === 'idle' && !requestFailure) void submit() },
     /** After a write whose answer could not be read: reads the draft back; the notice leaves once it shows what happened. Never resends. */
     confirm: () => { void queryClient.invalidateQueries({ queryKey: buildDraftOptions(projectId, draft.id).queryKey }) },
+    /** Reads the workspace again after a failed read (the notice's action). */
+    rereadWorkspace: () => { void workspace.refetch() },
     /** Starts every handoff task the latest run has not made, whatever that run's outcome (improvement sessions). */
     startPending: () => { void submit() },
     retry: () => {

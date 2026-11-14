@@ -30,7 +30,8 @@ export function previewDatabaseStatus(workspace: PreviewWorkspace, tasks: readon
   if (!database) return 'none'
   if (database.engine.kind === 'unknown') return 'unsupported'
   // Any other not-ready reason (unsupported, crashed, ownership or budget failures) needs the user, not a wait.
-  if (!database.ready) return (database.reason && WAITING_REASONS[database.reason]) || 'unavailable'
+  // `reason` is free text: only the table's own keys count (an inherited name such as `constructor` is no reason).
+  if (!database.ready) return database.reason && Object.hasOwn(WAITING_REASONS, database.reason) ? WAITING_REASONS[database.reason]! : 'unavailable'
   // Only a report made against the database running now counts: a reset or restart leaves older reports behind.
   // A condition status this console does not know is not True.
   const readySince = workspace.conditions.find((condition) => condition.type === 'PreviewDatabaseReady' && isOneOf(condition.status, 'True'))?.lastTransitionTime

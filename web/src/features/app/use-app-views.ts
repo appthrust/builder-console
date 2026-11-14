@@ -5,12 +5,11 @@ import { useApplicationReleases, useProjectReadModels } from '../../api/queries/
 import { useSourceRepositories } from '../../api/queries/catalog'
 import { draftsOptions } from '../../api/queries/build'
 import { applicationForStack, deriveAppView, stackForApplication, type AppView, type ConsoleAppsInput } from '../../model/app'
-import { jobState } from '../../model/contracts/build'
+import { draftKind, jobState, planOverview } from '../../model/contracts/build'
 import type { AppStack } from '../../model/contracts/app'
 import type { BusinessApp } from '../../model/contracts/console'
 import { isSourceBuildFailed } from './platform'
 import { text } from './copy'
-import { isImprovementDraft } from '../../model/improve'
 import { readCreateSession } from '../create/persistence'
 import { readBuildSession } from '../build/session'
 
@@ -78,9 +77,9 @@ export function useAppViews(projectId: string): AppViews {
       if (failedQuery) return { status: 'unknown', label: text.unsupported.label, text: copy.common.loadFailed, second: copy.common.loadFailed, draft: app.stackId === null }
       const session = app.stackId ? undefined : readCreateSession(app.id)
       const application = applicationForStack(app.stackId, input)
-      // Build progress comes from the session that made the app; improvement sessions have their own page.
-      const draft = drafts.data?.data.find((item) => application && !item.proposalId && !isImprovementDraft(item) && item.createdApplicationId === application.id)
-      const handoff = draft?.creationExecutions?.at(-1)?.approval?.implementationHandoff ?? draft?.creationPlan?.implementationHandoff
+      // Build progress comes from the session that made the app; improvement sessions have their own page, and a draft of a kind this console does not know is neither.
+      const draft = drafts.data?.data.find((item) => application && !item.proposalId && draftKind(item) === 'creation' && item.createdApplicationId === application.id)
+      const handoff = draft?.creationExecutions.at(-1)?.approval?.implementationHandoff ?? planOverview(draft)?.implementationHandoff
       const build = draft && handoff ? {
         draftId: draft.id,
         initialReleaseId: readBuildSession(draft.id)?.initialReleaseId,

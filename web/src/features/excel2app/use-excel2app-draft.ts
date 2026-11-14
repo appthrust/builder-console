@@ -1,6 +1,6 @@
 // One draft owns the workbook set, staged analysis, specification and screen design.
 // Files are parsed and stored sequentially; only an explicit start submits analysis.
-import { isOneOf, jobState, knownValue, type BuildDraft, type BuildTurn, type PublishPreferences, type TurnKind } from '../../model/contracts/build'
+import { excelSource, isOneOf, jobState, knownValue, type BuildDraft, type BuildTurn, type ShareScopeChoice, type TurnKind } from '../../model/contracts/build'
 import { analysisComplete, completeUiDesign, excelAnalysisOf, uiDesignOf, workbookReadingOf, type CompleteUiDesign, type ExcelAnalysis, type UiDesign, type WorkbookEntry, type WorkbookSummary } from '../../model/contracts/excel'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -98,7 +98,7 @@ export function fileStem(fileName: string): string {
 
 /** Turns belonging to the current membership revision, including its boundary. */
 export function currentTurns(draft: BuildDraft): BuildTurn[] {
-  const revision = draft.source?.revision
+  const revision = excelSource(draft)?.revision
   const turns = draft.conversationTurns
   return revision ? turns.filter((turn) => Date.parse(turn.startedAt) >= Date.parse(revision)) : turns
 }
@@ -140,7 +140,7 @@ export function designMessages(turns: BuildTurn[]): UiPreviewChatMessage[] {
 
 /** A collected set stays on step 0 until analysis has explicitly started. */
 export function resumeStep(draft: BuildDraft, analysed: boolean): Excel2AppStep {
-  if (!draft.source) return 0
+  if (!excelSource(draft)) return 0
   if (!analysed) return turnsOf(currentTurns(draft), 'excel-analysis').length > 0 ? 1 : 0
   if (!draft.uiDesign && turnsOf(currentTurns(draft), 'ui-design').length === 0) return 2
   return 3
@@ -187,7 +187,7 @@ export function analysisTitle(draft: BuildDraft, turn: BuildTurn | undefined): s
 }
 
 /** 用意する's two questions, persisted on the draft for every tab. */
-export type PublishChoice = Required<PublishPreferences>
+export interface PublishChoice { name: string; shareScope: ShareScopeChoice }
 
 /** The hand-off's PATCH: the aligned name (title and specification) and the publish preferences. */
 export interface HandOffPatch { title?: string; specMarkdown?: string; publishPreferences: PublishChoice }
@@ -226,7 +226,9 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
   const draftQuery = useQuery({ ...buildDraftOptions(projectId, draftId ?? ''), enabled: Boolean(draftId) })
   const [storedDraft, setStoredDraft] = useState<BuildDraft>()
   const draft = draftQuery.data ?? (storedDraft?.projectId === projectId && (!draftId || storedDraft.id === draftId) ? storedDraft : undefined)
-  const members = draft?.source?.workbooks ?? EMPTY_MEMBERS
+  const members = excelSource(draft)?.workbooks ?? EMPTY_MEMBERS
+  /** The draft's source is not an Excel workbook set this console knows: the flow shows it, but writes nothing. */
+  const sourceUnsupported = draft?.source?.kind === 'unsupported'
   const [previewRequested, setPreviewRequested] = useState(false)
   const [offline, setOffline] = useState(() => (draftId ? readOffline(draftId) : false))
   const [analysisProblem, setAnalysisProblem] = useState<{ kind: AnalysisProblem; failure?: BuildFailure }>()
@@ -259,8 +261,8 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
   // A turn in a state this console does not know may still run: nothing new is sent over it.
   const turnRunning = turns.some((turn) => jobState(turn) !== 'settled')
 
-  const version = `${draft?.source?.revision ?? ''}:${analysisTurn?.id ?? ''}:${analysisTurn ? knownValue(analysisTurn.status) ?? 'unknown' : ''}`
-  const workbooksQuery = useQuery({ ...draftWorkbooksOptions(projectId, draft?.id ?? '', version), enabled: Boolean(draft?.source) })
+  const version = `${excelSource(draft)?.revision ?? ''}:${analysisTurn?.id ?? ''}:${analysisTurn ? knownValue(analysisTurn.status) ?? 'unknown' : ''}`
+  const workbooksQuery = useQuery({ ...draftWorkbooksOptions(projectId, draft?.id ?? '', version), enabled: Boolean(excelSource(draft)) })
   const gridQueries = useQueries({
     queries: members.map((member) => ({
       ...draftWorkbookGridOptions(projectId, draft!.id, member.id),
@@ -315,9 +317,9 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
     return Boolean(current?.createdApplicationId || current?.createdApplicationStackId || (current && createdDraftRef.current === current.id))
   }
 
-  /** No new write starts: the app exists, or an earlier write is still unconfirmed. */
+  /** No new write starts: the app exists, an earlier write is still unconfirmed, or the source is one this console does not know. */
   function writesClosed() {
-    return isReadOnly() || unconfirmedRef.current
+    return isReadOnly() || unconfirmedRef.current || draftRef.current?.source?.kind === 'unsupported'
   }
 
   /**
@@ -338,7 +340,7 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
     if (draftRef.current) await refetchDraft()
     const id = draftRef.current?.id
     if (id) await queryClient.invalidateQueries({ queryKey: [...buildDraftOptions(projectId, id).queryKey.slice(0, 3), 'workbooks'] })
-    const members = draftRef.current?.source?.workbooks ?? []
+    const members = excelSource(draftRef.current)?.workbooks ?? []
     setFiles((rows) => rows.map((row) => {
       if (row.problem !== 'unconfirmed') return row
       const stored = members.find((member) => member.fileName === row.fileName && !rows.some((other) => other.workbookId === member.id))
@@ -457,7 +459,7 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
           allStored = false
         } else if (!await processFile(key, input)) allStored = false
       }
-      const analysisRequested = start && allStored && Boolean(draftRef.current?.source)
+      const analysisRequested = start && allStored && Boolean(excelSource(draftRef.current))
       if (analysisRequested) await analyse()
       return draftRef.current ? { id: draftRef.current.id, analysisRequested } : undefined
     } finally {
@@ -497,14 +499,15 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
 
   async function analyse(message = hint) {
     const current = draftRef.current
-    if (!current?.source || writesClosed() || currentTurns(current).some((turn) => jobState(turn) !== 'settled')) return
+    const source = excelSource(current)
+    if (!current || !source || writesClosed() || currentTurns(current).some((turn) => jobState(turn) !== 'settled')) return
     setAnalysisProblem(undefined)
     setStarting(true)
     try {
       await exclusive(async () => {
         try {
-          const first = current.source!.workbooks[0]!
-          await receive(await api.updateDraft(projectId, current.id, { title: fileStem(first.fileName), intent: text.pick.setIntent(first.fileName, current.source!.workbooks.length) }))
+          const first = source.workbooks[0]!
+          await receive(await api.updateDraft(projectId, current.id, { title: fileStem(first.fileName), intent: text.pick.setIntent(first.fileName, source.workbooks.length) }))
           await appendTurn(await api.createTurn(projectId, current.id, { kind: 'excel-analysis', message: message.trim() }))
         } catch (error) {
           if (isApplicationCreated(error)) return markCreated(current.id)
@@ -695,6 +698,7 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
     draftQuery,
     draft,
     readOnly,
+    sourceUnsupported,
     workbooksQuery,
     offlineEntries,
     grids,

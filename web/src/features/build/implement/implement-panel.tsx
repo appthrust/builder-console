@@ -1,4 +1,6 @@
+import { RotateCw } from 'lucide-react'
 import { useEffect, useRef, useState, type JSX } from 'react'
+import { copy as commonCopy, relativeTime } from '../../../copy'
 import { buildProgress } from '../../../model/build/progress'
 import { buildCopy } from '../../../model/build/copy'
 import { buildFailureReference } from '../../../model/build/failure'
@@ -10,8 +12,20 @@ import { PreviewDatabaseLine, type PreviewDatabaseControl } from './preview-data
 import { implemented, type ImplementationState } from './state'
 import { text } from '../copy'
 
+/**
+ * The workspace behind the preview could not be read: a non-blocking notice with a re-read. A first read that
+ * failed says the preview status is missing; a failed re-read says when the preview shown was last read.
+ */
+export function WorkspaceReadNotice({ read, onReread }: { read: NonNullable<ImplementationState['workspaceRead']>; onReread?(): void }): JSX.Element {
+  return (
+    <Notice tone="warning" actions={onReread ? <Button size="sm" icon={<RotateCw />} onClick={onReread}>{commonCopy.common.retry}</Button> : undefined}>
+      {read.kind === 'failed' ? copy.workspaceLoadFailed : commonCopy.common.refreshFailed(relativeTime(new Date(read.at).toISOString()) ?? '')}
+    </Notice>
+  )
+}
 
-export function ImplementPanel({ state, preparation, released, previewNotice, previewDatabase, onOpenPreview, onRetry, onSkipTask, onConfirm }: {
+
+export function ImplementPanel({ state, preparation, released, previewNotice, previewDatabase, onOpenPreview, onRetry, onSkipTask, onConfirm, onRereadWorkspace }: {
   state: ImplementationState
   preparation?: ProgressCard
   released: boolean
@@ -23,6 +37,8 @@ export function ImplementPanel({ state, preparation, released, previewNotice, pr
   onSkipTask?(id: string): void
   /** Reads the draft back after a start whose answer could not be read (the only action then offered). */
   onConfirm?(): void
+  /** Reads the workspace again after a failed read. */
+  onRereadWorkspace?(): void
 }): JSX.Element {
   const preview = useRef<HTMLIFrameElement>(null)
   const [previewRevision, setPreviewRevision] = useState(0)
@@ -81,6 +97,7 @@ export function ImplementPanel({ state, preparation, released, previewNotice, pr
           <CardBody><p role="status" className="py-16 text-center text-sm text-stone-500">{previewMessage}</p></CardBody>
         )}
       </Card> : null}
+      {state.workspaceRead ? <WorkspaceReadNotice read={state.workspaceRead} onReread={onRereadWorkspace} /> : null}
       <section aria-label={text.artifact.progress} aria-live="polite"><Card><CardBody>
         <h3 className="font-semibold text-stone-900">{progress.title}</h3>
         {progress.hint ? <p className="mt-2 text-sm text-stone-600">{progress.hint}</p> : null}

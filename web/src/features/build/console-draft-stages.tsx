@@ -139,7 +139,8 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
   const created = session.lifecycle.kind === 'known' && session.lifecycle.value === 'created'
   const proposal = planProposal(creation.proposalDraft)
   const preparing = tab.prepareRequested && !execution
-  const canCreate = readiness.kind === 'current' && !started && !creation.defaultPending && !busy && !view.write && !session.activeTurnId && !view.unsupported
+  // A draft phase or kind, job state or plan value this console does not know offers no creation (stage.ts `unsupported`).
+  const canCreate = readiness.kind === 'current' && !started && !creation.defaultPending && !busy && !view.write && !session.activeTurnId && !view.unsupported && !result.unsupported
   const proposalAction = started ? undefined
     : readiness.kind === 'current' ? <Button tone="primary" loading={preparing} disabled={!canCreate || preparing} onClick={effects.prepare}>{buildCopy.primary.prepare}</Button>
       : readiness.kind === 'stale' ? <div className="space-y-2" data-testid="console-plan-stale">
@@ -192,12 +193,14 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
     ...(started ? {
       // The failure is one page notice with its retry; the pane does not repeat it (a failed preparation's card says the same).
       artifact: <ArtifactPane draft={draft} spec={spec} proposal={proposal} stage={result.stage} progress={failure?.context === 'prepare' ? undefined : result.progress} implementation={implementation.state}
-        url={url} shareText={shareText} previewDatabaseReset={implementation.previewDatabaseReset} onOpenPreview={onOpenArtifact} onRetry={implementation.retry} onSkipTask={implementation.skipTask} onConfirm={implementation.confirm}
+        url={url} shareText={shareText} previewDatabaseReset={implementation.previewDatabaseReset} onOpenPreview={onOpenArtifact} onRetry={implementation.retry} onSkipTask={implementation.skipTask} onConfirm={implementation.confirm} onRereadWorkspace={implementation.rereadWorkspace}
         onCollapse={() => setArtifactCollapsed(true)}
         databaseChanges={<DatabaseChanges projectId={projectId} databaseId={app && canEditApp(app, me) ? appView?.stack?.databaseComponentId : undefined} />}
         shareStep={sharing && app ? <PublishStep app={app} publishId={appView?.platform?.publish?.id} publishPreferences={draft.publishPreferences} onPublished={() => { void effects.markPublished(); setSharing(false) }} onCancel={() => setSharing(false)} /> : undefined} />,
     } : {}),
     notices: [
+      // The session's own unknown state has the page's notice; this one is the draft's.
+      result.unsupported && !view.unsupported ? <Notice key="draft-unsupported" tone="warning" title={buildCopy.unsupported.title}>{buildCopy.unsupported.detail}</Notice> : null,
       earlierSpec ? <Notice key="earlier-spec" tone="warning" title={text.console.createdFromEarlier.title} actions={continuing ? undefined : improve}>
         {improvable ? text.console.createdFromEarlier.reason : text.console.createdFromEarlier.waiting}
       </Notice> : null,
