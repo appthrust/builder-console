@@ -36,7 +36,7 @@ func (a *API) ConfigureBuildSessions(service *buildsession.Service, installation
 	a.installationID = installation
 }
 func (a *API) NewAppConversation(r *http.Request) bool {
-	if a.builds == nil || a.builds.Flag.Mode == "off" {
+	if a.builds == nil {
 		return false
 	}
 	claims, _, err := a.identity.Authenticate(r.Context(), r.Header.Get("Authorization"))
@@ -47,7 +47,7 @@ func (a *API) NewAppConversation(r *http.Request) bool {
 	if err != nil {
 		return false
 	}
-	return a.builds.Offered(buildsession.Owner{Issuer: issuer, Subject: claims.Principal.Subject})
+	return a.builds.Offered(r.Context(), domain.BuildScope{InstallationID: a.installationID, ProjectID: a.platform.ProjectID, OwnerIssuer: issuer, OwnerSubject: claims.Principal.Subject})
 }
 
 // This is claim extraction AFTER the existing authenticator has verified the

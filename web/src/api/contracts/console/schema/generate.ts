@@ -6,6 +6,7 @@ import { operations } from './operations'
 import { schemas } from './schemas'
 import { buildReply } from './build-sessions'
 import { buildSessionOperations, type BuildOperation } from './build-session-operations'
+import { conversationSettingOperations } from './conversation-setting-operations'
 
 export function responseSchemas() {
   return Object.fromEntries(Object.entries(schemas).map(([name, schema]) => [name, z.toJSONSchema(schema, { io: 'input' })]))
@@ -75,6 +76,29 @@ export function openAPIDocument() {
     paths[path]![operation.method.toLowerCase()] = {
       operationId: operation.operationId, parameters, responses,
       ...(operation.requestSchema ? { requestBody: { required: true, content: { 'application/json': { schema: { $ref: `#/components/schemas/${operation.requestSchema}` } } } } } : {}),
+    }
+  }
+  for (const operation of Object.values(conversationSettingOperations)) {
+    const path = operation.routeTemplate.replace(/^\/api\/console/, '')
+    const parameters = 'headersSchema' in operation
+      ? [{ name: 'If-Match', in: 'header', required: true, schema: { $ref: '#/components/schemas/ConversationSettingETag' } }]
+      : []
+    const headers = {
+      'Cache-Control': { required: true, schema: { type: 'string', const: 'no-store' } },
+      ETag: { required: true, schema: { $ref: '#/components/schemas/ConversationSettingETag' } },
+    }
+    const responses: Record<string, unknown> = {
+      200: { description: 'Current installation setting', headers, content: { 'application/json': { schema: { $ref: '#/components/schemas/ConversationSetting' } } } },
+      default: { description: 'Console error; never a success', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+    }
+    for (const status of [400, 403, 412, 428]) responses[status] = {
+      description: 'Console error; never a success',
+      content: { 'application/json': { schema: { $ref: '#/components/schemas/BuildError' } } },
+    }
+    paths[path] ??= {}
+    paths[path]![operation.method.toLowerCase()] = {
+      operationId: operation.operationId, parameters, responses,
+      ...('requestSchema' in operation ? { requestBody: { required: true, content: { 'application/json': { schema: { $ref: `#/components/schemas/${operation.requestSchema}` } } } } } : {}),
     }
   }
   return {

@@ -9,6 +9,7 @@ export type {
   BuildCreateSessionInput, BuildTurnInput, BuildResolutionInput, BuildPublishInput,
   BuildPublishResult, BuildResolveResult, BuildListQuery, BuildMutationHeaders, BuildCreateHeaders, BuildETag,
 } from '../../api/contracts/console/build-sessions'
+export type { ConversationSetting, ConversationSettingInput } from '../../api/contracts/console/conversation-setting'
 
 /** A Directory person. `avatarVersion`: null without a profile picture, else when it last changed (the image URL's cache-buster). */
 export type Person = { id: string; subject: string | null; pending: boolean; email: string; displayName: string; avatarVersion: string | null }

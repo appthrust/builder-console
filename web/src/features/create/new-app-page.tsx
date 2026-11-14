@@ -447,7 +447,8 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
     setStartingBuild(true)
     setBuildError(undefined)
     try {
-      const config = await queryClient.ensureQueryData(consoleConfigQuery)
+      // Read per start: administrators can switch the NEW-APP conversation at any time (基盤の設定), without a reload here.
+      const config = await queryClient.fetchQuery({ ...consoleConfigQuery, staleTime: 0 })
       const session = await beginBuild(projectId, intent, { groupId: aiGroupId, ownerSubject: me.person.subject, newSessionEngine: newSessionEngine(config) })
       completedRef.current = true
       setCompleted(true)

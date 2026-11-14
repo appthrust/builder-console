@@ -237,9 +237,13 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 	p := &servicePlatform{t: t, db: checked, keys: map[string]string{}, turns: map[string]AgentTurn{}, requests: map[string]prompts.AgentTurnRequest{}, artifacts: map[string]Artifact{}, plans: map[string]Generation{}}
 	catalog, err := prompts.NewCatalog("test-release", nil)
 	require.NoError(t, err)
-	s, err := NewService(t.Context(), checked, p, catalog, Flag{Mode: "on"})
+	s, err := NewService(t.Context(), checked, p, catalog)
 	require.NoError(t, err)
 	f := &serviceFixture{s: s, p: p, db: checked, c: Caller{Access: store.BuildAccess{Scope: domain.BuildScope{InstallationID: "installation", ProjectID: "project", OwnerIssuer: "issuer", OwnerSubject: "subject"}, GroupIDs: []string{"group"}}, PersonID: "person", Authorization: "bEaReR exact-caller"}, now: time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC)}
+	require.NoError(t, db.Do(t.Context(), true, func(tx *store.Tx) error {
+		_, err := tx.SetConversationSetting(domain.ConversationScope{InstallationID: "installation", ProjectID: "project"}, 0, domain.ConversationSettingInput{Mode: "on", Allowlist: []domain.ConversationSubject{}}, "person-admin", f.now)
+		return err
+	}))
 	s.Now = func() time.Time { return f.now }
 	return f
 }
@@ -455,7 +459,7 @@ func TestMissingCapabilitiesRetainAttributionAndCloseOffer(t *testing.T) {
 	require.Equal(t, "draft", f.a.Session.DraftID)
 	require.Empty(t, f.p.workspace.ID)
 	require.Empty(t, f.p.turns)
-	require.False(t, f.s.Offered(Owner{"issuer", "subject"}))
+	require.False(t, f.s.Offered(t.Context(), f.c.Access.Scope))
 	id, err := f.s.Resolve(t.Context(), f.c, "draft")
 	require.NoError(t, err)
 	require.Equal(t, f.a.Session.ID, id)
@@ -463,7 +467,7 @@ func TestMissingCapabilitiesRetainAttributionAndCloseOffer(t *testing.T) {
 		require.NotContains(t, call.kind, "delete")
 	}
 	f.now = f.now.Add(3 * time.Minute)
-	require.True(t, f.s.Offered(Owner{"issuer", "subject"}))
+	require.True(t, f.s.Offered(t.Context(), f.c.Access.Scope))
 }
 func TestMissingPlanDigestFailsHandoff(t *testing.T) {
 	f := newServiceFixture(t)
@@ -476,10 +480,13 @@ func TestMissingPlanDigestFailsHandoff(t *testing.T) {
 	require.Equal(t, "specifying", f.a.Session.Lifecycle)
 	require.Equal(t, "PlatformCapabilityMissing", f.a.Turn.Failure.Reason)
 }
-func TestFlagOffExistingSessionAndReadOnlyObservation(t *testing.T) {
+func TestSettingOffExistingSessionAndReadOnlyObservation(t *testing.T) {
 	f := newServiceFixture(t)
 	f.ready(t)
-	f.s.Flag.Mode = "off"
+	require.NoError(t, f.db.Do(t.Context(), true, func(tx *store.Tx) error {
+		_, err := tx.SetConversationSetting(domain.ConversationScope{InstallationID: "installation", ProjectID: "project"}, 1, domain.ConversationSettingInput{Mode: "off", Allowlist: []domain.ConversationSubject{}}, "person-admin", f.now)
+		return err
+	}))
 	before := len(f.p.calls)
 	require.NoError(t, f.observe(t))
 	for _, call := range f.p.calls[before:] {

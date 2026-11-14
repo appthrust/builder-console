@@ -24,7 +24,7 @@ import { isResponseContractError } from '../../api/boundary'
 import { buildSessionsApi, intentKeys, isVersionConflict, mintIdempotencyKey, type BuildSessionsApi } from '../../api/build-sessions'
 import { ConsoleApiError } from '../../api/console'
 import {
-  buildSessionKeys, buildSessionOptions, buildTurnOptions, buildTurnsOptions, isObserving, receiveSession, receiveTurn, rereadSession,
+  buildSessionKeys, buildSessionOptions, buildTurnOptions, buildTurnsOptions, isObserving, receiveSession, receiveTurn, rereadSession, turnDecisionVersion,
 } from '../../api/queries/build-sessions'
 import { isSessionExpiredError, sessionExpiryStore } from '../../api/session-expiry'
 import { copy } from '../../copy'
@@ -208,9 +208,12 @@ export function useConsoleBuildSession(sessionId: string, options: { api?: Build
       family: 'turn', key: mintIdempotencyKey(), version: current.version, status: 'pending',
       body: { kind: 'request_plan', specRevision: current.specification.revision },
     } : undefined),
-    resolve: (turnId, decision) => start((current) => ({
-      family: 'resolution', key: intentKeys.resolution(sessionId, current.version, turnId, decision), version: current.version, status: 'pending', turnId, body: { decision },
-    })),
+    // The proposal is shown from the turn's read, which can be newer than the cached session (the server moves the
+    // version as the turn reaches awaiting_confirmation): decide on the version that read carried.
+    resolve: (turnId, decision) => start((current) => {
+      const version = turnDecisionVersion(client, sessionId, turnId) ?? current.version
+      return { family: 'resolution', key: intentKeys.resolution(sessionId, version, turnId, decision), version, status: 'pending', turnId, body: { decision } }
+    }),
     setPublishPreferences: (input) => start((current) => ({ family: 'publish', key: mintIdempotencyKey(), version: current.version, status: 'pending', body: input })),
     archive: () => start((current) => ({ family: 'archive', key: intentKeys.archive(sessionId, current.version), version: current.version, status: 'pending' })),
     retry: () => {

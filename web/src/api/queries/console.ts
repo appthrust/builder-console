@@ -37,6 +37,7 @@ import {
   type DirectoryAppsInput,
   type UpdateAppInput,
 } from '../contracts/console/operations'
+import { conversationSettingApi } from '../conversation-setting'
 import { apiGateway } from '../gateway'
 import { isTransientError } from '../platform-error'
 import type { BusinessApp, Person } from '../../model/contracts/console'
@@ -65,6 +66,7 @@ export const consoleKeys = {
   resolve: (path: string) => ['console', 'resolve', path] as const,
   directoryUsers: (query: string) => ['console', 'directory', 'users', query] as const,
   platform: ['console', 'admin', 'platform'] as const,
+  conversationSetting: ['console', 'admin', 'conversation'] as const,
 }
 
 /** Not-found answers and contract failures are final; a call nothing answered gets the transient retries, anything else two retries. */
@@ -161,6 +163,9 @@ export const directoryUsersQuery = (q: string) =>
   queryOptions({ queryKey: consoleKeys.directoryUsers(q), queryFn: () => apiGateway.console(directoryUsersContract, q), enabled: q.length > 0 })
 
 export const platformSettingsQuery = queryOptions({ queryKey: consoleKeys.platform, queryFn: () => apiGateway.console(settingsContract, undefined) })
+
+/** The NEW-APP conversation setting (Console administrators only). */
+export const conversationSettingQuery = queryOptions({ queryKey: consoleKeys.conversationSetting, queryFn: () => conversationSettingApi.get() })
 
 /** The caller; the root route's beforeLoad has loaded it before any page renders. */
 export function useMe() {
