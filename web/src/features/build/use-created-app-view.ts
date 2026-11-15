@@ -24,7 +24,7 @@ export function useCreatedAppView({ projectId, draft, app, groups, initialReleas
   const stackId = draft.createdApplicationStackId ?? lookup.input.stacks.find((stack) => stack.applicationId === draft.createdApplicationId)?.id
   const appView = app ? lookup.viewFor(app) : stackId && draft.createdApplicationId
     ? lookup.viewFor({ id: draft.createdApplicationId, stackId, createdAt: draft.createdAt }) : undefined
-  const creationAccess = useCreatedAppAccess(projectId, draft.creationPlanUnreadable ? undefined : app, appView?.platform?.publish)
+  const creationAccess = useCreatedAppAccess(projectId, app, appView?.platform?.publish)
   const releases = lookup.input.releasesByApplication[draft.createdApplicationId ?? '']?.components.flatMap((component) => component.releases) ?? []
   const released = draft.creationPlanUnreadable && draft.createdApplicationId ? Boolean(appView?.url) : implementedReleaseReady(appView?.platform, releases, { draftId: draft.id, initialReleaseId, taskCount: tasks.length, tasks })
   const url = released ? appView?.platform?.publish?.publicUrl ?? appView?.platform?.publish?.tailnetUrl : undefined

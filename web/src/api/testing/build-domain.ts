@@ -44,3 +44,12 @@ export function readFirst<D, A extends unknown[], R>(of: (wire: unknown) => D, f
 export function readEachFirst<D, A extends unknown[], R>(of: (wire: unknown) => D, fn: (values: D[], ...rest: A) => R): (wires: readonly unknown[] | undefined, ...rest: A) => R {
   return (wires, ...rest) => fn((wires === undefined ? undefined : wires.map(of)) as D[], ...rest)
 }
+
+/** Change a draft's wire snapshot in detail, list and mutation answers without changing the mock executor's state. */
+export function rewriteDraftWire(wire: Record<string, unknown>, draftId: string, change: (draft: Record<string, unknown>) => Record<string, unknown>): Record<string, unknown> {
+  const result = wire.id === draftId ? change(wire) : wire
+  const resource = wire.resource
+  if (resource && typeof resource === 'object' && !Array.isArray(resource)) return { ...result, resource: rewriteDraftWire(resource as Record<string, unknown>, draftId, change) }
+  if (Array.isArray(wire.data)) return { ...result, data: wire.data.map((row) => row && typeof row === 'object' && !Array.isArray(row) ? rewriteDraftWire(row as Record<string, unknown>, draftId, change) : row) }
+  return result
+}

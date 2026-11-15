@@ -79,7 +79,7 @@ function Session({ draft, stale }: { draft: BuildDraft; stale: ReactNode }) {
     {/* Page-level notices share one inset place under the header, whatever raised them. */}
     {stale || state.phase === 'unsupported' ? <div className="mx-5 mt-3 space-y-3">
       {stale}
-      {draft.creationPlanUnreadable ? <Notice tone="warning" title={buildCopy.unreadablePlan.title} actions={<Button disabled={session.sending || session.planning || session.reviewLocked || session.planFailure?.kind === 'unconfirmed'} onClick={() => void session.replan()}>{buildCopy.failure.plan.replan}</Button>}>{buildCopy.unreadablePlan.detail}{session.planFailure ? <p>{session.planFailure.reason}</p> : null}</Notice>
+      {draft.creationPlanUnreadable ? <Notice tone="warning" title={text.unreadablePlan.title}>{text.unreadablePlan.detail}</Notice>
         : state.phase === 'unsupported' ? <Notice tone="warning" title={buildCopy.unsupported.title}>{buildCopy.unsupported.detail}</Notice> : null}
     </div> : null}
     <div role="tablist" aria-label={text.page.tabs} className="flex shrink-0 border-b border-line bg-white md:hidden">

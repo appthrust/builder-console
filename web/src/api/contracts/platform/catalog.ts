@@ -14,6 +14,7 @@
 //   resolved answer with a revision offers a create; blocked and unknown
 //   states keep neither the server's reason nor its message.
 import {
+  DnsLabelName,
   ApplicationDraftCodexUnavailableReason,
   ApplicationDraftCreationToolRegistryResponse,
   ApplicationSourceRepository,
@@ -211,7 +212,7 @@ export const listStacksContract = platformContract({
   method: 'GET',
   routeTemplate: `${P}/application-stacks`,
   successStatuses: [200],
-  reader: independentRows(stackIdentityReader),
+  reader: independentRows(stackIdentityReader, DnsLabelName),
   recoveries: unreadableRowIssues,
 })
 

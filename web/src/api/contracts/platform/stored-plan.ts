@@ -26,4 +26,8 @@ function storedPlan<P extends { applicationStackRequest?: object }>(canonical: z
 }
 
 export const creationPlanReader: z.ZodType<CreationPlan> = storedPlan(ApplicationDraftCreationPlan)
-export const creationApprovalReader: z.ZodType<CreationApproval> = storedPlan(ApplicationDraftCreationApprovalSnapshot)
+export const creationApprovalReader: z.ZodType<CreationApproval> = storedPlan(ApplicationDraftCreationApprovalSnapshot.extend({
+  // Platform copies these plan fields without the snapshot schema's extra size limits.
+  summary: ApplicationDraftCreationPlan.shape.summary.optional(),
+  toolPlan: ApplicationDraftCreationPlan.shape.toolPlan,
+}))

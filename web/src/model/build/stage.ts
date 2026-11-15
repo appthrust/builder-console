@@ -62,7 +62,7 @@ export function deriveStage(input: StageInput): StageResult {
   const result = knownStage({ ...input, generation, turn, execution })
   // The draft's phase or the state of its latest job is a value this console does not know:
   // keep showing what is known, but nothing that depends on that state can be started.
-  const unsupported = draft?.phase.kind === 'unknown' || execution?.approvalUnreadable || [generation, turn, execution].some((job) => jobState(job) === 'unknown')
+  const unsupported = draft?.phase.kind === 'unknown' || [generation, turn, execution].some((job) => jobState(job) === 'unknown')
   return unsupported ? { ...result, primary: { action: 'none', label: '', enabled: false }, unsupported: true } : result
 }
 
@@ -70,7 +70,7 @@ function knownStage(input: StageInput): StageResult {
   const { draft, generation, turn, execution, implementation, published, now } = input
   const copy = buildCopy.primary
   const none: BuildPrimary = { action: 'none', label: '', enabled: false }
-  if (draft?.creationPlanUnreadable) return { stage: draft.createdApplicationId ? 'build' : 'decide', primary: none }
+  if (draft?.creationPlanUnreadable && !execution && !draft.createdApplicationId) return { stage: 'decide', primary: none }
   if (published && !input.appProgress?.buildFailed) return { stage: 'publish', primary: { action: 'continue', label: copy.continue, enabled: true } }
   if (isBuildPending(execution)) return {
     stage: 'build', build: { phase: 'preparing' }, primary: none, progress: input.appProgress?.buildFailed ? input.appProgress : progressCard({ kind: 'prepare', operation: execution, execution, now }),

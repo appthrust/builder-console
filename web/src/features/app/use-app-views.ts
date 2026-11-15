@@ -13,6 +13,7 @@ import { text } from './copy'
 import { isImprovementDraft } from '../../model/improve'
 import { readCreateSession } from '../create/persistence'
 import { readBuildSession } from '../build/session'
+import { readConsoleCreation } from '../build/console-session-state'
 
 export interface AppViews {
   /** Status word + second line for one BusinessApp, joined to the platform by `stackId`. */
@@ -78,15 +79,18 @@ export function useAppViews(projectId: string): AppViews {
       if (failedQuery) return { status: 'unknown', label: text.unsupported.label, text: copy.common.loadFailed, second: copy.common.loadFailed, draft: app.stackId === null }
       const unreadable = stacks.data?.unreadable ?? []
       const readable = stackRows.find((stack) => stack.id === app.stackId)
-      if (unreadable.some((row) => row.id === app.stackId || row.id === app.id || (row.id === undefined && !readable))) {
+      if (unreadable.length && (!readable || unreadable.some((row) => row.id === app.stackId || row.id === app.id))) {
         return { status: 'unknown', label: text.unsupported.label, text: copy.common.loadFailed, second: copy.common.loadFailed, draft: false, unreadableStack: true }
       }
+      const unreadableBuild = drafts.data?.unreadable.some((row) => row.id !== undefined &&
+        (readBuildSession(row.id)?.createdAppId === app.id || readConsoleCreation(row.id)?.createdAppId === app.id))
+      if (unreadableBuild) return { status: 'unknown', label: text.unsupported.label, text: copy.common.loadFailed, second: copy.common.loadFailed, draft: false, unreadableBuild: true }
       const session = app.stackId ? undefined : readCreateSession(app.id)
       const application = applicationForStack(app.stackId, input)
       // Build progress comes from the session that made the app; improvement sessions have their own page.
       const draft = drafts.data?.data.find((item) => application && !item.proposalId && !isImprovementDraft(item) && item.createdApplicationId === application.id)
       const execution = draft?.creationExecutions.at(-1)
-      const handoff = draft?.creationPlanUnreadable || execution?.approvalUnreadable ? undefined : execution?.approval?.implementationHandoff ?? draft?.creationPlan?.implementationHandoff
+      const handoff = execution?.approval?.implementationHandoff ?? draft?.creationPlan?.implementationHandoff
       const build = draft && handoff ? {
         draftId: draft.id,
         initialReleaseId: readBuildSession(draft.id)?.initialReleaseId,

@@ -3,7 +3,7 @@ import { QueryClient, QueryObserver, skipToken } from '@tanstack/react-query'
 import * as api from './build'
 import { BUILD_POLL_MS, buildDraftOptions, buildKeys, draftsOptions } from './queries/build'
 import { draftOf, runOf } from './testing/build-domain'
-import { readRetryDelay, retryReadQuery } from './queries/shared'
+import { POLL_INTERVAL_MS, readRetryDelay, retryReadQuery } from './queries/shared'
 import { isPublishPreparationPending } from './publish-retry'
 
 const originalFetch = globalThis.fetch
@@ -135,7 +135,7 @@ test('draft and list poll active executions', () => {
   for (const options of [buildDraftOptions('p1', 'd1'), draftsOptions('p1')]) {
     if (typeof options.refetchInterval !== 'function') throw new Error('Polling callback missing')
     const value = draftOf(draft)
-    const data = options.queryKey.includes('drafts') ? { data: [value] } : value
+    const data = options.queryKey.includes('drafts') ? { data: [value], unreadable: [] } : value
     expect(options.refetchInterval({ state: { data } } as never)).toBe(BUILD_POLL_MS)
   }
 })
@@ -174,10 +174,17 @@ test('draft and list poll implementation runs every three seconds until terminal
     const value = draftOf({ ...draft, creationExecutions: [], implementationRuns: [{ id: 'impl-1', status, startedAt, devWorkspaceId: '', taskIds: [], tasks: [], runLeaseExpiresAt: startedAt }] })
     for (const options of [buildDraftOptions('p1', 'd1'), draftsOptions('p1')]) {
       if (typeof options.refetchInterval !== 'function') throw new Error('Polling callback missing')
-      const data = options.queryKey.includes('drafts') ? { data: [value] } : value
+      const data = options.queryKey.includes('drafts') ? { data: [value], unreadable: [] } : value
       expect(options.refetchInterval({ state: { data } } as never)).toBe(status === 'pending' || status === 'running' ? BUILD_POLL_MS : false)
     }
   }
+})
+
+test('unreadable draft rows keep polling at the unknown-state interval', () => {
+  const options = draftsOptions('project-1')
+  if (typeof options.refetchInterval !== 'function') throw new Error('Polling callback missing')
+  expect(options.refetchInterval({ state: { data: { data: [], unreadable: [{ id: 'bad-draft' }] } } } as never)).toBe(POLL_INTERVAL_MS)
+  expect(options.refetchInterval({ state: { data: { data: [draftOf(draft)], unreadable: [{}] } } } as never)).toBe(BUILD_POLL_MS)
 })
 
 test('draft and draft-list reads share the rollout retry policy', () => {

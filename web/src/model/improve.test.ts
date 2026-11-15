@@ -96,6 +96,9 @@ test('the app page resumes the newest open improvement session of that app only'
   const other = { ...draft, id: 'other', createdApplicationStackId: 'kintai', createdAt: at(5) }
   expect(improvementFor([older, newer, archived, creation, other], 'mitsumori')?.id).toBe('new')
   expect(improvementFor([archived, creation], 'mitsumori')).toBeUndefined()
+  const unreadable = { ...draft, id: 'unreadable', creationPlan: { representation: ['future-kind'] }, createdAt: at(6) }
+  expect(improvementFor([unreadable], 'mitsumori')).toBeUndefined()
+  expect(improvementFor([newer, unreadable], 'mitsumori')?.id).toBe('new')
 })
 
 test('the timeline interleaves turns and runs by start time', () => {

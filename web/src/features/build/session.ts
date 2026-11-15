@@ -71,7 +71,6 @@ export function startConversation(session: BuildSession, draft: Pick<BuildDraft,
 
 /** While 用意する runs and the AI is idle, queue the hidden preparation turn once. */
 export function startPrepareConversation(session: BuildSession, draft: Pick<BuildDraft, 'conversationTurns' | 'creationPlanGenerations' | 'creationPlanUnreadable' | 'creationExecutions' | 'publishPreferences'>, at: string): BuildSession {
-  if (draft.creationPlanUnreadable || draft.creationExecutions.at(-1)?.approvalUnreadable) return session
   const turns = draft.conversationTurns
   if ((draft.publishPreferences?.name && draft.publishPreferences.shareScope) || session.pending.length || session.messages.some((message) => message.role === 'user' && isPrepareTurn(message.text)) || !isBuildPending(draft.creationExecutions.at(-1))) return session
   // The AI must be known to be idle: a turn or generation in a state this console does not know may still run.

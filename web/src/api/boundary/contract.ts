@@ -1,6 +1,6 @@
 import type { z } from 'zod'
 import { ResponseContractError, type HttpMethod, type ResponseSource } from './error'
-import { ROOT_PATH, safeIssues, safePath, type ResponseIssue } from './issues'
+import { appendResponseIssues, ROOT_PATH, safeIssues, safePath, type ResponseIssue } from './issues'
 
 /**
  * How the reader treats a field whose absence an older server version is known
@@ -60,7 +60,8 @@ export function defineResponseContract<D>(
     parse: (wire) => {
       const result = reader.safeParse(wire)
       if (!result.success) return { ok: false, issues: safeIssues(reader, result.error.issues, wire) }
-      const recovered = recoveries?.(result.data)
+      const recovered: ResponseIssue[] = []
+      appendResponseIssues(recovered, recoveries?.(result.data) ?? [])
       return { ok: true, value: result.data, ...(recovered?.length ? { recovered } : {}) }
     },
   }

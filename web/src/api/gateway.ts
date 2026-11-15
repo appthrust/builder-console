@@ -55,7 +55,10 @@ export function createApiGateway({ platformTransport, consoleTransport, reportFa
     if (!result.ok) return fail(result.error)
     if (result.recovered?.length) {
       try {
-        reportFailure({ ...contractFailureReport(contractFailure(contract, result.recovered)), outcome: 'partial' })
+        reportFailure({
+          code: 'response_contract_invalid', source: contract.source, operationId: contract.operationId,
+          method: contract.method, routeTemplate: contract.routeTemplate, issues: result.recovered, outcome: 'partial',
+        })
       } catch {
         // Reporting an isolated unreadable value must not fail a successful read.
       }

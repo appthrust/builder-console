@@ -62,7 +62,7 @@ async function platformAppNames(request: AvailabilityRequest, deps: Availability
     const stacks = await deps.api.stacks(request.projectId)
     return {
       values: new Set([...stacks.data.filter((stack) => stack.id !== request.own?.stackId).map((stack) => stack.applicationName), ...stacks.unreadable.flatMap((row) => row.id === undefined ? [] : [row.id])]),
-      complete: stacks.unreadable.every((row) => row.id !== undefined),
+      complete: stacks.unreadable.length === 0,
     }
   } catch {
     return undefined

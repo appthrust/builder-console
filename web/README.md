@@ -47,25 +47,41 @@ is unconfirmed and must be read back, not blindly repeated.
 
 Draft plans and execution approvals are read independently: an invalid stored
 value is dropped entirely, with `creationPlanUnreadable: true` or
-`approvalUnreadable: true`, never a partially validated plan. A stored
+`approvalUnreadable: true`, never a partially validated object. A stored
 `publish.enabled: false` block is read as absent, matching Platform's plan
-prompt. The plan and request types stay canonical; the Console's ordinary
-default-publish and post-creation decisions remain unchanged. An unreadable plan
-offers only 「計画を作り直す」, never approval, validation, rename, destination
-binding or automatic execution; an already-created app remains visible by its identity.
+prompt; the Console's ordinary default-publication decisions are unchanged.
+Approval snapshots reuse the plan field schemas for `summary` (nonempty,
+without the snapshot's 500-character cap) and `toolPlan` (without its extra
+20-item cap). Other shared request/handoff schemas remain unchanged.
 
-Normalizing the response never sends a plan back by itself. Only the existing
-destination-binding, default-publication and rename PATCH builders can send
-`creationPlan` as an explicit replacement; validation sends no plan, begin
-sends its fingerprint and client request id, and run sends only route ids.
-An unreadable approval keeps its execution and status visible but does not
-authorize begin/run/retry or an idempotent replay. This includes the answer to
-begin-execution itself: no run follows an unreadable approval snapshot, and the
-tab's replay key is cleared. The UI says a new plan is needed, without deriving
-or resending a request from the discarded approval. Approvals with summaries
-over 500 characters and plans with `database.lifecycle: {}` or a placement
-missing `placementProfileRef` remain explicitly unreadable. A standalone
-`runtimeProfileRef` without `placement` is already canonical and stays readable.
+Starting a new creation requires a readable plan: an unreadable plan cannot
+supply a default-publication, destination-binding or rename replacement, a
+validation or a new begin. Re-planning is offered only before an execution or
+created application exists. Existing executions are still run/resumed and
+observed by id/status; their failure reporting, Console app binding, publication
+repair and completion are not stopped by unreadable plan or approval content.
+Implementation uses a readable approval handoff, otherwise a readable plan or
+the already observed run/tasks. The Console's own request key is not discarded
+because a readback approval is unreadable. Known conversation content stays visible.
+
+Re-planning is not the only action on a creation draft: reads and discard remain
+available when their normal ownership/busy/resource checks allow them
+(discard may clean up known resources before deletion). A created app may
+still expose publication settings/access, mark-published, implementation
+actions from readable task evidence, or a new AI repair/improvement from a
+known build failure. None reconstructs content from an unreadable plan or
+approval. An improvement draft with an unreadable plan cannot continue and
+does not offer creation-plan generation; return to the app and start a new
+improvement. Its old draft remains listed and untouched and is excluded from
+the resumable-improvement lookup.
+
+Normalizing a response never sends a plan back by itself. Only the existing
+destination-binding, default-publication and rename PATCH builders send
+`creationPlan` as an explicit replacement. Validation sends no plan; begin
+sends the fingerprint and client request id; run sends only route ids.
+Plans with `database.lifecycle: {}` or a placement missing `placementProfileRef`
+remain unreadable; standalone `runtimeProfileRef` without `placement` is
+already readable.
 
 Project publish references may be empty strings (`applicationId`, `branchId`,
 `componentId`), including a stack's embedded publish snapshot. Such publishes
@@ -73,19 +89,31 @@ remain readable but are attributed to no app. Other malformed publish rows
 still fail their list; row isolation for that list is not part of this change.
 
 The draft list and both stack-list readers isolate rejected rows as
-`{ data: ReadableRow[], unreadable: { id?: string }[] }`. Only a string id
-is retained. Bad envelopes still fail. Recoveries use the existing
-contract-failure reporter with `outcome: 'partial'`, without rejected content.
+`{ data: ReadableRow[], unreadable: { id?: string }[] }`. Only an independently
+validated DNS-label id is retained. Bad envelopes still fail. Recoveries use
+the existing contract-failure reporter with `outcome: 'partial'`, schema-only
+field paths, deduplication and the existing `MAX_ISSUES` cap; no rejected
+content or ids are reported, and partial reports do not construct Error stacks.
 Other project lists retain their existing all-or-nothing contract.
-An unreadable stack's id blocks that app's writes and counts as a taken name.
-An id-less unreadable stack leaves apps with readable stacks unaffected but
-makes unmatched apps unknown and name availability unchecked. Any unreadable
-stack keeps creation readback unconfirmed. Unreadable drafts appear as plain
-「読めない作りかけ」 rows, with no resume/delete actions; a readable matching
-draft can still resume, but otherwise a partial draft list blocks a duplicate
-start. The dev mock's `POST /api/v1/__mock/stored-plan` accepts `draftId` and
+
+An unreadable stack's known id is conservatively taken, but does not reveal its
+application name: any unreadable stack row makes name availability incomplete
+and prevents free-name suggestions. Any app without a readable matching stack
+is unknown while unreadable stack rows exist, with no resume/delete offered.
+Readable matching stacks remain unaffected. Any unreadable stack keeps creation
+readback unconfirmed.
+
+Unreadable drafts appear as inert 「読めない作りかけ」 rows, after readable rows
+in deterministic order, and keep the list polling at the unknown-state interval.
+A readable exact match can still resume; otherwise a partial draft list blocks
+a duplicate start. An unreadable creating-draft row linked to an app through
+its saved platform-v1 or console-v1 creation-tab state makes that app unknown.
+Known limit: id-less or unlinked unreadable draft rows cannot be associated with
+an app, so they leave that app's existing status behavior unchanged.
+
+The dev mock's `POST /api/v1/__mock/stored-plan` accepts `draftId` and
 `mode: unpublished | unreadable | null-representation`; a new plan replaces
-that stored output. Contract and page tests drive these paths through the real
+that stored output. Contract and page tests drive these paths through real
 readers and request logs.
 
 Draft writes cancel older reads before replacing cached data. Excel calls

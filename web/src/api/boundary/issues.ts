@@ -135,3 +135,12 @@ export function safeIssues(schema: AnySchema, issues: readonly z.core.$ZodIssue[
   }
   return result.length > 0 ? result : [{ path: ROOT_PATH, code: 'invalid_value' }]
 }
+
+/** Merge schema-only diagnostics without duplicates or unbounded recovery reports. */
+export function appendResponseIssues(into: ResponseIssue[], issues: readonly ResponseIssue[], prefix = ''): void {
+  for (const issue of issues) {
+    if (into.length >= MAX_ISSUES) return
+    const path = prefix ? `${prefix}${issue.path === ROOT_PATH ? '' : issue.path}` : issue.path
+    if (!into.some((item) => item.path === path && item.code === issue.code)) into.push({ path, code: issue.code })
+  }
+}

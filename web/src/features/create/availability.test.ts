@@ -103,6 +103,12 @@ describe('checkNameAvailability', () => {
     expect(await checkNameAvailability(base, unknown.deps)).toEqual({ taken: undefined, checked: false })
     expect(await suggestFreeUrlName(base, unknown.deps)).toBeUndefined()
   })
+  test('an unreadable stack id is not proof that its different application name is free', async () => {
+    const { deps } = world({ stacksAnswer: () => json({ data: [{ id: 'stack-3f1234567890abcd', applicationName: 'mitsumori', templateId: 'Bad Id!' }] }) })
+    expect(await checkNameAvailability(base, deps)).toEqual({ taken: undefined, checked: false })
+    expect(await suggestFreeUrlName(base, deps)).toBeUndefined()
+    expect(await checkNameAvailability({ ...base, urlName: 'stack-3f1234567890abcd' }, deps)).toEqual({ taken: 'platform', checked: true, suggestion: undefined })
+  })
   test('a free name is not taken, is checked, and asks each source once', async () => {
     const { deps, calls } = world()
     expect(await checkNameAvailability(base, deps)).toEqual({ taken: undefined, checked: true })

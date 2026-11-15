@@ -25,6 +25,7 @@ import { BuildPage } from './build-page'
 import { text as uiText } from './copy'
 import { implementationCopy } from './implement/copy'
 import { initialSession, readBuildSession, saveBuildSession } from './session'
+import { rewriteDraftWire } from '../../api/testing/build-domain'
 
 const SECRET = 'SENTINEL-build-page-7f3a'
 const PROJECT = '/api/v1/projects/commerce'
@@ -70,6 +71,16 @@ async function call(method: string, path: string, body?: unknown) {
 const advance = async (count = 1) => { for (let step = 0; step < count; step++) await call('POST', '/api/v1/__mock/advance') }
 const draftPath = (id: string) => `${PROJECT}/application-drafts/${id}`
 const consoleGateway = createTestGateway({ consoleFetch: (path, init) => mockFetch(path, init) })
+
+function unreadableSnapshot(id: string, field: 'approval' | 'plan') {
+  const change = (draft: Json): Json => field === 'plan'
+    ? { ...draft, creationPlan: { representation: ['future-kind'] } }
+    : { ...draft, creationExecutions: ((draft.creationExecutions ?? []) as Json[]).map((execution) => ({ ...execution, approval: { applicationStackRequest: {} } })) }
+  for (const method of ['GET', 'POST', 'PATCH']) rewrites.push({
+    method, path: new RegExp(`^${PROJECT}/application-drafts(?:$|/${id}(?:$|/creation-executions))`), once: false,
+    body: (wire) => rewriteDraftWire(wire, id, change),
+  })
+}
 
 /** The opening turn answered with a question: the composer is open and no job runs, so nothing polls. */
 async function askingDraft() {
@@ -1076,53 +1087,77 @@ describe('APT-1109: a stored plan is read independently', () => {
     expect(writes.filter((item) => item.body && Object.hasOwn(item.body, 'creationPlan'))).toHaveLength(1)
   })
 
-  test('a created draft still shows its app when its stored plan and approval are unreadable', async () => {
+  test('a created draft still follows its app when its stored plan is unreadable', async () => {
     const id = await createdDraft()
-    await call('POST', '/api/v1/__mock/stored-plan', { draftId: id, mode: 'unreadable' })
-    rewrites.push({ method: 'GET', path: new RegExp(`${draftPath(id)}$`), once: false, body: (wire) => ({ ...wire, creationExecutions: (wire.creationExecutions as Json[]).map((execution) => ({ ...execution, approval: { applicationStackRequest: {} } })) }) })
+    unreadableSnapshot(id, 'plan')
     requests = []
     await renderBuild(id)
+    await act(async () => { await client.invalidateQueries() })
+    await settle(12)
     expect(stage()).toBe('build')
     expect(pageText()).toContain(buildCopy.unreadablePlan.title)
-    expect(container.querySelector('#build-artifact a[target=\"_blank\"]')).not.toBeNull()
-    expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
+    expect(count('POST', /\/api\/console\/apps\/[^/]+\/bind$/)).toBe(1)
+    expect(count('POST', /implementation-runs$/)).toBe(1)
+    expect(count('POST', /creation-executions$/)).toBe(0)
+    expect(count('POST', /creation-plan-validations$/)).toBe(0)
   })
 })
 
-test('APT-1109: an unreadable approval leaves the running execution visible but never resumes it', async () => {
+test.each(['approval', 'plan'] as const)('reload resumes an existing execution despite an unreadable %s, without another begin', async (field) => {
   const id = await plannedDraft()
   const validation = (await call('POST', `${draftPath(id)}/creation-plan-validations`, {})).resource as Json
-  await call('POST', `${draftPath(id)}/creation-executions`, { clientRequestId: 'unreadable-approval', creationPlanFingerprint: validation.creationPlanFingerprint })
-  rewrites.push({ method: 'GET', path: new RegExp(`${draftPath(id)}$`), once: false, body: (wire) => ({ ...wire, creationExecutions: (wire.creationExecutions as Json[]).map((execution) => ({ ...execution, approval: { applicationStackRequest: {} } })) }) })
+  await call('POST', `${draftPath(id)}/creation-executions`, { clientRequestId: 'existing-execution', creationPlanFingerprint: validation.creationPlanFingerprint })
+  unreadableSnapshot(id, field)
   requests = []
   const { key } = await renderBuild(id)
-  expect(client.getQueryData<BuildDraft>(key)?.creationExecutions.at(-1)).toMatchObject({ approvalUnreadable: true, status: { kind: 'known', value: 'running' } })
+  expect(client.getQueryData<BuildDraft>(key)?.creationExecutions.at(-1)?.status).toEqual({ kind: 'known', value: 'running' })
   expect(stage()).toBe('build')
-  expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
+  expect(count('POST', /creation-executions\/[^/]+\/run$/)).toBe(1)
+  expect(count('POST', /creation-executions$/)).toBe(0)
+  expect(count('POST', /creation-plan-validations$/)).toBe(0)
 })
 
-test.each(['accepted', 'unconfirmed'])('a long stored approval after an %s begin never runs or replays, including after reload', async (outcome) => {
+test.each(['unreadable', 'long-summary'])('a %s approval after begin is run, bound, implemented and published', async (snapshot) => {
   const id = await plannedDraft()
   const wire = await call('GET', draftPath(id))
-  await call('PATCH', draftPath(id), { creationPlan: { ...(wire.creationPlan as Json), summary: 'Saved plan '.padEnd(501, 'x') } })
-  if (outcome === 'unconfirmed') rewrites.push({ method: 'POST', path: new RegExp(`${draftPath(id)}/creation-executions$`), once: true, body: () => ({ resource: {} }) })
+  const plan = wire.creationPlan as Json
+  if (snapshot === 'unreadable') unreadableSnapshot(id, 'approval')
+  else await call('PATCH', draftPath(id), { creationPlan: { ...plan, summary: 'Saved plan '.padEnd(501, 'x') } })
+  const appName = ((plan.applicationStackRequest as Json).application as Json).name
+  // Publication readback has not appeared yet: the existing repair must still run after binding.
+  rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/publishes$`), once: false, body: (wire) => ({ ...wire, data: (wire.data as Json[]).filter((publish) => publish.applicationId !== appName) }) })
+  rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/application-stacks$`), once: false, body: (wire) => ({ ...wire, data: (wire.data as Json[]).map((stack) => stack.applicationId === appName ? { ...stack, publish: undefined } : stack) }) })
   requests = []
   const { key } = await renderBuild(id)
   await click(button(buildCopy.primary.prepare))
-  await tick(key)
   expect(count('POST', /creation-executions$/)).toBe(1)
-  expect(count('POST', /creation-executions\/[^/]+\/run$/)).toBe(0)
-  expect(client.getQueryData<BuildDraft>(key)?.creationExecutions.at(-1)).toMatchObject({ approvalUnreadable: true, status: { kind: 'known', value: 'running' } })
-  expect(pageText()).toContain(buildCopy.unreadableApproval.detail)
-  expect(actionsOf(buildCopy.unreadableApproval.title)).toEqual([])
-  expect(readBuildSession(id)?.executionRequestId).toBeUndefined()
-  saveBuildSession(id, { ...readBuildSession(id)!, prepareRequested: true, reusePlan: true, executionRequestId: 'saved-replay-key' })
-  await act(async () => { root?.unmount() })
-  container.remove()
-  client.clear()
+  expect(count('POST', /creation-executions\/[^/]+\/run$/)).toBe(1)
+  const approval = client.getQueryData<BuildDraft>(key)?.creationExecutions.at(-1)
+  if (snapshot === 'unreadable') expect(approval?.approvalUnreadable).toBe(true)
+  else { expect(approval?.approvalUnreadable).toBeUndefined(); expect(approval?.approval?.summary).toHaveLength(501) }
+  await advance(6)
+  for (let step = 0; step < 3; step++) {
+    await act(async () => { await client.invalidateQueries() })
+    await settle(12)
+  }
+  expect(client.getQueryData<BuildDraft>(key)?.creationExecutions.at(-1)?.status).toEqual({ kind: 'known', value: 'succeeded' })
+  expect(count('POST', /\/api\/console\/apps\/[^/]+\/bind$/)).toBe(1)
+  expect(count('POST', /implementation-runs$/)).toBe(1)
+  expect(requests.filter((request) => request.method === 'POST' && request.path === `${PROJECT}/publishes`)).toEqual([expect.objectContaining({ status: 202 })])
+  expect(readBuildSession(id)?.createdAppId).toBeDefined()
+})
+
+test('an unreadable plan with a failed execution offers no re-plan and retains the queued reply', async () => {
+  const id = await plannedDraft()
+  const validation = (await call('POST', `${draftPath(id)}/creation-plan-validations`, {})).resource as Json
+  await call('POST', `${draftPath(id)}/creation-executions`, { clientRequestId: 'existing-execution', creationPlanFingerprint: validation.creationPlanFingerprint })
+  const me = await consoleGateway.console(meContract, undefined)
+  saveBuildSession(id, { ...initialSession({ baseIntent: '見積', projectId: 'commerce', ownerSubject: me.person.subject, groupId: 'g-team-a' }), pending: [{ text: 'Keep this reply', at: '2026-11-15T00:00:00Z' }] })
+  rewrites.push({ method: 'GET', path: new RegExp(`${draftPath(id)}$`), once: false, body: (wire) => ({ ...wire, phase: 'planned', creationPlan: { representation: ['future-kind'] }, creationExecutions: (wire.creationExecutions as Json[]).map((execution) => ({ ...execution, status: 'failed', error: 'creation stopped' })) }) })
   requests = []
   await renderBuild(id)
-  expect(pageText()).toContain(buildCopy.unreadableApproval.title)
-  expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
-  expect(readBuildSession(id)?.executionRequestId).toBeUndefined()
+  expect(actionsOf(buildCopy.unreadablePlan.title)).toEqual([])
+  expect(readBuildSession(id)?.pending.map((message) => message.text)).toEqual(['Keep this reply'])
+  expect(count('POST', /creation-plan-generations$/)).toBe(0)
+  expect(count('POST', /creation-plan-validations$/)).toBe(0)
 })

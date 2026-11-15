@@ -124,7 +124,7 @@ export function deriveImprove(draft: Pick<BuildDraft, 'conversationTurns' | 'cre
 /** The newest open improvement session for one app (the console resumes it instead of starting another). A phase this console does not know is not open. */
 export function improvementFor(drafts: readonly BuildDraft[] | undefined, stackId: string): BuildDraft | undefined {
   return (drafts ?? [])
-    .filter((draft) => isImprovementDraft(draft) && draft.phase.kind === 'known' && draft.phase.value !== 'archived' && draft.createdApplicationStackId === stackId)
+    .filter((draft) => isImprovementDraft(draft) && !draft.creationPlanUnreadable && draft.phase.kind === 'known' && draft.phase.value !== 'archived' && draft.createdApplicationStackId === stackId)
     .sort((a, b) => time(b.createdAt) - time(a.createdAt))[0]
 }
 

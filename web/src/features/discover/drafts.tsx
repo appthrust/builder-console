@@ -74,7 +74,7 @@ export function useUnfinished(me: Me, { poll = true }: { poll?: boolean } = {}) 
       return { kind: 'improve' as const, id: draft.id, name, state: improveStateWord(state.phase, state.version), working: state.phase === 'running', at: draft.updatedAt, draft }
     }),
     ...(apps.data ?? []).filter((app) => !app.stackId && !sessionApps.has(app.id)).map((app) => ({ kind: 'app' as const, id: app.id, name: app.displayName, at: Date.parse(app.updatedAt) > Date.parse(app.createdAt) ? app.updatedAt : app.createdAt, app })),
-  ].sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
+  ].sort((a, b) => a.kind === 'unreadable' ? b.kind === 'unreadable' ? 0 : 1 : b.kind === 'unreadable' ? -1 : Date.parse(b.at) - Date.parse(a.at))
   return { items, apps, drafts, sent, incoming, loading: apps.isPending || drafts.isPending || sent.isPending || incoming.isPending }
 }
 

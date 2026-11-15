@@ -2,8 +2,7 @@ import type { textJa } from './copy'
 
 export const textEn: typeof textJa = {
   intent: { reply: '### Follow-up', publish: 'Publish: yes' },
-  unreadablePlan: { title: 'The saved plan could not be read', detail: 'This console could not read the plan saved on the platform. Make a new plan to review it and continue.' },
-  unreadableApproval: { title: 'The saved approval could not be read', detail: 'This console could not read the approval saved on the platform. Creation will not be resumed or resent. A new plan is needed to continue.' },
+  unreadablePlan: { title: 'The saved plan could not be read', detail: 'This console cannot show the contents of the plan saved on the platform.' },
   unreadableDrafts: 'Some drafts could not be read. Starting a new one is paused to avoid creating a duplicate.',
   questions: {
     firstTurn: 'Ask me one question at a time about the decisions needed to build this app.',

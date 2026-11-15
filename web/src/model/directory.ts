@@ -4,7 +4,7 @@ import type { AppView } from './app'
 
 /** Directory candidates reuse the existing view's draft and initial-publication gates. */
 export function isFinished(view: AppView): boolean {
-  return !view.draft && view.build === undefined && view.status !== 'deploying'
+  return !view.draft && !view.unreadableBuild && view.build === undefined && view.status !== 'deploying'
 }
 
 type StoreFields = Pick<DirectoryEntry, 'screenshots' | 'capabilities'> & { guide?: string }

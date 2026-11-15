@@ -37,7 +37,7 @@ import { z } from 'zod'
 import type {
   BuildDraft, BuildDraftList, BuildExecution, BuildExecutionStep, BuildGeneration, BuildTurn, CreationPlanValidation, DraftDeletion, ImplementationRun, ImplementationTask,
 } from '../../../model/contracts/build'
-import { absentMeansEmpty, independentRows, openEnum, unreadableRowIssues, type ResponseIssue } from '../../boundary'
+import { absentMeansEmpty, appendResponseIssues, independentRows, openEnum, unreadableRowIssues, type ResponseIssue } from '../../boundary'
 import { platformContract } from '../define'
 import { excelAnalysisReader, excelProgressReader, uiDesignReader } from './excel'
 import { creationApprovalReader, creationPlanReader } from './stored-plan'
@@ -149,8 +149,12 @@ export const listApplicationDraftsContract = platformContract({
   method: 'GET',
   routeTemplate: DRAFTS,
   successStatuses: [200],
-  reader: independentRows(draftReader) satisfies z.ZodType<BuildDraftList>,
-  recoveries: (rows) => [...unreadableRowIssues(rows), ...rows.data.flatMap((draft) => draftRecoveries(draft, '/data/*'))],
+  reader: independentRows(draftReader, DnsLabelName) satisfies z.ZodType<BuildDraftList>,
+  recoveries: (rows) => {
+    const issues = [...unreadableRowIssues(rows)]
+    for (const draft of rows.data) appendResponseIssues(issues, draftRecoveries(draft, '/data/*'))
+    return issues
+  },
 })
 
 export const createApplicationDraftContract = platformContract({

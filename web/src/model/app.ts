@@ -380,6 +380,8 @@ export interface AppView {
   draft: boolean
   /** This app may belong to an isolated stack row: its missing fields authorize no write. */
   unreadableStack?: true
+  /** A saved creating-draft link points at an unreadable row; completion is unknown. */
+  unreadableBuild?: true
   stack?: AppStack
   platform?: ConsoleApp
 }

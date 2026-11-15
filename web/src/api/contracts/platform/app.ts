@@ -132,7 +132,7 @@ export const listApplicationStacksContract = platformContract({
   method: 'GET',
   routeTemplate: `${PROJECT}/application-stacks`,
   successStatuses: [200],
-  reader: independentRows(stackReader),
+  reader: independentRows(stackReader, DnsLabelName),
   recoveries: unreadableRowIssues,
 })
 

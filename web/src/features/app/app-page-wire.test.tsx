@@ -26,6 +26,11 @@ import { storedDraftWire } from '../../api/testing/stored-plan'
 import { buildKeys } from '../../api/queries/build'
 import { beginBuild } from '../build/entry'
 import { buildCopy } from '../../model/build/copy'
+import { ImprovePage } from '../improve/improve-page'
+import { text as improveText } from '../improve/copy'
+import { initialSession, saveBuildSession } from '../build/session'
+import { saveConsoleCreation } from '../build/console-session-state'
+import { rewriteDraftWire } from '../../api/testing/build-domain'
 
 const SECRET = 'SENTINEL-app-page-5d21'
 const APP_ID = 'a-mitsumori'
@@ -106,7 +111,7 @@ function AppRoute({ tab }: { tab: AppTab }) {
 }
 
 /** The app page on the app's query defaults (retry policy included), with polling left to the test. */
-async function renderApp(tab: AppTab, scene: 'app' | 'mine' | 'drafts' = 'app') {
+async function renderApp(tab: AppTab, scene: 'app' | 'mine' | 'drafts' | { improve: string } = 'app') {
   client = new QueryClient({ defaultOptions: { queries: { ...appQueryClient.getDefaultOptions().queries, retryDelay: 0, refetchInterval: false, refetchOnWindowFocus: false } } })
   await Promise.all([client.fetchQuery(meQuery), client.fetchQuery(groupsQuery), client.fetchQuery(appQuery(APP_ID))])
   const rootRoute = createRootRoute()
@@ -117,7 +122,7 @@ async function renderApp(tab: AppTab, scene: 'app' | 'mine' | 'drafts' = 'app') 
   document.body.append(container)
   root = createRoot(container)
   await act(async () => {
-    root!.render(<QueryClientProvider client={client}><RouterContextProvider router={router}><UnsavedChangesProvider>{scene === 'mine' ? <MinePage /> : scene === 'drafts' ? <DraftsPage /> : <AppRoute tab={tab} />}</UnsavedChangesProvider></RouterContextProvider></QueryClientProvider>)
+    root!.render(<QueryClientProvider client={client}><RouterContextProvider router={router}><UnsavedChangesProvider>{typeof scene === 'object' ? <ImprovePage draftId={scene.improve} /> : scene === 'mine' ? <MinePage /> : scene === 'drafts' ? <DraftsPage /> : <AppRoute tab={tab} />}</UnsavedChangesProvider></RouterContextProvider></QueryClientProvider>)
   })
   await settle()
 }
@@ -492,4 +497,87 @@ test('unreferenced project publishes leave the normal app status and URL unchang
   expect(container.querySelector('[data-testid="app-url"]')!.getAttribute('href')).toBe(url)
   expect(pageText()).not.toContain(discoverText.list.statusFailed)
   expect(pageText()).not.toContain('unrelated.example.test')
+})
+
+test('an unreadable improvement offers no generation and the app can start a new improvement instead', async () => {
+  const response = await mockFetch(`${PROJECT}/application-drafts`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'improvement', applicationStackId: 'mitsumori', intent: 'Change the list', title: 'Unreadable improvement' }) })
+  expect(response.status).toBe(201)
+  const draft = (await response.json()).resource as Json
+  const id = draft.id as string
+  rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/application-drafts(?:$|/${id}$)`), once: false, body: (wire) => rewriteDraftWire(wire, id, (draft) => ({ ...draft, creationPlan: { representation: ['future-kind'] } })) })
+  requests = []
+  await renderApp('overview', { improve: id })
+  expect(pageText()).toContain(improveText.unreadablePlan.detail)
+  expect(buttons().some((item) => item.textContent?.trim() === buildCopy.failure.plan.replan)).toBe(false)
+  expect(container.querySelector<HTMLTextAreaElement>('textarea')?.disabled).toBe(true)
+  expect([...container.querySelectorAll('a')].some((link) => link.getAttribute('href') === APP_PATH)).toBe(true)
+  expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
+  await act(async () => { root?.unmount() })
+  container.remove()
+  client.clear()
+  await renderApp('overview')
+  await click(container.querySelector<HTMLButtonElement>('[data-testid="improve-with-ai"]')!)
+  expect(dialog()).not.toBeNull()
+  const message = dialog()!.querySelector<HTMLTextAreaElement>('textarea')!
+  await act(async () => { type(message, 'Start a different improvement') })
+  await click(button(improveText.entry.submit, dialog()!))
+  expect(count('POST', new RegExp(`^${PROJECT}/application-drafts$`))).toBe(1)
+  expect(count('POST', /creation-plan-generations$/)).toBe(0)
+  expect(requests.some((item) => item.method === 'DELETE' || (item.method === 'PATCH' && item.path.endsWith(`/${id}`)))).toBe(false)
+})
+
+test('any unreadable stack keeps an unmatched wizard app unknown without resume or discard', async () => {
+  await mockFetch('/api/console/__mock/app-draft', { method: 'POST' })
+  rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/application-stacks$`), once: false, body: (wire) => ({ ...wire, data: [...wire.data as Json[], { id: 'stack-3f1234567890abcd', templateId: 'Bad Id!' }] }) })
+  requests = []
+  await renderApp('overview', 'drafts')
+  const row = container.querySelector('a[href$="/draft-stopped"]')!.closest('li')!
+  expect(row.textContent).toContain(text.unsupported.label)
+  expect(row.textContent).not.toContain(discoverText.list.resume)
+  expect(row.querySelectorAll('button')).toHaveLength(0)
+  expect(requests.every((item) => item.method === 'GET')).toBe(true)
+})
+
+test('all unreadable stack rows keep apps listed with unknown status', async () => {
+  rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/application-stacks$`), once: false, body: (wire) => ({ ...wire, data: (wire.data as Json[]).map((stack) => ({ ...stack, templateId: 'Bad Id!' })) }) })
+  await renderApp('overview', 'mine')
+  const rows = [...container.querySelectorAll('tbody tr')]
+  expect(rows.length).toBeGreaterThan(1)
+  for (const row of rows) expect(row.textContent).toContain(text.unsupported.label)
+  expect(pageText()).not.toContain(copy.mine.empty)
+})
+
+test('all unreadable draft rows remain inert rows rather than an empty state', async () => {
+  rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/application-drafts$`), once: false, body: () => ({ data: [{ ...storedDraftWire, id: 'bad-one', createdAt: 'not-a-date' }, { ...storedDraftWire, id: 'bad-two', kind: 'future-kind' }] }) })
+  await renderApp('overview', 'drafts')
+  const rows = [...container.querySelectorAll('li')].filter((row) => row.textContent === discoverText.drafts.unreadable)
+  expect(rows).toHaveLength(2)
+  for (const row of rows) expect(row.querySelector('button, a')).toBeNull()
+  expect(pageText()).not.toContain(discoverText.drafts.empty)
+})
+
+test('readable drafts sort newest first before unreadable rows', async () => {
+  rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/application-drafts$`), once: false, body: () => ({ data: [
+    { ...storedDraftWire, id: 'bad', createdAt: 'not-a-date' },
+    { ...storedDraftWire, id: 'old', title: 'Older draft', updatedAt: '2026-11-01T00:00:00Z' },
+    { ...storedDraftWire, id: 'new', title: 'Newer draft', updatedAt: '2026-11-15T00:00:00Z' },
+  ] }) })
+  await renderApp('overview', 'drafts')
+  const rows = [...container.querySelectorAll(`ul[aria-label="${discoverText.drafts.title}"] > li`)].map((row) => row.textContent ?? '')
+  expect(rows.findIndex((row) => row.includes('Newer draft'))).toBeLessThan(rows.findIndex((row) => row.includes('Older draft')))
+  expect(rows.at(-1)).toBe(discoverText.drafts.unreadable)
+})
+
+test.each(['platform-v1', 'console-v1'] as const)('an unreadable creating-draft row linked by %s tab state makes its app unknown', async (engine) => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage')
+  const values = new Map<string, string>()
+  Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value), removeItem: (key: string) => values.delete(key) } })
+  restore.push(() => descriptor ? Object.defineProperty(globalThis, 'sessionStorage', descriptor) : Reflect.deleteProperty(globalThis, 'sessionStorage'))
+  if (engine === 'platform-v1') saveBuildSession('creating-draft', { ...initialSession({ projectId: 'commerce', ownerSubject: 'owner', groupId: 'g-team-a', baseIntent: 'Create app' }), createdAppId: APP_ID })
+  else saveConsoleCreation('creating-draft', { groupId: 'g-team-a', prepareRequested: false, reusePlan: false, createdAppId: APP_ID })
+  rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/application-drafts$`), once: false, body: () => ({ data: [{ ...storedDraftWire, id: 'creating-draft', createdAt: 'not-a-date' }] }) })
+  await renderApp('overview')
+  expect(container.querySelector('header')?.textContent).toContain(text.unsupported.label)
+  expect(container.querySelector('[data-testid="app-url"]')).toBeNull()
+  expect(pageText()).not.toContain(discoverText.list.statusFailed)
 })

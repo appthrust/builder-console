@@ -59,6 +59,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
   // The created app, its preparation, the plan's default publish address and the implementation run (shared with console-v1).
   const creation = useDraftCreation({ projectId, draft, tab: session, hasPending: session.pending.length > 0, now })
   const { app, appView, appProgress, generation, execution, domain, proposalDraft, published, implementation, implementing, destination } = creation
+  const planBlocksStart = Boolean(draft.creationPlanUnreadable) && !isBuildPending(execution) && !draft.createdApplicationId
   const turn = draft.conversationTurns.at(-1)
   const running = [generation, turn, execution].some(isBuildPending)
   const result = deriveStage({ draft, generation, turn, execution, appProgress, implementation: { phase: implementation.state.phase, done: implementation.state.phase === 'done', implemented: implemented(implementation.state), activityTail: implementation.state.activityTail }, published, lastPlannedIntent: session.lastPlannedIntent, now })
@@ -115,7 +116,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
       // generation Platform refused for its limit is never offered again.
       const limited = context === 'plan' && next.kind === 'limit'
       const calm = unconfirmed || next.destination === 'changed' || next.destination === 'blocked' || next.kind === 'plan' || limited
-      const retry = unconfirmed ? 'confirm' as const : next.recheck ? 'recheck' as const : next.kind === 'plan' ? 'plan' as const : next.kind !== 'policy' && !limited ? context : undefined
+      const retry = unconfirmed ? 'confirm' as const : context === 'prepare' && draftRef.current.creationPlanUnreadable ? undefined : next.recheck ? 'recheck' as const : next.kind === 'plan' ? 'plan' as const : next.kind !== 'policy' && !limited ? context : undefined
       return { ...current, ...(next.kind === 'quota' || next.kind === 'policy' || limited ? { planRequested: false } : {}), messages: [...messages, { role: 'notice', tone: calm ? 'warning' : 'error', title: next.title, detail: next.reason, ...(retry ? { retry } : {}), at, ...(next.reference ? { reference: next.reference } : {}) }] }
     })
   }
@@ -145,7 +146,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
   function send(text: string) {
     const reply = text.trim()
     // A state this console does not know offers no write (stage.ts `unsupported`); reading stays.
-    if (draft.creationPlanUnreadable) return
+    if (planBlocksStart) return
     if (!reply || reply.length > 4000 || result.unsupported) return
     if (result.stage === 'build' || result.stage === 'publish') {
       patch((current) => queueReply({ ...current, continuedAfterPublishAt: draft.publishedAt }, reply, new Date().toISOString()))
@@ -173,7 +174,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
     // HTTP failures retain their pending reply and notice across reload; only an explicit retry resumes it.
     const lastMessage = session.messages.at(-1)
     if (lastMessage?.role === 'notice' && (lastMessage.retry === 'turn' || (lastMessage.tone === 'error' && !lastMessage.retry))) return
-    if (!pending || draft.creationPlanUnreadable || conversing || busy || lock.current || failure || result.unsupported || Date.now() < blockedUntil.current) return
+    if (!pending || planBlocksStart || conversing || busy || lock.current || failure || result.unsupported || Date.now() < blockedUntil.current) return
     // 用意する questions are answered in the conversation, even when the app was made before the answer.
     const asking = preparing || answers.open || isPrepareTurn(pending.text)
     if (draft.createdApplicationStackId && !asking) {
@@ -285,7 +286,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
   // Draft preferences are authoritative across tabs. During implementation only the
   // preferences/title are writable; specification alignment waits for its lock.
   useEffect(() => {
-    if (draft.creationPlanUnreadable || execution?.approvalUnreadable) return
+    if (planBlocksStart) return
     const name = answers.name
     const preferences = { ...draft.publishPreferences, ...(name ? { name } : {}), ...(answers.shareChoice ? { shareScope: answers.shareChoice } : {}) }
     const preferencesChanged = preferences.name !== draft.publishPreferences?.name || preferences.shareScope !== draft.publishPreferences?.shareScope
@@ -313,7 +314,8 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
   }, [answers.name, answers.shareChoice, draft.publishPreferences, draft.title, spec.name, running, implementing, busy, failure, nameRetryAt])
 
   function retry(context?: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish' | 'confirm' | 'recheck') {
-    if (draft.creationPlanUnreadable) {
+    if (draft.creationPlanUnreadable && context === 'plan' && (execution || draft.createdApplicationId || draft.createdApplicationStackId)) return
+    if (planBlocksStart) {
       if (context !== 'plan' || busy || running) return
       unreadableReplanRequested.current = true
       patch({ prepareRequested: false, approvedDestinationRevision: undefined, reusePlan: false, pending: [] })
