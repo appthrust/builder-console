@@ -573,3 +573,105 @@ func TestAdvanceReceiptReplayAfterVersionChanges(t *testing.T) {
 	require.True(t, second.Replay)
 	require.Equal(t, first.Aggregate, second.Aggregate)
 }
+
+func TestNewServicePromptReleaseChanges(t *testing.T) {
+	for _, tc := range []struct {
+		name, firstRelease, nextRelease string
+		preRegistered                   bool
+	}{
+		{"registered_0.5.7_downgrade", "0.5.7", "0.5.6", true},
+		{"registered_0.5.7_upgrade", "0.5.7", "0.5.8", true},
+		{"unregistered_then_downgrade", "0.5.8", "0.5.7", false},
+		{"unregistered_then_upgrade", "0.5.7", "0.5.8", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, dsn := testutil.Database(t, store.Open)
+			var count int
+			require.NoError(t, db.Do(t.Context(), false, func(tx *store.Tx) error {
+				return tx.SQL.QueryRowContext(tx.Context, `SELECT count(*) FROM build_prompt_versions`).Scan(&count)
+			}))
+			require.Zero(t, count, "a migrated v0.5.6-era database has no registered prompt")
+
+			var first store.BuildPromptVersion
+			if tc.preRegistered {
+				catalog, err := prompts.NewCatalog(tc.firstRelease, nil)
+				require.NoError(t, err)
+				version, err := catalog.Select()
+				require.NoError(t, err)
+				first = store.BuildPromptVersion{
+					ID: version.Manifest.ID, SchemaVersion: version.Manifest.ReplySchemaVersion,
+					TemplateSHA256: version.Manifest.TemplateSHA256, SchemaSHA256: version.Manifest.SchemaSHA256,
+					ReleaseRevision: tc.firstRelease, CreatedAt: time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC),
+				}
+				require.NoError(t, db.Do(t.Context(), true, func(tx *store.Tx) error {
+					return tx.RegisterBuildPromptVersion(first)
+				}))
+			}
+
+			// First startup, then the Platform's config-first and image-second
+			// restarts. Identical prompt content survives either release direction.
+			for i, release := range []string{tc.firstRelease, tc.nextRelease, tc.nextRelease} {
+				t.Run(fmt.Sprintf("start_%d_%s", i, release), func(t *testing.T) {
+					reopened, err := store.Open(t.Context(), dsn)
+					require.NoError(t, err)
+					t.Cleanup(func() { require.NoError(t, reopened.Close()) })
+					catalog, err := prompts.NewCatalog(release, nil)
+					require.NoError(t, err)
+					service, err := NewService(t.Context(), reopened, nil, catalog)
+					require.NoError(t, err)
+					require.NotNil(t, service)
+					stored := registeredPrompt(t, reopened)
+					if i == 0 && !tc.preRegistered {
+						first = stored
+					}
+					require.Equal(t, tc.firstRelease, stored.ReleaseRevision)
+					require.Equal(t, first, stored, "startup must not rewrite first-registration provenance or content")
+				})
+			}
+		})
+	}
+}
+
+func TestNewServiceRejectsChangedPromptContent(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(*store.BuildPromptVersion)
+	}{
+		{"template_sha256", func(p *store.BuildPromptVersion) { p.TemplateSHA256 = strings.Repeat("a", 64) }},
+		{"schema_sha256", func(p *store.BuildPromptVersion) { p.SchemaSHA256 = strings.Repeat("b", 64) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, _ := testutil.Database(t, store.Open)
+			catalog, err := prompts.NewCatalog("0.5.7", nil)
+			require.NoError(t, err)
+			version, err := catalog.Select()
+			require.NoError(t, err)
+			stored := store.BuildPromptVersion{
+				ID: version.Manifest.ID, SchemaVersion: version.Manifest.ReplySchemaVersion,
+				TemplateSHA256: version.Manifest.TemplateSHA256, SchemaSHA256: version.Manifest.SchemaSHA256,
+				ReleaseRevision: "0.5.8", CreatedAt: time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC),
+			}
+			tc.change(&stored)
+			require.NoError(t, db.Do(t.Context(), true, func(tx *store.Tx) error {
+				return tx.RegisterBuildPromptVersion(stored)
+			}))
+			service, err := NewService(t.Context(), db, nil, catalog)
+			require.Nil(t, service)
+			require.EqualError(t, err, "conflict: Prompt version is already registered with different content")
+			var rejection *domain.BuildRejection
+			require.ErrorAs(t, err, &rejection)
+			require.Equal(t, "conflict", rejection.Code)
+			require.Equal(t, stored, registeredPrompt(t, db), "conflict must leave the registered content intact")
+		})
+	}
+}
+
+func registeredPrompt(t *testing.T, db *store.Store) store.BuildPromptVersion {
+	t.Helper()
+	var p store.BuildPromptVersion
+	require.NoError(t, db.Do(t.Context(), false, func(tx *store.Tx) error {
+		return tx.SQL.QueryRowContext(tx.Context, `SELECT id,schema_version,template_sha256,schema_sha256,release_revision,created_at FROM build_prompt_versions WHERE id=$1`, prompts.CurrentVersion).Scan(&p.ID, &p.SchemaVersion, &p.TemplateSHA256, &p.SchemaSHA256, &p.ReleaseRevision, &p.CreatedAt)
+	}))
+	p.CreatedAt = p.CreatedAt.UTC()
+	return p
+}

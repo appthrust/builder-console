@@ -319,7 +319,13 @@ environment variables, so check them before rolling back.
 `BUILDER_CONSOLE_INSTALLATION_ID` may pin the receipt namespace; the default is
 the singleton `builder-console/<configured Project>`. Keep it stable across upgrades.
 Prompt registration records `BUILDER_CONSOLE_RELEASE_VERSION`, or `development`
-for an unversioned local server; that local label is not release evidence.
+for an unversioned local server, as immutable first-registration provenance; that
+local label is not release evidence. Reusing a prompt ID compares only the reply
+schema version, template SHA256 and schema SHA256, not the release name, and never
+updates the original row. This lets a release start against another release's row,
+including the Platform's config-first version change that starts the old binary
+under the new release name before replacing its image. Different content under
+the same prompt ID still conflicts; template or schema changes require a new ID.
 
 Keep the administrator setting `off` until the estate's Platform
 contains the draft contracts from [Platform PR #6723](https://github.com/appthrust/platform/pull/6723):
