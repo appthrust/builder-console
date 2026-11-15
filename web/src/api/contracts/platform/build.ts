@@ -41,10 +41,10 @@ import { absentMeansEmpty, openEnum } from '../../boundary'
 import { platformContract } from '../define'
 import { excelAnalysisReader, excelProgressReader, uiDesignReader } from './excel'
 
-/** The canonical enum's values, read as an open enum (shared by this file and workspace.ts). */
 /** A stack's template id as Platform sends it: a DNS label, or "" for a stack installed from the catalog. */
 export const stackTemplateId = z.union([z.literal(''), DnsLabelName])
 
+/** The canonical enum's values, read as an open enum (shared by this file and workspace.ts). */
 export function openCanonical<K extends string>(canonical: { options: readonly K[] }) {
   return openEnum(canonical.options as readonly [K, ...K[]])
 }
