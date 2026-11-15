@@ -30,7 +30,7 @@ import { Button, Card, CardBody, focusHeading, LoadFailed, Notice, PageHeader, S
 import { checkNameAvailability, suggestFreeUrlName, type AvailabilityRequest, type NameAvailability } from './availability'
 import { text } from './copy'
 import { effectiveShareGroupIds, stepFields, syncUrlName, useCreateForm, type CreateValues } from './form'
-import { CreatingPanel, FailureNotice, FieldFailureNotice, StaleCatalogNotice, UnconfirmedCreateNotice, UnsettledCreateNotice } from './run-status'
+import { CandidateNotice, CreatingPanel, FailureNotice, FieldFailureNotice, StaleCatalogNotice, UnconfirmedCreateNotice, UnsettledCreateNotice } from './run-status'
 import { beginBuild, resolveBuildGroup } from '../build/entry'
 import { text as buildText } from '../build/copy'
 import { newSessionEngine } from '../build/new-session-engine'
@@ -44,9 +44,12 @@ import { ShareStep } from './steps/share-step'
 import { StartStep, type EntryBlocks } from './steps/start-step'
 import {
   abandonUnsettled,
+  acceptCandidate,
   confirmCreate,
   CreateFailed,
+  keptElsewhere,
   keptSource,
+  rejectCandidate,
   sourceOrigin,
   submitCreate,
   type CreatePath,
@@ -209,7 +212,8 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
     me.isConsoleAdmin && (['existing', 'template', 'ai', 'image'] as const).some((entry) => missingSetupFor(entry).length > 0)
   const catalogLoading = connections.isPending || templates.isPending || definitions.isPending || tools.isPending || destinationRead.isPending
   // The catalog is the evidence that creating is allowed. A first read that failed is this panel's failure; a
-  // re-read that failed keeps what was shown, says so, and holds every create entry until a read succeeds.
+  // re-read that failed keeps what was shown, says so, and holds every create entry until a read succeeds. Going on
+  // from an earlier attempt's source is held only by the reads it needs (`continueQueries`), never the destination's.
   const catalogQueries = [templates, definitions, connections, destinationRead]
   const catalogFailed = catalogQueries.some((query) => query.data === undefined && query.isError)
   const catalogStale = !catalogFailed && catalogQueries.some((query) => query.data !== undefined && query.isError)
@@ -243,11 +247,23 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
   const keptBinding: SourceBinding | undefined = kept?.binding ?? (keptRecord && keptWhere ? { repository: keptWhere, image: keptRecord.image.imagePath } : undefined)
   // Once a stack exists (or may), the source is only shown; otherwise one that cannot be shown holds the create.
   const stackStarted = Boolean(resume.stackId || resume.attempts?.stack)
-  // An unsettled (refused resend) create is not resent: its notice below explains it, the step shows where it went.
+  // An unsettled (refused resend) create is not resent, nor is one whose readback hit awaits the user's choice: their
+  // notice below explains it, the step shows where it went.
   const keptState: KeptSourceState | undefined = !kept ? undefined
-    : keptBinding ? (kept.state === 'pending' && resume.unsettled === 'source' ? 'held' : kept.state)
+    : keptBinding ? (kept.state === 'pending' ? (resume.unsettled === 'source' || resume.candidate?.step === 'source' ? 'held' : 'pending') : kept.provenance === 'found' ? 'found' : 'created')
       : stackStarted ? undefined
         : keptRead.isPending ? 'checking' : 'unknown'
+  // The next 作る goes on from what an earlier attempt made or sent for the source on screen (its repository, its stack,
+  // or the create to resend exactly): it needs neither today's destination nor the adopting connection. The stack
+  // request names only the repository id, the template and definition, and the domain (`buildCreateStackRequest`).
+  // Only a new ひな形 or 作ったコードから source needs them.
+  const continuing = (values.entry === 'template' || values.entry === 'existing') && (kept !== undefined || stackStarted)
+  const continueQueries = [templates, definitions, connections]
+  const continueReady = canCreate && continueQueries.every((query) => query.data !== undefined && !query.isError) &&
+    (values.entry !== 'template' || (Boolean(templateCatalog) && selectedTemplate !== undefined && templateUsableFor(selectedTemplate, 'github-template')))
+  // A kept repository the next attempt will not use and that is never deleted from here: the user is told it stays.
+  const left = keptElsewhere(resume, shownOrigin)
+  const leftInPlace = left && values.entry !== 'image' ? { where: left.binding?.repository } : undefined
   const newRepository = values.entry !== 'template' ? undefined
     : kept ? (keptBinding ? { repository: keptBinding.repository, image: keptBinding.image } : undefined)
       : resolvedDestination && isValidAppName(values.urlName)
@@ -517,7 +533,8 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
 
   // An unconfirmed step blocks every create until the readback below has run, also after a reload.
   const unconfirmed = run.state.resume.unconfirmed !== undefined
-  // A refused resend blocks every create until a readback finds what it made, or the user gives it up after one did not.
+  // A refused resend blocks every create until the user chooses a readback's hit, or gives it up after a readback did not
+  // find it (or found only what the user said is not theirs).
   const unsettledAttempt = resume.unsettled === 'source' ? resume.attempts?.source : undefined
   const unsettledWhere = resume.unsettled === 'stack' ? text.unsettled.app(resume.attempts?.stack?.appName ?? values.urlName)
     : unsettledAttempt?.binding ? text.unsettled.repository(unsettledAttempt.binding.repository, unsettledAttempt.binding.image) : text.unsettled.previous
@@ -563,40 +580,47 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
     setStillUnknown(false)
     patch({ resume: abandonUnsettled(run.state.resume), failure: undefined })
   }
+  /** The user's choice on a readback's hit: use it (kept as found) or not theirs (the earlier attempt stays held). Sends nothing. */
+  const judgeCandidate = (mine: boolean) => {
+    setStillUnknown(false)
+    patch({ resume: (mine ? acceptCandidate : rejectCandidate)(run.state.resume), failure: undefined })
+  }
   const [startingOver, setStartingOver] = useState(false)
   /**
-   * 「最初から作り直す」: where the earlier repository is cannot be shown, so it is left unused. Its platform record is
-   * removed (best effort, as for a renamed attempt) and the next 作る makes a new one at the destination shown.
+   * 「最初から作り直す」: where the earlier repository is cannot be shown, so it is left unused and the next 作る makes a new
+   * one at the destination shown. Only one this console's own keyed create answered is removed (best effort, as for a
+   * renamed attempt); any other stays where it is (the notice says so).
    */
   const startOver = async () => {
     const current = run.state.resume
     if (startingOver || !current.sourceRepositoryId) return
     setStartingOver(true)
     try {
-      await createApi.deleteSourceRepository(projectId, current.sourceRepositoryId).catch(() => undefined)
-      patch({ resume: { ...current, sourceRepositoryId: undefined, sourceRepositoryOrigin: undefined, sourceRepositoryBinding: undefined }, failure: undefined })
+      if (current.sourceRepositoryProvenance === 'created') await createApi.deleteSourceRepository(projectId, current.sourceRepositoryId).catch(() => undefined)
+      patch({ resume: { ...current, sourceRepositoryId: undefined, sourceRepositoryOrigin: undefined, sourceRepositoryBinding: undefined, sourceRepositoryProvenance: undefined }, failure: undefined })
     } finally {
       setStartingOver(false)
     }
   }
 
   const busy = phase !== undefined || startingBuild
-  // A moved destination is a new confirmation of what is shown now, not a retry of the refused one. An unsettled create
-  // offers no retry at all (its notice holds the actions).
-  const retrying = failure !== undefined && !failure.forbidden && failure.destination !== 'changed' && !resume.unsettled
+  // A moved destination is a new confirmation of what is shown now, not a retry of the refused one. An unsettled create,
+  // or a readback hit awaiting the user's choice, offers no retry at all (its notice holds the actions).
+  const retrying = failure !== undefined && !failure.forbidden && failure.destination !== 'changed' && !resume.unsettled && !resume.candidate
   // After a destination answer the shown destination is re-read; nothing is sent until the new one is on screen.
   const destinationRereading = failure?.destination !== undefined && destinationRead.isFetching
   const keptHold = keptState === 'checking' || keptState === 'unknown'
-  const blockedSubmit = !canCreate || busy || failure?.forbidden === true || unconfirmed || resume.unsettled !== undefined || destinationRereading || keptHold
+  const blockedSubmit = !canCreate || busy || failure?.forbidden === true || unconfirmed || resume.unsettled !== undefined || resume.candidate !== undefined || destinationRereading || keptHold
   // The confirm step's own fixed notice when no destination is resolved; a blocked answer at submit says the same and is not repeated.
-  // An earlier attempt's repository does not need the destination resolved now.
-  const destinationBlockedShown = step === 3 && values.entry === 'template' && destination !== undefined && !resolvedDestination && !kept
+  // Going on from an earlier attempt does not need the destination resolved now.
+  const destinationBlockedShown = step === 3 && values.entry === 'template' && destination !== undefined && !resolvedDestination && !continuing
   const primary =
     step === 0
       ? { label: copy.create.next, disabled: !entryReady(values.entry) }
       : step < 3
         ? { label: copy.create.next, disabled: false }
-        : { label: search.resume ? copy.create.confirm.resume : retrying ? copy.create.confirm.retry : copy.create.confirm.submit, disabled: !entryReady(values.entry) || !catalog || !domain || blockedSubmit }
+        : { label: search.resume ? copy.create.confirm.resume : retrying ? copy.create.confirm.retry : copy.create.confirm.submit, disabled: !(continuing ? continueReady : entryReady(values.entry)) || !catalog || !domain || blockedSubmit }
+
   const onSubmit = (event: FormEvent) => {
     event.preventDefault()
     if (primary.disabled || busy) return
@@ -604,7 +628,8 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
     else submitApp()
   }
 
-  const staleCatalog = catalogStale
+  // A failed re-read holds a create that needs it: going on from an earlier attempt does not need the destination.
+  const staleCatalog = (continuing ? continueQueries.some((query) => query.data !== undefined && query.isError) : catalogStale)
     ? <StaleCatalogNotice readAt={catalogReadAt} retrying={catalogQueries.some((query) => query.isFetching)} onRetry={retryCatalog} />
     : null
   const stepLabels = copy.create.steps
@@ -699,6 +724,7 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
                   onStartOver={keptState === 'unknown' ? () => void startOver() : undefined}
                   startingOver={startingOver}
                   destinationBlocked={destinationBlockedShown}
+                  leftInPlace={leftInPlace}
                   adoptionImage={adoptionImage}
                 />
                 {phase !== undefined && values.entry ? (
@@ -713,9 +739,13 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
               <div id="create-failure" tabIndex={-1} className="mt-6 focus:outline-none">
                 <UnconfirmedCreateNotice confirming={confirming} stillUnknown={stillUnknown} disabled={!catalog || !createPath()} onConfirm={() => void confirmLatest()} />
               </div>
+            ) : resume.candidate ? (
+              <div id="create-failure" tabIndex={-1} className="mt-6 focus:outline-none" data-testid="create-candidate">
+                <CandidateNotice candidate={resume.candidate} onUse={() => judgeCandidate(true)} onNotMine={() => judgeCandidate(false)} />
+              </div>
             ) : resume.unsettled ? (
               <div id="create-failure" tabIndex={-1} className="mt-6 focus:outline-none">
-                <UnsettledCreateNotice where={unsettledWhere} searched={resume.unsettledSearched === true} confirming={confirming} stillUnknown={stillUnknown}
+                <UnsettledCreateNotice where={unsettledWhere} searched={resume.unsettledSearched === true} notMine={(resume.notMine?.length ?? 0) > 0} confirming={confirming} stillUnknown={stillUnknown}
                   disabled={!catalog || !createPath()} onConfirm={() => void confirmLatest()} onGiveUp={giveUpUnsettled} />
               </div>
             ) : failure && !failure.field && !(failure.destination === 'blocked' && destinationBlockedShown) ? (

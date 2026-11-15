@@ -95,9 +95,10 @@ const atA = (destination: ResolvedRepositoryDestination): SourceBinding => ({ re
 
 /**
  * The user confirmed 在庫管理 at the GHCR default (A) and an attempt started: the console app exists, and `progress`
- * says what else it did. Then an administrator moved the Project default to the built-in registry (B).
+ * says what else it did. Then an administrator moved the Project default (`moveTo`: the built-in registry, B, unless
+ * another state is given).
  */
-async function resumedAtA(progressFor: (context: { draft: CreateProgress['draft']; destination: ResolvedRepositoryDestination; projectId: string }) => Promise<CreateProgress>) {
+async function resumedAtA(progressFor: (context: { draft: CreateProgress['draft']; destination: ResolvedRepositoryDestination; projectId: string }) => Promise<CreateProgress>, moveTo = 'builtin') {
   const [me, groups] = await Promise.all([gateway.console(meContract, undefined), gateway.console(groupsContract, undefined)])
   const group = groups[0]!
   const destination = await api.repositoryDestination(me.projectId)
@@ -108,7 +109,7 @@ async function resumedAtA(progressFor: (context: { draft: CreateProgress['draft'
     version: 1, step: 'confirm', progress,
     values: { entry: 'template', imageRef: '', repository: undefined, intent: '', templateId, displayName: '在庫管理', description: '', tags: [], groupId: group.id, urlName: name, urlNameEdited: false, scope: 'private', shareGroupIds: null },
   })
-  await mock('/api/v1/__mock/repository-destination', { state: 'builtin' })
+  await mock('/api/v1/__mock/repository-destination', { state: moveTo })
 
   client = new QueryClient({ defaultOptions: { queries: { retry: false, refetchInterval: false } } })
   client.setQueryData(consoleKeys.me, { ...me, canCreateApps: true, effectiveGroupIds: [group.id] })
@@ -194,26 +195,81 @@ describe('an unsettled create (review finding 1)', () => {
     expect(button('作る').disabled).toBe(false)
   })
 
-  test('K was applied at A but its resend is refused (the record gap): the readback finds it at A and the app continues there', async () => {
+  test('K was applied at A but its resend is refused (the record gap): the readback offers it at A, and once the user says it is theirs the app continues there', async () => {
     await resumedAtA(async ({ draft, destination, projectId }) => {
       const sent = templateRequest(destination.revision)
       // The first send was applied, but its answer was lost and its key is unknown to the (mock) Platform's replay.
       await api.createSourceRepository(projectId, sent as never, 'applied-without-record')
-      return { draft, attempts: { source: { key: 'K-2', origin, request: sent as never, binding: atA(destination) } } }
+      return { draft, attempts: { source: { key: 'K-2', origin, request: sent as never, binding: atA(destination), sentAt: new Date().toISOString() } } }
     })
     await click(button('作る'))
     expect(pageText()).toContain(text.unsettled.title)
 
     await click(check())
-    expect(pageText()).not.toContain(text.unsettled.title)
-    expect(rows()[text.destination.created]).toBe(`acme/${name}`)
+    // Offered, not adopted: where it is and when it was made; 作る stays disabled until the user chooses.
+    expect(pageText()).toContain(text.candidate.title)
+    expect(pageText()).toContain(text.candidate.body(where))
+    expect(container.querySelector('[data-testid="create-candidate-created-at"]')?.textContent).toContain(text.candidate.createdAt('').trim())
+    expect(button('作る').disabled).toBe(true)
+    expect(sourceWrites()).toHaveLength(1)
+
+    await click(button(text.candidate.use))
+    expect(pageText()).not.toContain(text.candidate.title)
+    expect(rows()[text.destination.found]).toBe(`acme/${name}`)
     expect(rows()[text.destination.image]).toBe(`ghcr.io/acme/${name}`)
+    expect(pageText()).toContain(text.destination.foundNote)
     expect(button('作る').disabled).toBe(false)
 
     await click(button('作る'))
     expect(sourceWrites()).toHaveLength(1)
     const stack = requests.find((item) => item.method === 'POST' && item.path.endsWith('/application-stacks'))
     expect(stack?.body).toMatchObject({ source: { kind: 'application-source-repository', sourceRepositoryId: `${name}-src` } })
+  })
+
+  test('another attempt\'s repository with the same name at A: the user says it is not theirs, K stays held with the explicit give-up, and nothing is sent', async () => {
+    await resumedAtA(async ({ draft, destination, projectId }) => {
+      // Someone else's request made a repository with this name at A; K itself was never applied.
+      await api.createSourceRepository(projectId, templateRequest(destination.revision) as never, 'someone-else')
+      return { draft, attempts: { source: { key: 'K-3', origin, request: templateRequest(destination.revision) as never, binding: atA(destination), sentAt: new Date().toISOString() } } }
+    })
+    await click(button('作る'))
+    await click(check())
+    expect(pageText()).toContain(text.candidate.title)
+
+    await click(button(text.candidate.notMine))
+    expect(pageText()).not.toContain(text.candidate.title)
+    expect(pageText()).toContain(text.unsettled.title)
+    expect(pageText()).toContain(text.unsettled.notMine)
+    expect(pageText()).toContain(text.unsettled.notFound(where))
+    expect(rows()[text.destination.pending]).toBe(`acme/${name}`)
+    expect(button('作る').disabled).toBe(true)
+    expect(button(text.unsettled.startOver).disabled).toBe(false)
+    // Only K's one resend was ever written; checking again does not offer the rejected repository.
+    await click(check())
+    expect(pageText()).not.toContain(text.candidate.title)
+    expect(sourceWrites()).toHaveLength(1)
+  })
+
+  test('a repository created clearly before K\'s first send is shown as an existing repository with the same name, not as probably the user\'s', async () => {
+    const { projectId } = await resumedAtA(async ({ draft, destination, projectId }) => {
+      await api.createSourceRepository(projectId, templateRequest(destination.revision) as never, 'long-ago')
+      return { draft, attempts: { source: { key: 'K-4', origin, request: templateRequest(destination.revision) as never, binding: atA(destination), sentAt: new Date().toISOString() } } }
+    })
+    // Platform's record says it was made an hour before K was sent.
+    const listed = await (await route(new Request(`http://mock.test/api/v1/projects/${projectId}/application-source-repositories`))).json() as { data: Record<string, unknown>[] }
+    const anHourAgo = new Date(Date.now() - 3_600_000).toISOString()
+    overrides.set(`GET /api/v1/projects/${projectId}/application-source-repositories`, () => Response.json({ ...listed, data: listed.data.map((item) => ({ ...item, createdAt: anHourAgo })) }))
+    await click(button('作る'))
+    await click(check())
+
+    expect(pageText()).toContain(text.candidate.preexistingTitle)
+    expect(pageText()).toContain(text.candidate.preexisting(where))
+    expect(pageText()).not.toContain(text.candidate.title)
+    expect(() => button(text.candidate.use)).toThrow()
+    expect(button('作る').disabled).toBe(true)
+    await click(button(text.candidate.preexistingDismiss))
+    expect(pageText()).toContain(text.unsettled.notMine)
+    expect(sourceWrites()).toHaveLength(1)
   })
 })
 
@@ -252,7 +308,7 @@ describe('a resumed creation (review finding 3)', () => {
     expect(button('作る').disabled).toBe(false)
   })
 
-  test('progress saved with only an id Platform cannot place: no create until the user starts over, which forgets it and shows B', async () => {
+  test('progress saved with only an id Platform cannot place: no create until the user starts over, which forgets it without deleting it and shows B', async () => {
     await resumedAtA(async ({ draft }) => ({ draft, sourceRepositoryId: 'gone-src', sourceRepositoryOrigin: origin }))
 
     expect(pageText()).toContain(text.destination.retainedUnknown)
@@ -260,10 +316,29 @@ describe('a resumed creation (review finding 3)', () => {
     expect(button('作る').disabled).toBe(true)
 
     await click(button(text.destination.startOver))
-    expect(sourceWrites()).toEqual([expect.objectContaining({ method: 'DELETE', path: '/api/v1/projects/commerce/application-source-repositories/gone-src' })])
+    // Progress saved without how the id was learned is not provably this console's: it is never deleted.
+    expect(sourceWrites()).toEqual([])
     expect(pageText()).not.toContain(text.destination.retainedUnknown)
     expect(rows()[text.destination.repository]).toBe(`acme/${name}`)
     expect(rows()[text.destination.image]).toBe(builtinImage)
     expect(button('作る').disabled).toBe(false)
+  })
+
+  test('a repository made at A, and today the default is not set: going on needs no destination, so 作る reuses A and sends no new source', async () => {
+    await resumedAtA(async ({ draft, destination, projectId }) => {
+      const made = await api.createSourceRepository(projectId, { template: { repository: 'appthrust/template-biz-inventory', ref: 'main' }, destination: { repositoryName: name, visibility: 'private' }, destinationRevision: destination.revision, build: { mode: 'observed-image', ref: 'main' } }, 'setup-key')
+      return { draft, sourceRepositoryId: made.id, sourceRepositoryOrigin: origin, sourceRepositoryBinding: atA(destination), sourceRepositoryProvenance: 'created' }
+    }, 'NotConfigured')
+
+    expect(rows()[text.destination.created]).toBe(`acme/${name}`)
+    // The blocked-destination notice is about new repositories; it does not apply here.
+    expect(container.querySelector('[data-testid="create-destination-blocked"]')).toBeNull()
+    expect(pageText()).not.toContain(text.destination.blocked)
+    expect(button('作る').disabled).toBe(false)
+
+    await click(button('作る'))
+    expect(sourceWrites()).toEqual([])
+    const stack = requests.find((item) => item.method === 'POST' && item.path.endsWith('/application-stacks'))
+    expect(stack?.body).toMatchObject({ source: { kind: 'application-source-repository', sourceRepositoryId: `${name}-src` } })
   })
 })

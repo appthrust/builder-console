@@ -81,7 +81,8 @@ function Session({ draft, groupId, stale }: { draft: BuildDraft; groupId: string
   const reapproveNotice = lastMessage?.role === 'notice' && lastMessage.retry === 'prepare' && lastMessage.title === buildCopy.failure.destination.changed.title
   const preparing = stage === 'decide' && build.proposal && !reapproveNotice && (primary.action === 'prepare' || primary.action === 'prepare-after-plan')
   // Only a destination on screen can be approved (the approval binds its revision): none is set (the proposal says only
-  // a Project administrator can set it), it is still read, or it could not be read (read it again here).
+  // a Project administrator can set it), it is still read, or no read has shown it yet (read it again here). One still on
+  // screen after a failed re-read stays approvable; the preparation checks Platform's current revision fresh against it.
   const shownDestination = typeof build.proposal?.newRepository !== 'string'
   const approve = <Button tone="primary" loading={Boolean(updatingPlan)} disabled={!primary.enabled || !shownDestination} onClick={() => build.prepare()}>
     {updatingPlan ? text.page.updatingPlan(progress?.elapsedLabel ?? '0:00') : build.proposal?.stale ? buildCopy.primary.refresh : buildCopy.primary.prepare}

@@ -13,11 +13,13 @@ import { SummaryList } from './summary-list'
 export type AdoptionImage = { kind: 'checking' } | { kind: 'known'; path: string } | { kind: 'unknown' }
 
 /**
- * The repository an earlier attempt made for this source (`created`, reused where it is) or sent a create for whose
- * outcome is unknown (`pending`, resent exactly there; `held` once that resend was refused, nothing is sent and the
- * wizard's notice says why); `checking` / `unknown` = progress saved without where it is, being read back / not showable.
+ * The repository an earlier attempt made for this source (`created`, reused where it is), or that a readback found and
+ * the user chose (`found`, reused the same way, never deleted from here), or sent a create for whose outcome is unknown
+ * (`pending`, resent exactly there; `held` once that resend was refused or a readback hit awaits the user's choice:
+ * nothing is sent and the wizard's notice says why); `checking` / `unknown` = progress saved without where it is,
+ * being read back / not showable.
  */
-export type KeptSourceState = 'created' | 'pending' | 'held' | 'checking' | 'unknown'
+export type KeptSourceState = 'created' | 'found' | 'pending' | 'held' | 'checking' | 'unknown'
 
 export function ConfirmStep({
   form,
@@ -32,6 +34,7 @@ export function ConfirmStep({
   onStartOver,
   startingOver,
   destinationBlocked,
+  leftInPlace,
   adoptionImage,
 }: {
   form: CreateFormApi
@@ -50,6 +53,8 @@ export function ConfirmStep({
   startingOver?: boolean
   /** ひな形: no destination is resolved, so nothing is created. */
   destinationBlocked?: boolean
+  /** An earlier repository the next attempt will not use and that is never deleted from here (`keptElsewhere`): where it is, when known. */
+  leftInPlace?: { where?: string }
   adoptionImage?: AdoptionImage
 }) {
   const values = useStore(form.store, (state) => state.values)
@@ -66,7 +71,7 @@ export function ConfirmStep({
     ...(values.entry === 'template' && templateName ? [[copy.create.confirm.labels.template, templateName] as [string, ReactNode]] : []),
     ...(values.entry === 'template' && newRepository
       ? [
-          [kept === 'created' ? text.destination.created : kept === 'pending' || kept === 'held' ? text.destination.pending : text.destination.repository, mono(newRepository.repository)],
+          [kept === 'created' ? text.destination.created : kept === 'found' ? text.destination.found : kept === 'pending' || kept === 'held' ? text.destination.pending : text.destination.repository, mono(newRepository.repository)],
           [text.destination.image, newRepository.image ? mono(newRepository.image) : <span className="text-stone-500">{text.destination.imageUnknown}</span>],
         ] as Array<[string, ReactNode]>
       : []),
@@ -96,16 +101,20 @@ export function ConfirmStep({
         {copy.create.confirm.summary(values.displayName, groupName, shareText)}
       </p>
       <SummaryList rows={rows} />
+      {leftInPlace && values.entry !== 'image' ? (
+        <div data-testid="create-left-in-place"><Notice>{text.destination.leftInPlace(leftInPlace.where)}</Notice></div>
+      ) : null}
       {kept && kept !== 'held' && values.entry !== 'image' ? (
         <div data-testid="create-kept-source">
           {kept === 'created' ? <Notice>{text.destination.createdNote}</Notice>
-            : kept === 'pending' ? <Notice tone="warning">{text.destination.pendingNote}</Notice>
-              : kept === 'checking' ? <p role="status" className="text-sm text-stone-500">{text.destination.retainedChecking}</p>
-                : (
-                  <Notice tone="warning" actions={onStartOver ? <Button size="sm" loading={startingOver} onClick={onStartOver}>{text.destination.startOver}</Button> : undefined}>
-                    {text.destination.retainedUnknown}
-                  </Notice>
-                )}
+            : kept === 'found' ? <Notice>{text.destination.foundNote}</Notice>
+              : kept === 'pending' ? <Notice tone="warning">{text.destination.pendingNote}</Notice>
+                : kept === 'checking' ? <p role="status" className="text-sm text-stone-500">{text.destination.retainedChecking}</p>
+                  : (
+                    <Notice tone="warning" actions={onStartOver ? <Button size="sm" loading={startingOver} onClick={onStartOver}>{text.destination.startOver}</Button> : undefined}>
+                      {text.destination.retainedUnknown}
+                    </Notice>
+                  )}
         </div>
       ) : null}
       {values.entry === 'image' ? (

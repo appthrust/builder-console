@@ -21,6 +21,7 @@ export interface CreateSession {
 const phases = z.enum(['draft', 'source', 'checking', 'platform', 'bind'])
 const origin = z.object({ appName: z.string(), kind: z.enum(['template', 'existing']), repository: z.string().optional(), templateId: z.string().optional() })
 const binding = z.object({ repository: z.string(), image: z.string().optional(), revision: z.string().optional(), connectionId: z.string().optional() })
+const provenance = z.enum(['created', 'found'])
 /** A create request this tab built and sent: resent exactly as it was (Platform compares it with the first one). */
 const sentRequest = <T,>() => z.custom<T>((value) => typeof value === 'object' && value !== null && !Array.isArray(value))
 
@@ -42,19 +43,27 @@ const sessionSchema = z.object({
     sourceRepositoryOrigin: origin.optional(),
     // Where the kept repository is: a resumed attempt shows it, not the destination resolved now.
     sourceRepositoryBinding: binding.optional(),
-    stackId: z.string().optional(), stackAppName: z.string().optional(),
+    // How the kept ids were learned: only a `created` one is ever deleted by this console; absent = never deleted.
+    sourceRepositoryProvenance: provenance.optional(),
+    stackId: z.string().optional(), stackAppName: z.string().optional(), stackProvenance: provenance.optional(),
     // A reload keeps an unconfirmed step unconfirmed: only the readback may follow.
     unconfirmed: phases.optional(),
     // Creates that may have been applied: their key and exact request, resent before anything else so Platform
-    // replays instead of creating twice. `request`/`binding` are optional for progress saved before they were kept.
+    // replays instead of creating twice. `request`/`binding`/`sentAt` are optional for progress saved before they were kept.
     attempts: z.object({
-      source: z.object({ key: z.string(), origin, request: sentRequest<SourceRepositoryRequest>().optional(), binding: binding.optional() }).optional(),
+      source: z.object({ key: z.string(), origin, request: sentRequest<SourceRepositoryRequest>().optional(), binding: binding.optional(), sentAt: z.string().optional() }).optional(),
       stack: z.object({ key: z.string(), appName: z.string(), sourceRepositoryId: z.string().optional(), request: sentRequest<StackRequest>().optional() }).optional(),
     }).optional(),
-    // A refused resend stays held across reloads: nothing is sent for it until a readback finds it or the user,
-    // after a readback that did not, explicitly gives it up.
+    // A refused resend stays held across reloads: nothing is sent for it until the user chooses a readback's hit or,
+    // after a readback that did not find it, explicitly gives it up.
     unsettled: z.enum(['source', 'stack']).optional(),
     unsettledSearched: z.boolean().optional(),
+    // A readback hit awaiting the user's choice stays one across reloads (nothing is sent meanwhile).
+    candidate: z.discriminatedUnion('step', [
+      z.object({ step: z.literal('source'), id: z.string(), binding, createdAt: z.string().optional(), preexisting: z.boolean() }),
+      z.object({ step: z.literal('stack'), id: z.string(), appName: z.string() }),
+    ]).optional(),
+    notMine: z.array(z.string()).optional(),
   }),
   phase: phases.optional(),
   failure: z.object({ message: z.string() }).optional(),

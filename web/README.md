@@ -520,25 +520,58 @@ non-engineers, with engineering words only under 「詳しい人向け」
   repository and image location the attempt used, kept with the progress),
   never at the destination resolved now. Progress saved with only its id reads
   Platform's record back; when that record cannot place it, nothing is created
-  until 「最初から作り直す」 leaves it unused.
+  until 「最初から作り直す」 leaves it unused. Going on from such a repository,
+  from a stack, or from a create to resend exactly needs neither today's
+  destination nor the adopting connection (the stack request names only the
+  repository id, the template, the definition and the domain): a destination
+  that is unset, blocked or unknown today disables only a new ひな形 / AI
+  repository, and its notice is not shown while the wizard goes on.
+- Every kept id records how it was learned: `created` (a readable answer to
+  this attempt's own keyed create) or `found` (a readback listed it and the user
+  chose it). Only a `created` source repository is ever deleted by the console
+  (best effort, when a renamed or re-templated attempt replaces it, or on
+  「最初から作り直す」); a `found` one, or one kept by older progress without
+  that record, stays where it is, and the confirm step says it stays.
 - A Platform create whose outcome is unknown (no answer, a 5xx, an unread 2xx
-  the readback did not find) keeps its Idempotency-Key, its exact request and
-  where it went. Before anything else is validated or sent, the next 作る resends
-  that request under that key (Platform replays an accepted one, also after the
-  default moved); the confirm step shows 「前回作ろうとした置き場」, not the
-  current default. The resource it answers ends the attempt; no answer or a 5xx
-  keeps it for the next resend. A refusal (4xx) of a resend does not prove the
-  first send failed (Platform does not serialize a resend with a first send
-  still in flight and records the key only after the write), so the attempt is
-  held unsettled and nothing more is sent: 「最新の状態を確認する」 looks for
-  it where it was sent, and finding it continues there. Only after such a
-  readback did not find it may the user choose 「前回の操作をあきらめて作り直す」,
-  which states that the earlier request may still create it later; it is never
-  automatic. Progress saved before requests were kept is held the same way,
-  never rebuilt against today's destination. A refused first send ends its own
-  attempt (no earlier send exists under its fresh key). The stack create is
-  treated the same. Readbacks match where the attempt sent it, never where the
-  destination resolves now.
+  the readback did not find) keeps its Idempotency-Key, its exact request, where
+  it went and when it was first sent. Before anything else is validated or
+  sent, the next 作る resends that request under that key (Platform replays an
+  accepted one, also after the default moved); the confirm step shows
+  「前回作ろうとした置き場」, not the current default. The resource it answers
+  ends the attempt; no answer or a 5xx keeps it for the next resend. A refusal
+  (4xx) of a resend does not prove the first send failed (Platform does not
+  serialize a resend with a first send still in flight and records the key only
+  after the write), so the attempt is held unsettled and nothing more is sent:
+  「最新の状態を確認する」 looks for it where it was sent. Platform's list does
+  not say which request or key made a resource (the key's annotations stay on
+  the resource), so a same-named repository or stack found there is only a
+  candidate: the console shows it (a repository with where it is, its image
+  location and its creation time; a stack with its app name, as the stack list
+  has no creation time) and sends nothing until the user chooses to go on with
+  it (kept as `found`) or that it is not theirs (not offered again; the attempt
+  stays held). A repository created more than 5 minutes (the allowance for
+  clock skew between the browser and the cluster) before the attempt's first
+  send is shown as an existing repository with the same name, the name taken at
+  that destination, never as possibly the user's. Only after a readback did not
+  find it, or found only what the user rejected, may the user choose
+  「前回の操作をあきらめて作り直す」, which states that the earlier request may
+  still create it later; it is never automatic. Progress saved before requests
+  were kept is held the same way, never rebuilt against today's destination. A
+  refused first send ends its own attempt (no earlier send exists under its
+  fresh key). The stack create is treated the same. Readbacks match where the
+  attempt sent it, never where the destination resolves now.
+- Before the first send of a new ひな形 attempt the console reads Platform's
+  list: a source repository with the name where the new one would go is a
+  taken name (back to Step 1). Platform's validation only sees GitHub (an
+  existing repository or package), not a record whose repository is not made
+  yet. This is also what remains when the tab loses its session storage (cleared
+  or unavailable, then a reload): the kept key, request and readback evidence
+  are gone, so the console cannot resend or read back that attempt, and a new
+  attempt gets a new key. An earlier attempt's repository then shows as a taken
+  name instead of being created twice, but only once Platform lists it; a stack
+  create, an adoption, or a write still in flight is not covered. Closing this
+  needs Platform to expose a create's key (or a lookup by key); session storage
+  is neither durable recovery nor an authorization boundary.
 - A new repository (ひな形, AI) goes where the Project's repository destination
   says (`GET repository-destination`, read as resolved / blocked / unknown in
   `contracts/platform/catalog.ts`); the console never picks a connection, and
@@ -552,11 +585,14 @@ non-engineers, with engineering words only under 「詳しい人向け」
   (only a Project administrator can set it); adoption still works. 409
   `DestinationChanged` re-reads and shows the new destination and sends nothing
   until the user presses 作る again. In the AI build, 「この内容で作る」 is
-  offered only once the destination is shown (disabled while it is read; a
-  failed read offers 「作成先を読み込み直す」) and approves the revision shown:
-  when Platform's current one differs from it (or from the plan's), the plan is
-  re-bound to the current revision and the approval stops with a fixed notice;
-  approving again needs no cleanup. 409 `DestinationMismatch` is a fixed-copy
+  offered only once a read has shown the destination (disabled while the first
+  read is pending; a failed first read offers 「作成先を読み込み直す」) and
+  approves the revision shown. A re-read that fails later keeps the destination
+  already shown and approval stays offered for it: the control is the fresh
+  read at approval, which goes on only when Platform's current revision is the
+  one shown (and the plan's); otherwise the plan is re-bound to the current
+  revision and the approval stops with a fixed notice; approving again needs no
+  cleanup. 409 `DestinationMismatch` is a fixed-copy
   failure. Stories: `e2e/stories/app-create-destination.mock.spec.ts` (mock
   toggle `repository-destination {state}`).
 - AI build sessions default an absent/disabled plan publish to the wizard's

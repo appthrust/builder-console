@@ -6,12 +6,14 @@
 //   stack, or the stack alone for an image).
 // - A step whose 2xx answer cannot be read (a ResponseContractError) may have
 //   happened: the attempt stops with `progress.unconfirmed` set, nothing is
-//   resent, and only `confirmCreate` (a readback) clears it. The readback
-//   adopts what the unconfirmed step made, so the next attempt does not make
-//   it twice.
+//   resent, and only `confirmCreate` (a readback) clears it.
 // - A platform create whose outcome is unknown (no answer, a 5xx, an unread
 //   2xx the readback could not find) is settled before anything else: the
 //   next attempt first resends its exact request under its key (`attempts`).
+// - A readback finds resources by name and place, which Platform's list does not
+//   tie to the attempt's key: a hit is only a `candidate` until the user says it
+//   is theirs. Every retained id records how it was learned (`created` / `found`),
+//   and this console deletes only what its own keyed create answered.
 import { ORPCError } from '@orpc/client'
 import { isResponseContractError } from '../../api/boundary'
 import { isConsoleError } from '../../api/console'
@@ -61,6 +63,24 @@ export type SubmitPhase =
   | 'platform'
   | 'bind'
 
+/**
+ * How the console learned a retained resource id. `created`: a readable success answer to this attempt's own keyed
+ * create (Platform answers it for that key only). `found`: a readback listed it and the user chose it (`acceptCandidate`).
+ * Only a `created` resource is ever deleted by this console.
+ */
+export type Provenance = 'created' | 'found'
+
+/**
+ * A readback's hit for the unconfirmed or unsettled step: a resource with the attempt's name where the attempt sent it.
+ * Platform's list carries no trace of the request or key that made it (the idempotency annotations stay on the
+ * resource; platform-api internal/handler/application_source_repository.go:1702-1749), so it may be another attempt's.
+ * `preexisting`: it was created clearly before this attempt's first send (`CANDIDATE_CLOCK_TOLERANCE_MS`), so it is not
+ * this attempt's; the name is taken there. A stack record has no creation time to compare.
+ */
+export type CreateCandidate =
+  | { step: 'source'; id: string; binding: SourceBinding; createdAt?: string; preexisting: boolean }
+  | { step: 'stack'; id: string; appName: string }
+
 /** What already exists from an earlier attempt. */
 export interface CreateProgress {
   draft?: BusinessApp
@@ -72,9 +92,13 @@ export interface CreateProgress {
    * destination Platform resolves now, because its retry reuses this repository. Absent in progress saved before it was kept.
    */
   sourceRepositoryBinding?: SourceBinding
+  /** How `sourceRepositoryId` was learned. Absent in progress saved before it was kept: not provably this attempt's, never deleted. */
+  sourceRepositoryProvenance?: Provenance
   stackId?: string
   /** The URL name `stackId` was created with; bind follows at once, so a retry must keep it. */
   stackAppName?: string
+  /** How `stackId` was learned. */
+  stackProvenance?: Provenance
   /** The phase whose write answered with an unreadable 2xx: it may have happened. Only `confirmCreate` clears it. */
   unconfirmed?: SubmitPhase
   /**
@@ -88,12 +112,17 @@ export interface CreateProgress {
   /**
    * The attempt whose resend Platform refused (or that cannot be resent exactly). The refusal does not prove the first
    * send was not applied (Platform does not serialize a resend with a first send still in flight, and records the key
-   * only after the write), so nothing is sent for it any more. A readback that finds the resource clears it; otherwise
-   * only the user's explicit `abandonUnsettled`, offered once a readback has looked and not found it, does.
+   * only after the write), so nothing is sent for it any more. The user accepting a readback's hit clears it; otherwise
+   * only the user's explicit `abandonUnsettled`, offered once a readback has looked and not found it (or the user said
+   * what it found is not theirs), does.
    */
   unsettled?: 'source' | 'stack'
   /** A readback has read Platform's list and not found the unsettled attempt's resource where it was sent. */
   unsettledSearched?: boolean
+  /** A readback hit the user has not judged yet: nothing is sent while it is set (`acceptCandidate` / `rejectCandidate`). */
+  candidate?: CreateCandidate
+  /** Readback hits the user said are not this attempt's: never offered again. */
+  notMine?: string[]
 }
 
 /** What a source repository is made for: the URL name and the entry (with its template or picked repository). */
@@ -111,14 +140,17 @@ export interface SourceBinding {
   connectionId?: string
 }
 
-/** A source create whose outcome is unknown. `request`/`binding` are absent only in progress saved before they were kept. */
-export interface SourceAttempt { key: string; origin: SourceOrigin; request?: SourceRepositoryRequest; binding?: SourceBinding }
+/**
+ * A source create whose outcome is unknown. `request`/`binding` are absent only in progress saved before they were kept;
+ * `sentAt` (this browser's clock, ISO) is when its first send started, absent in progress saved before it was kept.
+ */
+export interface SourceAttempt { key: string; origin: SourceOrigin; request?: SourceRepositoryRequest; binding?: SourceBinding; sentAt?: string }
 /** A stack create whose outcome is unknown. `request` is absent only in progress saved before it was kept. */
 export interface StackAttempt { key: string; appName: string; sourceRepositoryId?: string; request?: StackRequest }
 
 type CreateCalls = Pick<CreateApi,
   | 'createApp' | 'updateApp' | 'bindApp' | 'removeApp'
-  | 'validateSourceRepository' | 'createSourceRepository' | 'deleteSourceRepository'
+  | 'sourceRepositories' | 'validateSourceRepository' | 'createSourceRepository' | 'deleteSourceRepository'
   | 'validateStack' | 'createStack'
 >
 
@@ -193,7 +225,7 @@ export class CreateFailed extends Error {
     const reason = conflict ? platformErrorEnvelope(cause)?.details?.reason : undefined
     this.transient = isConsoleError(cause) && cause.transient
     this.retryable = reason === 'delivery_pending' || this.transient
-    this.nameTaken =
+    this.nameTaken = cause instanceof RepositoryNameTaken ||
       isConsoleError(cause, 'slug_taken') || (conflict && reason !== 'delivery_pending' && reason !== 'delivery_blocked' && this.destination === undefined)
     this.progress = progress
     const detail = this.destination ? undefined : detailOf(cause)
@@ -224,6 +256,12 @@ class ValidationRejected extends Error {
     this.issues = issues
   }
 }
+
+/**
+ * Before the first send of a new ひな形 attempt, Platform already lists a source repository with this name where this one
+ * would go. It cannot be this attempt's (nothing was sent yet), so the name is taken there.
+ */
+class RepositoryNameTaken extends Error {}
 
 const SECTIONS: readonly ValidationSectionName[] = ['source', 'runtime', 'publish']
 
@@ -331,17 +369,36 @@ function madeAt(repository: SourceRepository, sent: SourceBinding | undefined): 
 const sameName = (a: string | undefined, b: string | undefined) => a !== undefined && b !== undefined && a.trim().toLowerCase() === b.trim().toLowerCase()
 
 /**
- * The source repository this attempt made, judged by where the attempt sent it (its binding), never by the destination
- * resolved now. The adopted repository is named with its owner (`owner/name`) and its connection. A new repository's
- * name is unique per owner only, so it must also be where the attempt sent it: the image path shown for it and, when the
- * record still names it, its connection. An attempt saved without its binding adopts nothing (its resend settles it).
+ * A source repository with the attempt's name where the attempt sent it (its binding), never at the destination resolved
+ * now. The adopted repository is named with its owner (`owner/name`) and its connection. A new repository's name is
+ * unique per owner only, so it must also be where the attempt sent it: the image path shown for it and, when the record
+ * still names it, its connection. An attempt saved without its binding matches nothing (its resend settles it).
+ * Similarity, not identity: any request with that name and place makes such a repository, so a match is only a
+ * candidate (`CreateCandidate`), or, before anything was sent, a taken name.
  */
-function madeBy(repository: SourceRepository, attempt: SourceAttempt): boolean {
+function atAttemptPlace(repository: SourceRepository, attempt: Pick<SourceAttempt, 'origin' | 'binding'>): boolean {
   const { origin, binding } = attempt
   if (!binding || (repository.sourceConnectionId !== undefined && repository.sourceConnectionId !== binding.connectionId)) return false
   return origin.kind === 'existing'
     ? sameName(repository.existing?.repository, origin.repository)
     : sameName(repository.destination?.repositoryName, origin.appName) && sameName(repository.image.imagePath, binding.image)
+}
+
+/**
+ * How far a candidate's `createdAt` may lie before the attempt's `sentAt` and still be offered as possibly this
+ * attempt's: 5 minutes. `createdAt` is the Kubernetes creationTimestamp (the cluster's clock, whole seconds, rounded
+ * down); `sentAt` is this browser's clock. Their skew is unknown; 5 minutes is the customary maximum tolerated between
+ * hosts (Kerberos' default) and far above the second truncation. Judging the attempt's own repository as older would
+ * push the user to give it up and create again (a duplicate), so the tolerance errs toward offering it: the user still
+ * sees its creation time and chooses.
+ */
+export const CANDIDATE_CLOCK_TOLERANCE_MS = 5 * 60_000
+
+/** Created clearly before the attempt's first send: not this attempt's. Unknown either time: not judged so. */
+function createdBefore(createdAt: string | undefined, sentAt: string | undefined): boolean {
+  const created = createdAt ? Date.parse(createdAt) : Number.NaN
+  const sent = sentAt ? Date.parse(sentAt) : Number.NaN
+  return Number.isFinite(created) && Number.isFinite(sent) && created < sent - CANDIDATE_CLOCK_TOLERANCE_MS
 }
 
 /** The attempts left once `step`'s attempt has ended. */
@@ -357,18 +414,33 @@ export const sameOrigin = (a: SourceOrigin | undefined, b: SourceOrigin | undefi
 /**
  * What the confirm step shows as the source of `origin` (the entry, name and template or repository on screen) instead
  * of a new repository at the destination resolved now. `pending`: a create of it whose outcome is unknown; the next
- * attempt resends it exactly, to `binding`. `created`: the repository already made or adopted for it, which the next
- * attempt reuses; without `binding` (progress saved before it was kept) it is read back by `id`.
+ * attempt resends it exactly, to `binding`. `created`: the repository already made, adopted or chosen for it (how it
+ * was learned: `provenance`), which the next attempt reuses; without `binding` (progress saved before it was kept) it
+ * is read back by `id`.
  */
-export type KeptSource = { state: 'pending'; binding: SourceBinding } | { state: 'created'; id: string; binding?: SourceBinding }
+export type KeptSource = { state: 'pending'; binding: SourceBinding } | { state: 'created'; id: string; binding?: SourceBinding; provenance?: Provenance }
 
 export function keptSource(progress: CreateProgress, origin: SourceOrigin | undefined): KeptSource | undefined {
   const attempt = progress.attempts?.source
   if (attempt?.request && attempt.binding && !progress.sourceRepositoryId && sameOrigin(attempt.origin, origin)) return { state: 'pending', binding: attempt.binding }
   if (progress.sourceRepositoryId && sameOrigin(progress.sourceRepositoryOrigin, origin)) {
-    return { state: 'created', id: progress.sourceRepositoryId, ...(progress.sourceRepositoryBinding ? { binding: progress.sourceRepositoryBinding } : {}) }
+    return {
+      state: 'created', id: progress.sourceRepositoryId,
+      ...(progress.sourceRepositoryBinding ? { binding: progress.sourceRepositoryBinding } : {}),
+      ...(progress.sourceRepositoryProvenance ? { provenance: progress.sourceRepositoryProvenance } : {}),
+    }
   }
   return undefined
+}
+
+/**
+ * A kept repository the next attempt would not use (another name, entry, template or picked repository) and that this
+ * console never deletes, because no keyed create of its own answered it: it stays where it is, and the confirm step
+ * says so. A `created` one is removed instead (best effort) when the next attempt replaces it.
+ */
+export function keptElsewhere(progress: CreateProgress, origin: SourceOrigin | undefined): { binding?: SourceBinding } | undefined {
+  if (!progress.sourceRepositoryId || progress.stackId || sameOrigin(progress.sourceRepositoryOrigin, origin) || progress.sourceRepositoryProvenance === 'created') return undefined
+  return progress.sourceRepositoryBinding ? { binding: progress.sourceRepositoryBinding } : {}
 }
 
 export async function submitCreate(
@@ -401,11 +473,13 @@ export async function submitCreate(
       throw error
     }
   }
+  // A readable answer to this attempt's own keyed create names what that key made (`created`).
   const createSource = async (attempt: SourceAttempt, body: SourceRepositoryRequest, resend: boolean): Promise<string> => {
     const repository = await write('source', resend, () => deps.api.createSourceRepository(request.projectId, body, attempt.key))
     progress.sourceRepositoryId = repository.id
     progress.sourceRepositoryOrigin = attempt.origin
     progress.sourceRepositoryBinding = madeAt(repository, attempt.binding)
+    progress.sourceRepositoryProvenance = 'created'
     progress.attempts = settled(progress.attempts, 'source')
     report()
     return repository.id
@@ -414,13 +488,16 @@ export async function submitCreate(
     const stack = await write('stack', resend, () => deps.api.createStack(request.projectId, body, attempt.key))
     progress.stackId = stack.id
     progress.stackAppName = attempt.appName
+    progress.stackProvenance = 'created'
     progress.attempts = settled(progress.attempts, 'stack')
     report()
     return stack.id
   }
   try {
-    // An unread answer may have made something: only the readback may follow. So may a refused resend.
+    // An unread answer may have made something: only the readback may follow. So may a refused resend, and a readback
+    // hit the user has not judged.
     if (progress.unconfirmed) throw new Error(text.unconfirmed.title)
+    if (progress.candidate) throw new Error(text.candidate.title)
     if (progress.unsettled) throw new Error(text.unsettled.title)
     // A create that may have been applied is settled before anything else is validated or sent: its own request again
     // under its own key. Platform replays an accepted one (made where it was sent, whatever the destination is now); no
@@ -459,14 +536,21 @@ export async function submitCreate(
         source = { kind: 'sample-image', imageRef: request.path.imageRef }
       } else {
         const origin = sourceOrigin(appName, request.path, deps.catalog)
-        if (progress.sourceRepositoryId && !sameOrigin(progress.sourceRepositoryOrigin, origin)) {
-          // The kept repository belongs to another name, entry, or picked
-          // repository. Best effort: an orphan must not stop the new attempt.
-          enter('source')
-          await deps.api.deleteSourceRepository(request.projectId, progress.sourceRepositoryId).catch(() => undefined)
+        // The kept repository belongs to another name, entry, or picked repository: the next attempt makes its own.
+        const replaced = progress.sourceRepositoryId && !sameOrigin(progress.sourceRepositoryOrigin, origin) ? progress.sourceRepositoryId : undefined
+        // Only one this console's own keyed create answered is removed (best effort: an orphan must not stop the new
+        // attempt). One a readback found, or kept without how it was learned, may be someone else's: it is left where it
+        // is (the confirm step said so, `keptElsewhere`).
+        const removed = replaced && progress.sourceRepositoryProvenance === 'created' ? replaced : undefined
+        if (replaced) {
+          if (removed) {
+            enter('source')
+            await deps.api.deleteSourceRepository(request.projectId, removed).catch(() => undefined)
+          }
           progress.sourceRepositoryId = undefined
           progress.sourceRepositoryOrigin = undefined
           progress.sourceRepositoryBinding = undefined
+          progress.sourceRepositoryProvenance = undefined
           report()
         }
         // A kept repository is used where it is, whatever the destination resolves to now.
@@ -474,13 +558,23 @@ export async function submitCreate(
         if (!sourceRepositoryId) {
           const created = newSource(appName, request.path, deps.catalog, deps)
           enter('source')
+          if (origin.kind === 'template') {
+            // Before the first send: a repository Platform already lists with this name where this one would go is not
+            // this attempt's, so the name is taken there. Validation sees only GitHub (an existing repository or
+            // package), not a record whose repository is not made yet, such as an earlier attempt's whose progress this
+            // browser lost. The one just removed may still be listed while Platform deletes it; one left in place is not.
+            const listed = await deps.api.sourceRepositories(request.projectId)
+            if (listed.data.some((repository) => repository.id !== removed && atAttemptPlace(repository, { origin, binding: created.binding }))) {
+              throw new RepositoryNameTaken(text.repositoryNameTaken)
+            }
+          }
           // The request carries the destination revision the user confirmed; a moved destination answers 409, never a create elsewhere.
           const validation = await deps.api.validateSourceRepository(request.projectId, created.request)
           if (!validation.valid) {
             const message = validation.message ?? ''
             throw new ValidationRejected(message, message ? [{ section: 'source', message }] : [])
           }
-          const attempt: SourceAttempt = { key: crypto.randomUUID(), origin, request: created.request, binding: created.binding }
+          const attempt: SourceAttempt = { key: crypto.randomUUID(), origin, request: created.request, binding: created.binding, sentAt: new Date().toISOString() }
           progress.attempts = { ...progress.attempts, source: attempt }
           report()
           sourceRepositoryId = await createSource(attempt, created.request, false)
@@ -513,25 +607,32 @@ export interface ConfirmedCreate {
 
 /**
  * The only action after an unconfirmed step, or after a refused resend
- * (`unsettled`): read back what that step may have made and adopt it, so the
- * next attempt resumes instead of making it twice. Reads only; never resends.
- * Only that phase's resource is looked up (a same-named resource found for
- * another phase is not this attempt's), and only where that attempt sent it
+ * (`unsettled`): read back what that step may have made. Reads only; never
+ * resends. Only that phase's resource is looked up (a same-named resource found
+ * for another phase is not this attempt's), and only where that attempt sent it
  * (its binding), never at the destination resolved now. A failed read rejects
  * and leaves the step as it was.
+ *
+ * A source repository or stack found that way is matched by name and place, not
+ * by the attempt's key (Platform's list does not expose it), so it is not
+ * adopted: it becomes the `candidate`, nothing is sent while it is shown, and
+ * only the user's `acceptCandidate` / `rejectCandidate` ends it. One the user
+ * already said is not theirs (`notMine`) is not offered again.
  *
  * A Platform list that does not show the resource is not proof it was not
  * made (an accepted write may not be listed yet). After an unconfirmed step the
  * next attempt therefore resends the step's recorded request under its key
  * first: Platform replays the first write for it instead of making a second
- * resource. An unsettled step stays unsettled until the readback finds it. The
- * Console reads its own store, so an app it does not list was not made.
+ * resource. An unsettled step stays unsettled. The Console reads its own store
+ * (the caller's apps), so an app it does not list was not made.
  */
 export async function confirmCreate(
   request: CreateRequest,
   resume: CreateProgress,
   deps: { api: Pick<CreateApi, 'app' | 'myApps' | 'sourceRepositories' | 'stacks'>; catalog: CreateCatalog }
 ): Promise<ConfirmedCreate> {
+  // A hit waiting for the user's choice is not looked for again.
+  if (resume.candidate) return { progress: resume }
   const progress: CreateProgress = { ...resume, unconfirmed: undefined, unsettled: undefined, unsettledSearched: undefined }
   const phase = resume.unconfirmed ?? (resume.unsettled === 'source' ? 'source' : resume.unsettled === 'stack' ? 'platform' : undefined)
   const appName = request.urlName
@@ -546,41 +647,72 @@ export async function confirmCreate(
   }
   const sourceAttempt = progress.attempts?.source
   if (phase === 'source' && sourceAttempt && !progress.sourceRepositoryId) {
-    const made = (await deps.api.sourceRepositories(request.projectId)).data.find((repository) => madeBy(repository, sourceAttempt))
-    if (made) {
-      progress.sourceRepositoryId = made.id
-      progress.sourceRepositoryOrigin = sourceAttempt.origin
-      progress.sourceRepositoryBinding = madeAt(made, sourceAttempt.binding)
-      progress.attempts = settled(progress.attempts, 'source')
+    const hit = (await deps.api.sourceRepositories(request.projectId)).data.find((repository) => !resume.notMine?.includes(repository.id) && atAttemptPlace(repository, sourceAttempt))
+    const binding = hit && madeAt(hit, sourceAttempt.binding)
+    if (hit && binding) {
+      const candidate: CreateCandidate = {
+        step: 'source', id: hit.id, binding,
+        ...(hit.createdAt ? { createdAt: hit.createdAt } : {}),
+        preexisting: createdBefore(hit.createdAt, sourceAttempt.sentAt),
+      }
+      return { progress: { ...progress, candidate } }
     }
   }
   const stackAttempt = progress.attempts?.stack
   if (phase === 'platform' && !progress.stackId) {
     const name = stackAttempt?.appName ?? appName
     const sourceRepositoryId = stackAttempt ? stackAttempt.sourceRepositoryId : progress.sourceRepositoryId
-    const made = (await deps.api.stacks(request.projectId)).find((stack) =>
-      stack.applicationName === name && stack.templateId === deps.catalog.template.id && stack.sourceRepositoryRefName === sourceRepositoryId)
-    if (made) {
-      progress.stackId = made.id
-      progress.stackAppName = name
-      progress.attempts = settled(progress.attempts, 'stack')
-    }
+    const hit = (await deps.api.stacks(request.projectId)).find((stack) =>
+      !resume.notMine?.includes(stack.id) && stack.applicationName === name && stack.templateId === deps.catalog.template.id && stack.sourceRepositoryRefName === sourceRepositoryId)
+    if (hit) return { progress: { ...progress, candidate: { step: 'stack', id: hit.id, appName: name } } }
   }
-  // A refused resend's attempt is found or it stays held (nothing is sent for it again), now known not to be listed
-  // where it was sent: that is what lets the user explicitly give it up (`abandonUnsettled`).
+  // A refused resend's attempt stays held (nothing is sent for it again), now known not to be listed where it was
+  // sent: that is what lets the user explicitly give it up (`abandonUnsettled`).
   const held = resume.unsettled && progress.attempts?.[resume.unsettled] ? resume.unsettled : undefined
   return { progress: held ? { ...progress, unsettled: held, unsettledSearched: true } : progress }
 }
 
 /**
  * The user's explicit choice to give up an unsettled create after a readback looked for it where it was sent and did
- * not find it: its key and request are dropped, and the next 作る starts a new attempt at the destination shown then.
+ * not find it (or found only what the user said is not theirs): its key and request are dropped, and the next 作る starts
+ * a new attempt at the destination shown then.
  * Not proof the earlier create failed: it may still be applied later (a resend refused while the first send was in
  * flight, or a first send applied without its key recorded), which then leaves two. Refused (unchanged) before such a readback.
  */
 export function abandonUnsettled(progress: CreateProgress): CreateProgress {
   if (!progress.unsettled || !progress.unsettledSearched) return progress
   return { ...progress, attempts: settled(progress.attempts, progress.unsettled), unsettled: undefined, unsettledSearched: undefined }
+}
+
+/**
+ * 「この置き場で続ける」 / 「このアプリで続ける」: the user says the readback's hit is what the earlier request made. It is kept as
+ * `found` (never deleted by this console) and the app goes on with it. A `preexisting` repository is not offered: it is
+ * refused (unchanged).
+ */
+export function acceptCandidate(progress: CreateProgress): CreateProgress {
+  const candidate = progress.candidate
+  if (!candidate) return progress
+  if (candidate.step === 'stack') {
+    return { ...progress, candidate: undefined, stackId: candidate.id, stackAppName: candidate.appName, stackProvenance: 'found', attempts: settled(progress.attempts, 'stack') }
+  }
+  const attempt = progress.attempts?.source
+  if (candidate.preexisting || !attempt) return progress
+  return {
+    ...progress, candidate: undefined,
+    sourceRepositoryId: candidate.id, sourceRepositoryOrigin: attempt.origin, sourceRepositoryBinding: candidate.binding, sourceRepositoryProvenance: 'found',
+    attempts: settled(progress.attempts, 'source'),
+  }
+}
+
+/**
+ * 「自分のものではない」 (and the only choice for a `preexisting` repository): the hit is not offered again and the earlier
+ * attempt stays held, as after a readback that found nothing. Nothing new is created from here: only the explicit
+ * give-up (`abandonUnsettled`, which states the residual risk) moves on.
+ */
+export function rejectCandidate(progress: CreateProgress): CreateProgress {
+  const candidate = progress.candidate
+  if (!candidate) return progress
+  return { ...progress, candidate: undefined, notMine: [...(progress.notMine ?? []), candidate.id], unsettled: candidate.step, unsettledSearched: true }
 }
 
 /** Both creation paths bind the console app to the actual platform name and stack. */

@@ -20,6 +20,8 @@ export const textJa = {
   alreadyCreated: (name: string) => `this app was already created as "${name}"; finish it with that URL name`,
   sourceUnavailable: 'source connections unavailable',
   destinationUnavailable: 'repository destination unavailable',
+  /** A new ひな形 attempt found, before sending anything, a repository with its name where it would go (the wizard returns to the URL name). */
+  repositoryNameTaken: 'この作成先には同じ名前の置き場がすでにあります',
   /** Where a new repository goes (Platform's resolved repository destination); never its reason or message. */
   destination: {
     blocked: '新しい置き場の作成先が決まっていないため、AI やテンプレートからは作れません。プロジェクトの管理者に設定を依頼してください。',
@@ -34,25 +36,53 @@ export const textJa = {
     /** A repository already made (or adopted) by an earlier attempt: the next attempt uses it where it is. */
     created: '作成済みの置き場',
     createdNote: 'この置き場は前回の操作で作成済みです。続きは、この置き場とアプリの保管場所で作ります。',
+    /** A repository a readback found and the user chose as the earlier attempt's: used, never deleted from here. */
+    found: '選んだ置き場',
+    foundNote: '前回の操作で作られたものとして選んだ置き場です。続きは、この置き場とアプリの保管場所で作ります。この画面からこの置き場を削除することはありません。',
     /** An earlier create whose outcome is unknown: the next attempt resends it exactly, to where it went. */
     pending: '前回作ろうとした置き場',
     pendingNote: '前回の作成の結果がまだ分かりません。二重に作らないよう、続きは前回と同じ内容をもう一度送って確かめます。ほかの作成先や名前では作りません。',
     retainedChecking: '作成済みの置き場を確認しています…',
-    retainedUnknown: '前回作成した置き場がどこにあるかを表示できないため、続きから作れません。「最初から作り直す」を選ぶと、その置き場は使わずに、いまの作成先へ新しく作ります。',
+    retainedUnknown: '前回の置き場がどこにあるかを表示できないため、続きから作れません。「最初から作り直す」を選ぶと、その置き場は使わずに、いまの作成先へ新しく作ります。前回の置き場は削除せず、そのまま残ります。',
     startOver: '最初から作り直す',
+    /** A kept repository the next attempt will not use, and that this console never deletes (it may be someone else's). */
+    leftInPlace: (where?: string) => `${where ? `前回の置き場「${where}」` : '前回の置き場'}は、今回の内容では使いません。この画面からは削除せず、そのまま残ります。`,
+  },
+  /**
+   * A readback found a repository (or app) with the earlier attempt's name where it was sent. Platform's answer does not
+   * say which request made it, so it is not used until the user chooses; nothing is sent meanwhile.
+   */
+  candidate: {
+    title: '前回の操作で作られた可能性がある置き場が見つかりました',
+    body: (where: string) => `${where} が見つかりました。名前と作成先は前回の操作と同じですが、前回の操作で作られたものかどうかは確かめられません。ほかの人やほかの操作が同じ名前で作った置き場かもしれません。あなたの置き場か選んでください。選ぶまで何も送りません。`,
+    createdAt: (at: string) => `作成日時: ${at}`,
+    createdAtUnknown: '作成日時: 分かりません',
+    use: 'この置き場で続ける',
+    notMine: '自分の置き場ではない',
+    stackTitle: '前回の操作で作られた可能性があるアプリが見つかりました',
+    stackBody: (name: string) => `アプリ「${name}」が見つかりました。名前とひな形は前回の操作と同じですが、前回の操作で作られたものかどうかは確かめられません。あなたのアプリか選んでください。選ぶまで何も送りません。`,
+    useStack: 'このアプリで続ける',
+    notMineStack: '自分のアプリではない',
+    /** A candidate created clearly before the earlier attempt's first send: not offered as the user's. */
+    preexistingTitle: '同じ名前の置き場がすでにあります',
+    preexisting: (where: string) => `${where} は前回の操作より前に作られていたため、前回の操作で作られたものではありません。この置き場は使いません。この作成先では、この名前はすでに使われています。`,
+    preexistingDismiss: 'この置き場は使わない',
   },
   /**
    * The resend of an earlier, uncertain create was refused, or it cannot be resent exactly. The refusal does not prove
-   * the earlier create failed, so nothing more is sent: a readback that finds what it made lets the user go on, and
-   * only after a readback that did not find it may the user explicitly give the earlier create up (`where` = where it went).
+   * the earlier create failed, so nothing more is sent: a readback that finds a candidate lets the user choose it and go
+   * on, and only after a readback that did not find it (or the user said its hit is not theirs) may the user explicitly
+   * give the earlier create up (`where` = where it went).
    */
   unsettled: {
     title: '前回の作成が受け付けられたかを確かめられません',
-    body: (where: string) => `前回 ${where} を作ろうとした操作の結果を確かめられません。作られている、または後から作られる可能性があるため、二重に作らないよう、ここからは何も送りません。「最新の状態を確認する」で見つかれば、その置き場で続きを作れます。`,
+    body: (where: string) => `前回 ${where} を作ろうとした操作の結果を確かめられません。作られている、または後から作られる可能性があるため、二重に作らないよう、ここからは何も送りません。「最新の状態を確認する」で見つかったものがあなたのものなら、それで続きを作れます。`,
     previous: '前回の作成先',
     repository: (repository: string, image?: string) => image ? `「${repository}」（アプリの保管場所 ${image}）` : `「${repository}」`,
     app: (name: string) => `アプリ「${name}」`,
-    notFound: (where: string) => `${where} はまだ見つかりません。少し待ってから、もう一度確認できます。前回の操作をあきらめて作り直すこともできますが、前回の操作によって後から ${where} が作られることがあり、そのときは二つになります。`,
+    notFound: (where: string) => `前回の操作による ${where} はまだ見つかりません。少し待ってから、もう一度確認できます。前回の操作をあきらめて作り直すこともできますが、前回の操作によって後から ${where} が作られることがあり、そのときは二つになります。`,
+    /** After the user said a readback's hit is not theirs (or it existed before): that name is taken where it was found. */
+    notMine: '見つかった同じ名前のものは、前回の操作で作られたものではないとして使いません。その作成先ではこの名前がすでに使われているため、作り直すときは別の名前にしてください。',
     startOver: '前回の操作をあきらめて作り直す',
   },
   /** A create step answered 2xx with an answer this console cannot read: it may have happened (never resent blindly). */

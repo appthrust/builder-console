@@ -176,8 +176,10 @@ export function useDraftCreation({ projectId, draft, tab, hasPending, now }: Dra
   const published = draftPublished(draft) && tab.continuedAfterPublishAt !== draft.publishedAt && !hasPending
   const implementation = useImplementation({ projectId, draft, handoff: execution?.approval?.implementationHandoff ?? draft.creationPlan?.implementationHandoff, enabled: Boolean(draft.createdApplicationStackId) && !published })
   const implementing = implementation.pending || implementation.state.phase === 'starting-workspace' || implementation.state.phase === 'running' || implementation.state.phase === 'pushing'
-  // Where the plan's new repository goes, shown on the proposal before 「この内容で作る」: the approval binds the
-  // revision shown, so nothing is approved while it is still read or could not be read.
+  // Where the plan's new repository goes, shown on the proposal before 「この内容で作る」. Nothing is approved before a first
+  // read has shown it (pending or failed). A later re-read that fails keeps the destination already shown, and approval
+  // stays offered for it: the control is `bindPlanDestination`, which reads Platform's current one fresh at approval and
+  // goes on only when it is the revision shown.
   const needsDestination = Boolean(newRepositoryRequest(draft.creationPlan)) && !execution
   const destinationRead = useQuery({ ...repositoryDestinationQuery(projectId), enabled: needsDestination })
   const destination: ShownDestination | undefined = !needsDestination ? undefined
@@ -363,8 +365,9 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
 
   /**
    * 「この内容で作る」: approve what the proposal shows. A plan that makes a new repository is approved only with its
-   * destination on screen, bound to the revision shown (the preparation checks Platform's current one against it);
-   * while the destination is read, unreadable or not set, it is read again instead and nothing is approved.
+   * destination on screen, bound to the revision shown; while no destination has been shown (first read pending or
+   * failed) or it is not set, it is read again instead and nothing is approved. A destination still on screen after a
+   * failed re-read is approvable: the preparation reads Platform's current one fresh and stops unless it is that revision.
    */
   function prepare() {
     host.clearFailure()

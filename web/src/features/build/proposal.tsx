@@ -16,8 +16,9 @@ export function ProposalBody({ proposal, action }: { proposal: BuildProposal; ac
   if (proposal.records.length) rows.push([text.artifact.records, proposal.records.map((record) => text.proposal.record(record.name, record.fields)).join(text.proposal.recordSeparator)])
   if (proposal.rules.length) rows.push([text.artifact.rules, <ul className="space-y-0.5">{proposal.rules.map((rule) => <li key={rule}>{rule}</li>)}</ul>])
   rows.push([copy.url, proposal.url ? <span className="break-all">{proposal.url}</span> : <span className="text-stone-500">{copy.urlLater}</span>])
-  // Where the new repository and its image go: Platform's destination, the one 「この内容で作る」 binds. Until it is
-  // shown (read, or read again after a failure: the action offers that) nothing is approved.
+  // Where the new repository and its image go: Platform's destination, the one 「この内容で作る」 binds. Until a read has
+  // shown it (read, or read again after a failed first read: the action offers that) nothing is approved; a failed
+  // re-read keeps the one shown, and the approval's fresh check against Platform's current revision is the control.
   if (proposal.newRepository === 'blocked') rows.push([copy.repository, <span className="text-amber-800">{copy.destinationBlocked}</span>])
   else if (proposal.newRepository === 'loading') rows.push([copy.repository, <span role="status" className="text-stone-500">{copy.destinationLoading}</span>])
   else if (proposal.newRepository === 'failed') {
