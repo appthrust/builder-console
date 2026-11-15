@@ -479,10 +479,12 @@ Only a `v<semver>` tag starts publication. The initial standalone release is
 catalog entry. The publisher retains their images, merges persisted release history,
 keeps earlier versions served, and makes the new version the only default.
 A version listed under the publisher-only `withdrawnVersions` key of `catalog/entry.yaml`
-stays recorded with `served: false`: existing installations keep running, nothing
-installs or moves to it again, and it cannot be published. `0.5.7` is withdrawn
-because an installation of it cannot change version (see the prompt-version
-registration rule above).
+is recorded with `served: false` in the submitted entry and cannot be published
+again. **This does not yet stop anyone from selecting it**: Cloud's catalog
+publication and the Platform's catalog projection both write `served: true` for
+every version today (APT-1105), so the only effect that reaches an estate is that
+the new release becomes the default. `0.5.7` is listed because an installation
+of it cannot change version (see the prompt-version registration rule above).
 
 The workflow builds `linux/amd64` and `linux/arm64`, signs the image index with
 GitHub OIDC/cosign, then submits the catalog entry to Cloud. A queued publication is

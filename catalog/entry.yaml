@@ -1,5 +1,6 @@
 # Publisher-only (hack/publish-entry.ts removes it before publication): recorded
-# versions that stay in the catalog with served: false.
+# versions submitted with served: false and never published again. Cloud and the
+# Platform do not carry the flag yet (APT-1105); until they do, this only records intent.
 # 0.5.7: once installed it cannot be moved to any other version (APT-1102).
 withdrawnVersions:
 - 0.5.7
