@@ -32,7 +32,7 @@ import { ActionError, Button, cn, EmptyState, focusHeading, LinkButton, Loading,
 import { DatabaseChanges } from '../app/database-changes'
 import { canEditApp } from '../app/permissions'
 import { ArtifactPane } from './artifact-pane'
-import { ConversationPane } from './conversation-pane'
+import { ConversationPane, PlanRejectionActions } from './conversation-pane'
 import { PublishStep } from './publish-step'
 import { SessionHeader, StageAction } from './session-header'
 import { useBuildSession } from './use-build-session'
@@ -79,9 +79,14 @@ function Session({ draft, groupId, stale }: { draft: BuildDraft; groupId: string
   // destination moved, the notice right below the proposal carries the same action (once, beside its explanation).
   const lastMessage = build.messages.at(-1)
   const reapproveNotice = lastMessage?.role === 'notice' && lastMessage.retry === 'prepare' && lastMessage.title === buildCopy.failure.destination.changed.title
-  // A plan Platform's validation rejected is never approved again: 「計画を作り直す」 is its only action, on the notice that
-  // explains the rejection, or on the proposal when that notice is gone (and no new plan is being made yet).
-  const replanNotice = lastMessage?.role === 'notice' && lastMessage.retry === 'plan'
+  // A plan Platform's validation rejected is never approved again. Its actions (「もう一度確かめる」 when the cause may lie
+  // outside the plan, 「計画を作り直す」) are on the notice that explains the rejection, or on the proposal when that notice
+  // is gone (and no new plan is being made yet). Once Platform refused a new plan for its generation limit, the proposal
+  // does not offer another: only the check is left, where it applies.
+  const rejectionNotice = lastMessage?.role === 'notice' && (lastMessage.retry === 'plan' || lastMessage.retry === 'recheck')
+  const limitNotice = lastMessage?.role === 'notice' && lastMessage.title === buildCopy.failure.limit.title
+  const offerRecheck = build.planRecheck
+  const offerReplan = !limitNotice
   const preparing = stage === 'decide' && build.proposal && !reapproveNotice && !build.planRejected && (primary.action === 'prepare' || primary.action === 'prepare-after-plan')
   // Only a destination on screen can be approved (the approval binds its revision): none is set (the proposal says only
   // a Project administrator can set it), it is still read, or no read has shown it yet (read it again here). One still on
@@ -91,7 +96,9 @@ function Session({ draft, groupId, stale }: { draft: BuildDraft; groupId: string
     {updatingPlan ? text.page.updatingPlan(progress?.elapsedLabel ?? '0:00') : build.proposal?.stale ? buildCopy.primary.refresh : buildCopy.primary.prepare}
   </Button>
   const proposalAction = build.planRejected
-    ? (stage === 'decide' && !replanNotice && !planPending ? <Button tone="primary" disabled={build.busy} onClick={build.replan}>{buildCopy.failure.plan.replan}</Button> : undefined)
+    ? (stage === 'decide' && !rejectionNotice && !planPending && (offerRecheck || offerReplan)
+      ? <PlanRejectionActions recheck={offerRecheck ? { disabled: build.busy, onClick: build.recheck } : undefined} replan={offerReplan ? { disabled: build.busy, onClick: build.replan } : undefined} />
+      : undefined)
     : !preparing ? undefined
       : build.proposal?.newRepository === 'failed' ? <><Button onClick={build.retryDestination}>{buildCopy.proposal.destinationRetry}</Button>{approve}</>
         : approve
@@ -127,7 +134,7 @@ function Session({ draft, groupId, stale }: { draft: BuildDraft; groupId: string
     </div>
     <div className={cn('flex min-h-0 flex-1 md:grid md:grid-rows-[minmax(0,1fr)]', artifactCollapsed ? 'md:grid-cols-[minmax(0,1fr)_2.75rem]' : 'md:grid-cols-[minmax(0,1fr)_minmax(18rem,22rem)] lg:grid-cols-[minmax(0,1fr)_26rem] xl:grid-cols-[minmax(0,1fr)_28rem]')}>
       <div id="build-conversation" role="tabpanel" aria-labelledby="build-tab-conversation" className={cn('min-h-0 min-w-0 flex-1 flex-col md:flex md:border-r md:border-line', tab === 'conversation' ? 'flex' : 'hidden')}>
-        <ConversationPane messages={build.messages} stage={stage} answering={build.busy} unsupported={build.result.unsupported} thinking={isBuildPending(draft.conversationTurns.at(-1))} waitingForAi={build.waitingForAi} planning={planning} proposalAction={proposalAction} queued={build.queued} progress={progress} prepareOpen={build.prepareOpen} ownerGroupName={ownerGroupName} failure={failure} onSend={build.send} onRetry={build.retry} onUseName={useName} />
+        <ConversationPane messages={build.messages} stage={stage} answering={build.busy} unsupported={build.result.unsupported} thinking={isBuildPending(draft.conversationTurns.at(-1))} waitingForAi={build.waitingForAi} planning={planning} proposalAction={proposalAction} queued={build.queued} progress={progress} prepareOpen={build.prepareOpen} ownerGroupName={ownerGroupName} failure={failure} planRejected={build.planRejected ? (build.planRecheck ? 'recheck' : 'replan') : undefined} onSend={build.send} onRetry={build.retry} onUseName={useName} />
       </div>
       <div id="build-artifact" role="tabpanel" aria-labelledby="build-tab-artifact" className={cn('relative min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain', tab === 'artifact' ? 'block' : 'hidden', artifactCollapsed ? 'md:hidden' : 'md:block')}>
         <ArtifactPane draft={draft} spec={build.spec} proposal={build.proposal} stage={stage} progress={progress} implementation={build.implementation.state} failure={build.failure} url={url} shareText={shareText} previewDatabaseReset={build.implementation.previewDatabaseReset} onOpenPreview={openPreview} onRetry={build.implementation.retry} onSkipTask={build.implementation.skipTask} onConfirm={build.implementation.confirm} onCollapse={() => setArtifactCollapsed(true)} databaseChanges={<DatabaseChanges projectId={me.projectId} databaseId={build.app && canEditApp(build.app, me) ? appView?.stack?.databaseComponentId : undefined} />} shareStep={sharing && build.app ? <PublishStep app={build.app} publishId={appView?.platform?.publish?.id} publishPreferences={draft.publishPreferences} onPublished={() => { build.published(); setSharing(false) }} onCancel={() => setSharing(false)} /> : undefined} />

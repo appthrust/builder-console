@@ -159,8 +159,28 @@ test('a validation that names a taken repository or URL is the name choice, not 
 })
 
 test('a plan for another destination is made again; no reason code is needed and no reference is offered', () => {
-  expect(planRejectionFailure(['The request does not match the Project repository destination.'])).toMatchObject({ kind: 'plan', plan: 'destination', ...buildCopy.failure.plan.destination })
-  expect(planRejectionFailure(['Creation plan needs changes before AppThrust tools can run.', 'Validate a repository destination before approving this creation plan.']).platformMessage).toBeUndefined()
+  const reference = { draftId: 'd', at: '2026-11-15T00:00:00Z' }
+  expect(planRejectionFailure(['The request does not match the Project repository destination.'], reference)).toMatchObject({ kind: 'plan', plan: 'destination', ...buildCopy.failure.plan.destination })
+  const unbound = planRejectionFailure(['Creation plan needs changes before AppThrust tools can run.', 'Validate a repository destination before approving this creation plan.'], reference)
+  expect(unbound.reference).toBeUndefined()
+  expect(unbound.recheck).toBeUndefined()
+  // A destination Platform calls unusable may be fixed by an administrator, outside the plan: the same plan may be checked again.
+  expect(planRejectionFailure(['Image access is not ready for the repository destination.'], reference)).toMatchObject({ kind: 'plan', plan: 'destination', recheck: true })
+})
+
+test('a validation answer with a reason this console does not know is the platform failure with its reference; the same plan may be checked again', () => {
+  const reference = { draftId: 'd', at: '2026-11-15T00:00:00Z' }
+  const lines = ['Creation plan needs changes before AppThrust tools can run.', 'Tool sequence appthrust.database.attach is not supported by this Platform.']
+  const failure = planRejectionFailure(lines, reference)
+  expect(failure).toMatchObject({ kind: 'platform', ...buildCopy.failure.platform, reference, recheck: true, raw: lines.join('\n') })
+  expect(failure.plan).toBeUndefined()
+})
+
+test('a failed request in the plan context keeps its class: the plan\'s field names are read only in a generation\'s stored error', () => {
+  const reference = { draftId: 'd', at: '2026-11-15T00:00:00Z' }
+  const text = "'creationPlan.applicationStackRequest' is required"
+  for (const status of [500, 400]) expect(classifyBuildFailure(text, status, 'plan', reference)).toMatchObject({ kind: 'platform', reference })
+  expect(classifyBuildFailure(text, undefined, 'plan', reference)).toMatchObject({ kind: 'plan', plan: 'incomplete' })
 })
 
 test('plan generations stopped by Platform\'s plan check read as the plan to make again; an unset destination as the destination notice', () => {
@@ -184,9 +204,9 @@ test('the plan copy is plain in both languages, without Platform\'s words', () =
   for (const language of ['ja', 'en'] as const) {
     setLanguage(language)
     const copy = buildCopy.failure.plan
-    const words = [copy.destination, copy.incomplete, copy.unknown].flatMap((item) => [item.title, item.reason]).join(' ')
+    const words = [copy.destination, copy.incomplete].flatMap((item) => [item.title, item.reason]).join(' ')
     expect(words).not.toMatch(/creationPlan|destinationRevision|AppThrust/)
-    if (language === 'en') expect(words + copy.said + copy.replan).not.toMatch(/[ぁ-んァ-ヶ一-龠]/)
+    if (language === 'en') expect(words + copy.recheck + copy.replan).not.toMatch(/[ぁ-んァ-ヶ一-龠]/)
     else expect(words).not.toMatch(/問い合わせ番号|あなたの入力や操作の問題ではありません/)
   }
 })

@@ -107,9 +107,8 @@ export const textEn: typeof textJa = {
     plan: {
       destination: { title: 'The plan needs to match the current repository destination', reason: 'Nothing has been created yet. The plan does not match where the project creates repositories now. Make the plan again to match the current destination.' },
       incomplete: { title: 'The plan is missing something', reason: 'Nothing has been created yet. The plan AI made does not meet the rules for building an app. Make the plan again and AI will rethink it.' },
-      unknown: { title: 'This plan cannot be built', reason: 'Nothing has been created yet. The platform’s explanation is shown below as it was given. Tell AI anything you want to change, then make the plan again.' },
-      said: 'The platform’s explanation',
       replan: 'Make the plan again',
+      recheck: 'Check again',
     },
   },
   /** A state this console version does not know: the known parts stay visible, only what depends on it stops. */

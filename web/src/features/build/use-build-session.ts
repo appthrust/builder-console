@@ -99,11 +99,14 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
       const last = current.messages.at(-1)
       const messages = last?.role === 'notice' && last.title === next.title && last.detail === next.reason ? current.messages.slice(0, -1) : current.messages
       // The repository destination moved (approve again, labelled 「この内容で作る」) or is not set (retry once a
-      // Project administrator has set it), or the plan has to change: none is an error of this session, and nothing
-      // was made to clean up. A rejected plan is followed by a new plan (`retry: 'plan'`), never by the same plan again.
-      const calm = unconfirmed || next.destination === 'changed' || next.destination === 'blocked' || next.kind === 'plan'
-      const retry = unconfirmed ? 'confirm' as const : next.kind === 'plan' ? 'plan' as const : next.kind !== 'policy' ? context : undefined
-      return { ...current, ...(next.kind === 'quota' || next.kind === 'policy' ? { planRequested: false } : {}), messages: [...messages, { role: 'notice', tone: calm ? 'warning' : 'error', title: next.title, detail: next.reason, ...(next.platformMessage ? { platformMessage: next.platformMessage } : {}), ...(retry ? { retry } : {}), at, ...(next.reference ? { reference: next.reference } : {}) }] }
+      // Project administrator has set it), the plan has to change, or no new plan may be made (the generation limit):
+      // none is an error of this session, and nothing was made to clean up. A rejected plan is followed by a new plan
+      // (`retry: 'plan'`), and by the same plan validated once more when the cause may lie outside it (`recheck`); a
+      // generation Platform refused for its limit is never offered again.
+      const limited = context === 'plan' && next.kind === 'limit'
+      const calm = unconfirmed || next.destination === 'changed' || next.destination === 'blocked' || next.kind === 'plan' || limited
+      const retry = unconfirmed ? 'confirm' as const : next.recheck ? 'recheck' as const : next.kind === 'plan' ? 'plan' as const : next.kind !== 'policy' && !limited ? context : undefined
+      return { ...current, ...(next.kind === 'quota' || next.kind === 'policy' || limited ? { planRequested: false } : {}), messages: [...messages, { role: 'notice', tone: calm ? 'warning' : 'error', title: next.title, detail: next.reason, ...(retry ? { retry } : {}), at, ...(next.reference ? { reference: next.reference } : {}) }] }
     })
   }
   async function perform(context: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish', action: () => Promise<void>) {
@@ -291,7 +294,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
     })
   }, [answers.name, answers.shareChoice, draft.publishPreferences, draft.title, spec.name, running, implementing, busy, failure, nameRetryAt])
 
-  function retry(context?: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish' | 'confirm') {
+  function retry(context?: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish' | 'confirm' | 'recheck') {
     const last = session.messages.at(-1)
     context ??= last?.role === 'notice' && last.retry ? last.retry : retryContext.current
     // A stop at the repository destination made nothing: trying again is a fresh preparation (it reads the
@@ -306,6 +309,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
     if (context === 'confirm') void queryClient.invalidateQueries({ queryKey: buildDraftOptions(projectId, draft.id).queryKey })
     else if (reapprove) creationEffects.prepare()
     else if (context === 'publish' || context === 'implement' || context === 'prepare') creationEffects.retry(context)
+    else if (context === 'recheck') creationEffects.recheck()
     else if (context === 'plan') patch({ planRequested: true })
     else if (context === 'turn' && !store.state.pending.length && isOneOf(turn?.status, 'failed')) send(turn!.userMessage)
   }
@@ -325,10 +329,14 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
       else send(buildCopy.questions.kickoffReply)
     },
     prepare: creationEffects.prepare,
-    /** Platform's validation rejected the plan on screen: it is not approved again; only a new plan (`replan`) goes on. */
+    /** Platform's validation rejected the plan on screen: it is not approved again; a new plan (`replan`) goes on. */
     planRejected: creation.planRejected,
-    /** 「計画を作り直す」: asks for a new plan; the rejected one is never validated or begun again. */
+    /** The rejected plan's cause may lie outside it: 「もう一度確かめる」 (`recheck`) is offered too. */
+    planRecheck: creation.planRecheck,
+    /** 「計画を作り直す」: asks for a new plan. */
     replan: () => retry('plan'),
+    /** 「もう一度確かめる」: the rejected plan validated once more, unchanged (one validation per click). */
+    recheck: () => retry('recheck'),
     /** Reads the repository destination again after its read failed (nothing is approved meanwhile). */
     retryDestination: creation.retryDestination,
     /** The shared name-collision recovery (use-draft-creation `rename`). */

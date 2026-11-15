@@ -111,15 +111,15 @@ export const textJa = {
       mismatch: { title: '置き場の作成先を確かめられませんでした', reason: 'まだ何も作っていません。この画面を開き直しても続くときは、管理者に相談してください。' },
     },
     /**
-     * Platform's validation answered that the plan itself has to change: nothing was made, and the same plan is never
-     * sent again; the action makes a new plan. `unknown` shows Platform's sentence under `said`.
+     * Platform's validation answered that the plan itself has to change: nothing was made; the action makes a new
+     * plan. `recheck` validates the same plan once more when the cause may lie outside it (a reason this console does
+     * not know, shown as the platform failure, or a destination Platform calls unusable).
      */
     plan: {
       destination: { title: '計画を、いまの置き場の作成先に合わせる必要があります', reason: 'まだ何も作っていません。計画が、プロジェクトでいま決まっている置き場の作成先と合っていません。計画を作り直すと、いまの作成先に合わせた計画になります。' },
       incomplete: { title: '計画に足りないところがありました', reason: 'まだ何も作っていません。AI の作った計画が、アプリを作るときの決まりを満たしていませんでした。計画を作り直すと、AI がもう一度考えます。' },
-      unknown: { title: 'この計画では作れませんでした', reason: 'まだ何も作っていません。基盤からの説明を、そのまま下に出しています。変えたいところがあれば AI に伝えてから、計画を作り直してください。' },
-      said: '基盤からの説明',
       replan: '計画を作り直す',
+      recheck: 'もう一度確かめる',
     },
   },
   /** A state this console version does not know: the known parts stay visible, only what depends on it stops. */

@@ -46,9 +46,10 @@ export type BuildMessage =
   | { role: 'assistant'; text: string; summary?: string; changed?: string[]; question?: string; options?: string[]; proposal?: BuildProposal; link?: { kind: 'excel2app'; draftId: string }; at: string; turnId?: string }
   /**
    * `retry: 'confirm'` re-reads the draft after a write whose answer could not be read; it never resends that write.
-   * `platformMessage`: Platform's own sentences for a reason this console does not know, shown verbatim under the fixed words.
+   * `retry: 'recheck'`: Platform's validation rejected the plan for a cause that may lie outside it; the notice offers
+   * 「もう一度確かめる」 (the same plan validated once more) and 「計画を作り直す」.
    */
-  | { role: 'notice'; tone: 'info' | 'warning' | 'error'; title: string; detail?: string; platformMessage?: string; at: string; retry?: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish' | 'confirm'; reference?: BuildFailure['reference'] }
+  | { role: 'notice'; tone: 'info' | 'warning' | 'error'; title: string; detail?: string; at: string; retry?: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish' | 'confirm' | 'recheck'; reference?: BuildFailure['reference'] }
 export interface ProgressCard {
   kind: 'workspace' | 'turn' | 'plan' | 'prepare' | 'implement' | 'publish'
   title: string
@@ -75,8 +76,8 @@ export interface BuildFailure {
   /**
    * `unconfirmed`: a write answered 2xx with an answer this console could not read; it may have happened.
    * `destination`: Platform's repository destination moved, is not set, or did not match; nothing was created.
-   * `plan`: Platform's validation answered that this plan cannot be approved as it is (or a plan generation stopped at
-   * that check); nothing was created and only a new plan goes on, never the same plan again.
+   * `plan`: Platform's validation answered that this plan cannot be approved as it is, for a reason this console knows
+   * (or a plan generation's stored error is that check); nothing was created and a new plan goes on.
    */
   kind: 'workspace' | 'unavailable' | 'policy' | 'quota' | 'limit' | 'forbidden' | 'timeout' | 'failed' | 'name-taken' | 'interrupted' | 'platform' | 'group' | 'unconfirmed' | 'destination' | 'plan'
   title: string
@@ -88,12 +89,15 @@ export interface BuildFailure {
   destination?: 'changed' | 'blocked' | 'mismatch'
   /**
    * `plan` only: what the plan has to change. `destination`: it does not carry the Project's current repository
-   * destination (none, or another one); `incomplete`: it breaks Platform's rules for a plan; `unknown`: a reason this
-   * console does not know, said in `platformMessage`.
+   * destination (none, or another one); `incomplete`: it breaks Platform's rules for a plan.
    */
-  plan?: 'destination' | 'incomplete' | 'unknown'
-  /** `plan` `unknown` only: Platform's own sentences, shown verbatim (they are not secrets). */
-  platformMessage?: string
+  plan?: 'destination' | 'incomplete'
+  /**
+   * Platform's validation answered `valid: false` for a cause that may lie outside the plan: a reason this console
+   * does not know (kind `platform`, with its reference) or a repository destination Platform calls unusable (kind
+   * `plan`). The same plan may be validated once more, only on the user's 「もう一度確かめる」 (use-draft-creation `recheck`).
+   */
+  recheck?: true
   suggestedName?: string
   reasonCode?: 'PublishURLConflict'
   raw?: string

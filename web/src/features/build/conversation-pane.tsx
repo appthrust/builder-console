@@ -17,7 +17,7 @@ type Assistant = Extract<BuildMessage, { role: 'assistant' }>
 /** Pixels from the bottom that still count as "reading the newest message". */
 const STICK = 96
 
-export function ConversationPane({ messages, stage, answering, unsupported = false, thinking: turnPending, waitingForAi, planning, proposalAction, queued, progress, prepareOpen, ownerGroupName, failure, onSend, onRetry, onUseName }: {
+export function ConversationPane({ messages, stage, answering, unsupported = false, thinking: turnPending, waitingForAi, planning, proposalAction, queued, progress, prepareOpen, ownerGroupName, failure, planRejected, onSend, onRetry, onUseName }: {
   messages: BuildMessage[]
   stage: BuildStage
   answering: boolean
@@ -38,6 +38,11 @@ export function ConversationPane({ messages, stage, answering, unsupported = fal
   progress?: ProgressCard
   /** The current failure; a name collision turns the notice's action into the name choice. */
   failure?: BuildFailure
+  /**
+   * Platform's validation rejected the plan on screen (`recheck`: it may also be validated once more). A preparation
+   * retry from an earlier notice would validate it unchanged: it is not offered meanwhile.
+   */
+  planRejected?: 'replan' | 'recheck'
   onSend(text: string): void
   onRetry(kind: NonNullable<Extract<BuildMessage, { role: 'notice' }>['retry']>): void
   onUseName(name: string): void
@@ -90,6 +95,8 @@ export function ConversationPane({ messages, stage, answering, unsupported = fal
         {messages.map((message, index) => {
           const key = `${message.at}-${index}`
           if (message.role === 'notice') {
+            // A preparation retry offered before Platform's validation rejected the plan would validate that plan as it is.
+            const stale = planRejected !== undefined && message.retry === 'prepare'
             // Retrying a prepare with the same name can only fail again: the only way forward is a different name.
             const nameTaken = message.retry === 'prepare' && failure?.kind === 'name-taken' && message.title === failure.title
             // After an unreadable write answer the action only reads the draft back: it is never labelled as a retry.
@@ -97,14 +104,16 @@ export function ConversationPane({ messages, stage, answering, unsupported = fal
             const reapprove = message.retry === 'prepare' && message.title === buildCopy.failure.destination.changed.title
             // A plan Platform's validation rejected is followed by a new plan: the action says so, it never resends the plan.
             const plan = buildCopy.failure.plan
-            const replan = message.retry === 'plan' && [plan.destination.title, plan.incomplete.title, plan.unknown.title].includes(message.title)
+            const replan = message.retry === 'plan' && [plan.destination.title, plan.incomplete.title].includes(message.title)
             const label = message.retry === 'confirm' ? buildCopy.failure.confirm : reapprove ? buildCopy.primary.prepare : replan ? buildCopy.failure.plan.replan : uiText.conversation.retry
-            const actions = nameTaken ? <NameChoice suggestion={failure.suggestedName} onUse={onUseName} /> : message.retry ? <Button size="sm" tone={reapprove || replan ? 'primary' : undefined} onClick={() => onRetry(message.retry!)}>{label}</Button> : undefined
-            const reference = message.reference ? buildFailureReference(message.reference) : undefined
+            // 「もう一度確かめる」 only while that plan is still the rejected one on screen; 「計画を作り直す」 always.
+            const actions = stale ? undefined
+              : message.retry === 'recheck' ? <PlanRejectionActions size="sm" recheck={planRejected === 'recheck' ? { onClick: () => onRetry('recheck') } : undefined} replan={{ onClick: () => onRetry('plan') }} />
+                : nameTaken ? <NameChoice suggestion={failure.suggestedName} onUse={onUseName} />
+                  : message.retry ? <Button size="sm" tone={reapprove || replan ? 'primary' : undefined} onClick={() => onRetry(message.retry!)}>{label}</Button> : undefined
             return <Notice key={key} tone={message.tone} title={message.title} actions={actions}>
               {message.detail}
-              {message.platformMessage ? <PlatformMessage text={message.platformMessage} /> : null}
-              {reference ? <div className="mt-3 flex flex-wrap items-center gap-2"><span className="min-w-0 break-all text-xs">{reference}</span><CopyButton value={reference} label={buildCopy.failure.copyReference} /></div> : null}
+              {message.reference ? <FailureReference reference={message.reference} /> : null}
             </Notice>
           }
           // The console's own requests (opening, 用意する) are not the user's words; the AI's question speaks for them.
@@ -133,12 +142,21 @@ export function UserMessage({ text }: { text: string }) {
   </article>
 }
 
-/** Platform's own sentences for a reason this console does not know, as said (they are not secrets), under their label. */
-export function PlatformMessage({ text }: { text: string }) {
-  return <div className="mt-2">
-    <p className="text-xs font-medium">{buildCopy.failure.plan.said}</p>
-    <p lang="en" className="mt-0.5 whitespace-pre-wrap break-words font-mono text-xs">{text}</p>
-  </div>
+/** A failure's support reference, with its copy button. */
+export function FailureReference({ reference }: { reference: NonNullable<BuildFailure['reference']> }) {
+  const value = buildFailureReference(reference)
+  return <div className="mt-3 flex flex-wrap items-center gap-2"><span className="min-w-0 break-all text-xs">{value}</span><CopyButton value={value} label={buildCopy.failure.copyReference} /></div>
+}
+
+/**
+ * What follows Platform's validation rejecting a plan: 「もう一度確かめる」 (the same plan validated once more) when its
+ * cause may lie outside the plan, and 「計画を作り直す」 (a new plan) unless none may be made. The first one is primary.
+ */
+export function PlanRejectionActions({ size, recheck, replan }: { size?: 'sm'; recheck?: { disabled?: boolean; onClick(): void }; replan?: { disabled?: boolean; onClick(): void } }) {
+  return <>
+    {recheck ? <Button size={size} tone="primary" disabled={recheck.disabled} onClick={recheck.onClick}>{buildCopy.failure.plan.recheck}</Button> : null}
+    {replan ? <Button size={size} tone={recheck ? undefined : 'primary'} disabled={replan.disabled} onClick={replan.onClick}>{buildCopy.failure.plan.replan}</Button> : null}
+  </>
 }
 
 export function AiTurn({ label, children }: { label?: string; children: ReactNode }) {

@@ -437,32 +437,67 @@ describe('the plan', () => {
     expect((await api.get(sessionId)).lifecycle).toEqual({ kind: 'known', value: 'created' })
   })
 
-  test('a plan Platform\'s validation rejects shows its reason, withdraws 「この内容で作る」 and offers only a new plan (APT-1094)', async () => {
+  /** A current plan on the page, its validation answering `answer` (valid: false) once on 「この内容で作る」. */
+  async function rejectedPlan(answer: Record<string, unknown>) {
     const { draftId, sessionId } = await startSession()
     const session = await api.get(sessionId)
     await api.createTurn(sessionId, { kind: 'request_plan', specRevision: 0 }, { key: mintIdempotencyKey(), version: session.version })
     await finishActive(sessionId)
     const page = await open(draftId)
     await settle(30)
-    const sentence = 'Tool sequence appthrust.database.attach is not supported by this Platform.'
-    const answer = { valid: false, message: 'Creation plan needs changes before AppThrust tools can run.', staticErrors: [sentence] }
     const validations = new RegExp(`/application-drafts/${draftId}/creation-plan-validations$`)
     mock.rewrites.push({ method: 'POST', path: validations, once: true, body: (wire) => ({ ...answer, operation: wire.operation, resource: answer }) })
     await act(async () => { button(page.container.querySelector('[data-testid="build-proposal"]')!, buildCopy.primary.prepare).click() })
     await settle(40)
-    const notice = notices(page).find((item) => item.querySelector('p')?.textContent === buildCopy.failure.plan.unknown.title)!
-    expect(notice.textContent).toContain(buildCopy.failure.plan.unknown.reason)
-    expect(notice.textContent).toContain(sentence)
-    expect(notice.textContent).not.toContain('Creation plan needs changes')
-    expect(page.container.textContent).not.toContain(buildCopy.failure.platform.title)
+    return { draftId, sessionId, page, validations, executions: new RegExp(`/application-drafts/${draftId}/creation-executions$`) }
+  }
+  /** A notice's or the proposal's actions, without the support-reference copy and the 「詳しい人向け」 fold. */
+  const actionLabels = (scope: Element) => [...scope.querySelectorAll('button')].map((item) => item.textContent?.trim()).filter((label) => label !== buildCopy.failure.copyReference && label !== text.artifact.advanced)
+
+  test('a plan that breaks Platform\'s plan rules withdraws 「この内容で作る」 and offers only a new plan (APT-1094)', async () => {
+    const { sessionId, page, validations, executions } = await rejectedPlan({ valid: false, message: 'Creation plan needs changes before AppThrust tools can run.', staticErrors: ["'creationPlan.implementationHandoff' is required when applicationStackRequest is present"] })
+    const notice = notices(page).find((item) => item.querySelector('p')?.textContent === buildCopy.failure.plan.incomplete.title)!
+    expect(notice.textContent).toContain(buildCopy.failure.plan.incomplete.reason)
+    expect(notice.textContent).not.toContain('creationPlan')
     expect(page.container.textContent).not.toContain(buildCopy.failure.copyReference)
-    expect([...notice.querySelectorAll('button')].map((item) => item.textContent?.trim())).toEqual([buildCopy.failure.plan.replan])
+    expect(actionLabels(notice)).toEqual([buildCopy.failure.plan.replan])
     expect(buttons(page.container.querySelector('[data-testid="build-proposal"]')!, buildCopy.primary.prepare)).toHaveLength(0)
     await act(async () => { button(notice, buildCopy.failure.plan.replan).click() })
     await settle()
     expect((await api.allTurns(sessionId)).at(-1)).toMatchObject({ kind: 'request_plan' })
     expect(mock.count('POST', validations)).toBe(1)
-    expect(mock.count('POST', new RegExp(`/application-drafts/${draftId}/creation-executions$`))).toBe(0)
+    expect(mock.count('POST', executions)).toBe(0)
+  })
+
+  test('a reason this console does not know is the platform failure with its reference; 「もう一度確かめる」 validates the same plan once, also after a reload (APT-1094)', async () => {
+    const sentence = 'Tool sequence appthrust.database.attach is not supported by this Platform.'
+    const { draftId, page, validations, executions } = await rejectedPlan({ valid: false, message: 'Creation plan needs changes before AppThrust tools can run.', staticErrors: [sentence] })
+    const notice = notices(page).find((item) => item.querySelector('p')?.textContent === buildCopy.failure.platform.title)!
+    expect(notice.textContent).toContain(buildCopy.failure.platform.reason)
+    expect(notice.textContent).toContain(buildCopy.failure.copyReference)
+    // Platform's sentences are folded away under 「詳しい人向け」, never told as what the user did wrong.
+    expect(notice.textContent).not.toContain(sentence)
+    await act(async () => { button(notice, text.artifact.advanced).click() })
+    await settle()
+    expect(notice.textContent).toContain(sentence)
+    expect(actionLabels(notice)).toEqual([buildCopy.failure.plan.recheck, buildCopy.failure.plan.replan])
+    expect(buttons(page.container.querySelector('[data-testid="build-proposal"]')!, buildCopy.primary.prepare)).toHaveLength(0)
+    await settle(40)
+    expect(mock.count('POST', validations)).toBe(1)
+
+    // A reload keeps the rejection: the proposal offers the check and a new plan, never 「この内容で作る」; nothing validates on its own.
+    const reloaded = await open(draftId)
+    await settle(30)
+    const proposal = reloaded.container.querySelector('[data-testid="build-proposal"]')!
+    expect(actionLabels(proposal)).toEqual([buildCopy.failure.plan.recheck, buildCopy.failure.plan.replan])
+    expect(mock.count('POST', validations)).toBe(1)
+    const writes = () => [mock.count('PATCH', new RegExp(`/application-drafts/${draftId}$`)), mock.count('POST', new RegExp(`/application-drafts/${draftId}/creation-plan-generations$`))]
+    const before = writes()
+    await act(async () => { button(proposal, buildCopy.failure.plan.recheck).click() })
+    await settle(40)
+    expect(mock.count('POST', validations)).toBe(2)
+    expect(writes()).toEqual(before)
+    expect(mock.count('POST', executions)).toBe(1)
   })
 
   test('a spec change accepted after planning makes the plan stale: no creation, re-planning offered', async () => {

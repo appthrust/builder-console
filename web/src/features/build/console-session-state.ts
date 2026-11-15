@@ -100,7 +100,7 @@ export function saveConsoleStart(start: ConsoleStart | undefined, storage?: Pick
 const creationSchema: z.ZodType<CreationTab> = z.object({
   groupId: z.string(), createdAppId: z.string().optional(), continuedAfterPublishAt: z.string().optional(),
   prepareRequested: z.boolean(), reusePlan: z.boolean(), executionRequestId: z.string().optional(), initialReleaseId: z.string().optional(),
-  approvedDestinationRevision: z.string().optional(), rejectedPlanGenerationId: z.string().optional(),
+  approvedDestinationRevision: z.string().optional(), rejectedPlan: z.object({ generationId: z.string(), recheck: z.boolean() }).optional(),
 })
 const CREATION_PREFIX = 'builder-console:build-creation:'
 
