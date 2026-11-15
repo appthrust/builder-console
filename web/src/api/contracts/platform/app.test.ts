@@ -76,6 +76,7 @@ describe('application stacks (platformApiListApplicationStacks)', () => {
   test('wire variants', () => {
     assertWireContractCases(listApplicationStacksContract, [
       { name: 'the marshalled list', variant: 'present', path: '/data', wire: { data: [stack] }, expect: { accept: true, check: (value) => expect([value[0]?.id, value[0]?.sourceKind, value[0]?.webComponentId]).toEqual(['mitsumori', { kind: 'known', value: 'application-source-repository' }, 'mitsumori-web']) } },
+      { name: 'a stack installed from the catalog has no template', variant: 'empty', path: '/data/*/templateId', wire: { data: [stack, { ...without(stack, 'sourceRepositoryRefName'), id: 'builder-console', templateId: '', sourceKind: 'sample-image' }] }, expect: { accept: true, check: (value) => expect(value.map((item) => [item.id, item.templateId])).toEqual([['mitsumori', 'nextjs-postgres'], ['builder-console', '']]) } },
       { name: 'an empty list', variant: 'empty', path: '/data', wire: { data: [] }, expect: { accept: true, value: [] } },
       { name: 'a null list is broken', variant: 'null', path: '/data', wire: { data: null }, expect: { accept: false, issues: [{ path: '/data', code: 'invalid_type' }] } },
       { name: 'the source kind is required', variant: 'absent', path: '/data/*/sourceKind', wire: { data: [without(stack, 'sourceKind')] }, expect: { accept: false, issues: [{ path: '/data/*/sourceKind', code: 'missing' }] } },

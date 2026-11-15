@@ -69,6 +69,8 @@ export const publishReader: z.ZodType<AppPublish> = Publish.pick({ id: true, app
 export const stackReader: z.ZodType<AppStack> = ApplicationStack.pick({
   id: true, projectId: true, templateId: true, imageRef: true, applicationId: true, branchId: true, webComponentId: true, databaseComponentId: true, sourceRepositoryRefName: true,
 }).extend({
+  // A stack installed from the catalog has no template: Platform sends "".
+  templateId: z.union([z.literal(''), ApplicationStack.shape.templateId]),
   sourceKind: openCanonical(ApplicationTemplateSourceKind),
   publish: publishReader.optional(),
   buildFailure: BuildFailure.pick({ lines: true }).optional(),
