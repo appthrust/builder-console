@@ -17,7 +17,6 @@ export const textEn: typeof textJa = {
   alreadyCreated: (name: string) => `This app was already created as "${name}"; finish it with that URL name.`,
   sourceUnavailable: 'The GitHub connection is unavailable.',
   destinationUnavailable: 'The repository destination is not set.',
-  pendingCreate: (name: string) => `The earlier request to create "${name}" has no known result yet. Change the URL name back to "${name}", then try again.`,
   destination: {
     blocked: 'Where new repositories are created has not been set, so apps cannot be made with AI or from a template yet. Ask a project administrator to set it.',
     repository: 'New repository',
@@ -31,14 +30,19 @@ export const textEn: typeof textJa = {
     created: 'Repository already created',
     createdNote: 'This repository was created earlier. The app continues with this repository and image location.',
     pending: 'Repository requested earlier',
-    pendingNote: 'The earlier create request has no known result yet. So nothing is created twice, the same request is sent again to check: if it arrived, that repository is used; if not, the destination at that time is shown again.',
+    pendingNote: 'The earlier create request has no known result yet. So nothing is created twice, the same request is sent again to check; no other destination or name is used.',
     retainedChecking: 'Checking the repository created earlier…',
     retainedUnknown: 'Where the repository created earlier is cannot be shown, so the app cannot continue from it. Select “Start over” to leave that repository unused and create a new one at the current destination.',
     startOver: 'Start over',
   },
-  keyConflict: {
-    title: 'The earlier create request does not match',
-    body: 'The earlier create request was already accepted with different contents. So nothing is created twice, this page cannot continue.',
+  unsettled: {
+    title: 'Could not confirm whether the earlier create request was accepted',
+    body: (where: string) => `The result of the earlier request to create ${where} cannot be confirmed. It may have been created, or may still be created later, so nothing more is sent from here. If “Check the latest state” finds it, you can continue with it.`,
+    previous: 'the earlier repository',
+    repository: (repository: string, image?: string) => image ? `“${repository}” (image location ${image})` : `“${repository}”`,
+    app: (name: string) => `the app “${name}”`,
+    notFound: (where: string) => `${where} has not been found yet. You can check again in a moment. You can also give up the earlier request and create again, but the earlier request may still create ${where} later; you would then have two.`,
+    startOver: 'Give up the earlier request and create again',
   },
   unconfirmed: {
     title: 'Could not confirm what was created',

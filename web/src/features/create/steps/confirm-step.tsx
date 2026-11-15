@@ -14,10 +14,10 @@ export type AdoptionImage = { kind: 'checking' } | { kind: 'known'; path: string
 
 /**
  * The repository an earlier attempt made for this source (`created`, reused where it is) or sent a create for whose
- * outcome is unknown (`pending`, resent exactly there); `checking` / `unknown` = progress saved without where it is,
- * being read back / not showable.
+ * outcome is unknown (`pending`, resent exactly there; `held` once that resend was refused, nothing is sent and the
+ * wizard's notice says why); `checking` / `unknown` = progress saved without where it is, being read back / not showable.
  */
-export type KeptSourceState = 'created' | 'pending' | 'checking' | 'unknown'
+export type KeptSourceState = 'created' | 'pending' | 'held' | 'checking' | 'unknown'
 
 export function ConfirmStep({
   form,
@@ -66,7 +66,7 @@ export function ConfirmStep({
     ...(values.entry === 'template' && templateName ? [[copy.create.confirm.labels.template, templateName] as [string, ReactNode]] : []),
     ...(values.entry === 'template' && newRepository
       ? [
-          [kept === 'created' ? text.destination.created : kept === 'pending' ? text.destination.pending : text.destination.repository, mono(newRepository.repository)],
+          [kept === 'created' ? text.destination.created : kept === 'pending' || kept === 'held' ? text.destination.pending : text.destination.repository, mono(newRepository.repository)],
           [text.destination.image, newRepository.image ? mono(newRepository.image) : <span className="text-stone-500">{text.destination.imageUnknown}</span>],
         ] as Array<[string, ReactNode]>
       : []),
@@ -96,7 +96,7 @@ export function ConfirmStep({
         {copy.create.confirm.summary(values.displayName, groupName, shareText)}
       </p>
       <SummaryList rows={rows} />
-      {kept && values.entry !== 'image' ? (
+      {kept && kept !== 'held' && values.entry !== 'image' ? (
         <div data-testid="create-kept-source">
           {kept === 'created' ? <Notice>{text.destination.createdNote}</Notice>
             : kept === 'pending' ? <Notice tone="warning">{text.destination.pendingNote}</Notice>

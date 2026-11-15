@@ -80,11 +80,20 @@ export interface CreateProgress {
   /**
    * Platform creates that were sent (or about to be) and whose resource is not recorded: they may have been applied.
    * Each keeps its Idempotency-Key and the exact request it carried. The next attempt sends nothing else before it has
-   * resent that request under that key (Platform replays an accepted write, also after the destination moved, and
-   * answers an unaccepted one as a new request). Only the resource it answers, or Platform's refusal of that very write
-   * (a 4xx), ends an attempt; a validation answer, another destination or another name never does.
+   * resent that request under that key (Platform replays an accepted write, also after the destination moved). Only
+   * the resource it answers ends such an attempt, or, for a request sent in the same attempt that made it, Platform's
+   * refusal of that very write (a 4xx). A validation answer, another destination or another name never does.
    */
   attempts?: { source?: SourceAttempt; stack?: StackAttempt }
+  /**
+   * The attempt whose resend Platform refused (or that cannot be resent exactly). The refusal does not prove the first
+   * send was not applied (Platform does not serialize a resend with a first send still in flight, and records the key
+   * only after the write), so nothing is sent for it any more. A readback that finds the resource clears it; otherwise
+   * only the user's explicit `abandonUnsettled`, offered once a readback has looked and not found it, does.
+   */
+  unsettled?: 'source' | 'stack'
+  /** A readback has read Platform's list and not found the unsettled attempt's resource where it was sent. */
+  unsettledSearched?: boolean
 }
 
 /** What a source repository is made for: the URL name and the entry (with its template or picked repository). */
@@ -148,9 +157,8 @@ export interface ValidationIssue {
  * moved since it was shown (`changed`), it is no longer resolvable
  * (`blocked`), or the request asserted another one (`mismatch`). Each is a
  * typed failure, never resent: the wizard re-reads the destination and shows
- * it, and only the user's next confirmation sends again. `keyConflict` =
- * Platform already accepted an earlier create of this attempt with another
- * request: it exists, but this console cannot resend it, so it cannot go on.
+ * it, and only the user's next confirmation sends again. A refused resend of an
+ * earlier attempt is none of these: it sets `progress.unsettled`.
  * Otherwise `progress` is what to resume from.
  */
 export class CreateFailed extends Error {
@@ -158,7 +166,6 @@ export class CreateFailed extends Error {
   readonly nameTaken: boolean
   readonly retryable: boolean
   readonly unconfirmed: boolean
-  readonly keyConflict: boolean
   /** Quoted Platform API input field and the wizard step that owns it. */
   readonly field?: { path: string; step: 0 | 1 }
   /** No answer from the console (gateway 5xx, network); its message is `copy.errors.transient`. */
@@ -183,13 +190,11 @@ export class CreateFailed extends Error {
     // destination says DestinationChanged / DestinationMismatch. None of them
     // is about the caller's name.
     const conflict = cause instanceof ORPCError && cause.status === 409
-    const envelope409 = conflict ? platformErrorEnvelope(cause) : undefined
-    const reason = envelope409?.details?.reason
-    this.keyConflict = envelope409?.code === 'idempotency_conflict'
+    const reason = conflict ? platformErrorEnvelope(cause)?.details?.reason : undefined
     this.transient = isConsoleError(cause) && cause.transient
     this.retryable = reason === 'delivery_pending' || this.transient
-    this.nameTaken = isConsoleError(cause, 'slug_taken') ||
-      (conflict && !this.keyConflict && reason !== 'delivery_pending' && reason !== 'delivery_blocked' && this.destination === undefined)
+    this.nameTaken =
+      isConsoleError(cause, 'slug_taken') || (conflict && reason !== 'delivery_pending' && reason !== 'delivery_blocked' && this.destination === undefined)
     this.progress = progress
     const detail = this.destination ? undefined : detailOf(cause)
     this.data = detail ? { message: detail } : undefined
@@ -276,10 +281,21 @@ async function failed(error: unknown, progress: CreateProgress, phase: SubmitPha
  * the key's replay first, then createRepositoryWithID's checks (the destination and its revision included) before
  * Writer.Apply (platform-api internal/handler/application_source_repository.go:362-386, 433-476). The exception is
  * `idempotency_conflict`: the key was already accepted with another request. No answer, a 5xx (one can follow the
- * write, :1206-1215) and an unreadable 2xx may have been applied.
+ * write, :1206-1215) and an unreadable 2xx may have been applied. This holds for the first send of a key only: a
+ * resend's refusal says nothing about the first send (`CreateProgress.unsettled`).
  */
 function refused(error: unknown): boolean {
   return error instanceof ORPCError && error.status >= 400 && error.status < 500 && platformErrorEnvelope(error)?.code !== 'idempotency_conflict'
+}
+
+/**
+ * Platform answered a resend of an earlier, uncertain create with a refusal (any 4xx but a missing sign-in, which never
+ * reached it). Not proof the first send failed: Platform neither serializes a resend with a first send still being
+ * processed nor records the key before the write (handler/application_source_repository.go:375-380, 1101-1141,
+ * 1206-1215), so a resend can be judged as new while the first one is (or was) applied.
+ */
+function refusedResend(error: unknown): boolean {
+  return error instanceof ORPCError && error.status >= 400 && error.status < 500 && error.status !== 401
 }
 
 type SourcePath = Exclude<CreatePath, { kind: 'image' }>
@@ -368,17 +384,25 @@ export async function submitCreate(
     deps.onPhase(next)
   }
   const report = () => deps.onProgress?.({ ...progress })
-  /** An attempt's create: it ends with the resource answered or with Platform's refusal of it; anything else keeps it. */
-  const write = async <T,>(step: 'source' | 'stack', send: () => Promise<T>): Promise<T> => {
+  /**
+   * An attempt's create. A first send ends the attempt with the resource answered or with Platform's refusal of it. A
+   * resend of an earlier, uncertain one ends it only with the resource: a refusal holds it unsettled, and nothing is
+   * sent any more. Anything else (no answer, a 5xx) keeps the attempt for the next resend.
+   */
+  const write = async <T,>(step: 'source' | 'stack', resend: boolean, send: () => Promise<T>): Promise<T> => {
     try {
       return await send()
     } catch (error) {
-      if (refused(error)) progress.attempts = settled(progress.attempts, step)
+      if (resend && refusedResend(error)) {
+        progress.unsettled = step
+        throw new Error(text.unsettled.title, { cause: error })
+      }
+      if (!resend && refused(error)) progress.attempts = settled(progress.attempts, step)
       throw error
     }
   }
-  const createSource = async (attempt: SourceAttempt, body: SourceRepositoryRequest): Promise<string> => {
-    const repository = await write('source', () => deps.api.createSourceRepository(request.projectId, body, attempt.key))
+  const createSource = async (attempt: SourceAttempt, body: SourceRepositoryRequest, resend: boolean): Promise<string> => {
+    const repository = await write('source', resend, () => deps.api.createSourceRepository(request.projectId, body, attempt.key))
     progress.sourceRepositoryId = repository.id
     progress.sourceRepositoryOrigin = attempt.origin
     progress.sourceRepositoryBinding = madeAt(repository, attempt.binding)
@@ -386,8 +410,8 @@ export async function submitCreate(
     report()
     return repository.id
   }
-  const createStack = async (attempt: StackAttempt, body: StackRequest): Promise<string> => {
-    const stack = await write('stack', () => deps.api.createStack(request.projectId, body, attempt.key))
+  const createStack = async (attempt: StackAttempt, body: StackRequest, resend: boolean): Promise<string> => {
+    const stack = await write('stack', resend, () => deps.api.createStack(request.projectId, body, attempt.key))
     progress.stackId = stack.id
     progress.stackAppName = attempt.appName
     progress.attempts = settled(progress.attempts, 'stack')
@@ -395,35 +419,30 @@ export async function submitCreate(
     return stack.id
   }
   try {
-    // An unread answer may have made something: only the readback may follow.
+    // An unread answer may have made something: only the readback may follow. So may a refused resend.
     if (progress.unconfirmed) throw new Error(text.unconfirmed.title)
+    if (progress.unsettled) throw new Error(text.unsettled.title)
     // A create that may have been applied is settled before anything else is validated or sent: its own request again
-    // under its own key. Platform replays an accepted one (made where it was sent, whatever the destination is now) or
-    // answers it as new; no other destination, name or key is tried meanwhile. Progress saved before requests were kept
-    // can only rebuild the request of the same origin (Platform never applies one key twice; another body under an
-    // accepted key answers `idempotency_conflict`).
+    // under its own key. Platform replays an accepted one (made where it was sent, whatever the destination is now); no
+    // other destination, name or key is tried meanwhile. Progress saved before requests were kept cannot be resent
+    // exactly, and a request rebuilt against today's destination is not that create: it is held unsettled unsent.
     const pendingSource = progress.attempts?.source
     if (pendingSource && !progress.sourceRepositoryId) {
       enter('source')
-      const rebuilt = !pendingSource.request && request.path.kind !== 'image' && sameOrigin(pendingSource.origin, sourceOrigin(appName, request.path, deps.catalog))
-        ? newSource(appName, request.path, deps.catalog, deps).request
-        : undefined
-      const body = pendingSource.request ?? rebuilt
-      if (!body) throw new Error(text.pendingCreate(pendingSource.origin.appName))
-      await createSource(pendingSource, body)
+      if (!pendingSource.request) {
+        progress.unsettled = 'source'
+        throw new Error(text.unsettled.title)
+      }
+      await createSource(pendingSource, pendingSource.request, true)
     }
     const pendingStack = progress.attempts?.stack
     if (pendingStack && !progress.stackId) {
       enter('platform')
-      const source: StackSource | undefined = request.path.kind === 'image'
-        ? { kind: 'sample-image', imageRef: request.path.imageRef }
-        : pendingStack.sourceRepositoryId ? { kind: 'application-source-repository', sourceRepositoryId: pendingStack.sourceRepositoryId } : undefined
-      const rebuilt = !pendingStack.request && source && pendingStack.appName === appName && pendingStack.sourceRepositoryId === progress.sourceRepositoryId
-        ? buildCreateStackRequest(appName, source, deps.catalog, deps.domain)
-        : undefined
-      const body = pendingStack.request ?? rebuilt
-      if (!body) throw new Error(text.pendingCreate(pendingStack.appName))
-      await createStack(pendingStack, body)
+      if (!pendingStack.request) {
+        progress.unsettled = 'stack'
+        throw new Error(text.unsettled.title)
+      }
+      await createStack(pendingStack, pendingStack.request, true)
     }
     // A kept stack is bound right after it is made, so only a failed bind
     // leaves one behind; binding it under another name would split the app.
@@ -464,7 +483,7 @@ export async function submitCreate(
           const attempt: SourceAttempt = { key: crypto.randomUUID(), origin, request: created.request, binding: created.binding }
           progress.attempts = { ...progress.attempts, source: attempt }
           report()
-          sourceRepositoryId = await createSource(attempt, created.request)
+          sourceRepositoryId = await createSource(attempt, created.request, false)
         }
         source = { kind: 'application-source-repository', sourceRepositoryId }
       }
@@ -476,7 +495,7 @@ export async function submitCreate(
       const attempt: StackAttempt = { key: crypto.randomUUID(), appName, sourceRepositoryId: progress.sourceRepositoryId, request: body }
       progress.attempts = { ...progress.attempts, stack: attempt }
       report()
-      progress.stackId = await createStack(attempt, body)
+      progress.stackId = await createStack(attempt, body, false)
     }
 
     enter('bind')
@@ -493,26 +512,28 @@ export interface ConfirmedCreate {
 }
 
 /**
- * The only action after an unconfirmed step: read back what that step may
- * have made and adopt it, so the next attempt resumes instead of making it
- * twice. Reads only; never resends. Only the unconfirmed phase's resource is
- * looked up (a same-named resource found for another phase is not this
- * attempt's), and only where that attempt sent it (its binding), never at the
- * destination resolved now. A failed read rejects and leaves the step unconfirmed.
+ * The only action after an unconfirmed step, or after a refused resend
+ * (`unsettled`): read back what that step may have made and adopt it, so the
+ * next attempt resumes instead of making it twice. Reads only; never resends.
+ * Only that phase's resource is looked up (a same-named resource found for
+ * another phase is not this attempt's), and only where that attempt sent it
+ * (its binding), never at the destination resolved now. A failed read rejects
+ * and leaves the step as it was.
  *
  * A Platform list that does not show the resource is not proof it was not
- * made (an accepted write may not be listed yet). The next attempt therefore
- * resends the step's recorded request under its key first: Platform replays
- * the first write for it instead of making a second resource. The Console
- * reads its own store, so an app it does not list was not made.
+ * made (an accepted write may not be listed yet). After an unconfirmed step the
+ * next attempt therefore resends the step's recorded request under its key
+ * first: Platform replays the first write for it instead of making a second
+ * resource. An unsettled step stays unsettled until the readback finds it. The
+ * Console reads its own store, so an app it does not list was not made.
  */
 export async function confirmCreate(
   request: CreateRequest,
   resume: CreateProgress,
   deps: { api: Pick<CreateApi, 'app' | 'myApps' | 'sourceRepositories' | 'stacks'>; catalog: CreateCatalog }
 ): Promise<ConfirmedCreate> {
-  const progress: CreateProgress = { ...resume, unconfirmed: undefined }
-  const phase = resume.unconfirmed
+  const progress: CreateProgress = { ...resume, unconfirmed: undefined, unsettled: undefined, unsettledSearched: undefined }
+  const phase = resume.unconfirmed ?? (resume.unsettled === 'source' ? 'source' : resume.unsettled === 'stack' ? 'platform' : undefined)
   const appName = request.urlName
   if (progress.draft) {
     progress.draft = await deps.api.app(progress.draft.id)
@@ -545,7 +566,21 @@ export async function confirmCreate(
       progress.attempts = settled(progress.attempts, 'stack')
     }
   }
-  return { progress }
+  // A refused resend's attempt is found or it stays held (nothing is sent for it again), now known not to be listed
+  // where it was sent: that is what lets the user explicitly give it up (`abandonUnsettled`).
+  const held = resume.unsettled && progress.attempts?.[resume.unsettled] ? resume.unsettled : undefined
+  return { progress: held ? { ...progress, unsettled: held, unsettledSearched: true } : progress }
+}
+
+/**
+ * The user's explicit choice to give up an unsettled create after a readback looked for it where it was sent and did
+ * not find it: its key and request are dropped, and the next 作る starts a new attempt at the destination shown then.
+ * Not proof the earlier create failed: it may still be applied later (a resend refused while the first send was in
+ * flight, or a first send applied without its key recorded), which then leaves two. Refused (unchanged) before such a readback.
+ */
+export function abandonUnsettled(progress: CreateProgress): CreateProgress {
+  if (!progress.unsettled || !progress.unsettledSearched) return progress
+  return { ...progress, attempts: settled(progress.attempts, progress.unsettled), unsettled: undefined, unsettledSearched: undefined }
 }
 
 /** Both creation paths bind the console app to the actual platform name and stack. */

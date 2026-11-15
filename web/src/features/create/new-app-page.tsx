@@ -30,7 +30,7 @@ import { Button, Card, CardBody, focusHeading, LoadFailed, Notice, PageHeader, S
 import { checkNameAvailability, suggestFreeUrlName, type AvailabilityRequest, type NameAvailability } from './availability'
 import { text } from './copy'
 import { effectiveShareGroupIds, stepFields, syncUrlName, useCreateForm, type CreateValues } from './form'
-import { CreatingPanel, FailureNotice, FieldFailureNotice, StaleCatalogNotice, UnconfirmedCreateNotice } from './run-status'
+import { CreatingPanel, FailureNotice, FieldFailureNotice, StaleCatalogNotice, UnconfirmedCreateNotice, UnsettledCreateNotice } from './run-status'
 import { beginBuild, resolveBuildGroup } from '../build/entry'
 import { text as buildText } from '../build/copy'
 import { newSessionEngine } from '../build/new-session-engine'
@@ -43,6 +43,7 @@ import { DetailsStep, type TakenUrlName } from './steps/details-step'
 import { ShareStep } from './steps/share-step'
 import { StartStep, type EntryBlocks } from './steps/start-step'
 import {
+  abandonUnsettled,
   confirmCreate,
   CreateFailed,
   keptSource,
@@ -242,8 +243,9 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
   const keptBinding: SourceBinding | undefined = kept?.binding ?? (keptRecord && keptWhere ? { repository: keptWhere, image: keptRecord.image.imagePath } : undefined)
   // Once a stack exists (or may), the source is only shown; otherwise one that cannot be shown holds the create.
   const stackStarted = Boolean(resume.stackId || resume.attempts?.stack)
+  // An unsettled (refused resend) create is not resent: its notice below explains it, the step shows where it went.
   const keptState: KeptSourceState | undefined = !kept ? undefined
-    : keptBinding ? kept.state
+    : keptBinding ? (kept.state === 'pending' && resume.unsettled === 'source' ? 'held' : kept.state)
       : stackStarted ? undefined
         : keptRead.isPending ? 'checking' : 'unknown'
   const newRepository = values.entry !== 'template' ? undefined
@@ -515,6 +517,10 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
 
   // An unconfirmed step blocks every create until the readback below has run, also after a reload.
   const unconfirmed = run.state.resume.unconfirmed !== undefined
+  // A refused resend blocks every create until a readback finds what it made, or the user gives it up after one did not.
+  const unsettledAttempt = resume.unsettled === 'source' ? resume.attempts?.source : undefined
+  const unsettledWhere = resume.unsettled === 'stack' ? text.unsettled.app(resume.attempts?.stack?.appName ?? values.urlName)
+    : unsettledAttempt?.binding ? text.unsettled.repository(unsettledAttempt.binding.repository, unsettledAttempt.binding.image) : text.unsettled.previous
 
   const submitApp = () => {
     const path = createPath()
@@ -552,6 +558,11 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
     }
   }
 
+  /** 「前回の操作をあきらめて作り直す」: only offered after a readback did not find it; never automatic (`abandonUnsettled`). */
+  const giveUpUnsettled = () => {
+    setStillUnknown(false)
+    patch({ resume: abandonUnsettled(run.state.resume), failure: undefined })
+  }
   const [startingOver, setStartingOver] = useState(false)
   /**
    * 「最初から作り直す」: where the earlier repository is cannot be shown, so it is left unused. Its platform record is
@@ -570,12 +581,13 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
   }
 
   const busy = phase !== undefined || startingBuild
-  // A moved destination is a new confirmation of what is shown now, not a retry of the refused one.
-  const retrying = failure !== undefined && !failure.forbidden && failure.destination !== 'changed'
+  // A moved destination is a new confirmation of what is shown now, not a retry of the refused one. An unsettled create
+  // offers no retry at all (its notice holds the actions).
+  const retrying = failure !== undefined && !failure.forbidden && failure.destination !== 'changed' && !resume.unsettled
   // After a destination answer the shown destination is re-read; nothing is sent until the new one is on screen.
   const destinationRereading = failure?.destination !== undefined && destinationRead.isFetching
   const keptHold = keptState === 'checking' || keptState === 'unknown'
-  const blockedSubmit = !canCreate || busy || failure?.forbidden === true || unconfirmed || destinationRereading || keptHold
+  const blockedSubmit = !canCreate || busy || failure?.forbidden === true || unconfirmed || resume.unsettled !== undefined || destinationRereading || keptHold
   // The confirm step's own fixed notice when no destination is resolved; a blocked answer at submit says the same and is not repeated.
   // An earlier attempt's repository does not need the destination resolved now.
   const destinationBlockedShown = step === 3 && values.entry === 'template' && destination !== undefined && !resolvedDestination && !kept
@@ -700,6 +712,11 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
             {unconfirmed ? (
               <div id="create-failure" tabIndex={-1} className="mt-6 focus:outline-none">
                 <UnconfirmedCreateNotice confirming={confirming} stillUnknown={stillUnknown} disabled={!catalog || !createPath()} onConfirm={() => void confirmLatest()} />
+              </div>
+            ) : resume.unsettled ? (
+              <div id="create-failure" tabIndex={-1} className="mt-6 focus:outline-none">
+                <UnsettledCreateNotice where={unsettledWhere} searched={resume.unsettledSearched === true} confirming={confirming} stillUnknown={stillUnknown}
+                  disabled={!catalog || !createPath()} onConfirm={() => void confirmLatest()} onGiveUp={giveUpUnsettled} />
               </div>
             ) : failure && !failure.field && !(failure.destination === 'blocked' && destinationBlockedShown) ? (
               <div id="create-failure" tabIndex={-1} className="mt-6 focus:outline-none">

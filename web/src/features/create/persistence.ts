@@ -51,6 +51,10 @@ const sessionSchema = z.object({
       source: z.object({ key: z.string(), origin, request: sentRequest<SourceRepositoryRequest>().optional(), binding: binding.optional() }).optional(),
       stack: z.object({ key: z.string(), appName: z.string(), sourceRepositoryId: z.string().optional(), request: sentRequest<StackRequest>().optional() }).optional(),
     }).optional(),
+    // A refused resend stays held across reloads: nothing is sent for it until a readback finds it or the user,
+    // after a readback that did not, explicitly gives it up.
+    unsettled: z.enum(['source', 'stack']).optional(),
+    unsettledSearched: z.boolean().optional(),
   }),
   phase: phases.optional(),
   failure: z.object({ message: z.string() }).optional(),

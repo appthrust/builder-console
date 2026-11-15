@@ -149,14 +149,18 @@ const sourceWrites = () => requests.filter((item) => item.method !== 'GET' && it
 const builtinImage = `registry.appthrust.test/commerce/${name}`
 
 describe('an unsettled create (review finding 1)', () => {
-  test('the confirm step shows where K went (A), not the new default; 作る resends only K\'s own request, and B is shown once Platform refuses it', async () => {
+  const templateRequest = (revision: string) => ({ template: { repository: 'appthrust/template-biz-inventory', ref: 'main' }, destination: { repositoryName: name, visibility: 'private' }, destinationRevision: revision, build: { mode: 'observed-image', ref: 'main' } })
+  const where = text.unsettled.repository(`acme/${name}`, `ghcr.io/acme/${name}`)
+  const check = () => button(text.unconfirmed.confirm)
+  const sourceReads = () => requests.filter((item) => item.method === 'GET' && item.path.endsWith('/application-source-repositories')).length
+
+  test('K\'s resend is refused: the page holds it at A and sends nothing; a readback that does not find it offers the explicit give-up, which alone moves to B', async () => {
     let sent: Record<string, unknown> = {}
     const { destination } = await resumedAtA(async ({ draft, destination }) => {
-      sent = { template: { repository: 'appthrust/template-biz-inventory', ref: 'main' }, destination: { repositoryName: name, visibility: 'private' }, destinationRevision: destination.revision, build: { mode: 'observed-image', ref: 'main' } }
+      sent = templateRequest(destination.revision)
       // POST with K got no answer: the attempt keeps K, its exact request and where it goes.
       return { draft, attempts: { source: { key: 'K-1', origin, request: sent as never, binding: atA(destination) } } }
     })
-
     expect(rows()[text.destination.pending]).toBe(`acme/${name}`)
     expect(rows()[text.destination.image]).toBe(`ghcr.io/acme/${name}`)
     expect(pageText()).toContain(text.destination.pendingNote)
@@ -164,14 +168,52 @@ describe('an unsettled create (review finding 1)', () => {
 
     await click(button('作る'))
     // Only K's own request, under K, with A's revision: no validation, no other destination, no new key.
-    expect(sourceWrites()).toEqual([{ method: 'POST', path: `/api/v1/projects/commerce/application-source-repositories`, key: 'K-1', body: sent }])
+    expect(sourceWrites()).toEqual([{ method: 'POST', path: '/api/v1/projects/commerce/application-source-repositories', key: 'K-1', body: sent }])
     expect(sent.destinationRevision).toBe(destination.revision)
-    // Platform had not accepted K, so it answered the old revision DestinationChanged: K ended, B is shown for a new confirmation.
-    expect(pageText()).toContain(text.destination.changedTitle)
+    // Platform refused it (DestinationChanged), which does not prove K failed: A stays on screen, B is not offered.
+    expect(pageText()).toContain(text.unsettled.title)
+    expect(pageText()).toContain(text.unsettled.body(where))
+    expect(pageText()).not.toContain(text.destination.changedTitle)
+    expect(rows()[text.destination.pending]).toBe(`acme/${name}`)
+    expect(pageText()).not.toContain(builtinImage)
+    expect(button('作る').disabled).toBe(true)
+    expect(() => button(text.unsettled.startOver)).toThrow()
+
+    await click(check())
+    expect(sourceReads()).toBe(1)
+    expect(pageText()).toContain(text.unsettled.notFound(where))
+    expect(button('作る').disabled).toBe(true)
+    expect(sourceWrites()).toHaveLength(1)
+
+    // Only the user's explicit choice gives K up; then the current destination (B) is shown for a new confirmation.
+    await click(button(text.unsettled.startOver))
+    expect(sourceWrites()).toHaveLength(1)
+    expect(pageText()).not.toContain(text.unsettled.title)
     expect(rows()[text.destination.repository]).toBe(`acme/${name}`)
     expect(rows()[text.destination.image]).toBe(builtinImage)
-    expect(pageText()).not.toContain(text.destination.pendingNote)
-    expect(requests.filter((item) => item.method === 'POST' && item.path.endsWith('/application-stacks'))).toEqual([])
+    expect(button('作る').disabled).toBe(false)
+  })
+
+  test('K was applied at A but its resend is refused (the record gap): the readback finds it at A and the app continues there', async () => {
+    await resumedAtA(async ({ draft, destination, projectId }) => {
+      const sent = templateRequest(destination.revision)
+      // The first send was applied, but its answer was lost and its key is unknown to the (mock) Platform's replay.
+      await api.createSourceRepository(projectId, sent as never, 'applied-without-record')
+      return { draft, attempts: { source: { key: 'K-2', origin, request: sent as never, binding: atA(destination) } } }
+    })
+    await click(button('作る'))
+    expect(pageText()).toContain(text.unsettled.title)
+
+    await click(check())
+    expect(pageText()).not.toContain(text.unsettled.title)
+    expect(rows()[text.destination.created]).toBe(`acme/${name}`)
+    expect(rows()[text.destination.image]).toBe(`ghcr.io/acme/${name}`)
+    expect(button('作る').disabled).toBe(false)
+
+    await click(button('作る'))
+    expect(sourceWrites()).toHaveLength(1)
+    const stack = requests.find((item) => item.method === 'POST' && item.path.endsWith('/application-stacks'))
+    expect(stack?.body).toMatchObject({ source: { kind: 'application-source-repository', sourceRepositoryId: `${name}-src` } })
   })
 })
 

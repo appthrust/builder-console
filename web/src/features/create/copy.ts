@@ -20,8 +20,6 @@ export const textJa = {
   alreadyCreated: (name: string) => `this app was already created as "${name}"; finish it with that URL name`,
   sourceUnavailable: 'source connections unavailable',
   destinationUnavailable: 'repository destination unavailable',
-  /** Progress saved before create requests were kept, whose create of `name` is still unsettled, while another name is chosen. */
-  pendingCreate: (name: string) => `「${name}」で前回送った作成の結果がまだ分かりません。URL になる名前を「${name}」に戻してから、もう一度試してください。`,
   /** Where a new repository goes (Platform's resolved repository destination); never its reason or message. */
   destination: {
     blocked: '新しい置き場の作成先が決まっていないため、AI やテンプレートからは作れません。プロジェクトの管理者に設定を依頼してください。',
@@ -38,15 +36,24 @@ export const textJa = {
     createdNote: 'この置き場は前回の操作で作成済みです。続きは、この置き場とアプリの保管場所で作ります。',
     /** An earlier create whose outcome is unknown: the next attempt resends it exactly, to where it went. */
     pending: '前回作ろうとした置き場',
-    pendingNote: '前回の作成の結果がまだ分かりません。二重に作らないよう、前回と同じ内容でもう一度送って確かめます。届いていればその置き場を使い、届いていなければ、そのときの作成先をあらためて表示します。',
+    pendingNote: '前回の作成の結果がまだ分かりません。二重に作らないよう、続きは前回と同じ内容をもう一度送って確かめます。ほかの作成先や名前では作りません。',
     retainedChecking: '作成済みの置き場を確認しています…',
     retainedUnknown: '前回作成した置き場がどこにあるかを表示できないため、続きから作れません。「最初から作り直す」を選ぶと、その置き場は使わずに、いまの作成先へ新しく作ります。',
     startOver: '最初から作り直す',
   },
-  /** Platform accepted an earlier create of this attempt with another request (an older console's): it cannot be resent. */
-  keyConflict: {
-    title: '前回の作成と内容が合いません',
-    body: '前回送った作成は、別の内容ですでに受け付けられています。二重に作らないよう、この画面からは続けられません。',
+  /**
+   * The resend of an earlier, uncertain create was refused, or it cannot be resent exactly. The refusal does not prove
+   * the earlier create failed, so nothing more is sent: a readback that finds what it made lets the user go on, and
+   * only after a readback that did not find it may the user explicitly give the earlier create up (`where` = where it went).
+   */
+  unsettled: {
+    title: '前回の作成が受け付けられたかを確かめられません',
+    body: (where: string) => `前回 ${where} を作ろうとした操作の結果を確かめられません。作られている、または後から作られる可能性があるため、二重に作らないよう、ここからは何も送りません。「最新の状態を確認する」で見つかれば、その置き場で続きを作れます。`,
+    previous: '前回の作成先',
+    repository: (repository: string, image?: string) => image ? `「${repository}」（アプリの保管場所 ${image}）` : `「${repository}」`,
+    app: (name: string) => `アプリ「${name}」`,
+    notFound: (where: string) => `${where} はまだ見つかりません。少し待ってから、もう一度確認できます。前回の操作をあきらめて作り直すこともできますが、前回の操作によって後から ${where} が作られることがあり、そのときは二つになります。`,
+    startOver: '前回の操作をあきらめて作り直す',
   },
   /** A create step answered 2xx with an answer this console cannot read: it may have happened (never resent blindly). */
   unconfirmed: {

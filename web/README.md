@@ -524,13 +524,21 @@ non-engineers, with engineering words only under 「詳しい人向け」
 - A Platform create whose outcome is unknown (no answer, a 5xx, an unread 2xx
   the readback did not find) keeps its Idempotency-Key, its exact request and
   where it went. Before anything else is validated or sent, the next 作る resends
-  that request under that key: Platform replays an accepted one, also after the
-  default moved, and answers an unaccepted one as new. Only that answer (the
-  resource, or Platform's 4xx refusal of that very write) ends the attempt; a
-  validation answer, a moved destination or another name never does. Until then
-  the confirm step shows 「前回作ろうとした置き場」, not the current default.
-  The readback after an unread 2xx matches the repository where the attempt sent
-  it, not where the destination resolves now.
+  that request under that key (Platform replays an accepted one, also after the
+  default moved); the confirm step shows 「前回作ろうとした置き場」, not the
+  current default. The resource it answers ends the attempt; no answer or a 5xx
+  keeps it for the next resend. A refusal (4xx) of a resend does not prove the
+  first send failed (Platform does not serialize a resend with a first send
+  still in flight and records the key only after the write), so the attempt is
+  held unsettled and nothing more is sent: 「最新の状態を確認する」 looks for
+  it where it was sent, and finding it continues there. Only after such a
+  readback did not find it may the user choose 「前回の操作をあきらめて作り直す」,
+  which states that the earlier request may still create it later; it is never
+  automatic. Progress saved before requests were kept is held the same way,
+  never rebuilt against today's destination. A refused first send ends its own
+  attempt (no earlier send exists under its fresh key). The stack create is
+  treated the same. Readbacks match where the attempt sent it, never where the
+  destination resolves now.
 - A new repository (ひな形, AI) goes where the Project's repository destination
   says (`GET repository-destination`, read as resolved / blocked / unknown in
   `contracts/platform/catalog.ts`); the console never picks a connection, and

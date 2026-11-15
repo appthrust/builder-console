@@ -65,6 +65,35 @@ export function UnconfirmedCreateNotice({ confirming, stillUnknown, disabled, on
   )
 }
 
+/**
+ * An earlier create's resend was refused (or it cannot be resent exactly): Platform's refusal does not prove the
+ * earlier create failed, so nothing is sent. The actions read the latest state back (finding it lets the user go on)
+ * and, only once a readback did not find it, give the earlier create up with its residual risk stated. `where` names
+ * where it went.
+ */
+export function UnsettledCreateNotice({ where, searched, confirming, stillUnknown, disabled, onConfirm, onGiveUp }: {
+  where: string
+  searched: boolean
+  confirming: boolean
+  stillUnknown: boolean
+  disabled: boolean
+  onConfirm: () => void
+  onGiveUp: () => void
+}) {
+  const actions = <>
+    <Button size="sm" loading={confirming} disabled={disabled} onClick={onConfirm}>{text.unconfirmed.confirm}</Button>
+    {searched ? <Button size="sm" tone="secondary" disabled={confirming} onClick={onGiveUp}>{text.unsettled.startOver}</Button> : null}
+    <LinkButton to="/" tone="ghost" size="sm">{text.abandon}</LinkButton>
+  </>
+  return (
+    <Notice tone="warning" title={text.unsettled.title} actions={actions}>
+      <p>{text.unsettled.body(where)}</p>
+      {searched ? <p className="mt-1" role="status" data-testid="create-unsettled-not-found">{text.unsettled.notFound(where)}</p> : null}
+      {stillUnknown ? <p className="mt-1" role="status">{text.unconfirmed.stillUnknown}</p> : null}
+    </Notice>
+  )
+}
+
 /** Input failures belong beside the owning step, rather than the generic retry notice. */
 export function FieldFailureNotice({ failure, onFix }: { failure: CreateFailed; onFix: () => void }) {
   const path = failure.field?.path ?? ''
@@ -93,15 +122,6 @@ export function FailureNotice({ failure }: { failure: CreateFailed }) {
     return (
       <Notice tone="error" actions={abandon}>
         {copy.create.forbidden}
-      </Notice>
-    )
-  }
-  // An earlier create of this attempt exists with another request: it cannot be resent, so nothing goes on from here.
-  if (failure.keyConflict) {
-    return (
-      <Notice tone="error" title={text.keyConflict.title} actions={abandon}>
-        <p>{text.keyConflict.body}</p>
-        {failure.progress.draft ? <p className="mt-1 opacity-80">{copy.create.draftKept}</p> : null}
       </Notice>
     )
   }
