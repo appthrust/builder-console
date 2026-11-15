@@ -74,6 +74,8 @@ export const textEn: typeof textJa = {
     forbidden: { title: 'Permission needed', reason: 'Ask your administrator for permission to create apps.' },
     group: { title: 'Your department could not be verified', reason: 'Ask your administrator to add you to a department, then try again.' },
     limit: { title: 'Revision limit reached', reason: 'Use an earlier proposal or start a new draft.' },
+    limitRejected: 'The platform did not accept this plan, so it cannot be used as it is. Start a new draft.',
+    limitRecheck: 'The platform did not accept this plan. Once the cause is fixed on the platform side, use “Check again” to check it again; otherwise, start a new draft.',
     unavailable: { title: 'AI is currently unavailable', reason: 'An update may be in progress; try again shortly, or contact your administrator if the problem continues.' },
     quota: { title: 'AI usage allowance has run out', reason: 'Ask your administrator to restore the AI allowance. Once restored, press the retry button to continue from where work stopped. This is not a problem with your Excel file or input.' },
     waitingForAi: { title: 'Waiting for AI', hint: 'An update may be in progress; work will continue automatically.' },

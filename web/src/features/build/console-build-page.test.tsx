@@ -469,7 +469,7 @@ describe('the plan', () => {
     expect(mock.count('POST', executions)).toBe(0)
   })
 
-  test('a reason this console does not know is the platform failure with its reference; 「もう一度確かめる」 validates the same plan once, also after a reload (APT-1094)', async () => {
+  test('a reason this console does not know is the platform failure with its reference; 「もう一度確かめる」 validates the same plan once, also after a reload, and creates nothing (APT-1094)', async () => {
     const sentence = 'Tool sequence appthrust.database.attach is not supported by this Platform.'
     const { draftId, page, validations, executions } = await rejectedPlan({ valid: false, message: 'Creation plan needs changes before AppThrust tools can run.', staticErrors: [sentence] })
     const notice = notices(page).find((item) => item.querySelector('p')?.textContent === buildCopy.failure.platform.title)!
@@ -497,7 +497,31 @@ describe('the plan', () => {
     await settle(40)
     expect(mock.count('POST', validations)).toBe(2)
     expect(writes()).toEqual(before)
+    // A valid answer makes the plan approvable again; only 「この内容で作る」 begins the execution.
+    expect(mock.count('POST', executions)).toBe(0)
+    expect(actionLabels(proposal)).toEqual([buildCopy.primary.prepare])
+    await act(async () => { button(proposal, buildCopy.primary.prepare).click() })
+    await settle(40)
+    expect(mock.count('POST', validations)).toBe(3)
     expect(mock.count('POST', executions)).toBe(1)
+  })
+
+  test('「もう一度確かめる」 whose request fails (502) leaves the plan rejected: the notice offers the check and a new plan, never the approval, and a reload sends nothing (APT-1094 R1)', async () => {
+    const { draftId, page, validations, executions } = await rejectedPlan({ valid: false, message: 'Unsupported plan shape.' })
+    mock.rewrites.push({ method: 'POST', path: validations, once: true, response: () => Response.json({ error: { code: 'bad_gateway', message: 'upstream connect error' } }, { status: 502 }) })
+    const first = notices(page).find((item) => item.querySelector('p')?.textContent === buildCopy.failure.platform.title)!
+    await act(async () => { button(first, buildCopy.failure.plan.recheck).click() })
+    await settle(40)
+    expect(mock.count('POST', validations)).toBe(2)
+    const notice = notices(page).find((item) => item.querySelector('p')?.textContent === buildCopy.failure.platform.title)!
+    expect(actionLabels(notice)).toEqual([buildCopy.failure.plan.recheck, buildCopy.failure.plan.replan])
+    expect(buttons(page.container.querySelector('[data-testid="build-proposal"]')!, buildCopy.primary.prepare)).toHaveLength(0)
+    const sent = mock.requests.length
+    const reloaded = await open(draftId)
+    await settle(30)
+    expect(mock.requests.slice(sent).filter((item) => item.method !== 'GET' && item.path.includes(`/application-drafts/${draftId}`))).toEqual([])
+    expect(actionLabels(reloaded.container.querySelector('[data-testid="build-proposal"]')!)).toEqual([buildCopy.failure.plan.recheck, buildCopy.failure.plan.replan])
+    expect(mock.count('POST', executions)).toBe(0)
   })
 
   test('a spec change accepted after planning makes the plan stale: no creation, re-planning offered', async () => {

@@ -704,7 +704,8 @@ describe('a plan Platform\'s validation rejects is an answer about the plan (APT
     await settle(10)
     expect(count('POST', validations(draftId))).toBe(2)
     expect(count('POST', generations(draftId))).toBe(0)
-    expect(count('POST', executions(draftId))).toBe(1)
+    expect(count('POST', executions(draftId))).toBe(0)
+    expect(proposalButtons()).toEqual([buildCopy.primary.prepare])
   })
 
   test('the destination sentence while no destination is set is the blocked stop; once one is set the same plan goes on without a new plan (review F4)', async () => {
@@ -751,19 +752,42 @@ describe('a plan Platform\'s validation rejects is an answer about the plan (APT
     await replans(draftId, platformTitle, key, [checkAgain, makeAgain])
   })
 
-  test('「もう一度確かめる」 validates the same plan once: no plan write, no new plan; a valid answer goes on as a first valid answer does', async () => {
+  test('「もう一度確かめる」 answered valid creates nothing: the plan is approvable again, and only 「この内容で作る」 begins the execution (J1)', async () => {
     const { draftId } = await rejected(unknownAnswer)
     const before = requests.length
     await click(action(platformTitle, checkAgain))
     await settle(10)
-    const writes = requests.slice(before).filter((item) => item.method !== 'GET')
-    expect(writes.slice(0, 3).map((item) => [validations, executions, runs].findIndex((path) => path(draftId).test(item.path)))).toEqual([0, 1, 2])
-    expect(writes.filter((item) => item.method === 'PATCH' && item.path === draftPath(draftId))).toEqual([])
-    expect(count('POST', validations(draftId))).toBe(2)
+    // One validation of the unchanged plan, nothing else written.
+    expect(requests.slice(before).filter((item) => item.method !== 'GET').map((item) => `${item.method} ${item.path}`)).toEqual([`POST ${draftPath(draftId)}/creation-plan-validations`])
+    expect(count('POST', executions(draftId))).toBe(0)
+    expect(notices(platformTitle)).toHaveLength(0)
+    expect(proposalButtons()).toEqual([buildCopy.primary.prepare])
+    await click(button(buildCopy.primary.prepare))
+    await settle(10)
+    expect(count('POST', validations(draftId))).toBe(3)
     expect(count('POST', generations(draftId))).toBe(0)
     expect(count('POST', executions(draftId))).toBe(1)
     expect(count('POST', runs(draftId))).toBe(1)
-    expect(notices(platformTitle)).toHaveLength(0)
+  })
+
+  test('「もう一度確かめる」 whose request fails (502) leaves the plan rejected: no approval comes back, and a reload sends nothing (R1)', async () => {
+    const { draftId, key } = await rejected(unknownAnswer)
+    refusals.push({ method: 'POST', path: validations(draftId), status: 502, body: { error: { code: 'bad_gateway', message: 'upstream connect error' } } })
+    await click(action(platformTitle, checkAgain))
+    await settle(10)
+    expect(count('POST', validations(draftId))).toBe(2)
+    expect(notices(platformTitle, '#build-conversation')).toHaveLength(1)
+    // The failed check's notice offers no preparation retry; the rejected plan keeps its own actions on the proposal.
+    expect(labels(platformTitle)).toEqual([])
+    expect(proposalButtons()).toEqual([checkAgain, makeAgain])
+    await tick(key)
+    await settle(10)
+    const sent = requests.length
+    await reload(draftId)
+    await settle(10)
+    expect(requests.slice(sent).filter((item) => item.method !== 'GET')).toEqual([])
+    expect(proposalButtons()).toEqual([checkAgain, makeAgain])
+    expect(count('POST', executions(draftId))).toBe(0)
   })
 
   test('「もう一度確かめる」 answered `valid: false` again leaves everything as it was: one validation, nothing else', async () => {
@@ -780,6 +804,20 @@ describe('a plan Platform\'s validation rejects is an answer about the plan (APT
     await settle(10)
     expect(count('POST', validations(draftId))).toBe(2)
     expect(count('POST', executions(draftId))).toBe(0)
+  })
+
+  test('a rejected plan the conversation has outgrown is not checked again: only 「計画を作り直す」 remains (R2)', async () => {
+    const { draftId, key } = await rejected(unknownAnswer)
+    expect(labels(platformTitle)).toEqual([checkAgain, makeAgain])
+    // The user tells the AI what to change and it answers with a changed specification: the plan is outgrown.
+    await call('POST', `${draftPath(draftId)}/conversation-turns`, { message: '承認のステップを足してください。' })
+    await advance()
+    await tick(key)
+    await settle(10)
+    const offered = [...container.querySelectorAll('button')].map((item) => item.textContent?.trim())
+    expect(offered).not.toContain(checkAgain)
+    expect(offered).toContain(makeAgain)
+    expect(count('POST', validations(draftId))).toBe(1)
   })
 
   test('section messages are not taken for the user\'s mistake either: the platform failure, the sentences folded away', async () => {
@@ -890,11 +928,13 @@ describe('a plan Platform\'s validation rejects is an answer about the plan (APT
     await reload(draftId)
     expect(proposalButtons()).toEqual(left)
     expect(count('POST', generations(draftId))).toBe(1)
+    expect(notices(buildCopy.failure.limit.title, '#build-conversation')[0]!.textContent).toContain(left.length ? buildCopy.failure.limitRecheck : buildCopy.failure.limitRejected)
     if (!left.length) return
     await click(button(checkAgain))
     await settle(10)
     expect(count('POST', validations(draftId))).toBe(2)
-    expect(count('POST', executions(draftId))).toBe(1)
+    expect(count('POST', executions(draftId))).toBe(0)
+    expect(proposalButtons()).toEqual([buildCopy.primary.prepare])
   })
 
   // A failed request is not an answer about the plan: preparing asks no AI, so a 500 and a gateway 503 alike are the

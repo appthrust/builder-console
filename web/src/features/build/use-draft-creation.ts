@@ -255,6 +255,8 @@ export interface DraftCreationHost {
   unsupported: boolean
   /** The host has to do something before the preparation may start (send a reply, make the plan first, report a failure). */
   holdPreparation: boolean
+  /** The conversation has outgrown the plan on the draft (legacy `needsPlanRefresh`): a rejected plan is not checked again. */
+  planOutgrown: boolean
   /** Failed jobs already reported; shared with the host's own failure observation. */
   observedFailures: MutableRefObject<Set<string>>
   /** The created console app's display name. */
@@ -300,55 +302,69 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
     })
   }, [draft.creationPlan, knownValue(generation?.status), execution, domain, running, busy, failure])
 
+  /**
+   * The plan's check before anything is created: bind the approved destination, then validate; answers Platform's
+   * fingerprint. A plan written to another destination revision is no longer the plan Platform rejected (its approval
+   * stops for the user, #30); `valid: false` (re)marks a rejection; a failed request changes nothing in the tab.
+   */
+  async function checkPlan(): Promise<string> {
+    // Plan replacement is forbidden once an execution exists; a fresh approval binds the shown destination first.
+    const destinationDeps = {
+      readDestination: () => queryClient.fetchQuery({ ...repositoryDestinationQuery(projectId), staleTime: 0 }),
+      updateDraft: api.updateDraft,
+      receive: async (next: BuildDraft) => {
+        host.patch({ rejectedPlan: undefined })
+        await host.receive(next)
+      },
+      stop: () => host.patch({ prepareRequested: false, approvedDestinationRevision: undefined }),
+    }
+    if (!host.draftRef.current.creationExecutions.length) {
+      await bindPlanDestination(projectId, host.draftRef.current, host.currentTab().approvedDestinationRevision, destinationDeps)
+    }
+    try {
+      return await validatePreparationPlan(projectId, draft.id)
+    } catch (error) {
+      if (!(error instanceof PlanValidationError)) {
+        if (typeof error === 'object' && error !== null) failedValidationRequests.add(error)
+        throw error
+      }
+      // Platform answered that this plan cannot be approved: it is never validated or begun again unchanged, except
+      // on the user's 「もう一度確かめる」 where the cause may lie outside the plan. A destination that is not set stops
+      // as such; a plan bound to a revision that is no longer current is bound to the current one for the user to
+      // approve again (#30's stop). Nothing validates the answered plan again by itself (a reload included). A plan that
+      // already carries the current revision, or must change otherwise (not a name another app holds: renaming fixes
+      // that one), is remembered as rejected.
+      const destination = error.lines.map(destinationSentence).find(Boolean)
+      if ((destination === 'changed' || destination === 'blocked') && !host.draftRef.current.creationExecutions.length) {
+        await bindPlanDestination(projectId, host.draftRef.current, undefined, destinationDeps, true)
+      }
+      const rejection = planRejectionFailure(error.lines)
+      const remembered = rejection.kind === 'plan' || rejection.recheck
+      host.patch({ prepareRequested: false, approvedDestinationRevision: undefined, ...(remembered ? { rejectedPlan: { generationId: planGenerationOf(host.draftRef.current), recheck: Boolean(rejection.recheck) } } : {}) })
+      throw error
+    }
+  }
+
+  /** The preparation an approval asks for: the plan's check, then begin and run. */
+  async function preparation() {
+    const creationPlanFingerprint = await checkPlan()
+    const clientRequestId = host.currentTab().executionRequestId ?? crypto.randomUUID()
+    host.patch({ executionRequestId: clientRequestId })
+    const begun = await api.createExecution(projectId, draft.id, { clientRequestId, creationPlanFingerprint })
+    await host.receive(begun)
+    const created = begun.creationExecutions.at(-1)
+    if (!created) throw new Error(text.session.missingExecution)
+    host.patch({ prepareRequested: false })
+    await host.receive(await api.runExecution(projectId, draft.id, created.id))
+  }
+
   useEffect(() => {
     // A phase or job state this console does not know starts nothing on its own (stage.ts `unsupported`).
     if (running || busy || lock.current || failure || draft.createdApplicationStackId || host.unsupported || host.holdPreparation) return
     if (isOneOf(execution?.status, 'failed') && !host.observedFailures.current.has(execution!.id)) return
-    // A rejected plan is validated again only through `recheck`, which lifts the rejection as it asks (never an older retry).
+    // A rejected plan is never prepared: only `recheck` checks it, from its click, and creates nothing.
     if (!tab.prepareRequested || defaultPending || creation.planRejected) return
-    void host.perform('prepare', async () => {
-      // Plan replacement is forbidden once an execution exists; a fresh approval binds the shown destination first.
-      const destinationDeps = {
-        readDestination: () => queryClient.fetchQuery({ ...repositoryDestinationQuery(projectId), staleTime: 0 }),
-        updateDraft: api.updateDraft,
-        receive: host.receive,
-        stop: () => host.patch({ prepareRequested: false, approvedDestinationRevision: undefined }),
-      }
-      if (!host.draftRef.current.creationExecutions.length) {
-        await bindPlanDestination(projectId, host.draftRef.current, host.currentTab().approvedDestinationRevision, destinationDeps)
-      }
-      let creationPlanFingerprint: string
-      try {
-        creationPlanFingerprint = await validatePreparationPlan(projectId, draft.id)
-      } catch (error) {
-        if (!(error instanceof PlanValidationError)) {
-          if (typeof error === 'object' && error !== null) failedValidationRequests.add(error)
-          throw error
-        }
-        // Platform answered that this plan cannot be approved: it is never validated or begun again unchanged, except
-        // on the user's 「もう一度確かめる」 where the cause may lie outside the plan. A destination that is not set stops
-        // as such; a plan bound to a revision that is no longer current is bound to the current one for the user to
-        // approve again (#30's stop). Nothing validates the answered plan again by itself (a reload included). A plan that
-        // already carries the current revision, or must change otherwise (not a name another app holds: renaming fixes
-        // that one), is remembered as rejected.
-        const destination = error.lines.map(destinationSentence).find(Boolean)
-        if ((destination === 'changed' || destination === 'blocked') && !host.draftRef.current.creationExecutions.length) {
-          await bindPlanDestination(projectId, host.draftRef.current, undefined, destinationDeps, true)
-        }
-        const rejection = planRejectionFailure(error.lines)
-        const remembered = rejection.kind === 'plan' || rejection.recheck
-        host.patch({ prepareRequested: false, approvedDestinationRevision: undefined, ...(remembered ? { rejectedPlan: { generationId: planGenerationOf(host.draftRef.current), recheck: Boolean(rejection.recheck) } } : {}) })
-        throw error
-      }
-      const clientRequestId = host.currentTab().executionRequestId ?? crypto.randomUUID()
-      host.patch({ executionRequestId: clientRequestId })
-      const begun = await api.createExecution(projectId, draft.id, { clientRequestId, creationPlanFingerprint })
-      await host.receive(begun)
-      const created = begun.creationExecutions.at(-1)
-      if (!created) throw new Error(text.session.missingExecution)
-      host.patch({ prepareRequested: false })
-      await host.receive(await api.runExecution(projectId, draft.id, created.id))
-    })
+    void host.perform('prepare', preparation)
   }, [draft, tab.prepareRequested, host.holdPreparation, running, busy, failure, defaultPending])
 
   useEffect(() => {
@@ -436,7 +452,7 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
    * failed) or it is not set, it is read again instead and nothing is approved. A destination still on screen after a
    * failed re-read is approvable: the preparation reads Platform's current one fresh and stops unless it is that revision.
    */
-  function approve(next: Partial<CreationTab> = {}) {
+  function approve() {
     host.clearFailure()
     const shown = creation.destination
     if (shown && shown.kind !== 'resolved') {
@@ -444,26 +460,42 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
       return
     }
     bindingFailed.current = false
-    host.patch({ ...next, prepareRequested: true, approvedDestinationRevision: shown?.revision })
+    host.patch({ prepareRequested: true, approvedDestinationRevision: shown?.revision })
   }
+  /**
+   * 「もう一度確かめる」: the plan Platform's validation rejected for a cause that may lie outside it is checked once, from
+   * this click: one validation of the unchanged plan, after the destination check of any approval (a destination that
+   * moved is bound to the current revision with one PATCH, and the approval stops for the user, #30). Never while the
+   * conversation has outgrown the plan. The rejection stands until a valid answer: then the plan is approvable again
+   * and nothing is created until 「この内容で作る」; `valid: false` leaves it rejected; a failed request (or a failed
+   * destination read) leaves it rejected, nothing requested, and this action offered again.
+   */
+  function recheck() {
+    if (!creation.planRecheck || host.planOutgrown || running || busy || lock.current || draft.createdApplicationStackId || host.unsupported || host.holdPreparation || defaultPending) return
+    host.clearFailure()
+    const shown = creation.destination
+    if (shown && shown.kind !== 'resolved') {
+      creation.retryDestination()
+      return
+    }
+    bindingFailed.current = false
+    host.patch({ approvedDestinationRevision: shown?.revision })
+    void host.perform('prepare', async () => {
+      await checkPlan()
+      host.patch({ rejectedPlan: undefined, approvedDestinationRevision: undefined })
+    })
+  }
+  /** A rejected plan is never approved as it is; a stop on the way of a check (the destination not set) is checked again. */
   function prepare() {
-    // A plan Platform's validation rejected is never approved again as it is.
-    if (!creation.planRejected) approve()
+    if (creation.planRecheck) recheck()
+    else if (!creation.planRejected) approve()
   }
 
   return {
     waitingForPublish: publishRetries.current >= 4,
     markPublished,
     prepare,
-    /**
-     * 「もう一度確かめる」: the plan Platform's validation rejected for a cause that may lie outside it is validated once
-     * more, unchanged (no plan write, no new plan; the shown destination is checked as at any approval). The rejection
-     * is lifted as this asks, so the preparation effect runs exactly once: a valid answer goes on as an approval does
-     * (begin, then run); `valid: false` marks it rejected again. Nothing else validates a rejected plan.
-     */
-    recheck() {
-      if (creation.planRecheck) approve({ rejectedPlan: undefined, reusePlan: true })
-    },
+    recheck,
     /**
      * The name collision's recovery (NameChoice), then the preparation again with the new name. A URL taken by
      * another app renames the application on the stored plan (never a schema-defaulted client copy, no cleanup);
@@ -479,9 +511,10 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
           ? { renameApplication: { name } }
           : { creationPlan: renameCreationPlan(draft.creationPlan!, name, { domain }) })
         await host.receive(updated)
-        host.patch({ reusePlan: true, executionRequestId: undefined })
+        // The renamed plan is not the plan Platform may have rejected: it is approved as the user chose its name.
+        host.patch({ reusePlan: true, executionRequestId: undefined, rejectedPlan: undefined })
         onRenamed(updated)
-        prepare()
+        approve()
       })
     },
     /** A retry may bind again after a failed binding. */

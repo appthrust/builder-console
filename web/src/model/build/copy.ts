@@ -78,6 +78,10 @@ export const textJa = {
     forbidden: { title: 'アプリを作る権限がありません', reason: '基盤の担当者に「アプリを作る権限」を依頼してください。' },
     group: { title: '所属する部署が確認できませんでした', reason: '管理者に部署への追加を依頼してから、もう一度試してください。' },
     limit: { title: 'この作業で考え直せる回数を使い切りました', reason: '前の提案を使うか、新しい作りかけから始めてください。' },
+    /** `limit`'s reason when the plan on screen is the one Platform's validation rejected: it cannot be used. */
+    limitRejected: 'この計画は基盤に受け付けられなかったため、そのままでは使えません。新しい作りかけから始めてください。',
+    /** Same, when the cause may lie outside the plan and 「もう一度確かめる」 is still offered. */
+    limitRecheck: 'この計画は基盤に受け付けられませんでした。原因が基盤の側で直ったら「もう一度確かめる」で確かめ直せます。そうでなければ、新しい作りかけから始めてください。',
     unavailable: { title: 'AI がいま使えません', reason: '基盤の更新中かもしれません。少し待ってからもう一度試してください。しばらく待っても使えないときは、基盤の担当者に確認を依頼してください。' },
     quota: { title: 'AI の利用枠が切れています', reason: '管理者に AI の利用枠の回復を依頼してください。回復後に、もう一度試すボタンを押すと止まったところから再開できます。Excel や入力内容の問題ではありません。' },
     waitingForAi: { title: 'AI の準備を待っています', hint: '基盤の更新中かもしれません。そのまま待つと自動で続けます。' },

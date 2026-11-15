@@ -64,6 +64,10 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
   const preparationDone = Boolean(appView?.platform) && !appProgress
   const messages = useMemo(() => messagesFromDraft(proposalDraft, session.messages, { lastPlannedIntent: session.lastPlannedIntent, preparationDone, destination }), [proposalDraft, session.messages, session.lastPlannedIntent, preparationDone, destination])
   const proposal = useMemo(() => planProposal(proposalDraft, session.lastPlannedIntent, destination), [proposalDraft, session.lastPlannedIntent, destination])
+  // The conversation has outgrown the plan (the approval would make it again, 「計画を更新して作る」): a rejected plan is
+  // not checked again then; only a new plan goes on.
+  const planOutgrown = needsPlanRefresh(draft, session.lastPlannedIntent)
+  const planRecheck = creation.planRecheck && !planOutgrown
   const initialMessage: BuildMessage = { role: 'user', text: decomposeBuildIntent(session.baseIntent), at: draft.createdAt }
   // 用意する: the draft is read-only while the execution runs, but the AI can still ask preparation questions.
   const preparing = isBuildPending(execution)
@@ -91,7 +95,11 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
     // from it enters the draft cache, the draft is read back, and only `confirm` (a re-read) is offered.
     const unconfirmed = isResponseContractError(error)
     if (unconfirmed) void queryClient.invalidateQueries({ queryKey: buildDraftOptions(projectId, draft.id).queryKey })
-    const next = draftFailure(error, context, reference, failedStep)
+    const classified = draftFailure(error, context, reference, failedStep)
+    // At the generation limit the plan on screen is the rejected one: it cannot be used, so the copy says what is left.
+    const next = context === 'plan' && classified.kind === 'limit' && creation.planRejected
+      ? { ...classified, reason: planRecheck ? buildCopy.failure.limitRecheck : buildCopy.failure.limitRejected }
+      : classified
     retryContext.current = context
     setFailure(next)
     patch((current) => {
@@ -242,7 +250,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
   const creationEffects = useDraftCreationEffects(creation, {
     projectId, groupId, draft, draftRef, tab: session, currentTab: () => store.state, patch, receive, perform, fail,
     clearFailure: () => setFailure(undefined), busy, lock, failure, running, unsupported: Boolean(result.unsupported),
-    holdPreparation: session.pending.length > 0 || unobservedFailure || planFirst, observedFailures,
+    holdPreparation: session.pending.length > 0 || unobservedFailure || planFirst, planOutgrown, observedFailures,
     displayName: answers.name ?? spec.name ?? draft.title, description: spec.oneLine ?? '',
   })
 
@@ -332,7 +340,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
     /** Platform's validation rejected the plan on screen: it is not approved again; a new plan (`replan`) goes on. */
     planRejected: creation.planRejected,
     /** The rejected plan's cause may lie outside it: 「もう一度確かめる」 (`recheck`) is offered too. */
-    planRecheck: creation.planRecheck,
+    planRecheck,
     /** 「計画を作り直す」: asks for a new plan. */
     replan: () => retry('plan'),
     /** 「もう一度確かめる」: the rejected plan validated once more, unchanged (one validation per click). */

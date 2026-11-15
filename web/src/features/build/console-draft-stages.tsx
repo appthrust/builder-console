@@ -119,7 +119,7 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
     receive: (next) => writeDraft(queryClient, projectId, draftRef, next), perform, fail, clearFailure: () => setFailure(undefined),
     busy, lock, failure: failure?.failure, running, unsupported: Boolean(result.unsupported) || view.unsupported,
     // Never from a plan that is missing or stale, and never while the conversation has a turn open.
-    holdPreparation: readiness.kind !== 'current' || Boolean(session.activeTurnId), observedFailures,
+    holdPreparation: readiness.kind !== 'current' || Boolean(session.activeTurnId), planOutgrown: readiness.kind !== 'current', observedFailures,
     displayName: draft.publishPreferences?.name ?? spec.name ?? draft.title, description: spec.oneLine ?? '',
   })
 
@@ -147,14 +147,16 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
   const destinationStop = failure?.failure.kind === 'destination' && failure.failure.destination !== 'mismatch' && !execution ? failure.failure.destination : undefined
   // A plan Platform's validation rejected is never approved again. 「計画を作り直す」 asks for a new plan (typed
   // `request_plan`; the new plan clears the rejection by itself); where the cause may lie outside the plan, 「もう一度確かめる」
-  // validates the same plan once more. Both are on the failure notice while it is shown, else on the proposal.
-  const rejectionShown = failure !== undefined && (failure.failure.kind === 'plan' || failure.failure.recheck === true)
-  const rejection = (size: 'sm' | undefined, recheck: boolean) => <PlanRejectionActions size={size}
-    recheck={recheck ? { disabled: !canCreate, onClick: effects.recheck } : undefined}
+  // validates the same plan once more. While the plan is the rejected one, a creation failure (not an unreadable answer,
+  // a name choice or a destination stop) carries these actions, so a failed check never offers the approval back
+  // through a retry; with no failure shown they are on the proposal.
+  const rejectionShown = failure !== undefined && creation.planRejected && !destinationStop && failure.failure.kind !== 'unconfirmed' && failure.failure.kind !== 'name-taken'
+  const rejection = (size?: 'sm') => <PlanRejectionActions size={size}
+    recheck={creation.planRecheck ? { disabled: !canCreate, onClick: effects.recheck } : undefined}
     replan={{ disabled: !view.canRequestPlan, onClick: () => { if (actions.requestPlan()) setFailure(undefined) } }} />
   const approve = <Button tone="primary" loading={preparing} disabled={!canCreate || preparing || typeof proposal?.newRepository === 'string'} onClick={effects.prepare}>{buildCopy.primary.prepare}</Button>
   const proposalAction = started ? undefined
-    : creation.planRejected ? (rejectionShown ? undefined : rejection(undefined, creation.planRecheck))
+    : creation.planRejected ? (rejectionShown ? undefined : rejection())
       : readiness.kind === 'current' ? (proposal?.newRepository === 'failed' ? <><Button onClick={creation.retryDestination}>{buildCopy.proposal.destinationRetry}</Button>{approve}</> : approve)
       : readiness.kind === 'stale' ? <div className="space-y-2" data-testid="console-plan-stale">
         <p className="text-xs leading-relaxed text-busy-ink">{text.console.plan.stale}</p>
@@ -185,7 +187,7 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
     // The checked suggestion arrives after the failure: start over with it offered instead of an open field.
     ? <NameChoice key={shown.suggestedName ?? ''} suggestion={shown.suggestedName} onUse={(name) => effects.rename(name, failure.failure, () => setFailure(undefined))} />
     : destinationStop === 'changed' ? undefined
-      : rejectionShown ? rejection('sm', failure.failure.recheck === true && creation.planRecheck)
+      : rejectionShown ? rejection('sm')
       : failure && destinationStop
         // Retry once an administrator has set it: a fresh approval that reads the destination again, never a cleanup.
         ? <Button size="sm" onClick={() => { effects.resetBinding(); effects.prepare() }}>{text.conversation.retry}</Button>

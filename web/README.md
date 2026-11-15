@@ -628,15 +628,27 @@ non-engineers, with engineering words only under 「詳しい人向け」
   `valid: false` answer): 「この内容で作る」 is withdrawn and nothing validates
   it again by itself. Where the cause may lie outside the plan (the unknown
   reason, or only "destination unusable" sentences for a plan this console
-  reads as bound), 「もう一度確かめる」 is offered beside 「計画を作り直す」: one
-  validation of the unchanged plan per click (no plan write, no generation);
-  a valid answer goes on as an approval does (begin, then run), `valid: false`
-  leaves the state as it was. A preparation retry from a notice older than the
-  rejection is not offered and does nothing. When Platform refuses a new plan
-  for its 20-generation limit, the legacy page shows the limit notice without
-  an action and the proposal no longer offers 「計画を作り直す」; the check
-  stays where it applies. A plan generation whose stored error is the same
-  check reads the same way; a failed request in the plan context (the
+  reads as bound), 「もう一度確かめる」 is offered beside 「計画を作り直す」. Each
+  click checks the unchanged plan once, from the click: one validation, no
+  generation. If the destination moved since the plan was bound, the check
+  first sends the one PATCH that binds the plan to the current revision and
+  stops for the user's approval (the destination notice), as any approval
+  does. The rejection stands until a validation answers valid: then the plan
+  is approvable again and nothing is created until the user presses
+  「この内容で作る」; `valid: false` leaves the state as it was; a failed
+  request (or a failed destination read) leaves the plan rejected, nothing
+  requested, so a reload sends nothing. In the legacy engine the check is not
+  offered while the conversation has outgrown the plan (the approval would
+  read 「計画を更新して作る」); only 「計画を作り直す」 remains. A preparation
+  retry from a notice older than the rejection is not offered and does
+  nothing. Legacy only: when Platform refuses a new plan for its
+  20-generation limit, the limit notice has no action, says the rejected plan
+  cannot be used (and, where it applies, that 「もう一度確かめる」 can check it
+  again), and the proposal no longer offers 「計画を作り直す」. Console-v1 does
+  not handle the limit: its plan turn, refused by Platform, reaches the page
+  only as a `failed_precondition` without Platform's reason, so
+  「計画を作り直す」 stays offered there. A plan generation whose stored error
+  is the same check reads the same way; a failed request in the plan context (the
   generation request, the plan's PATCH) keeps the class its status and text
   give it. A failed validation request (5xx, 502-504 included: validating asks
   no AI) is the platform failure with its reference; other preparation
