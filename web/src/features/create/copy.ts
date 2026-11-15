@@ -50,23 +50,27 @@ export const textJa = {
   },
   /**
    * A readback found a repository (or app) with the earlier attempt's name where it was sent. Platform's answer does not
-   * say which request made it, so it is not used until the user chooses; nothing is sent meanwhile.
+   * say which request made it, so it is not used until the user chooses; nothing is sent meanwhile. Its creation time
+   * (基盤の時計) and when this console sent the earlier request (this device's clock) are shown side by side, never
+   * judged: the two clocks may differ.
    */
   candidate: {
     title: '前回の操作で作られた可能性がある置き場が見つかりました',
     body: (where: string) => `${where} が見つかりました。名前と作成先は前回の操作と同じですが、前回の操作で作られたものかどうかは確かめられません。ほかの人やほかの操作が同じ名前で作った置き場かもしれません。あなたの置き場か選んでください。選ぶまで何も送りません。`,
-    createdAt: (at: string) => `作成日時: ${at}`,
-    createdAtUnknown: '作成日時: 分かりません',
+    createdAt: (at: string) => `置き場の作成日時（基盤の時計）: ${at}`,
+    createdAtUnknown: '置き場の作成日時: 分かりません',
+    sentAt: (at: string) => `前回の作成を送った日時（この端末の時計）: ${at}`,
+    sentAtUnknown: '前回の作成を送った日時: 記録がありません',
+    /** Shown only when, by this device's clock, it was created clearly before the earlier request (`createdBeforeSent`). */
+    createdBeforeSent: 'この端末の時計では、前回の作成を送るより前に作られています。同じ名前の、もとからあった置き場かもしれません。ただし端末と基盤の時計はずれていることがあるため、これだけでは決まりません。あなたの置き場かどうかは、あなたが選んでください。',
+    /** What choosing it means, matching what app deletion says (copy.app.settings.deleteKeepsRepository / deleteSourceBusy). */
+    useMeans: 'この置き場で続けると、アプリはこの置き場をもとに作られます。あとでアプリを削除すると、基盤にあるこの置き場とのつながりも一緒に削除されます（GitHub の置き場は消さずに残ります）。',
     use: 'この置き場で続ける',
     notMine: '自分の置き場ではない',
     stackTitle: '前回の操作で作られた可能性があるアプリが見つかりました',
     stackBody: (name: string) => `アプリ「${name}」が見つかりました。名前とひな形は前回の操作と同じですが、前回の操作で作られたものかどうかは確かめられません。あなたのアプリか選んでください。選ぶまで何も送りません。`,
     useStack: 'このアプリで続ける',
     notMineStack: '自分のアプリではない',
-    /** A candidate created clearly before the earlier attempt's first send: not offered as the user's. */
-    preexistingTitle: '同じ名前の置き場がすでにあります',
-    preexisting: (where: string) => `${where} は前回の操作より前に作られていたため、前回の操作で作られたものではありません。この置き場は使いません。この作成先では、この名前はすでに使われています。`,
-    preexistingDismiss: 'この置き場は使わない',
   },
   /**
    * The resend of an earlier, uncertain create was refused, or it cannot be resent exactly. The refusal does not prove
@@ -81,8 +85,9 @@ export const textJa = {
     repository: (repository: string, image?: string) => image ? `「${repository}」（アプリの保管場所 ${image}）` : `「${repository}」`,
     app: (name: string) => `アプリ「${name}」`,
     notFound: (where: string) => `前回の操作による ${where} はまだ見つかりません。少し待ってから、もう一度確認できます。前回の操作をあきらめて作り直すこともできますが、前回の操作によって後から ${where} が作られることがあり、そのときは二つになります。`,
-    /** After the user said a readback's hit is not theirs (or it existed before): that name is taken where it was found. */
-    notMine: '見つかった同じ名前のものは、前回の操作で作られたものではないとして使いません。その作成先ではこの名前がすでに使われているため、作り直すときは別の名前にしてください。',
+    /** After the user said a readback's hit is not theirs: it is not used, and can be looked at again (`reconsider`). */
+    notMine: '見つかった同じ名前のものは、あなたのものではないと選んだため使いません。選び直すときは「見つかったものをもう一度見る」を押してください。その作成先ではこの名前がすでに使われているため、作り直すときは別の名前にしてください。',
+    reconsider: '見つかったものをもう一度見る',
     startOver: '前回の操作をあきらめて作り直す',
   },
   /** A create step answered 2xx with an answer this console cannot read: it may have happened (never resent blindly). */

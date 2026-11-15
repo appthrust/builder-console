@@ -15,7 +15,7 @@ import { createTestGateway } from '../../api/testing/gateway'
 import { consoleRoutes } from '../../dev/mock-console'
 import { platformRoutes } from '../../dev/mock-platform'
 import type { ResolvedRepositoryDestination } from '../../model/contracts/catalog'
-import { setLanguage } from '../../shell/language'
+import { locale, setLanguage } from '../../shell/language'
 import { UnsavedChangesProvider } from '../../ui/use-unsaved-changes-guard'
 import { preserveLanguage } from '../../../test/language'
 import { text } from './copy'
@@ -206,10 +206,14 @@ describe('an unsettled create (review finding 1)', () => {
     expect(pageText()).toContain(text.unsettled.title)
 
     await click(check())
-    // Offered, not adopted: where it is and when it was made; 作る stays disabled until the user chooses.
+    // Offered, not adopted: where it is, when it was made and when K was sent; 作る stays disabled until the user chooses.
     expect(pageText()).toContain(text.candidate.title)
     expect(pageText()).toContain(text.candidate.body(where))
     expect(container.querySelector('[data-testid="create-candidate-created-at"]')?.textContent).toContain(text.candidate.createdAt('').trim())
+    expect(container.querySelector('[data-testid="create-candidate-sent-at"]')?.textContent).toContain(text.candidate.sentAt('').trim())
+    expect(container.querySelector('[data-testid="create-candidate-created-before"]')).toBeNull()
+    // What choosing it means: the app is built on it, and deleting the app later removes its record too.
+    expect(pageText()).toContain(text.candidate.useMeans)
     expect(button('作る').disabled).toBe(true)
     expect(sourceWrites()).toHaveLength(1)
 
@@ -226,7 +230,7 @@ describe('an unsettled create (review finding 1)', () => {
     expect(stack?.body).toMatchObject({ source: { kind: 'application-source-repository', sourceRepositoryId: `${name}-src` } })
   })
 
-  test('another attempt\'s repository with the same name at A: the user says it is not theirs, K stays held with the explicit give-up, and nothing is sent', async () => {
+  test('another attempt\'s repository with the same name at A: "not mine" keeps K held with the explicit give-up and sends nothing; looking again re-offers it, and choosing it goes on', async () => {
     await resumedAtA(async ({ draft, destination, projectId }) => {
       // Someone else's request made a repository with this name at A; K itself was never applied.
       await api.createSourceRepository(projectId, templateRequest(destination.revision) as never, 'someone-else')
@@ -248,28 +252,68 @@ describe('an unsettled create (review finding 1)', () => {
     await click(check())
     expect(pageText()).not.toContain(text.candidate.title)
     expect(sourceWrites()).toHaveLength(1)
+
+    // The user reconsiders: the same hit is offered again with both choices, and choosing it goes on with its id.
+    await click(button(text.unsettled.reconsider))
+    expect(pageText()).toContain(text.candidate.title)
+    expect(pageText()).toContain(text.candidate.body(where))
+    expect(button(text.candidate.notMine).disabled).toBe(false)
+    expect(button('作る').disabled).toBe(true)
+    await click(button(text.candidate.use))
+    expect(rows()[text.destination.found]).toBe(`acme/${name}`)
+    await click(button('作る'))
+    expect(sourceWrites()).toHaveLength(1)
+    const stack = requests.find((item) => item.method === 'POST' && item.path.endsWith('/application-stacks'))
+    expect(stack?.body).toMatchObject({ source: { kind: 'application-source-repository', sourceRepositoryId: `${name}-src` } })
   })
 
-  test('a repository created clearly before K\'s first send is shown as an existing repository with the same name, not as probably the user\'s', async () => {
+  /** Platform's list, with every repository's creation time set to `createdAt` (the cluster's clock). */
+  async function listedAt(projectId: string, createdAt: string) {
+    const listed = await (await route(new Request(`http://mock.test/api/v1/projects/${projectId}/application-source-repositories`))).json() as { data: Record<string, unknown>[] }
+    overrides.set(`GET /api/v1/projects/${projectId}/application-source-repositories`, () => Response.json({ ...listed, data: listed.data.map((item) => ({ ...item, createdAt })) }))
+  }
+
+  test('a repository created an hour before K\'s first send (by this browser\'s clock) is still a candidate with both choices, plus a neutral hint', async () => {
+    const sentAt = new Date().toISOString()
     const { projectId } = await resumedAtA(async ({ draft, destination, projectId }) => {
       await api.createSourceRepository(projectId, templateRequest(destination.revision) as never, 'long-ago')
-      return { draft, attempts: { source: { key: 'K-4', origin, request: templateRequest(destination.revision) as never, binding: atA(destination), sentAt: new Date().toISOString() } } }
+      return { draft, attempts: { source: { key: 'K-4', origin, request: templateRequest(destination.revision) as never, binding: atA(destination), sentAt } } }
     })
-    // Platform's record says it was made an hour before K was sent.
-    const listed = await (await route(new Request(`http://mock.test/api/v1/projects/${projectId}/application-source-repositories`))).json() as { data: Record<string, unknown>[] }
-    const anHourAgo = new Date(Date.now() - 3_600_000).toISOString()
-    overrides.set(`GET /api/v1/projects/${projectId}/application-source-repositories`, () => Response.json({ ...listed, data: listed.data.map((item) => ({ ...item, createdAt: anHourAgo })) }))
+    await listedAt(projectId, new Date(Date.parse(sentAt) - 3_600_000).toISOString())
     await click(button('作る'))
     await click(check())
 
-    expect(pageText()).toContain(text.candidate.preexistingTitle)
-    expect(pageText()).toContain(text.candidate.preexisting(where))
-    expect(pageText()).not.toContain(text.candidate.title)
-    expect(() => button(text.candidate.use)).toThrow()
+    expect(pageText()).toContain(text.candidate.title)
+    expect(pageText()).toContain(text.candidate.body(where))
+    expect(container.querySelector('[data-testid="create-candidate-created-before"]')?.textContent).toBe(text.candidate.createdBeforeSent)
+    expect(container.querySelector('[data-testid="create-candidate-sent-at"]')?.textContent).toBe(text.candidate.sentAt(new Date(sentAt).toLocaleString(locale())))
+    expect(button(text.candidate.use).disabled).toBe(false)
+    expect(button(text.candidate.notMine).disabled).toBe(false)
     expect(button('作る').disabled).toBe(true)
-    await click(button(text.candidate.preexistingDismiss))
-    expect(pageText()).toContain(text.unsettled.notMine)
     expect(sourceWrites()).toHaveLength(1)
+  })
+
+  test('the browser clock is 10 minutes ahead of the cluster and K really made the repository: the user chooses it and creation goes on with its id', async () => {
+    const sentAt = new Date().toISOString()
+    const { projectId } = await resumedAtA(async ({ draft, destination, projectId }) => {
+      // K's first send was applied, but its answer was lost and its key is unknown to the (mock) Platform's replay.
+      await api.createSourceRepository(projectId, templateRequest(destination.revision) as never, 'applied-without-record')
+      return { draft, attempts: { source: { key: 'K-5', origin, request: templateRequest(destination.revision) as never, binding: atA(destination), sentAt } } }
+    })
+    // The cluster stamped it by a clock 10 minutes behind this browser's.
+    await listedAt(projectId, new Date(Date.parse(sentAt) - 10 * 60_000).toISOString())
+    await click(button('作る'))
+    await click(check())
+    expect(pageText()).toContain(text.candidate.title)
+    expect(container.querySelector('[data-testid="create-candidate-created-before"]')).not.toBeNull()
+
+    await click(button(text.candidate.use))
+    expect(rows()[text.destination.found]).toBe(`acme/${name}`)
+    expect(button('作る').disabled).toBe(false)
+    await click(button('作る'))
+    expect(sourceWrites()).toHaveLength(1)
+    const stack = requests.find((item) => item.method === 'POST' && item.path.endsWith('/application-stacks'))
+    expect(stack?.body).toMatchObject({ source: { kind: 'application-source-repository', sourceRepositoryId: `${name}-src` } })
   })
 })
 

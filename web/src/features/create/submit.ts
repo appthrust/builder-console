@@ -13,7 +13,11 @@
 // - A readback finds resources by name and place, which Platform's list does not
 //   tie to the attempt's key: a hit is only a `candidate` until the user says it
 //   is theirs. Every retained id records how it was learned (`created` / `found`),
-//   and this console deletes only what its own keyed create answered.
+//   and the wizard's own cleanup (origin replacement, start-over) deletes only what
+//   its own keyed create answered. Deleting the finished app later is not covered:
+//   app/mutations.ts `deleteAppResources` deletes the stack's source repository
+//   record however the wizard learned it (follow-up APT-1080: durable provenance on
+//   the Console app record, or ownership enforced by Platform).
 import { ORPCError } from '@orpc/client'
 import { isResponseContractError } from '../../api/boundary'
 import { isConsoleError } from '../../api/console'
@@ -66,7 +70,8 @@ export type SubmitPhase =
 /**
  * How the console learned a retained resource id. `created`: a readable success answer to this attempt's own keyed
  * create (Platform answers it for that key only). `found`: a readback listed it and the user chose it (`acceptCandidate`).
- * Only a `created` resource is ever deleted by this console.
+ * Only a `created` resource is deleted by the wizard's own cleanup. Provenance ends with the wizard: deleting the app
+ * later (`deleteAppResources`) removes the stack's source repository record either way (APT-1080).
  */
 export type Provenance = 'created' | 'found'
 
@@ -74,12 +79,16 @@ export type Provenance = 'created' | 'found'
  * A readback's hit for the unconfirmed or unsettled step: a resource with the attempt's name where the attempt sent it.
  * Platform's list carries no trace of the request or key that made it (the idempotency annotations stay on the
  * resource; platform-api internal/handler/application_source_repository.go:1702-1749), so it may be another attempt's.
- * `preexisting`: it was created clearly before this attempt's first send (`CANDIDATE_CLOCK_TOLERANCE_MS`), so it is not
- * this attempt's; the name is taken there. A stack record has no creation time to compare.
+ * A repository carries its creation time (`createdAt`, the cluster's clock) and the attempt's first send (`sentAt`,
+ * this browser's clock) for the user to see; the two clocks have no known relation, so neither decides anything
+ * (`createdBeforeSent` is a display hint only). A stack record has no creation time.
  */
 export type CreateCandidate =
-  | { step: 'source'; id: string; binding: SourceBinding; createdAt?: string; preexisting: boolean }
+  | { step: 'source'; id: string; binding: SourceBinding; createdAt?: string; sentAt?: string }
   | { step: 'stack'; id: string; appName: string }
+
+/** A readback hit the user said is not theirs, for the attempt whose Idempotency-Key is `key` (absent: no attempt kept). */
+export interface RejectedCandidate { key?: string; candidate: CreateCandidate }
 
 /** What already exists from an earlier attempt. */
 export interface CreateProgress {
@@ -92,7 +101,7 @@ export interface CreateProgress {
    * destination Platform resolves now, because its retry reuses this repository. Absent in progress saved before it was kept.
    */
   sourceRepositoryBinding?: SourceBinding
-  /** How `sourceRepositoryId` was learned. Absent in progress saved before it was kept: not provably this attempt's, never deleted. */
+  /** How `sourceRepositoryId` was learned. Absent in progress saved before it was kept: not provably this attempt's, never deleted by the wizard. */
   sourceRepositoryProvenance?: Provenance
   stackId?: string
   /** The URL name `stackId` was created with; bind follows at once, so a retry must keep it. */
@@ -121,8 +130,12 @@ export interface CreateProgress {
   unsettledSearched?: boolean
   /** A readback hit the user has not judged yet: nothing is sent while it is set (`acceptCandidate` / `rejectCandidate`). */
   candidate?: CreateCandidate
-  /** Readback hits the user said are not this attempt's: never offered again. */
-  notMine?: string[]
+  /**
+   * Readback hits the user said are not theirs. Each counts only for its resource kind and the attempt it was rejected
+   * for (`key`): a readback for that attempt skips it, and the held notice can offer it again (`reconsiderCandidate`).
+   * Dropped when that attempt ends (answered, refused, accepted or given up), never carried into a later one.
+   */
+  notMine?: RejectedCandidate[]
 }
 
 /** What a source repository is made for: the URL name and the entry (with its template or picked repository). */
@@ -385,27 +398,33 @@ function atAttemptPlace(repository: SourceRepository, attempt: Pick<SourceAttemp
 }
 
 /**
- * How far a candidate's `createdAt` may lie before the attempt's `sentAt` and still be offered as possibly this
- * attempt's: 5 minutes. `createdAt` is the Kubernetes creationTimestamp (the cluster's clock, whole seconds, rounded
- * down); `sentAt` is this browser's clock. Their skew is unknown; 5 minutes is the customary maximum tolerated between
- * hosts (Kerberos' default) and far above the second truncation. Judging the attempt's own repository as older would
- * push the user to give it up and create again (a duplicate), so the tolerance errs toward offering it: the user still
- * sees its creation time and chooses.
+ * Display threshold for one hint, never a rule: by this browser's clock the repository was created more than 1 minute
+ * before the attempt's first send (`createdAt` is the cluster's creationTimestamp, whole seconds rounded down; `sentAt`
+ * is this browser's clock, with no known relation to it). The hint says it may be an existing repository with the same
+ * name; both choices stay offered either way.
  */
-export const CANDIDATE_CLOCK_TOLERANCE_MS = 5 * 60_000
+export const CREATED_BEFORE_HINT_MS = 60_000
 
-/** Created clearly before the attempt's first send: not this attempt's. Unknown either time: not judged so. */
-function createdBefore(createdAt: string | undefined, sentAt: string | undefined): boolean {
-  const created = createdAt ? Date.parse(createdAt) : Number.NaN
-  const sent = sentAt ? Date.parse(sentAt) : Number.NaN
-  return Number.isFinite(created) && Number.isFinite(sent) && created < sent - CANDIDATE_CLOCK_TOLERANCE_MS
+/** Whether the candidate notice adds the hint above. Unknown either time: no hint. */
+export function createdBeforeSent(candidate: CreateCandidate): boolean {
+  if (candidate.step !== 'source') return false
+  const created = candidate.createdAt ? Date.parse(candidate.createdAt) : Number.NaN
+  const sent = candidate.sentAt ? Date.parse(candidate.sentAt) : Number.NaN
+  return Number.isFinite(created) && Number.isFinite(sent) && created < sent - CREATED_BEFORE_HINT_MS
 }
 
-/** The attempts left once `step`'s attempt has ended. */
-function settled(attempts: CreateProgress['attempts'], step: 'source' | 'stack'): CreateProgress['attempts'] {
-  const rest: NonNullable<CreateProgress['attempts']> = { ...attempts }
+/** What is left once `step`'s attempt has ended: the other attempt, and only the rejections made for that one. */
+function settled(progress: CreateProgress, step: 'source' | 'stack'): Pick<CreateProgress, 'attempts' | 'notMine'> {
+  const rest: NonNullable<CreateProgress['attempts']> = { ...progress.attempts }
   delete rest[step]
-  return rest.source || rest.stack ? rest : undefined
+  const notMine = progress.notMine?.filter((rejected) => rejected.candidate.step !== step)
+  return { attempts: rest.source || rest.stack ? rest : undefined, notMine: notMine?.length ? notMine : undefined }
+}
+
+/** Whether the user said `id` is not theirs for `step`'s current attempt. */
+function rejectedNow(progress: CreateProgress, step: 'source' | 'stack', id: string): boolean {
+  const key = progress.attempts?.[step]?.key
+  return progress.notMine?.some((rejected) => rejected.candidate.step === step && rejected.candidate.id === id && rejected.key === key) ?? false
 }
 
 export const sameOrigin = (a: SourceOrigin | undefined, b: SourceOrigin | undefined) =>
@@ -434,8 +453,8 @@ export function keptSource(progress: CreateProgress, origin: SourceOrigin | unde
 }
 
 /**
- * A kept repository the next attempt would not use (another name, entry, template or picked repository) and that this
- * console never deletes, because no keyed create of its own answered it: it stays where it is, and the confirm step
+ * A kept repository the next attempt would not use (another name, entry, template or picked repository) and that the
+ * wizard never deletes, because no keyed create of its own answered it: it stays where it is, and the confirm step
  * says so. A `created` one is removed instead (best effort) when the next attempt replaces it.
  */
 export function keptElsewhere(progress: CreateProgress, origin: SourceOrigin | undefined): { binding?: SourceBinding } | undefined {
@@ -469,7 +488,7 @@ export async function submitCreate(
         progress.unsettled = step
         throw new Error(text.unsettled.title, { cause: error })
       }
-      if (!resend && refused(error)) progress.attempts = settled(progress.attempts, step)
+      if (!resend && refused(error)) Object.assign(progress, settled(progress, step))
       throw error
     }
   }
@@ -480,7 +499,7 @@ export async function submitCreate(
     progress.sourceRepositoryOrigin = attempt.origin
     progress.sourceRepositoryBinding = madeAt(repository, attempt.binding)
     progress.sourceRepositoryProvenance = 'created'
-    progress.attempts = settled(progress.attempts, 'source')
+    Object.assign(progress, settled(progress, 'source'))
     report()
     return repository.id
   }
@@ -489,7 +508,7 @@ export async function submitCreate(
     progress.stackId = stack.id
     progress.stackAppName = attempt.appName
     progress.stackProvenance = 'created'
-    progress.attempts = settled(progress.attempts, 'stack')
+    Object.assign(progress, settled(progress, 'stack'))
     report()
     return stack.id
   }
@@ -617,7 +636,8 @@ export interface ConfirmedCreate {
  * by the attempt's key (Platform's list does not expose it), so it is not
  * adopted: it becomes the `candidate`, nothing is sent while it is shown, and
  * only the user's `acceptCandidate` / `rejectCandidate` ends it. One the user
- * already said is not theirs (`notMine`) is not offered again.
+ * already said is not theirs for this attempt (`notMine`) is not offered by a
+ * readback again; only the user's `reconsiderCandidate` brings it back.
  *
  * A Platform list that does not show the resource is not proof it was not
  * made (an accepted write may not be listed yet). After an unconfirmed step the
@@ -647,13 +667,13 @@ export async function confirmCreate(
   }
   const sourceAttempt = progress.attempts?.source
   if (phase === 'source' && sourceAttempt && !progress.sourceRepositoryId) {
-    const hit = (await deps.api.sourceRepositories(request.projectId)).data.find((repository) => !resume.notMine?.includes(repository.id) && atAttemptPlace(repository, sourceAttempt))
+    const hit = (await deps.api.sourceRepositories(request.projectId)).data.find((repository) => !rejectedNow(resume, 'source', repository.id) && atAttemptPlace(repository, sourceAttempt))
     const binding = hit && madeAt(hit, sourceAttempt.binding)
     if (hit && binding) {
       const candidate: CreateCandidate = {
         step: 'source', id: hit.id, binding,
         ...(hit.createdAt ? { createdAt: hit.createdAt } : {}),
-        preexisting: createdBefore(hit.createdAt, sourceAttempt.sentAt),
+        ...(sourceAttempt.sentAt ? { sentAt: sourceAttempt.sentAt } : {}),
       }
       return { progress: { ...progress, candidate } }
     }
@@ -663,7 +683,7 @@ export async function confirmCreate(
     const name = stackAttempt?.appName ?? appName
     const sourceRepositoryId = stackAttempt ? stackAttempt.sourceRepositoryId : progress.sourceRepositoryId
     const hit = (await deps.api.stacks(request.projectId)).find((stack) =>
-      !resume.notMine?.includes(stack.id) && stack.applicationName === name && stack.templateId === deps.catalog.template.id && stack.sourceRepositoryRefName === sourceRepositoryId)
+      !rejectedNow(resume, 'stack', stack.id) && stack.applicationName === name && stack.templateId === deps.catalog.template.id && stack.sourceRepositoryRefName === sourceRepositoryId)
     if (hit) return { progress: { ...progress, candidate: { step: 'stack', id: hit.id, appName: name } } }
   }
   // A refused resend's attempt stays held (nothing is sent for it again), now known not to be listed where it was
@@ -681,38 +701,59 @@ export async function confirmCreate(
  */
 export function abandonUnsettled(progress: CreateProgress): CreateProgress {
   if (!progress.unsettled || !progress.unsettledSearched) return progress
-  return { ...progress, attempts: settled(progress.attempts, progress.unsettled), unsettled: undefined, unsettledSearched: undefined }
+  return { ...progress, ...settled(progress, progress.unsettled), unsettled: undefined, unsettledSearched: undefined }
 }
 
 /**
  * 「この置き場で続ける」 / 「このアプリで続ける」: the user says the readback's hit is what the earlier request made. It is kept as
- * `found` (never deleted by this console) and the app goes on with it. A `preexisting` repository is not offered: it is
- * refused (unchanged).
+ * `found` (never deleted by the wizard's own cleanup) and the app goes on with it. Its times never stop this: they are
+ * shown, not judged (`createdBeforeSent`).
  */
 export function acceptCandidate(progress: CreateProgress): CreateProgress {
   const candidate = progress.candidate
   if (!candidate) return progress
   if (candidate.step === 'stack') {
-    return { ...progress, candidate: undefined, stackId: candidate.id, stackAppName: candidate.appName, stackProvenance: 'found', attempts: settled(progress.attempts, 'stack') }
+    return { ...progress, ...settled(progress, 'stack'), candidate: undefined, stackId: candidate.id, stackAppName: candidate.appName, stackProvenance: 'found' }
   }
   const attempt = progress.attempts?.source
-  if (candidate.preexisting || !attempt) return progress
+  if (!attempt) return progress
   return {
-    ...progress, candidate: undefined,
+    ...progress, ...settled(progress, 'source'), candidate: undefined,
     sourceRepositoryId: candidate.id, sourceRepositoryOrigin: attempt.origin, sourceRepositoryBinding: candidate.binding, sourceRepositoryProvenance: 'found',
-    attempts: settled(progress.attempts, 'source'),
   }
 }
 
 /**
- * 「自分のものではない」 (and the only choice for a `preexisting` repository): the hit is not offered again and the earlier
- * attempt stays held, as after a readback that found nothing. Nothing new is created from here: only the explicit
- * give-up (`abandonUnsettled`, which states the residual risk) moves on.
+ * 「自分の置き場ではない」 / 「自分のアプリではない」: a readback for this attempt does not offer the hit again and the earlier
+ * attempt stays held, as after a readback that found nothing. Nothing new is created from here: the user may look at the
+ * hit again (`reconsiderCandidate`), check the latest state, or explicitly give the attempt up (`abandonUnsettled`, which
+ * states the residual risk).
  */
 export function rejectCandidate(progress: CreateProgress): CreateProgress {
   const candidate = progress.candidate
   if (!candidate) return progress
-  return { ...progress, candidate: undefined, notMine: [...(progress.notMine ?? []), candidate.id], unsettled: candidate.step, unsettledSearched: true }
+  const key = progress.attempts?.[candidate.step]?.key
+  const rejected: RejectedCandidate = { candidate, ...(key ? { key } : {}) }
+  return { ...progress, candidate: undefined, notMine: [...(progress.notMine ?? []), rejected], unsettled: candidate.step, unsettledSearched: true }
+}
+
+/** The hit the user last said is not theirs for the held attempt, which the held notice can offer again. */
+export function rejectedCandidate(progress: CreateProgress): CreateCandidate | undefined {
+  const step = progress.unsettled
+  if (!step || progress.candidate) return undefined
+  const key = progress.attempts?.[step]?.key
+  return progress.notMine?.filter((rejected) => rejected.candidate.step === step && rejected.key === key).at(-1)?.candidate
+}
+
+/**
+ * 「見つかったものをもう一度見る」: the user takes back "not mine" and the hit is offered again as it was found, with both
+ * choices. Sends nothing; its rejection is dropped (choosing "not mine" again records it again).
+ */
+export function reconsiderCandidate(progress: CreateProgress): CreateProgress {
+  const candidate = rejectedCandidate(progress)
+  if (!candidate) return progress
+  const notMine = progress.notMine?.filter((rejected) => rejected.candidate !== candidate)
+  return { ...progress, candidate, notMine: notMine?.length ? notMine : undefined, unsettled: undefined, unsettledSearched: undefined }
 }
 
 /** Both creation paths bind the console app to the actual platform name and stack. */

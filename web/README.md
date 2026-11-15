@@ -528,10 +528,16 @@ non-engineers, with engineering words only under 「詳しい人向け」
   repository, and its notice is not shown while the wizard goes on.
 - Every kept id records how it was learned: `created` (a readable answer to
   this attempt's own keyed create) or `found` (a readback listed it and the user
-  chose it). Only a `created` source repository is ever deleted by the console
-  (best effort, when a renamed or re-templated attempt replaces it, or on
-  「最初から作り直す」); a `found` one, or one kept by older progress without
-  that record, stays where it is, and the confirm step says it stays.
+  chose it). The wizard's own cleanup deletes only a `created` source
+  repository (best effort, when a renamed or re-templated attempt replaces it,
+  or on 「最初から作り直す」); a `found` one, or one kept by older progress
+  without that record, stays where it is, and the confirm step says it stays.
+  This rule covers the wizard only. Deleting the finished app later
+  (`features/app/mutations.ts` `deleteAppResources`) deletes the stack and then
+  its source repository record however the wizard learned it, so a `found`
+  repository's record goes with the app; the candidate notice says so before the
+  user chooses it. Not covered yet (APT-1080): durable provenance on the Console
+  app record, or ownership enforced by Platform.
 - A Platform create whose outcome is unknown (no answer, a 5xx, an unread 2xx
   the readback did not find) keeps its Idempotency-Key, its exact request, where
   it went and when it was first sent. Before anything else is validated or
@@ -546,13 +552,19 @@ non-engineers, with engineering words only under 「詳しい人向け」
   not say which request or key made a resource (the key's annotations stay on
   the resource), so a same-named repository or stack found there is only a
   candidate: the console shows it (a repository with where it is, its image
-  location and its creation time; a stack with its app name, as the stack list
-  has no creation time) and sends nothing until the user chooses to go on with
-  it (kept as `found`) or that it is not theirs (not offered again; the attempt
-  stays held). A repository created more than 5 minutes (the allowance for
-  clock skew between the browser and the cluster) before the attempt's first
-  send is shown as an existing repository with the same name, the name taken at
-  that destination, never as possibly the user's. Only after a readback did not
+  location, its creation time and when this console first sent the earlier
+  request; a stack with its app name, as the stack list has no creation time)
+  and sends nothing until the user chooses to go on with it (kept as `found`)
+  or that it is not theirs (the attempt stays held). The two times come from
+  different clocks (the cluster's and this browser's) with no known relation,
+  so they decide nothing: both choices are always offered. When the repository
+  looks more than 1 minute older than the send by this browser's clock (a
+  display threshold above the creation time's whole-second truncation), a
+  neutral hint says it may be an existing repository with the same name. A
+  rejected hit is not offered by a readback for that attempt again, but the held
+  notice offers 「見つかったものをもう一度見る」 to choose again; rejections are kept
+  per resource kind and attempt key and dropped when that attempt ends
+  (answered, refused, accepted or given up). Only after a readback did not
   find it, or found only what the user rejected, may the user choose
   「前回の操作をあきらめて作り直す」, which states that the earlier request may
   still create it later; it is never automatic. Progress saved before requests

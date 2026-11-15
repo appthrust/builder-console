@@ -49,7 +49,9 @@ import {
   CreateFailed,
   keptElsewhere,
   keptSource,
+  reconsiderCandidate,
   rejectCandidate,
+  rejectedCandidate,
   sourceOrigin,
   submitCreate,
   type CreatePath,
@@ -585,6 +587,11 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
     setStillUnknown(false)
     patch({ resume: (mine ? acceptCandidate : rejectCandidate)(run.state.resume), failure: undefined })
   }
+  /** 「見つかったものをもう一度見る」: the hit rejected for the held attempt is offered again, with both choices. Sends nothing. */
+  const reconsider = () => {
+    setStillUnknown(false)
+    patch({ resume: reconsiderCandidate(run.state.resume), failure: undefined })
+  }
   const [startingOver, setStartingOver] = useState(false)
   /**
    * 「最初から作り直す」: where the earlier repository is cannot be shown, so it is left unused and the next 作る makes a new
@@ -745,8 +752,9 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
               </div>
             ) : resume.unsettled ? (
               <div id="create-failure" tabIndex={-1} className="mt-6 focus:outline-none">
-                <UnsettledCreateNotice where={unsettledWhere} searched={resume.unsettledSearched === true} notMine={(resume.notMine?.length ?? 0) > 0} confirming={confirming} stillUnknown={stillUnknown}
-                  disabled={!catalog || !createPath()} onConfirm={() => void confirmLatest()} onGiveUp={giveUpUnsettled} />
+                <UnsettledCreateNotice where={unsettledWhere} searched={resume.unsettledSearched === true} confirming={confirming} stillUnknown={stillUnknown}
+                  disabled={!catalog || !createPath()} onConfirm={() => void confirmLatest()} onGiveUp={giveUpUnsettled}
+                  {...(rejectedCandidate(resume) ? { onReconsider: reconsider } : {})} />
               </div>
             ) : failure && !failure.field && !(failure.destination === 'blocked' && destinationBlockedShown) ? (
               <div id="create-failure" tabIndex={-1} className="mt-6 focus:outline-none">

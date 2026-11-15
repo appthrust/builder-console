@@ -51,9 +51,10 @@ describe('create session', () => {
     const held: CreateSession = {
       ...session,
       progress: {
-        draft, sourceRepositoryProvenance: 'found', stackProvenance: 'created', notMine: ['source-old'],
+        draft, sourceRepositoryProvenance: 'found', stackProvenance: 'created',
+        notMine: [{ key: 'K', candidate: { step: 'source', id: 'source-old', binding, createdAt: '2026-11-14T00:00:00Z' } }, { candidate: { step: 'stack', id: 'stack-old', appName: 'stock' } }],
         attempts: { source: { key: 'K', origin: { kind: 'template', appName: 'stock' }, binding, sentAt: '2026-11-15T00:00:00.000Z' } },
-        candidate: { step: 'source', id: 'source-abc', binding, createdAt: '2026-11-15T00:00:01Z', preexisting: false },
+        candidate: { step: 'source', id: 'source-abc', binding, createdAt: '2026-11-15T00:00:01Z', sentAt: '2026-11-15T00:00:00.000Z' },
       },
     }
     saveCreateSession(held, target)

@@ -22,6 +22,11 @@ const phases = z.enum(['draft', 'source', 'checking', 'platform', 'bind'])
 const origin = z.object({ appName: z.string(), kind: z.enum(['template', 'existing']), repository: z.string().optional(), templateId: z.string().optional() })
 const binding = z.object({ repository: z.string(), image: z.string().optional(), revision: z.string().optional(), connectionId: z.string().optional() })
 const provenance = z.enum(['created', 'found'])
+/** A readback hit with what is shown for it: a repository's creation time and its attempt's first send, each as read. */
+const candidate = z.discriminatedUnion('step', [
+  z.object({ step: z.literal('source'), id: z.string(), binding, createdAt: z.string().optional(), sentAt: z.string().optional() }),
+  z.object({ step: z.literal('stack'), id: z.string(), appName: z.string() }),
+])
 /** A create request this tab built and sent: resent exactly as it was (Platform compares it with the first one). */
 const sentRequest = <T,>() => z.custom<T>((value) => typeof value === 'object' && value !== null && !Array.isArray(value))
 
@@ -43,7 +48,7 @@ const sessionSchema = z.object({
     sourceRepositoryOrigin: origin.optional(),
     // Where the kept repository is: a resumed attempt shows it, not the destination resolved now.
     sourceRepositoryBinding: binding.optional(),
-    // How the kept ids were learned: only a `created` one is ever deleted by this console; absent = never deleted.
+    // How the kept ids were learned: only a `created` one is deleted by the wizard's own cleanup; absent = never by it.
     sourceRepositoryProvenance: provenance.optional(),
     stackId: z.string().optional(), stackAppName: z.string().optional(), stackProvenance: provenance.optional(),
     // A reload keeps an unconfirmed step unconfirmed: only the readback may follow.
@@ -59,11 +64,9 @@ const sessionSchema = z.object({
     unsettled: z.enum(['source', 'stack']).optional(),
     unsettledSearched: z.boolean().optional(),
     // A readback hit awaiting the user's choice stays one across reloads (nothing is sent meanwhile).
-    candidate: z.discriminatedUnion('step', [
-      z.object({ step: z.literal('source'), id: z.string(), binding, createdAt: z.string().optional(), preexisting: z.boolean() }),
-      z.object({ step: z.literal('stack'), id: z.string(), appName: z.string() }),
-    ]).optional(),
-    notMine: z.array(z.string()).optional(),
+    candidate: candidate.optional(),
+    // Hits the user said are not theirs, each for its resource kind and the attempt (key) it was rejected for.
+    notMine: z.array(z.object({ key: z.string().optional(), candidate })).optional(),
   }),
   phase: phases.optional(),
   failure: z.object({ message: z.string() }).optional(),

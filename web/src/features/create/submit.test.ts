@@ -14,12 +14,15 @@ import { text } from './copy'
 import {
   abandonUnsettled,
   acceptCandidate,
-  CANDIDATE_CLOCK_TOLERANCE_MS,
+  CREATED_BEFORE_HINT_MS,
+  createdBeforeSent,
   confirmCreate,
   CreateFailed,
   keptElsewhere,
   keptSource,
+  reconsiderCandidate,
   rejectCandidate,
+  rejectedCandidate,
   submitCreate,
   type CreateDeps,
   type CreateProgress,
@@ -523,7 +526,7 @@ describe('an unreadable 2xx answer to a create step (X5: no resend, readback onl
     const confirmed = await confirmCreate(request, failure.progress, readback.value)
     expect(readback.calls).toEqual(['app', 'sources'])
     // A candidate, not adopted: the attempt and its key stay, and nothing is sent until the user chooses.
-    expect(confirmed.progress).toMatchObject({ candidate: { step: 'source', id: 'mitsumori-src', binding: templateBinding, preexisting: false }, attempts: { source: { key: first.keys.createSource?.[0] } } })
+    expect(confirmed.progress).toMatchObject({ candidate: { step: 'source', id: 'mitsumori-src', binding: templateBinding }, attempts: { source: { key: first.keys.createSource?.[0] } } })
     expect(confirmed.progress.sourceRepositoryId).toBeUndefined()
     const waiting = deps()
     await fail(submitCreate(request, confirmed.progress, waiting.value))
@@ -929,11 +932,11 @@ describe('a readback hit is a candidate, never adopted or deleted silently (re-r
   const anotherAtA = (createdAt?: string) => wireRepository({ destination: { repositoryName: 'mitsumori' }, sourceConnectionId: 'github-source-207cb7ce' }, 'source-0f1e2d3c4b5a', createdAt)
 
   test('another attempt\'s same-named repository at A is offered as a candidate: K is not settled and nothing is sent', async () => {
-    const { progress, key } = await heldK()
+    const { progress, key, sentAt } = await heldK()
     const readback = deps({}, { repositories: [anotherAtA()] })
     const { progress: offered } = await confirmCreate(request, progress, { api: readback.api, catalog: readback.value.catalog })
     expect(readback.calls).toEqual(['app', 'sources'])
-    expect(offered.candidate).toEqual({ step: 'source', id: 'source-0f1e2d3c4b5a', binding: templateBinding, preexisting: false })
+    expect(offered.candidate).toEqual({ step: 'source', id: 'source-0f1e2d3c4b5a', binding: templateBinding, sentAt })
     expect(offered.attempts?.source?.key).toBe(key)
     expect([offered.sourceRepositoryId, offered.sourceRepositoryProvenance]).toEqual([undefined, undefined])
     // While it is shown: no create, no resend, no other readback.
@@ -957,11 +960,11 @@ describe('a readback hit is a candidate, never adopted or deleted silently (re-r
     expect(next.bodies.createStack![0]).toMatchObject({ source: { kind: 'application-source-repository', sourceRepositoryId: 'source-0f1e2d3c4b5a' } })
   })
 
-  test('the user says it is not theirs: K stays held, nothing is sent, the hit is not offered again, and only the explicit give-up moves on', async () => {
+  test('the user says it is not theirs: K stays held, nothing is sent, a readback does not offer it again, and only the explicit give-up moves on', async () => {
     const { progress, key } = await heldK()
     const readback = deps({}, { repositories: [anotherAtA()] })
     const rejected = rejectCandidate((await confirmCreate(request, progress, { api: readback.api, catalog: readback.value.catalog })).progress)
-    expect(rejected).toMatchObject({ unsettled: 'source', unsettledSearched: true, notMine: ['source-0f1e2d3c4b5a'], attempts: { source: { key } } })
+    expect(rejected).toMatchObject({ unsettled: 'source', unsettledSearched: true, notMine: [{ key, candidate: { step: 'source', id: 'source-0f1e2d3c4b5a' } }], attempts: { source: { key } } })
     expect(rejected.candidate).toBeUndefined()
     const held = deps()
     await fail(submitCreate(request, rejected, held.value))
@@ -980,18 +983,69 @@ describe('a readback hit is a candidate, never adopted or deleted silently (re-r
     expect(fresh.calls).toEqual(['sources'])
   })
 
-  test('a repository created clearly before K\'s first send is shown as an existing repository with the same name, never as probably the user\'s', async () => {
+  test('a repository created long before K\'s first send (by this browser\'s clock) is still a candidate with both choices and a hint, and can be chosen', async () => {
     const { progress, sentAt } = await heldK()
-    const before = new Date(Date.parse(sentAt) - CANDIDATE_CLOCK_TOLERANCE_MS - 60_000).toISOString()
-    const readback = deps({}, { repositories: [anotherAtA(before)] })
+    const anHourBefore = new Date(Date.parse(sentAt) - 3_600_000).toISOString()
+    const readback = deps({}, { repositories: [anotherAtA(anHourBefore)] })
     const { progress: offered } = await confirmCreate(request, progress, { api: readback.api, catalog: readback.value.catalog })
-    expect(offered.candidate).toEqual({ step: 'source', id: 'source-0f1e2d3c4b5a', binding: templateBinding, createdAt: before, preexisting: true })
-    // It cannot be chosen; the only way on is not to use it, which keeps K held.
-    expect(acceptCandidate(offered)).toBe(offered)
-    expect(rejectCandidate(offered)).toMatchObject({ unsettled: 'source', unsettledSearched: true, notMine: ['source-0f1e2d3c4b5a'] })
-    // Within the clock tolerance it is still offered for the user to judge.
-    const near = deps({}, { repositories: [anotherAtA(new Date(Date.parse(sentAt) - CANDIDATE_CLOCK_TOLERANCE_MS + 60_000).toISOString())] })
-    expect((await confirmCreate(request, progress, { api: near.api, catalog: near.value.catalog })).progress.candidate).toMatchObject({ preexisting: false })
+    expect(offered.candidate).toEqual({ step: 'source', id: 'source-0f1e2d3c4b5a', binding: templateBinding, createdAt: anHourBefore, sentAt })
+    expect(createdBeforeSent(offered.candidate!)).toBe(true)
+    expect(rejectCandidate(offered)).toMatchObject({ unsettled: 'source', unsettledSearched: true })
+    expect(acceptCandidate(offered)).toMatchObject({ sourceRepositoryId: 'source-0f1e2d3c4b5a', sourceRepositoryProvenance: 'found' })
+    // The hint is display only, past its 1-minute threshold; no hint for times within it or unknown.
+    const near = { step: 'source' as const, id: 'source-0f1e2d3c4b5a', binding: templateBinding, sentAt }
+    expect([createdBeforeSent({ ...near, createdAt: new Date(Date.parse(sentAt) - CREATED_BEFORE_HINT_MS + 1_000).toISOString() }), createdBeforeSent(near)]).toEqual([false, false])
+  })
+
+  test('the browser clock is 10 minutes ahead of the cluster and K really made the repository: it is chosen and creation goes on with its id', async () => {
+    const { progress, sentAt } = await heldK()
+    // K's own repository, stamped by a cluster clock 10 minutes behind this browser's.
+    const stamped = new Date(Date.parse(sentAt) - 10 * 60_000).toISOString()
+    const readback = deps({}, { repositories: [wireRepository({ destination: { repositoryName: 'mitsumori' }, sourceConnectionId: 'github-source-207cb7ce' }, 'mitsumori-src', stamped)] })
+    const { progress: offered } = await confirmCreate(request, progress, { api: readback.api, catalog: readback.value.catalog })
+    expect(offered.candidate).toMatchObject({ step: 'source', id: 'mitsumori-src', createdAt: stamped, sentAt })
+    expect(createdBeforeSent(offered.candidate!)).toBe(true)
+    const chosen = acceptCandidate(offered)
+    expect(chosen).toMatchObject({ draft, ...foundSource })
+    expect([chosen.candidate, chosen.attempts, chosen.unsettled]).toEqual([undefined, undefined, undefined])
+    const next = deps()
+    await submitCreate(request, chosen, next.value)
+    expect(next.calls).toEqual(['validateStack', 'createStack', 'bindApp:mitsumori:mitsumori'])
+    expect(next.bodies.createStack![0]).toMatchObject({ source: { kind: 'application-source-repository', sourceRepositoryId: 'mitsumori-src' } })
+  })
+
+  test('after "not mine" the held attempt can look at the hit again; choosing it then goes on with its id', async () => {
+    const { progress, key, sentAt } = await heldK()
+    const readback = deps({}, { repositories: [anotherAtA()] })
+    const offered = (await confirmCreate(request, progress, { api: readback.api, catalog: readback.value.catalog })).progress
+    const rejected = rejectCandidate(offered)
+    expect(rejectedCandidate(rejected)).toEqual(offered.candidate)
+    const again = reconsiderCandidate(rejected)
+    expect(again).toMatchObject({ candidate: { step: 'source', id: 'source-0f1e2d3c4b5a', binding: templateBinding, sentAt }, attempts: { source: { key } } })
+    expect([again.unsettled, again.unsettledSearched, again.notMine]).toEqual([undefined, undefined, undefined])
+    // Nothing is sent while it is offered again.
+    const blocked = deps()
+    expect((await fail(submitCreate(request, again, blocked.value))).message).toBe(text.candidate.title)
+    expect(blocked.calls).toEqual([])
+    const next = deps()
+    await submitCreate(request, acceptCandidate(again), next.value)
+    expect(next.calls).toEqual(['validateStack', 'createStack', 'bindApp:mitsumori:mitsumori'])
+    expect(next.bodies.createStack![0]).toMatchObject({ source: { kind: 'application-source-repository', sourceRepositoryId: 'source-0f1e2d3c4b5a' } })
+  })
+
+  test('"not mine" belongs to its attempt: giving up drops it, and a rejection for an earlier key does not hide a later attempt\'s hit', async () => {
+    const { progress, key } = await heldK()
+    const readback = deps({}, { repositories: [anotherAtA()] })
+    const rejected = rejectCandidate((await confirmCreate(request, progress, { api: readback.api, catalog: readback.value.catalog })).progress)
+    const givenUp = abandonUnsettled(rejected)
+    expect([givenUp.attempts, givenUp.notMine, rejectedCandidate(givenUp)]).toEqual([undefined, undefined, undefined])
+    // A later attempt (K2) whose create got no answer; a rejection kept for K must not mask what its readback finds.
+    const lostK2 = await fail(submitCreate(request, givenUp, deps({ createSource: lost }).value))
+    const k2 = lostK2.progress.attempts!.source!.key
+    expect(k2).not.toBe(key)
+    const stale = { ...lostK2.progress, unconfirmed: 'source' as const, notMine: rejected.notMine }
+    const later = deps({}, { repositories: [anotherAtA()] })
+    expect((await confirmCreate(request, stale, { api: later.api, catalog: later.value.catalog })).progress.candidate).toMatchObject({ step: 'source', id: 'source-0f1e2d3c4b5a' })
   })
 
   test('a found repository is never sent to DELETE on a rename or template change; a created one still is', async () => {
@@ -1024,7 +1078,7 @@ describe('a readback hit is a candidate, never adopted or deleted silently (re-r
     const { progress: offered } = await confirmCreate(request, refused.progress, { api: readback.api, catalog: readback.value.catalog })
     expect(offered.candidate).toEqual({ step: 'stack', id: 'stack-other', appName: 'mitsumori' })
     const rejected = rejectCandidate(offered)
-    expect(rejected).toMatchObject({ unsettled: 'stack', unsettledSearched: true, notMine: ['stack-other'] })
+    expect(rejected).toMatchObject({ unsettled: 'stack', unsettledSearched: true, notMine: [{ key: refused.progress.attempts!.stack!.key, candidate: { step: 'stack', id: 'stack-other' } }] })
     const held = deps()
     await fail(submitCreate(request, rejected, held.value))
     expect(held.calls).toEqual([])
