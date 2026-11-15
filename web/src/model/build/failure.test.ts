@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test'
 import { ConsoleApiError } from '../../api/console'
 import { setLanguage } from '../../shell/language'
 import { buildCopy } from './copy'
-import { buildFailureReference, classifyBuildFailure } from './failure'
+import { buildFailureReference, classifyBuildFailure, planRejectionFailure } from './failure'
 import { aiPolicyExplanation } from '../../copy/ai-policy'
 
 afterEach(() => setLanguage('ja'))
@@ -148,4 +148,65 @@ test('non-policy availability reasons keep the existing runtime copy', () => {
   const failure = classifyBuildFailure('unavailable', 412, 'turn', undefined, undefined, undefined, undefined, { reason: 'ai_approval_policy_denied', policy: 'default' })
   expect(failure.reason).toContain('“default” does not allow unattended execution.')
   expect(failure.reason).not.toMatch(/[ぁ-んァ-ヶ一-龠]/)
+})
+
+test('a validation that names a taken repository or URL is the name choice, not a plan to make again', () => {
+  const repository = planRejectionFailure(['name already exists: mitsumori: GitHub repository acme/mitsumori already exists. Choose a different repository name.'])
+  expect(repository).toMatchObject({ kind: 'name-taken', title: buildCopy.failure.nameTaken, suggestedName: 'mitsumori-2' })
+  const url = planRejectionFailure(['Launch needs changes before resources can be created.', 'Another publish already uses this URL.'])
+  expect(url).toMatchObject({ kind: 'name-taken', reasonCode: 'PublishURLConflict', title: buildCopy.failure.urlNameTaken })
+  expect(url.reference).toBeUndefined()
+})
+
+test('a plan for another destination is made again; no reason code is needed and no reference is offered', () => {
+  const reference = { draftId: 'd', at: '2026-11-15T00:00:00Z' }
+  expect(planRejectionFailure(['The request does not match the Project repository destination.'], reference)).toMatchObject({ kind: 'plan', plan: 'destination', ...buildCopy.failure.plan.destination })
+  const unbound = planRejectionFailure(['Creation plan needs changes before AppThrust tools can run.', 'Validate a repository destination before approving this creation plan.'], reference)
+  expect(unbound.reference).toBeUndefined()
+  expect(unbound.recheck).toBeUndefined()
+  // A destination Platform calls unusable may be fixed by an administrator, outside the plan: the same plan may be checked again.
+  expect(planRejectionFailure(['Image access is not ready for the repository destination.'], reference)).toMatchObject({ kind: 'plan', plan: 'destination', recheck: true })
+})
+
+test('a validation answer with a reason this console does not know is the platform failure with its reference; the same plan may be checked again', () => {
+  const reference = { draftId: 'd', at: '2026-11-15T00:00:00Z' }
+  const lines = ['Creation plan needs changes before AppThrust tools can run.', 'Tool sequence appthrust.database.attach is not supported by this Platform.']
+  const failure = planRejectionFailure(lines, reference)
+  expect(failure).toMatchObject({ kind: 'platform', ...buildCopy.failure.platform, reference, recheck: true, raw: lines.join('\n') })
+  expect(failure.plan).toBeUndefined()
+})
+
+test('a failed request in the plan context keeps its class: the plan\'s field names are read only in a generation\'s stored error', () => {
+  const reference = { draftId: 'd', at: '2026-11-15T00:00:00Z' }
+  const text = "'creationPlan.applicationStackRequest' is required"
+  for (const status of [500, 400]) expect(classifyBuildFailure(text, status, 'plan', reference)).toMatchObject({ kind: 'platform', reference })
+  expect(classifyBuildFailure(text, undefined, 'plan', reference)).toMatchObject({ kind: 'plan', plan: 'incomplete' })
+})
+
+test('plan generations stopped by Platform\'s plan check read as the plan to make again; an unset destination as the destination notice', () => {
+  expect(classifyBuildFailure("invalid_argument: 'creationPlan.summary' is required", undefined, 'plan', { draftId: 'd', at: '2026-11-15T00:00:00Z' })).toMatchObject({ kind: 'plan', plan: 'incomplete' })
+  expect(classifyBuildFailure('conflict: Validate a repository destination before approving this creation plan.', undefined, 'plan')).toMatchObject({ kind: 'plan', plan: 'destination' })
+  const blocked = classifyBuildFailure('failed_precondition: No repository destination is configured.', undefined, 'plan', { draftId: 'd', at: '2026-11-15T00:00:00Z' })
+  expect(blocked).toMatchObject({ kind: 'destination', destination: 'blocked', ...buildCopy.failure.destination.blocked })
+  expect(blocked.reference).toBeUndefined()
+  // Platform #6919's early generation failures: an unset or ambiguous destination waits for an administrator; a direct
+  // template stack (no longer valid) is a plan to make again, here and as a validation static error.
+  const templateStack = "'creationPlan.applicationStackRequest.source.kind' must not be github-template; request a new repository through 'creationPlan.applicationSourceRepositoryRequest'"
+  expect(classifyBuildFailure('failed_precondition: Multiple repository destinations are available; ask a Project administrator to select a default.', undefined, 'plan')).toMatchObject({ kind: 'destination', destination: 'blocked' })
+  expect(classifyBuildFailure(`invalid_argument: ${templateStack}`, undefined, 'plan')).toMatchObject({ kind: 'plan', plan: 'incomplete' })
+  expect(planRejectionFailure(['Creation plan needs changes before AppThrust tools can run.', templateStack])).toMatchObject({ kind: 'plan', plan: 'incomplete' })
+  // Other generation failures keep their classes; unknown text is not taken for a plan rejection.
+  expect(classifyBuildFailure('application draft plan generation timed out', undefined, 'plan').kind).toBe('timeout')
+  expect(classifyBuildFailure('failed_precondition: Some newer Platform reason.', undefined, 'plan').kind).toBe('failed')
+})
+
+test('the plan copy is plain in both languages, without Platform\'s words', () => {
+  for (const language of ['ja', 'en'] as const) {
+    setLanguage(language)
+    const copy = buildCopy.failure.plan
+    const words = [copy.destination, copy.incomplete].flatMap((item) => [item.title, item.reason]).join(' ')
+    expect(words).not.toMatch(/creationPlan|destinationRevision|AppThrust/)
+    if (language === 'en') expect(words + copy.recheck + copy.replan).not.toMatch(/[ぁ-んァ-ヶ一-龠]/)
+    else expect(words).not.toMatch(/問い合わせ番号|あなたの入力や操作の問題ではありません/)
+  }
 })

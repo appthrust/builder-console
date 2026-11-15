@@ -607,6 +607,62 @@ non-engineers, with engineering words only under 「詳しい人向け」
   cleanup. 409 `DestinationMismatch` is a fixed-copy
   failure. Stories: `e2e/stories/app-create-destination.mock.spec.ts` (mock
   toggle `repository-destination {state}`).
+- A creation-plan validation that answers `valid: false` is read by
+  `model/build/failure.ts` `planRejectionFailure`. Only a reason this console
+  knows is the user's to act on, without 「基盤の問題」 wording or support
+  reference: a name or URL another app holds is the name choice; a plan that
+  does not carry the Project's repository destination, or breaks Platform's
+  plan rules (a `creationPlan.…` field error, the `github-template` sentence,
+  the fingerprint failure) is kind `plan` with fixed copy and 「計画を作り直す」
+  (a new plan generation; console-v1 `request_plan`). Destination sentences (no
+  reason code is carried) read the destination again first: an unset one stops
+  as the blocked notice (not remembered; once an administrator sets it, the
+  same plan is bound and approved without a new plan); a plan bound to a
+  revision that is no longer current is bound to the current one and stops as
+  the destination notice (approve again). Any other reason is not the user's
+  plan problem: it is the platform failure with its reference, Platform's
+  sentences only under 「詳しい人向け」 (legacy: the artifact pane's fold;
+  console-v1: its creation notice carries the reference and that fold, for
+  every creation failure). Both engines remember the rejected plan
+  for this tab, across a reload (`CreationTab.rejectedPlan`, set only from a
+  `valid: false` answer): 「この内容で作る」 is withdrawn and nothing validates
+  it again by itself. Where the cause may lie outside the plan (the unknown
+  reason, or only "destination unusable" sentences for a plan this console
+  reads as bound), 「もう一度確かめる」 is offered beside 「計画を作り直す」. Each
+  click checks the unchanged plan once, from the click: one validation, no
+  generation. If the destination moved since the plan was bound, the check
+  first sends the one PATCH that binds the plan to the current revision and
+  stops for the user's approval (the destination notice), as any approval
+  does. The rejection stands until a validation answers valid: then the plan
+  is approvable again, an information notice says so (no action, not a
+  failure), and nothing is created until the user presses
+  「この内容で作る」; `valid: false` leaves the state as it was; a failed
+  request (or a failed destination read) leaves the plan rejected, nothing
+  requested, so a reload sends nothing. In the legacy engine the check's
+  buttons are disabled while it cannot run (a job or turn running, the page
+  busy, a reply pending), and the check is not
+  offered while the conversation has outgrown the plan (the approval would
+  read 「計画を更新して作る」); only 「計画を作り直す」 remains. A preparation
+  retry from a notice older than the rejection is not offered and does
+  nothing; a check answered "name taken" keeps its name choice. Renaming
+  changes the plan, so it clears the rejection and approves the renamed plan,
+  which is validated before anything begins. A retry of a destination stop
+  met during a check (`prepare()` on a re-checkable plan) runs the check
+  again, never an approval. In console-v1, while a plan is rejected, every
+  creation failure notice (except an unreadable answer, a name choice or a
+  destination stop) carries the rejection's actions instead of a retry.
+  Legacy only: when Platform refuses a new plan for its
+  20-generation limit, the limit notice has no action, says the rejected plan
+  cannot be used (and, where it applies, that 「もう一度確かめる」 can check it
+  again), and the proposal no longer offers 「計画を作り直す」. Console-v1 does
+  not handle the limit: its plan turn, refused by Platform, reaches the page
+  only as a `failed_precondition` without Platform's reason, so
+  「計画を作り直す」 stays offered there. A plan generation whose stored error
+  is the same check reads the same way; a failed request in the plan context (the
+  generation request, the plan's PATCH) keeps the class its status and text
+  give it. A failed validation request (5xx, 502-504 included: validating asks
+  no AI) is the platform failure with its reference; other preparation
+  requests keep their classes; an unreadable answer stays `unconfirmed`.
 - AI build sessions default an absent/disabled plan publish to the wizard's
   `pickCreateEnvironment(...).domain`, using the application's name as the
   wildcard subdomain. Enabled publish destinations are preserved; a rename

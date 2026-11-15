@@ -134,7 +134,7 @@ export function ArtifactPane({ draft, spec, proposal, stage, progress, implement
     {built ? null : specCard}
     {!built && progress ? <ProgressCard progress={progress} failure={progressFailure} /> : null}
     {!built && proposal?.tasks.length ? <TasksPreview proposal={proposal} /> : null}
-    {showFailureNotice ? <Notice tone={failure.kind === 'unconfirmed' ? 'warning' : 'error'} title={failure.title}>
+    {showFailureNotice ? <Notice tone={failure.kind === 'unconfirmed' || failure.kind === 'plan' ? 'warning' : 'error'} title={failure.title}>
       <p>{failure.reason}</p>
       {reference ? <p className="mt-3 break-all text-xs">{reference}</p> : null}
     </Notice> : null}

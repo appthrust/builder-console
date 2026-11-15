@@ -16,6 +16,7 @@ import { copy } from '../../copy'
 import { consoleRoutes } from '../../dev/mock-console'
 import { platformRoutes } from '../../dev/mock-platform'
 import { buildCopy } from '../../model/build/copy'
+import { buildFailureReference } from '../../model/build/failure'
 import type { BuildDraft } from '../../model/contracts/build'
 import { setLanguage } from '../../shell/language'
 import { UnsavedChangesProvider } from '../../ui/use-unsaved-changes-guard'
@@ -28,25 +29,33 @@ const SECRET = 'SENTINEL-build-page-7f3a'
 const PROJECT = '/api/v1/projects/commerce'
 
 type Json = Record<string, unknown>
-/** Rewrites a successful answer of the in-memory Platform mock before the page reads it. */
+/** Rewrites a successful answer of the in-memory Platform mock before the page reads it (`body` may first change the mock's state). */
 interface Rewrite { method: string; path: RegExp; body: (wire: Json) => unknown; once: boolean }
 
 let rewrites: Rewrite[] = []
 let requests: { method: string; path: string; status: number }[] = []
 /** A read the page waits on until the test releases it (a slow Platform answer). */
 let held: { path: RegExp; until: Promise<void> } | undefined
+/** Answers a request with an error status instead of the mock (the mock never sees it): a failed Platform request. */
+let refusals: { method: string; path: RegExp; status: number; body: unknown }[] = []
 
 async function mockFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const request = input instanceof Request ? input : new Request(new URL(String(input), window.location.href), init)
   const url = new URL(request.url)
   if (request.method === 'GET' && held?.path.test(url.pathname)) await held.until
+  const refusal = refusals.find((item) => item.method === request.method && item.path.test(url.pathname))
+  if (refusal) {
+    refusals = refusals.filter((item) => item !== refusal)
+    requests.push({ method: request.method, path: url.pathname, status: refusal.status })
+    return Response.json(refusal.body, { status: refusal.status })
+  }
   const response = await (url.pathname.startsWith('/api/console/') ? consoleRoutes : platformRoutes)(request, url)
   requests.push({ method: request.method, path: url.pathname, status: response?.status ?? 404 })
   if (!response) return Response.json({ error: { message: 'unhandled' } }, { status: 404 })
   const rewrite = rewrites.find((item) => item.method === request.method && item.path.test(url.pathname))
   if (!rewrite || !response.ok) return response
   if (rewrite.once) rewrites = rewrites.filter((item) => item !== rewrite)
-  return Response.json(rewrite.body((await response.json()) as Json), { status: response.status })
+  return Response.json(await rewrite.body((await response.json()) as Json), { status: response.status })
 }
 
 /** Drives the Platform mock directly (setup and server-side truth); these calls are not the page's requests. */
@@ -132,6 +141,7 @@ beforeEach(async () => {
   window.sessionStorage.clear()
   rewrites = []
   held = undefined
+  refusals = []
   requests = []
   globalThis.fetch = mockFetch as typeof globalThis.fetch
   // The boundary reports a contract failure with console.warn (safe metadata only); keep test output quiet.
@@ -568,5 +578,442 @@ describe('the approval binds the destination the proposal showed (review finding
     await click(approve())
     expect(count('POST', new RegExp(`${draftPath(draftId)}/creation-plan-validations$`))).toBe(1)
     expect(count('POST', new RegExp(`${draftPath(draftId)}/creation-executions$`))).toBe(1)
+  })
+})
+
+describe('a plan Platform\'s validation rejects is an answer about the plan (APT-1094)', () => {
+  const validations = (draftId: string) => new RegExp(`${draftPath(draftId)}/creation-plan-validations$`)
+  const executions = (draftId: string) => new RegExp(`${draftPath(draftId)}/creation-executions$`)
+  const generations = (draftId: string) => new RegExp(`${draftPath(draftId)}/creation-plan-generations$`)
+  const proposal = () => container.querySelector<HTMLElement>('[data-testid="build-proposal"]')
+  const proposalButtons = () => [...(proposal()?.querySelectorAll('button') ?? [])].map((item) => item.textContent?.trim())
+  const conversation = () => container.querySelector('#build-conversation')!.textContent ?? ''
+  const resolvedBranch = { applicationId: 'mitsumori', branchId: 'main', state: 'pending', management: { source: 'applicationStack', mutableFields: [] } }
+  const platformTitle = buildCopy.failure.platform.title
+  const runs = (draftId: string) => new RegExp(`${draftPath(draftId)}/creation-executions/[^/]+/run$`)
+  const labels = (title: string) => actionsOf(title).map((item) => item.textContent?.trim())
+  const action = (title: string, label: string) => actionsOf(title).find((item) => item.textContent?.trim() === label)!
+  const { recheck: checkAgain, replan: makeAgain } = buildCopy.failure.plan
+  const unknownSentence = 'Tool sequence appthrust.database.attach is not supported by this Platform.'
+  const unknownAnswer = { valid: false, message: 'Creation plan needs changes before AppThrust tools can run.', staticErrors: [unknownSentence] }
+  const fieldErrorAnswer = { valid: false, message: 'Creation plan needs changes before AppThrust tools can run.', staticErrors: ["'creationPlan.implementationHandoff' is required when applicationStackRequest is present"] }
+
+  /** The page as a reload brings it back: only what the tab stored and the draft survive. */
+  async function reload(draftId: string) {
+    await act(async () => { root?.unmount() })
+    container.remove()
+    return renderBuild(draftId)
+  }
+
+  /** Presses 「この内容で作る」; the plan's validation answers `answer` (valid: false) once, after `meanwhile` changed the mock. */
+  async function rejected(answer: Json, meanwhile?: () => Promise<unknown>) {
+    const draftId = await plannedDraft()
+    const view = await renderBuild(draftId)
+    expect(stage()).toBe('decide')
+    rejectNext(draftId, answer, meanwhile)
+    await click(button(buildCopy.primary.prepare))
+    await settle(10)
+    expect(count('POST', validations(draftId))).toBe(1)
+    return { draftId, ...view }
+  }
+  function rejectNext(draftId: string, answer: Json, meanwhile?: () => Promise<unknown>) {
+    rewrites.push({ method: 'POST', path: validations(draftId), once: true, body: async (wire) => { await meanwhile?.(); return { ...answer, operation: wire.operation, resource: answer } } })
+  }
+
+  /** The re-plan offered after a rejection: one new plan generation, never the rejected plan validated or begun again. */
+  async function replans(draftId: string, title: string, key: readonly unknown[], offered = [makeAgain]) {
+    expect(labels(title)).toEqual(offered)
+    // The proposal no longer offers its approval: the rejected plan is never approved as it is.
+    expect(proposalButtons()).not.toContain(buildCopy.primary.prepare)
+    const validated = count('POST', validations(draftId))
+    const before = count('POST', generations(draftId))
+    await click(action(title, makeAgain))
+    await settle(10)
+    expect(count('POST', generations(draftId))).toBe(before + 1)
+    expect(count('POST', validations(draftId))).toBe(validated)
+    expect(count('POST', executions(draftId))).toBe(0)
+    expect(notices(title)).toHaveLength(0)
+    // The new plan arrives: only it can be approved, and its approval validates it once.
+    await advance(4)
+    await tick(key)
+    await settle(10)
+    expect(proposalButtons()).toContain(buildCopy.primary.prepare)
+    await click(button(buildCopy.primary.prepare))
+    await settle(10)
+    expect(count('POST', validations(draftId))).toBe(validated + 1)
+    expect(count('POST', executions(draftId))).toBe(1)
+  }
+
+  test('the destination sentence after the destination moved reaches the destination stop: the plan is bound to the new one; the same sentence again is a plan to make again', async () => {
+    let revisionB = ''
+    const moveToB = async () => {
+      await call('POST', '/api/v1/__mock/repository-destination', { state: 'builtin' })
+      revisionB = (await call('GET', `${PROJECT}/repository-destination`)).revision as string
+    }
+    const staticError = { valid: false, message: 'Creation plan needs changes before AppThrust tools can run.', staticErrors: ['Validate a repository destination before approving this creation plan.'] }
+    const { draftId, key } = await rejected(staticError, moveToB)
+    const title = buildCopy.failure.destination.changed.title
+    expect(notices(title, '#build-conversation')).toHaveLength(1)
+    expect(conversation()).toContain(buildCopy.failure.destination.changed.reason)
+    expect(container.textContent).not.toContain(platformTitle)
+    expect(container.textContent).not.toContain(buildCopy.failure.copyReference)
+    expect(count('POST', executions(draftId))).toBe(0)
+    // The plan was written bound to B after the rejection, before anything else: the plan itself changed.
+    const rejectedAt = requests.findIndex((item) => item.method === 'POST' && validations(draftId).test(item.path))
+    expect(requests.slice(rejectedAt + 1).filter((item) => item.method !== 'GET').map((item) => `${item.method} ${item.path}`)).toEqual([`PATCH ${draftPath(draftId)}`])
+    const stored = (await call('GET', draftPath(draftId))).creationPlan as { applicationSourceRepositoryRequest: { destinationRevision: string } }
+    expect(stored.applicationSourceRepositoryRequest.destinationRevision).toBe(revisionB)
+    expect(proposal()?.textContent).toContain('registry.appthrust.test/commerce/')
+
+    // Its action approves the plan now shown (「この内容で作る」). Platform answers the same sentence again for the plan
+    // already bound to B: binding again would change nothing, so it is a plan to make again, never a third validation.
+    rejectNext(draftId, staticError)
+    const actions = actionsOf(title)
+    expect(actions.map((item) => item.textContent?.trim())).toEqual([buildCopy.primary.prepare])
+    await click(actions[0]!)
+    await settle(10)
+    expect(count('POST', validations(draftId))).toBe(2)
+    const again = buildCopy.failure.plan.destination.title
+    expect(notices(again, '#build-conversation')).toHaveLength(1)
+    const secondAt = requests.length - 1 - [...requests].reverse().findIndex((item) => item.method === 'POST' && validations(draftId).test(item.path))
+    expect(requests.slice(secondAt + 1).filter((item) => item.method !== 'GET')).toEqual([])
+    await replans(draftId, again, key)
+  })
+
+  test('the destination sentence for a plan already bound to the current destination is a plan to make again: nothing is rewritten, also after a reload', async () => {
+    const { draftId } = await rejected({ valid: false, message: 'Creation plan needs changes before AppThrust tools can run.', staticErrors: ['Validate a repository destination before approving this creation plan.'] })
+    const title = buildCopy.failure.plan.destination.title
+    expect(notices(title, '#build-conversation')).toHaveLength(1)
+    expect(conversation()).toContain(buildCopy.failure.plan.destination.reason)
+    expect(container.textContent).not.toContain(platformTitle)
+    expect(container.textContent).not.toContain(buildCopy.failure.copyReference)
+    const rejectedAt = requests.findIndex((item) => item.method === 'POST' && validations(draftId).test(item.path))
+    expect(requests.slice(rejectedAt + 1).filter((item) => item.method !== 'GET')).toEqual([])
+    const { key } = await reload(draftId)
+    expect(count('POST', validations(draftId))).toBe(1)
+    await replans(draftId, title, key)
+  })
+
+  test('a destination Platform calls unusable while this console reads it set is a plan for the destination that may also be checked again: an administrator may fix it', async () => {
+    const { draftId } = await rejected({ valid: false, message: 'Image access is not ready for the repository destination.', sourceRepositoryValidation: { valid: false, message: 'Image access is not ready for the repository destination.' } })
+    const title = buildCopy.failure.plan.destination.title
+    expect(notices(title, '#build-conversation')).toHaveLength(1)
+    expect(container.textContent).not.toContain(buildCopy.failure.copyReference)
+    expect(labels(title)).toEqual([checkAgain, makeAgain])
+    await click(action(title, checkAgain))
+    await settle(10)
+    expect(count('POST', validations(draftId))).toBe(2)
+    expect(count('POST', generations(draftId))).toBe(0)
+    expect(count('POST', executions(draftId))).toBe(0)
+    expect(proposalButtons()).toEqual([buildCopy.primary.prepare])
+  })
+
+  test('the destination sentence while no destination is set is the blocked stop; once one is set the same plan goes on without a new plan (review F4)', async () => {
+    const { draftId } = await rejected(
+      { valid: false, message: 'No repository destination is configured.', sourceRepositoryValidation: { valid: false, message: 'No repository destination is configured.' } },
+      () => call('POST', '/api/v1/__mock/repository-destination', { state: 'NotConfigured' }),
+    )
+    const title = buildCopy.failure.destination.blocked.title
+    expect(notices(title, '#build-conversation')).toHaveLength(1)
+    expect(container.textContent).not.toContain(platformTitle)
+    expect(container.textContent).not.toContain(makeAgain)
+    await click(actionsOf(title)[0]!)
+    expect(count('POST', validations(draftId))).toBe(1)
+    expect(count('POST', executions(draftId))).toBe(0)
+
+    // An administrator sets the destination; the reopened page offers the same plan, bound to it before it is approved.
+    await call('POST', '/api/v1/__mock/repository-destination', { state: 'ghcr' })
+    await reload(draftId)
+    expect(proposalButtons()).toEqual([buildCopy.primary.prepare])
+    await click(button(buildCopy.primary.prepare))
+    expect(notices(buildCopy.failure.destination.changed.title, '#build-conversation')).toHaveLength(1)
+    await click(action(buildCopy.failure.destination.changed.title, buildCopy.primary.prepare))
+    await settle(10)
+    expect(count('POST', validations(draftId))).toBe(2)
+    expect(count('POST', executions(draftId))).toBe(1)
+    expect(count('POST', generations(draftId))).toBe(0)
+    // An ordinary approval says nothing about a check.
+    expect(notices(buildCopy.failure.plan.accepted.title)).toHaveLength(0)
+  })
+
+  test('a reason this console does not know is the platform failure with its reference, Platform\'s words folded away; nothing validates it again on its own', async () => {
+    const { draftId, key } = await rejected(unknownAnswer)
+    expect(notices(platformTitle, '#build-conversation')).toHaveLength(1)
+    expect(conversation()).toContain(buildCopy.failure.platform.reason)
+    expect(conversation()).toContain(buildFailureReference({ draftId, at: new Date().toISOString() }).replace(/ \d\d:\d\d$/, ''))
+    // Platform's sentences are not told as what the user did wrong: they are only in the folded 「詳しい人向け」.
+    expect(conversation()).not.toContain(unknownSentence)
+    expect(container.textContent).not.toContain(unknownSentence)
+    await click(button(uiText.artifact.advanced))
+    expect(container.querySelector('#build-artifact')!.textContent).toContain(unknownSentence)
+    expect(labels(platformTitle)).toEqual([checkAgain, makeAgain])
+    expect(proposalButtons()).not.toContain(buildCopy.primary.prepare)
+    await tick(key)
+    await settle(10)
+    expect(count('POST', validations(draftId))).toBe(1)
+    await replans(draftId, platformTitle, key, [checkAgain, makeAgain])
+  })
+
+  test('「もう一度確かめる」 answered valid creates nothing: the plan is approvable again, and only 「この内容で作る」 begins the execution (J1)', async () => {
+    const { draftId } = await rejected(unknownAnswer)
+    const before = requests.length
+    await click(action(platformTitle, checkAgain))
+    await settle(10)
+    // One validation of the unchanged plan, nothing else written.
+    expect(requests.slice(before).filter((item) => item.method !== 'GET').map((item) => `${item.method} ${item.path}`)).toEqual([`POST ${draftPath(draftId)}/creation-plan-validations`])
+    expect(count('POST', executions(draftId))).toBe(0)
+    expect(notices(platformTitle)).toHaveLength(0)
+    // The plan is said to be accepted, once, as information: no action, no reference.
+    const accepted = buildCopy.failure.plan.accepted
+    expect(notices(accepted.title, '#build-conversation')).toHaveLength(1)
+    expect(conversation()).toContain(accepted.detail)
+    expect(labels(accepted.title)).toEqual([])
+    expect(proposalButtons()).toEqual([buildCopy.primary.prepare])
+    await click(button(buildCopy.primary.prepare))
+    await settle(10)
+    expect(count('POST', validations(draftId))).toBe(3)
+    expect(count('POST', generations(draftId))).toBe(0)
+    expect(count('POST', executions(draftId))).toBe(1)
+    expect(count('POST', runs(draftId))).toBe(1)
+    expect(notices(accepted.title, '#build-conversation')).toHaveLength(1)
+  })
+
+  test('「もう一度確かめる」 answered "name taken" offers the name choice; the new name is written and validated, with no new plan (N1)', async () => {
+    const { draftId } = await rejected(unknownAnswer)
+    rejectNext(draftId, { valid: false, message: 'Creation plan needs changes before AppThrust tools can run.', staticErrors: ['name already exists: mitsumori: GitHub repository acme/mitsumori already exists. Choose a different repository name.'] })
+    await click(action(platformTitle, checkAgain))
+    await settle(10)
+    const suggestion = uiText.nameChoice.useSuggestion('mitsumori-2')
+    expect(labels(buildCopy.failure.nameTaken)).toContain(suggestion)
+    const before = requests.length
+    await click(action(buildCopy.failure.nameTaken, suggestion))
+    await settle(10)
+    const writes = requests.slice(before).filter((item) => item.method !== 'GET').map((item) => `${item.method} ${item.path}`)
+    expect(writes.slice(0, 3)).toEqual([`POST ${draftPath(draftId)}/creation-cleanups`, `PATCH ${draftPath(draftId)}`, `POST ${draftPath(draftId)}/creation-plan-validations`])
+    expect(count('POST', generations(draftId))).toBe(0)
+  })
+
+  test('「もう一度確かめる」 on the notice while a conversation turn runs is disabled: nothing is sent and the notice keeps its reference (N2)', async () => {
+    const { draftId, key } = await rejected(unknownAnswer)
+    await call('POST', `${draftPath(draftId)}/conversation-turns`, { message: '承認のステップを足してください。' })
+    await tick(key)
+    const before = requests.length
+    const check = action(platformTitle, checkAgain)
+    expect(check.disabled).toBe(true)
+    await click(check)
+    await settle(10)
+    expect(requests.slice(before).filter((item) => item.method !== 'GET')).toEqual([])
+    expect(notices(platformTitle, '#build-conversation')).toHaveLength(1)
+    expect(conversation()).toContain(buildCopy.failure.copyReference)
+  })
+
+  test('「もう一度確かめる」 whose request fails (502) leaves the plan rejected: no approval comes back, and a reload sends nothing (R1)', async () => {
+    const { draftId, key } = await rejected(unknownAnswer)
+    refusals.push({ method: 'POST', path: validations(draftId), status: 502, body: { error: { code: 'bad_gateway', message: 'upstream connect error' } } })
+    await click(action(platformTitle, checkAgain))
+    await settle(10)
+    expect(count('POST', validations(draftId))).toBe(2)
+    expect(notices(platformTitle, '#build-conversation')).toHaveLength(1)
+    // The failed check's notice offers no preparation retry; the rejected plan keeps its own actions on the proposal.
+    expect(labels(platformTitle)).toEqual([])
+    expect(proposalButtons()).toEqual([checkAgain, makeAgain])
+    await tick(key)
+    await settle(10)
+    const sent = requests.length
+    await reload(draftId)
+    await settle(10)
+    expect(requests.slice(sent).filter((item) => item.method !== 'GET')).toEqual([])
+    expect(proposalButtons()).toEqual([checkAgain, makeAgain])
+    expect(count('POST', executions(draftId))).toBe(0)
+  })
+
+  test('「もう一度確かめる」 answered `valid: false` again leaves everything as it was: one validation, nothing else', async () => {
+    const { draftId, key } = await rejected(unknownAnswer)
+    rejectNext(draftId, unknownAnswer)
+    const before = requests.length
+    await click(action(platformTitle, checkAgain))
+    await settle(10)
+    expect(requests.slice(before).filter((item) => item.method !== 'GET').map((item) => `${item.method} ${item.path}`)).toEqual([`POST ${draftPath(draftId)}/creation-plan-validations`])
+    expect(notices(platformTitle, '#build-conversation')).toHaveLength(1)
+    expect(labels(platformTitle)).toEqual([checkAgain, makeAgain])
+    expect(proposalButtons()).not.toContain(buildCopy.primary.prepare)
+    await tick(key)
+    await settle(10)
+    expect(count('POST', validations(draftId))).toBe(2)
+    expect(count('POST', executions(draftId))).toBe(0)
+  })
+
+  test('a rejected plan the conversation has outgrown is not checked again: only 「計画を作り直す」 remains (R2)', async () => {
+    const { draftId, key } = await rejected(unknownAnswer)
+    expect(labels(platformTitle)).toEqual([checkAgain, makeAgain])
+    // The user tells the AI what to change and it answers with a changed specification: the plan is outgrown.
+    await call('POST', `${draftPath(draftId)}/conversation-turns`, { message: '承認のステップを足してください。' })
+    await advance()
+    await tick(key)
+    await settle(10)
+    const offered = [...container.querySelectorAll('button')].map((item) => item.textContent?.trim())
+    expect(offered).not.toContain(checkAgain)
+    expect(offered).toContain(makeAgain)
+    expect(count('POST', validations(draftId))).toBe(1)
+  })
+
+  test('section messages are not taken for the user\'s mistake either: the platform failure, the sentences folded away', async () => {
+    const runtime = 'Storage class "fast" is not available in this cluster.'
+    const publish = 'Domain apps.example.com is not ready for publishing.'
+    const { draftId, key } = await rejected({
+      valid: false, message: 'Launch needs changes before resources can be created.',
+      applicationStackValidation: {
+        valid: false, message: 'Launch needs changes before resources can be created.', resolvedBranch,
+        source: { valid: true, message: 'Repository and image source setup is ready.' },
+        runtime: { valid: false, message: runtime },
+        publish: { valid: false, message: publish },
+      },
+    })
+    expect(notices(platformTitle, '#build-conversation')).toHaveLength(1)
+    expect(conversation()).not.toContain(runtime)
+    expect(conversation()).not.toContain(publish)
+    await replans(draftId, platformTitle, key, [checkAgain, makeAgain])
+  })
+
+  test.each([
+    ['a plan field error', "'creationPlan.implementationHandoff' is required when applicationStackRequest is present"],
+    ['a direct template stack', "'creationPlan.applicationStackRequest.source.kind' must not be github-template; request a new repository through 'creationPlan.applicationSourceRepositoryRequest'"],
+  ])('%s gets the fixed copy, not Platform\'s field names; it stays a plan to make again after a reload', async (_, sentence) => {
+    const { draftId } = await rejected({ valid: false, message: 'Creation plan needs changes before AppThrust tools can run.', staticErrors: [sentence] })
+    const title = buildCopy.failure.plan.incomplete.title
+    expect(notices(title, '#build-conversation')).toHaveLength(1)
+    expect(conversation()).toContain(buildCopy.failure.plan.incomplete.reason)
+    expect(conversation()).not.toContain('creationPlan')
+    expect(container.textContent).not.toContain(buildCopy.failure.copyReference)
+    const { key } = await reload(draftId)
+    expect(count('POST', validations(draftId))).toBe(1)
+    await replans(draftId, title, key)
+  })
+
+  test('a plan rejected for a reason this console does not know stays rejected after a reload: only the check and a new plan are offered', async () => {
+    const { draftId } = await rejected({ valid: false, message: 'Unsupported plan shape.' })
+    const { key } = await reload(draftId)
+    expect(count('POST', validations(draftId))).toBe(1)
+    expect(notices(platformTitle, '#build-conversation')).toHaveLength(1)
+    expect(conversation()).toContain(buildCopy.failure.copyReference)
+    await replans(draftId, platformTitle, key, [checkAgain, makeAgain])
+  })
+
+  test('a name another app holds, said by the validation, is the name choice: no reference, not remembered as a rejected plan', async () => {
+    const { draftId } = await rejected({ valid: false, message: 'Creation plan needs changes before AppThrust tools can run.', staticErrors: ['name already exists: mitsumori: GitHub repository acme/mitsumori already exists. Choose a different repository name.'] })
+    expect(notices(buildCopy.failure.nameTaken, '#build-conversation')).toHaveLength(1)
+    expect(labels(buildCopy.failure.nameTaken)).toContain(uiText.nameChoice.useSuggestion('mitsumori-2'))
+    expect(container.textContent).not.toContain(buildCopy.failure.copyReference)
+    expect(container.textContent).not.toContain(makeAgain)
+    expect(container.textContent).not.toContain(checkAgain)
+    await reload(draftId)
+    expect(proposalButtons()).toEqual([buildCopy.primary.prepare])
+    expect(count('POST', validations(draftId))).toBe(1)
+  })
+
+  test('a retry offered before the rejection never validates or begins the rejected plan (review F5)', async () => {
+    const draftId = await plannedDraft()
+    const { key } = await renderBuild(draftId)
+    refusals.push({ method: 'POST', path: validations(draftId), status: 500, body: { error: { code: 'internal', message: 'upstream connect error' } } })
+    await click(button(buildCopy.primary.prepare))
+    await settle(10)
+    expect(labels(platformTitle)).toEqual([uiText.conversation.retry])
+    // The user approves again from the proposal instead; Platform now rejects the plan. The older notice stays.
+    rejectNext(draftId, fieldErrorAnswer)
+    await click(button(buildCopy.primary.prepare))
+    await settle(10)
+    expect(count('POST', validations(draftId))).toBe(2)
+    expect(notices(buildCopy.failure.plan.incomplete.title, '#build-conversation')).toHaveLength(1)
+    expect(notices(platformTitle, '#build-conversation')).toHaveLength(1)
+    // Its retry would validate the rejected plan as it is: it is no longer offered, now or after a reload.
+    expect(labels(platformTitle)).toEqual([])
+    await tick(key)
+    await settle(10)
+    await reload(draftId)
+    expect(notices(platformTitle, '#build-conversation')).toHaveLength(1)
+    expect(labels(platformTitle)).toEqual([])
+    expect(count('POST', validations(draftId))).toBe(2)
+    expect(count('POST', executions(draftId))).toBe(0)
+  })
+
+  test('a failed plan generation request whose answer names the plan\'s fields is the platform failure with its reference (review F6)', async () => {
+    const { draftId } = await rejected(fieldErrorAnswer)
+    refusals.push({ method: 'POST', path: generations(draftId), status: 500, body: { error: { code: 'internal', message: "'creationPlan.applicationStackRequest' is required" } } })
+    await click(action(buildCopy.failure.plan.incomplete.title, makeAgain))
+    await settle(10)
+    expect(count('POST', generations(draftId))).toBe(1)
+    expect(notices(platformTitle, '#build-conversation')).toHaveLength(1)
+    expect(notices(buildCopy.failure.plan.incomplete.title, '#build-conversation')).toHaveLength(0)
+    expect(conversation()).toContain(buildCopy.failure.copyReference)
+  })
+
+  test.each([
+    ['a plan to make again', fieldErrorAnswer, buildCopy.failure.plan.incomplete.title, [] as string[]],
+    ['a reason this console does not know', unknownAnswer, platformTitle, [checkAgain]],
+  ])('at the generation limit, %s offers no new plan again; the check of the same plan stays where it applies (review F4)', async (_, answer, title, left) => {
+    const { draftId, key } = await rejected(answer)
+    refusals.push({ method: 'POST', path: generations(draftId), status: 412, body: { error: { code: 'failed_precondition', message: 'application draft has reached 20 plan generation attempts' } } })
+    await click(action(title, makeAgain))
+    await settle(10)
+    expect(count('POST', generations(draftId))).toBe(1)
+    expect(notices(buildCopy.failure.limit.title, '#build-conversation')).toHaveLength(1)
+    expect(labels(buildCopy.failure.limit.title)).toEqual([])
+    expect(proposalButtons()).toEqual(left)
+    await tick(key)
+    await settle(10)
+    expect(count('POST', generations(draftId))).toBe(1)
+    await reload(draftId)
+    expect(proposalButtons()).toEqual(left)
+    expect(count('POST', generations(draftId))).toBe(1)
+    expect(notices(buildCopy.failure.limit.title, '#build-conversation')[0]!.textContent).toContain(left.length ? buildCopy.failure.limitRecheck : buildCopy.failure.limitRejected)
+    if (!left.length) return
+    await click(button(checkAgain))
+    await settle(10)
+    expect(count('POST', validations(draftId))).toBe(2)
+    expect(count('POST', executions(draftId))).toBe(0)
+    expect(proposalButtons()).toEqual([buildCopy.primary.prepare])
+  })
+
+  // A failed request is not an answer about the plan: preparing asks no AI, so a 500 and a gateway 503 alike are the
+  // platform failure with its reference, and the same approval may be tried again.
+  test.each([500, 503])('a failed validation request (%i) is the platform failure with its reference, never a plan rejection', async (status) => {
+    const draftId = await plannedDraft()
+    await renderBuild(draftId)
+    refusals.push({ method: 'POST', path: validations(draftId), status, body: { error: { code: status === 503 ? 'service_unavailable' : 'internal', message: 'upstream connect error' } } })
+    await click(button(buildCopy.primary.prepare))
+    await settle(10)
+    expect(notices(platformTitle, '#build-conversation')).toHaveLength(1)
+    expect(conversation()).toContain(buildFailureReference({ draftId, at: new Date().toISOString() }).replace(/ \d\d:\d\d$/, ''))
+    expect(conversation()).toContain(buildCopy.failure.copyReference)
+    expect(container.textContent).not.toContain(buildCopy.failure.plan.replan)
+    expect(actionsOf(platformTitle).map((item) => item.textContent?.trim())).toEqual([uiText.conversation.retry])
+    expect(count('POST', executions(draftId))).toBe(0)
+  })
+
+  test('a plan generation that failed on the destination check reads as the plan to make again, not as a platform failure', async () => {
+    const draftId = await askingDraft()
+    const error = 'conflict: Validate a repository destination before approving this creation plan.'
+    await call('POST', '/api/v1/__mock/plan-generation', { outcome: 'failed', error })
+    await call('POST', `${draftPath(draftId)}/creation-plan-generations`, {})
+    await advance(4)
+    const { key } = await renderBuild(draftId)
+    // The first failed plan is made once more on its own; the second one is reported.
+    expect(count('POST', generations(draftId))).toBe(1)
+    await advance(4)
+    await tick(key)
+    await settle(10)
+    const title = buildCopy.failure.plan.destination.title
+    expect(notices(title, '#build-conversation')).toHaveLength(1)
+    expect(conversation()).toContain(buildCopy.failure.plan.destination.reason)
+    expect(notices(buildCopy.failure.failed.plan)).toHaveLength(0)
+    expect(container.textContent).not.toContain(platformTitle)
+    expect(container.textContent).not.toContain(buildCopy.failure.copyReference)
+    expect(actionsOf(title).map((item) => item.textContent?.trim())).toEqual([buildCopy.failure.plan.replan])
+    await call('POST', '/api/v1/__mock/plan-generation', { outcome: 'succeeded' })
+    const before = count('POST', generations(draftId))
+    await click(actionsOf(title)[0]!)
+    await settle(10)
+    expect(count('POST', generations(draftId))).toBe(before + 1)
+    expect(count('POST', validations(draftId))).toBe(0)
   })
 })

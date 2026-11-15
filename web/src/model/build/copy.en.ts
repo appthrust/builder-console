@@ -74,6 +74,8 @@ export const textEn: typeof textJa = {
     forbidden: { title: 'Permission needed', reason: 'Ask your administrator for permission to create apps.' },
     group: { title: 'Your department could not be verified', reason: 'Ask your administrator to add you to a department, then try again.' },
     limit: { title: 'Revision limit reached', reason: 'Use an earlier proposal or start a new draft.' },
+    limitRejected: 'The platform did not accept this plan, so it cannot be used as it is. Start a new draft.',
+    limitRecheck: 'The platform did not accept this plan. Once the cause is fixed on the platform side, use “Check again” to check it again; otherwise, start a new draft.',
     unavailable: { title: 'AI is currently unavailable', reason: 'An update may be in progress; try again shortly, or contact your administrator if the problem continues.' },
     quota: { title: 'AI usage allowance has run out', reason: 'Ask your administrator to restore the AI allowance. Once restored, press the retry button to continue from where work stopped. This is not a problem with your Excel file or input.' },
     waitingForAi: { title: 'Waiting for AI', hint: 'An update may be in progress; work will continue automatically.' },
@@ -103,6 +105,13 @@ export const textEn: typeof textJa = {
       changed: { title: 'The repository destination changed', reason: 'Nothing has been created yet. The proposal now shows the new destination under “New repository” and “Image location”. Check it, then select “Build this app”.' },
       blocked: { title: 'The repository destination is not set', reason: 'Where new repositories are created has not been set yet. Ask a project administrator to set the repository destination.' },
       mismatch: { title: 'The repository destination could not be confirmed', reason: 'Nothing has been created yet. If this continues after reopening this page, contact your administrator.' },
+    },
+    plan: {
+      destination: { title: 'The plan needs to match the current repository destination', reason: 'Nothing has been created yet. The plan does not match where the project creates repositories now. Make the plan again to match the current destination.' },
+      incomplete: { title: 'The plan is missing something', reason: 'Nothing has been created yet. The plan AI made does not meet the rules for building an app. Make the plan again and AI will rethink it.' },
+      replan: 'Make the plan again',
+      recheck: 'Check again',
+      accepted: { title: 'The platform accepted this plan', detail: 'Nothing has been created yet. Select “Build this app” to start building it.' },
     },
   },
   /** A state this console version does not know: the known parts stay visible, only what depends on it stops. */

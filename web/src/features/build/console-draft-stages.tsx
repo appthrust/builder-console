@@ -28,14 +28,14 @@ import type { BuildFailure, BuildStage } from '../../model/build/types'
 import type { BuildDraft, BuildExecutionStep } from '../../model/contracts/build'
 import type { Group, Me } from '../../model/contracts/console'
 import { setArtifactCollapsed } from '../../shell/store'
-import { ActionError, Button, Notice } from '../../ui'
+import { ActionError, Button, Disclosure, Notice } from '../../ui'
 import { DatabaseChanges } from '../app/database-changes'
 import { canEditApp } from '../app/permissions'
 import { ArtifactPane } from './artifact-pane'
 import { ConsolePublishSettings, publishReady } from './console-publish-settings'
 import { readConsoleCreation, saveConsoleCreation } from './console-session-state'
 import type { ConsoleBuildView } from './console-view'
-import { AiTurn } from './conversation-pane'
+import { AiTurn, FailureReference, PlanRejectionActions } from './conversation-pane'
 import { text } from './copy'
 import { implemented } from './implement'
 import { NameChoice } from './name-choice'
@@ -85,6 +85,8 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
   const [busy, setBusy] = useState(false)
   const [now, setNow] = useState(Date.now)
   const [sharing, setSharing] = useState(false)
+  // A re-check answered valid: said once, until the user approves or a failure takes its place.
+  const [accepted, setAccepted] = useState(false)
   const lock = useRef(false)
   const observedFailures = useRef(new Set<string>())
   const readiness = planReadiness(session)
@@ -105,6 +107,7 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
     const next = draftFailure(error, context, { draftId: draft.id, at, ...(preparationExecution ? { executionId: preparationExecution.id } : {}) }, failedStep)
     // An answer this console cannot read may have happened: read the draft back; only that re-read is offered.
     if (next.kind === 'unconfirmed') void queryClient.invalidateQueries({ queryKey: buildDraftOptions(projectId, draft.id).queryKey })
+    setAccepted(false)
     setFailure({ failure: next, context })
   }
   async function perform(context: CreationContext, action: () => Promise<void>) {
@@ -119,8 +122,9 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
     receive: (next) => writeDraft(queryClient, projectId, draftRef, next), perform, fail, clearFailure: () => setFailure(undefined),
     busy, lock, failure: failure?.failure, running, unsupported: Boolean(result.unsupported) || view.unsupported,
     // Never from a plan that is missing or stale, and never while the conversation has a turn open.
-    holdPreparation: readiness.kind !== 'current' || Boolean(session.activeTurnId), observedFailures,
+    holdPreparation: readiness.kind !== 'current' || Boolean(session.activeTurnId), planOutgrown: readiness.kind !== 'current', observedFailures,
     displayName: draft.publishPreferences?.name ?? spec.name ?? draft.title, description: spec.oneLine ?? '',
+    planAccepted: () => setAccepted(true),
   })
 
   useEffect(() => {
@@ -145,9 +149,19 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
   // proposal says only a Project administrator can set it, and nothing is approved. Only a destination on screen can be
   // approved (the approval binds its revision): while it is read, or after its read failed (read it again here), nothing is.
   const destinationStop = failure?.failure.kind === 'destination' && failure.failure.destination !== 'mismatch' && !execution ? failure.failure.destination : undefined
-  const approve = <Button tone="primary" loading={preparing} disabled={!canCreate || preparing || typeof proposal?.newRepository === 'string'} onClick={effects.prepare}>{buildCopy.primary.prepare}</Button>
+  // A plan Platform's validation rejected is never approved again. 「計画を作り直す」 asks for a new plan (typed
+  // `request_plan`; the new plan clears the rejection by itself); where the cause may lie outside the plan, 「もう一度確かめる」
+  // validates the same plan once more. While the plan is the rejected one, a creation failure (not an unreadable answer,
+  // a name choice or a destination stop) carries these actions, so a failed check never offers the approval back
+  // through a retry; with no failure shown they are on the proposal.
+  const rejectionShown = failure !== undefined && creation.planRejected && !destinationStop && failure.failure.kind !== 'unconfirmed' && failure.failure.kind !== 'name-taken'
+  const rejection = (size?: 'sm') => <PlanRejectionActions size={size}
+    recheck={creation.planRecheck ? { disabled: !canCreate, onClick: effects.recheck } : undefined}
+    replan={{ disabled: !view.canRequestPlan, onClick: () => { if (actions.requestPlan()) setFailure(undefined) } }} />
+  const approve = <Button tone="primary" loading={preparing} disabled={!canCreate || preparing || typeof proposal?.newRepository === 'string'} onClick={() => { setAccepted(false); effects.prepare() }}>{buildCopy.primary.prepare}</Button>
   const proposalAction = started ? undefined
-    : readiness.kind === 'current' ? (proposal?.newRepository === 'failed' ? <><Button onClick={creation.retryDestination}>{buildCopy.proposal.destinationRetry}</Button>{approve}</> : approve)
+    : creation.planRejected ? (rejectionShown ? undefined : rejection())
+      : readiness.kind === 'current' ? (proposal?.newRepository === 'failed' ? <><Button onClick={creation.retryDestination}>{buildCopy.proposal.destinationRetry}</Button>{approve}</> : approve)
       : readiness.kind === 'stale' ? <div className="space-y-2" data-testid="console-plan-stale">
         <p className="text-xs leading-relaxed text-busy-ink">{text.console.plan.stale}</p>
         <Button tone="primary" disabled={!view.canRequestPlan} onClick={() => actions.requestPlan()}>{text.console.plan.replan}</Button>
@@ -177,6 +191,7 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
     // The checked suggestion arrives after the failure: start over with it offered instead of an open field.
     ? <NameChoice key={shown.suggestedName ?? ''} suggestion={shown.suggestedName} onUse={(name) => effects.rename(name, failure.failure, () => setFailure(undefined))} />
     : destinationStop === 'changed' ? undefined
+      : rejectionShown ? rejection('sm')
       : failure && destinationStop
         // Retry once an administrator has set it: a fresh approval that reads the destination again, never a cleanup.
         ? <Button size="sm" onClick={() => { effects.resetBinding(); effects.prepare() }}>{text.conversation.retry}</Button>
@@ -211,7 +226,13 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
       earlierSpec ? <Notice key="earlier-spec" tone="warning" title={text.console.createdFromEarlier.title} actions={continuing ? undefined : improve}>
         {improvable ? text.console.createdFromEarlier.reason : text.console.createdFromEarlier.waiting}
       </Notice> : null,
-      failure && shown ? <Notice key="creation-failure" tone={shown.kind === 'unconfirmed' || destinationStop ? 'warning' : 'error'} title={shown.title} actions={retry}>{shown.reason}</Notice> : null,
+      failure && shown ? <Notice key="creation-failure" tone={shown.kind === 'unconfirmed' || shown.kind === 'plan' || destinationStop ? 'warning' : 'error'} title={shown.title} actions={retry}>
+        {shown.reason}
+        {shown.reference ? <FailureReference reference={shown.reference} /> : null}
+        {/* Platform's own words stay folded, as under the legacy pane's 「詳しい人向け」. */}
+        {shown.raw ? <div className="mt-3"><Disclosure title={text.artifact.advanced}><pre className="whitespace-pre-wrap break-words text-xs">{shown.raw}</pre></Disclosure></div> : null}
+      </Notice> : null,
+      accepted && !failure && !started && !creation.planRejected ? <Notice key="plan-accepted" tone="info" title={buildCopy.failure.plan.accepted.title}>{buildCopy.failure.plan.accepted.detail}</Notice> : null,
       creationAccess.error ? <ActionError key="creation-access" error={creationAccess.error} /> : null,
       effects.waitingForPublish || creationAccess.waitingForPublish ? <p key="waiting-publish" role="status" className="text-xs text-stone-500">{text.page.waitingForPublish}</p> : null,
     ].filter(Boolean),

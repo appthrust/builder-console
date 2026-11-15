@@ -78,6 +78,10 @@ export const textJa = {
     forbidden: { title: 'アプリを作る権限がありません', reason: '基盤の担当者に「アプリを作る権限」を依頼してください。' },
     group: { title: '所属する部署が確認できませんでした', reason: '管理者に部署への追加を依頼してから、もう一度試してください。' },
     limit: { title: 'この作業で考え直せる回数を使い切りました', reason: '前の提案を使うか、新しい作りかけから始めてください。' },
+    /** `limit`'s reason when the plan on screen is the one Platform's validation rejected: it cannot be used. */
+    limitRejected: 'この計画は基盤に受け付けられなかったため、そのままでは使えません。新しい作りかけから始めてください。',
+    /** Same, when the cause may lie outside the plan and 「もう一度確かめる」 is still offered. */
+    limitRecheck: 'この計画は基盤に受け付けられませんでした。原因が基盤の側で直ったら「もう一度確かめる」で確かめ直せます。そうでなければ、新しい作りかけから始めてください。',
     unavailable: { title: 'AI がいま使えません', reason: '基盤の更新中かもしれません。少し待ってからもう一度試してください。しばらく待っても使えないときは、基盤の担当者に確認を依頼してください。' },
     quota: { title: 'AI の利用枠が切れています', reason: '管理者に AI の利用枠の回復を依頼してください。回復後に、もう一度試すボタンを押すと止まったところから再開できます。Excel や入力内容の問題ではありません。' },
     waitingForAi: { title: 'AI の準備を待っています', hint: '基盤の更新中かもしれません。そのまま待つと自動で続けます。' },
@@ -109,6 +113,19 @@ export const textJa = {
       changed: { title: '置き場の作成先が変わりました', reason: 'まだ何も作っていません。提案の「新しく作る置き場」と「アプリの保管場所」を新しい作成先にしました。確かめてから「この内容で作る」を押してください。' },
       blocked: { title: '置き場の作成先が決まっていません', reason: '新しいアプリの置き場をどこに作るかが、まだ決まっていません。プロジェクトの管理者に、置き場の作成先を設定するよう依頼してください。' },
       mismatch: { title: '置き場の作成先を確かめられませんでした', reason: 'まだ何も作っていません。この画面を開き直しても続くときは、管理者に相談してください。' },
+    },
+    /**
+     * Platform's validation answered that the plan itself has to change: nothing was made; the action makes a new
+     * plan. `recheck` validates the same plan once more when the cause may lie outside it (a reason this console does
+     * not know, shown as the platform failure, or a destination Platform calls unusable).
+     */
+    plan: {
+      destination: { title: '計画を、いまの置き場の作成先に合わせる必要があります', reason: 'まだ何も作っていません。計画が、プロジェクトでいま決まっている置き場の作成先と合っていません。計画を作り直すと、いまの作成先に合わせた計画になります。' },
+      incomplete: { title: '計画に足りないところがありました', reason: 'まだ何も作っていません。AI の作った計画が、アプリを作るときの決まりを満たしていませんでした。計画を作り直すと、AI がもう一度考えます。' },
+      replan: '計画を作り直す',
+      recheck: 'もう一度確かめる',
+      /** 「もう一度確かめる」 answered valid: the plan may be created now, by the user's 「この内容で作る」. */
+      accepted: { title: '基盤がこの計画を受け付けました', detail: 'まだ何も作っていません。「この内容で作る」を押すと作り始めます。' },
     },
   },
   /** A state this console version does not know: the known parts stay visible, only what depends on it stops. */
