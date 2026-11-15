@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { isPlatformNotFound } from '../../api/platform-error'
 import { draftOf, runOf, taskOf } from '../../api/testing/build-domain'
 import { buildCopy } from '../../model/build/copy'
-import { buildFailureReference, classifyBuildFailure } from '../../model/build/failure'
+import { buildFailureReference, classifyBuildFailure, destinationFailure } from '../../model/build/failure'
 import type { BuildProposal, BuildSpec } from '../../model/build/types'
 import { preserveLanguage } from '../../../test/language'
 import { setLanguage } from '../../shell/language'
@@ -104,6 +104,24 @@ test.each(['ja', 'en'] as const)('creation URL failure renders NameChoice instea
   expect(markup).toContain(text.nameChoice.useSuggestion('contacts-3'))
   expect(markup).toContain(text.nameChoice.alternative)
   expect(markup).not.toContain(`>${text.conversation.retry}</button>`)
+})
+
+test.each(['ja', 'en'] as const)('a moved destination is approved again with the proposal action’s words, an unset one is tried again (%s)', (language) => {
+  setLanguage(language)
+  const render = (rejection: 'changed' | 'blocked') => {
+    const failure = destinationFailure(rejection)
+    return renderToStaticMarkup(<ConversationPane
+      messages={[{ role: 'notice', tone: 'warning', title: failure.title, detail: failure.reason, retry: 'prepare', at: '2026-10-27T00:00:00Z' }]}
+      stage="decide" answering={false} thinking={false} queued={false} failure={failure}
+      onSend={() => {}} onRetry={() => {}} onUseName={() => {}}
+    />)
+  }
+  const changed = render('changed')
+  expect(changed).toContain(`>${buildCopy.primary.prepare}</button>`)
+  expect(changed).not.toContain(`>${text.conversation.retry}</button>`)
+  expect(changed).toContain(buildCopy.failure.destination.changed.reason)
+  expect(changed).toContain('role="status"')
+  expect(render('blocked')).toContain(`>${text.conversation.retry}</button>`)
 })
 
 // The rendered state needs the router (LinkButton); app-build-ai.mock.spec.ts covers it. Here: the

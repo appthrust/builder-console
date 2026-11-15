@@ -1,10 +1,10 @@
 import { expect, test } from 'bun:test'
 import type { ApplicationDraftCreationPlan } from '@appthrust/api-schema/platform-api'
-import { renameCreationPlan, withDefaultPublish } from './plan'
+import { newRepositoryRequest, renameCreationPlan, withDefaultPublish, withDestinationRevision } from './plan'
 
 const plan: ApplicationDraftCreationPlan = {
   summary: '見積', markdown: '# foo の計画を保持', representation: ['SourceRepository', 'ApplicationStack', 'Publish'],
-  applicationSourceRepositoryRequest: { template: { repository: 'appthrust/template' }, destination: { repositoryName: 'foo' }, image: { imagePath: 'ghcr.io/acme/foo', tagFilter: '^v' } },
+  applicationSourceRepositoryRequest: { template: { repository: 'appthrust/template' }, destination: { repositoryName: 'foo' }, destinationRevision: 'rd-1', image: { imagePath: 'ghcr.io/acme/foo', tagFilter: '^v' } },
   applicationStackRequest: {
     templateId: 'biz-master-postgres', definitionRef: { name: 'web-postgres' }, application: { name: 'foo' },
     source: { kind: 'application-source-repository', sourceRepositoryId: 'created-source-repository' },
@@ -17,12 +17,31 @@ const plan: ApplicationDraftCreationPlan = {
 
 test('renames new destinations without regenerating or changing schema-path tool references', () => {
   const renamed = renameCreationPlan(plan, 'foo-2')
-  expect(renamed.applicationSourceRepositoryRequest).toMatchObject({ destination: { repositoryName: 'foo-2' }, image: { imagePath: 'ghcr.io/acme/foo-2', tagFilter: '^v' } })
+  expect(renamed.applicationSourceRepositoryRequest).toMatchObject({ destination: { repositoryName: 'foo-2' }, destinationRevision: 'rd-1', image: { tagFilter: '^v' } })
   expect(renamed.applicationStackRequest).toMatchObject({ application: { name: 'foo-2' }, publish: { subdomain: 'foo-2', customDomain: 'project.test' }, source: { sourceRepositoryId: 'created-source-repository' } })
   expect(renamed.toolPlan).toBe(plan.toolPlan)
   expect(renamed.markdown).toBe(plan.markdown)
   expect(renamed.implementationHandoff).toBe(plan.implementationHandoff)
   expect(plan.applicationSourceRepositoryRequest?.destination?.repositoryName).toBe('foo')
+})
+
+test('a rename never rewrites the image path: an asserted one names the old repository and is dropped, the server derives it', () => {
+  const renamed = renameCreationPlan(plan, 'foo-2')
+  expect(renamed.applicationSourceRepositoryRequest?.image).toEqual({ tagFilter: '^v' })
+  expect(plan.applicationSourceRepositoryRequest?.image?.imagePath).toBe('ghcr.io/acme/foo')
+  const withoutImage = { ...plan, applicationSourceRepositoryRequest: { template: { repository: 'appthrust/template' }, destination: { repositoryName: 'foo' }, destinationRevision: 'rd-1' } }
+  expect(renameCreationPlan(withoutImage, 'foo-2').applicationSourceRepositoryRequest).toEqual({ template: { repository: 'appthrust/template' }, destination: { repositoryName: 'foo-2' }, destinationRevision: 'rd-1' })
+})
+
+test('the approved plan’s new repository carries the revision of the destination shown; adoptions are not bound', () => {
+  const rebound = withDestinationRevision(plan, 'rd-2')
+  expect(rebound.applicationSourceRepositoryRequest?.destinationRevision).toBe('rd-2')
+  expect(plan.applicationSourceRepositoryRequest?.destinationRevision).toBe('rd-1')
+  expect(withDestinationRevision(plan, 'rd-1')).toBe(plan)
+  const adopted = { ...plan, applicationSourceRepositoryRequest: { existing: { repository: 'acme/shared' } } }
+  expect(newRepositoryRequest(adopted)).toBeUndefined()
+  expect(withDestinationRevision(adopted, 'rd-2')).toBe(adopted)
+  expect(newRepositoryRequest({ ...plan, applicationSourceRepositoryRequest: undefined })).toBeUndefined()
 })
 
 test.each([undefined, 'foo', 'explicit-id'])('moves only the application ID derived from the old name: %s', (id) => {

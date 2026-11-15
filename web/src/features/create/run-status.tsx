@@ -2,9 +2,10 @@
 import { LoaderCircle, RotateCw } from 'lucide-react'
 import { copy, relativeTime } from '../../copy'
 import type { CreateEntry } from '../../model/create'
+import { locale } from '../../shell/language'
 import { Button, LinkButton, Notice } from '../../ui'
 import { text } from './copy'
-import type { CreateFailed, SubmitPhase } from './submit'
+import { createdBeforeSent, type CreateCandidate, type CreateFailed, type SubmitPhase } from './submit'
 
 /** The submitCreate phases each non-AI entry goes through, in order. */
 const ENTRY_PHASES: Record<Exclude<CreateEntry, 'ai'>, readonly SubmitPhase[]> = {
@@ -65,6 +66,76 @@ export function UnconfirmedCreateNotice({ confirming, stillUnknown, disabled, on
   )
 }
 
+/**
+ * An earlier create's resend was refused (or it cannot be resent exactly): Platform's refusal does not prove the
+ * earlier create failed, so nothing is sent. The actions read the latest state back (a hit is offered as a candidate)
+ * and, only once a readback did not find it (or the user said its hit is not theirs), give the earlier create up with
+ * its residual risk stated. After "not mine", `onReconsider` offers that hit again. `where` names where it went.
+ */
+export function UnsettledCreateNotice({ where, searched, confirming, stillUnknown, disabled, onConfirm, onGiveUp, onReconsider }: {
+  where: string
+  searched: boolean
+  confirming: boolean
+  stillUnknown: boolean
+  disabled: boolean
+  onConfirm: () => void
+  onGiveUp: () => void
+  /** Present while a hit the user said is not theirs can be looked at again (`reconsiderCandidate`). */
+  onReconsider?: () => void
+}) {
+  const actions = <>
+    <Button size="sm" loading={confirming} disabled={disabled} onClick={onConfirm}>{text.unconfirmed.confirm}</Button>
+    {onReconsider ? <Button size="sm" tone="secondary" disabled={confirming} onClick={onReconsider}>{text.unsettled.reconsider}</Button> : null}
+    {searched ? <Button size="sm" tone="secondary" disabled={confirming} onClick={onGiveUp}>{text.unsettled.startOver}</Button> : null}
+    <LinkButton to="/" tone="ghost" size="sm">{text.abandon}</LinkButton>
+  </>
+  return (
+    <Notice tone="warning" title={text.unsettled.title} actions={actions}>
+      <p>{text.unsettled.body(where)}</p>
+      {onReconsider ? <p className="mt-1" data-testid="create-unsettled-not-mine">{text.unsettled.notMine}</p> : null}
+      {searched ? <p className="mt-1" role="status" data-testid="create-unsettled-not-found">{text.unsettled.notFound(where)}</p> : null}
+      {stillUnknown ? <p className="mt-1" role="status">{text.unconfirmed.stillUnknown}</p> : null}
+    </Notice>
+  )
+}
+
+/**
+ * A readback found a resource with the earlier attempt's name where it was sent; Platform's answer does not say which
+ * request made it. Nothing is sent until the user chooses: use it (kept as found: the wizard never deletes it, but the
+ * app is built on it, and deleting the app later removes its record too, which the notice says) or say it is not theirs
+ * (the attempt stays held). A repository's creation time and the earlier request's send time are shown side by side as
+ * information; a hint is added when it looks older by this device's clock (`createdBeforeSent`). Both choices always.
+ */
+export function CandidateNotice({ candidate, onUse, onNotMine }: { candidate: CreateCandidate; onUse: () => void; onNotMine: () => void }) {
+  if (candidate.step === 'stack') {
+    return (
+      <Notice tone="warning" title={text.candidate.stackTitle} actions={<>
+        <Button size="sm" onClick={onUse}>{text.candidate.useStack}</Button>
+        <Button size="sm" tone="secondary" onClick={onNotMine}>{text.candidate.notMineStack}</Button>
+      </>}>
+        <p>{text.candidate.stackBody(candidate.appName)}</p>
+      </Notice>
+    )
+  }
+  const where = text.unsettled.repository(candidate.binding.repository, candidate.binding.image)
+  const createdAt = candidate.createdAt ? text.candidate.createdAt(new Date(candidate.createdAt).toLocaleString(locale())) : text.candidate.createdAtUnknown
+  const sentAt = candidate.sentAt ? text.candidate.sentAt(new Date(candidate.sentAt).toLocaleString(locale())) : text.candidate.sentAtUnknown
+  return (
+    <Notice tone="warning" title={text.candidate.title} actions={<>
+      <Button size="sm" onClick={onUse}>{text.candidate.use}</Button>
+      <Button size="sm" tone="secondary" onClick={onNotMine}>{text.candidate.notMine}</Button>
+    </>}>
+      <p>{text.candidate.body(where)}</p>
+      <ul className="mt-1">
+        <li data-testid="create-candidate-created-at">{createdAt}</li>
+        <li data-testid="create-candidate-sent-at">{sentAt}</li>
+      </ul>
+      {createdBeforeSent(candidate) ? <p className="mt-1" data-testid="create-candidate-created-before">{text.candidate.createdBeforeSent}</p> : null}
+      <p className="mt-1" data-testid="create-candidate-use-means">{text.candidate.useMeans}</p>
+    </Notice>
+  )
+}
+
 /** Input failures belong beside the owning step, rather than the generic retry notice. */
 export function FieldFailureNotice({ failure, onFix }: { failure: CreateFailed; onFix: () => void }) {
   const path = failure.field?.path ?? ''
@@ -93,6 +164,20 @@ export function FailureNotice({ failure }: { failure: CreateFailed }) {
     return (
       <Notice tone="error" actions={abandon}>
         {copy.create.forbidden}
+      </Notice>
+    )
+  }
+  // The repository destination's answers have fixed words: never the server's reason or message.
+  if (failure.destination) {
+    const [title, body] = failure.destination === 'changed'
+      ? [text.destination.changedTitle, text.destination.changed]
+      : failure.destination === 'mismatch'
+        ? [text.destination.mismatchTitle, text.destination.mismatch]
+        : [undefined, text.destination.blocked]
+    return (
+      <Notice tone={failure.destination === 'changed' ? 'warning' : 'error'} title={title} actions={abandon}>
+        <p>{body}</p>
+        {failure.progress.draft ? <p className="mt-1 opacity-80">{copy.create.draftKept}</p> : null}
       </Notice>
     )
   }

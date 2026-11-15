@@ -3,9 +3,11 @@ import { assertWireContractCases } from '../../testing/wire-contract-cases'
 import {
   createSourceRepositoryContract,
   createStackContract,
+  getRepositoryDestinationContract,
   listSourceConnectionsContract,
   listTemplatesContract,
   putPublishAccessContract,
+  validateSourceRepositoryContract,
   validateStackContract,
 } from './catalog'
 
@@ -48,10 +50,49 @@ describe('source connections (platformApiListProjectGitHubSourceConnections)', (
   const wireSource = { id: 'gh', displayName: 'gh', account: { login: 'acme', type: 'Organization' }, capabilities: ['createRepositories'], status: 'ready', source: 'github-source-connection-cr' }
   test('wire variants', () => {
     assertWireContractCases(listSourceConnectionsContract, [
-      { name: 'an omitted allowlist keeps its meaning (every repository)', variant: 'absent', path: '/data/*/allowedRepositories', wire: { data: [wireSource] }, expect: { accept: true, check: (value) => expect(value.data[0]?.allowedRepositories).toBeUndefined() } },
-      { name: 'a null allowlist is broken, not "every repository"', variant: 'null', path: '/data/*/allowedRepositories', wire: { data: [{ ...wireSource, allowedRepositories: null }] }, expect: { accept: false, issues: [{ path: '/data/*/allowedRepositories', code: 'invalid_type' }] } },
+      // The allowlist and account no longer decide anything here (the destination does), so they are not read.
+      { name: 'the template allowlist and account are not read', variant: 'unknown', path: '/data/*/allowedRepositories', wire: { data: [{ ...wireSource, allowedRepositories: null, account: null }] }, expect: { accept: true, value: { data: [{ id: 'gh', capabilities: [{ kind: 'known', value: 'createRepositories' }], status: { kind: 'known', value: 'ready' } }] } } },
       { name: 'capabilities are required', variant: 'absent', path: '/data/*/capabilities', wire: { data: [without(wireSource, 'capabilities')] }, expect: { accept: false, issues: [{ path: '/data/*/capabilities', code: 'missing' }] } },
       { name: 'an unknown status and capability never read as ready or able', variant: 'unknown', path: '/data/*/status', wire: { data: [{ ...wireSource, status: SECRET, capabilities: [SECRET] }] }, expect: { accept: true, check: (value) => expect([value.data[0]?.status, value.data[0]?.capabilities]).toEqual([{ kind: 'unknown' }, [{ kind: 'unknown' }]]) } },
+    ])
+  })
+})
+
+describe('repository destination (platformApiGetProjectRepositoryDestination)', () => {
+  const destination = { connectionId: 'github-source-207cb7ce', provider: 'github', displayName: 'Acme GitHub', repositoryNamespace: 'acme', registryNamespace: 'ghcr.io/acme' }
+  const resolved = { state: 'Resolved', source: 'Project', revision: 'rd-1', destination }
+  const blocked = { state: 'Blocked', reason: 'NotConfigured', message: `No repository destination. ${SECRET}`, settingsUrl: '/projects/pj/settings' }
+  const expected = { kind: 'resolved', revision: 'rd-1', connectionId: 'github-source-207cb7ce', repositoryNamespace: 'acme', registryNamespace: 'ghcr.io/acme' } as const
+
+  test('wire variants', () => {
+    assertWireContractCases(getRepositoryDestinationContract, [
+      { name: 'a resolved GHCR destination', variant: 'present', path: '/', wire: resolved, expect: { accept: true, value: expected } },
+      {
+        name: 'a resolved built-in registry destination with its image access', variant: 'present', path: '/destination/registryNamespace',
+        wire: { ...resolved, source: 'Environment', destination: { ...destination, registryNamespace: 'registry.appthrust.test/commerce', imageAccessId: 'platform-registry' } },
+        expect: { accept: true, value: { ...expected, registryNamespace: 'registry.appthrust.test/commerce' } },
+      },
+      { name: 'an unknown source does not change where it goes', variant: 'unknown', path: '/source', wire: { ...resolved, source: SECRET }, expect: { accept: true, value: expected } },
+      { name: 'blocked keeps neither reason nor message', variant: 'present', path: '/reason', wire: blocked, expect: { accept: true, check: (value) => { expect(value).toEqual({ kind: 'blocked' }); expect(JSON.stringify(value)).not.toContain(SECRET) } } },
+      { name: 'an unknown blocked reason is blocked', variant: 'unknown', path: '/reason', wire: { ...blocked, reason: SECRET }, expect: { accept: true, value: { kind: 'blocked' } } },
+      { name: 'an unknown state offers no create', variant: 'unknown', path: '/state', wire: { state: SECRET, revision: 'rd-1', destination }, expect: { accept: true, value: { kind: 'unknown' } } },
+      { name: 'no state is broken, never blocked or resolved', variant: 'absent', path: '/state', wire: without(resolved, 'state'), expect: { accept: false, issues: [{ path: '/state', code: 'missing' }] } },
+      { name: 'a null state is broken', variant: 'null', path: '/state', wire: { ...resolved, state: null }, expect: { accept: false, issues: [{ path: '/state', code: 'invalid_type' }] } },
+      { name: 'a resolved answer without a revision is broken: nothing to bind a create to', variant: 'absent', path: '/revision', wire: without(resolved, 'revision'), expect: { accept: false, issues: [{ path: '/revision', code: 'missing' }] } },
+      { name: 'an empty revision is broken: Platform would resolve again at create time', variant: 'empty', path: '/revision', wire: { ...resolved, revision: '' }, expect: { accept: false, issues: [{ path: '/revision', code: 'invalid_value' }] } },
+      { name: 'a null revision is broken', variant: 'null', path: '/revision', wire: { ...resolved, revision: null }, expect: { accept: false, issues: [{ path: '/revision', code: 'invalid_type' }] } },
+      { name: 'a resolved answer without its destination is broken', variant: 'absent', path: '/destination', wire: without(resolved, 'destination'), expect: { accept: false, issues: [{ path: '/destination', code: 'missing' }] } },
+      { name: 'a destination without its registry namespace is broken', variant: 'absent', path: '/destination/registryNamespace', wire: { ...resolved, destination: without(destination, 'registryNamespace') }, expect: { accept: false, issues: [{ path: '/destination/registryNamespace', code: 'missing' }] } },
+      { name: 'unknown fields are dropped', variant: 'unknown', path: '/', wire: { ...resolved, credential: SECRET, destination: { ...destination, token: SECRET } }, expect: { accept: true, check: (value) => expect(JSON.stringify(value)).not.toContain(SECRET) } },
+    ])
+  })
+
+  test('validation reads the verdict and the image path Platform derived; the resolution it carries is not read', () => {
+    assertWireContractCases(validateSourceRepositoryContract, [
+      { name: 'an adoption validation with its derived image path', variant: 'present', path: '/imagePath', wire: { valid: true, message: 'ok', imagePath: 'ghcr.io/acme/app', tagFilter: 'edge-', versioningScheme: 'Alphabetical' }, expect: { accept: true, value: { valid: true, message: 'ok', imagePath: 'ghcr.io/acme/app' } } },
+      { name: 'Go omits imagePath when nothing was derived', variant: 'absent', path: '/imagePath', wire: { valid: false, message: 'not visible' }, expect: { accept: true, value: { valid: false, message: 'not visible' } } },
+      { name: 'an unknown versioning scheme or resolution state does not break the verdict', variant: 'unknown', path: '/versioningScheme', wire: { valid: true, versioningScheme: SECRET, repositoryDestination: { state: SECRET } }, expect: { accept: true, value: { valid: true } } },
+      { name: 'a verdict that is not a boolean is broken', variant: 'unknown', path: '/valid', wire: { valid: SECRET }, expect: { accept: false, issues: [{ path: '/valid', code: 'invalid_type' }] } },
     ])
   })
 })

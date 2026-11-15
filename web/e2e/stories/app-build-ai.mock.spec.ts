@@ -65,6 +65,9 @@ test.describe('AI build session @app-build-ai', () => {
     await expect(page.getByTestId('build-session')).toHaveAttribute('data-stage', 'decide')
     await expect(page.getByTestId('build-proposal')).toContainText('公開先（予定）')
     await expect(page.getByTestId('build-proposal')).toContainText(`ai-app-${draftId.slice(-4)}.commerce.appthrust.test`)
+    // Where the new repository and its image go: the Project's resolved destination, the one the approval binds.
+    await expect(page.getByTestId('build-proposal').getByText(`acme/ai-app-${draftId.slice(-4)}`, { exact: true })).toBeVisible()
+    await expect(page.getByTestId('build-proposal').getByText(`ghcr.io/acme/ai-app-${draftId.slice(-4)}`, { exact: true })).toBeVisible()
     await expect.poll(async () => (await (await request.get(draftPath)).json()).creationPlan?.applicationStackRequest?.publish).toEqual({
       enabled: true, customDomain: 'commerce.appthrust.test', hostnamePattern: 'wildcard', subdomain: `ai-app-${draftId.slice(-4)}`,
     })

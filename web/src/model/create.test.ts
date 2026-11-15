@@ -1,23 +1,23 @@
 import { describe, expect, test } from 'bun:test'
-import { definitionOf, domainOf, registryOf, sourceConnectionOf, templateOf } from '../api/testing/catalog-domain'
+import { definitionOf, domainOf, registryOf, resolvedDestinationOf, sourceConnectionOf, templateOf } from '../api/testing/catalog-domain'
 import type { CreationPlan } from './contracts/build'
 import {
   appUrl,
   buildCreateStackRequest,
   buildExistingSourceRepositoryRequest,
   buildSourceRepositoryRequest,
+  destinationImage,
+  destinationRepository,
   isValidAppName,
   missingPrerequisites,
+  newRepositoryEntry,
   numberedUrlName,
   pickCreateEnvironment,
   pickPublishDomain,
-  pickSourceConnection,
   resolveCreateCatalog,
-  sourceConnectionsOf,
   suggestUrlName,
   summarizeCreationPlan,
   templatesFor,
-  templateSourceProblem,
   templateUsableFor,
   urlNameFromRepository,
 } from './create'
@@ -96,6 +96,10 @@ const wireSeedDomain = {
 const seedDomain = domainOf(wireSeedDomain)
 const customDomain = domainOf({ ...wireSeedDomain, id: 'acme.dev', name: 'acme.dev', source: 'hostedZone', deletable: true })
 
+// The Project's resolved repository destination: GHCR under the connection's account, or the built-in registry.
+const ghcrDestination = resolvedDestinationOf()
+const builtinDestination = resolvedDestinationOf({ revision: 'rd-builtin-2', registryNamespace: 'registry.appthrust.test/commerce', imageAccessId: 'platform-registry' })
+
 describe('URL name', () => {
   test('follows the DNS label rule and rejects console reserved words', () => {
     expect(isValidAppName('my-shop')).toBe(true)
@@ -162,25 +166,20 @@ describe('catalog', () => {
     expect(resolveCreateCatalog([template], [marketplace], 'github-template')).toBeUndefined()
   })
 
-  test('template allowlists trim and ignore case like the Platform validator; empty allowlists admit all templates', () => {
-    const blocked = sourceWith({ allowedRepositories: ['appthrust/template-other'] })
-    expect(templateSourceProblem(template, [blocked])).toBe('not-admitted')
-    expect(pickSourceConnection([blocked], template)).toBeUndefined()
-    expect(templateSourceProblem(template, [sourceWith({ allowedRepositories: [] })])).toBeUndefined()
-    expect(templateSourceProblem(template, [sourceConnection])).toBeUndefined()
-    expect(templateSourceProblem(template, [sourceWith({ allowedRepositories: [' AppThrust/Template-Nextjs '] })])).toBeUndefined()
-    expect(templateSourceProblem(templateWith({
-      githubTemplate: { ...wireTemplate.githubTemplate, repository: ' APPTHRUST/template-nextjs ' },
-    }), [sourceWith({ allowedRepositories: ['appthrust/template-nextjs'] })])).toBeUndefined()
-    expect(templateSourceProblem(template, [])).toBe('no-connection')
-    expect(templateSourceProblem(template, [sourceWith({ status: 'incomplete' })])).toBe('no-connection')
-    expect(templateSourceProblem(template, [sourceWith({ capabilities: ['createRepositories'] })])).toBe('no-connection')
-    expect(pickSourceConnection([blocked])).toBe(blocked)
+  test('new repositories never come from the connection list: the connection catalog only serves adoption', () => {
+    // Two ready connections in either order: no new-repository request can be built from them, only adoption.
+    const other = sourceWith({ id: 'github-other' })
+    expect(pickCreateEnvironment([other, sourceConnection], [registryConnection], [seedDomain]).adoption).toBe(other)
+    expect(newRepositoryEntry('template')).toBe(true)
+    expect(newRepositoryEntry('ai')).toBe(true)
+    expect(newRepositoryEntry('existing')).toBe(false)
+    expect(newRepositoryEntry('image')).toBe(false)
+    expect(newRepositoryEntry(undefined)).toBe(false)
   })
 
   test('an unknown connection status or capability is never ready and never a capability', () => {
-    expect(pickSourceConnection([sourceWith({ status: 'verified-later' })])).toBeUndefined()
-    expect(templateSourceProblem(template, [sourceWith({ capabilities: ['createRepositories', 'readEverything'] })])).toBe('no-connection')
+    expect(pickCreateEnvironment([sourceWith({ status: 'verified-later' })], [registryConnection], [seedDomain]).adoption).toBeUndefined()
+    expect(pickCreateEnvironment([sourceWith({ capabilities: ['readEverything'] })], [registryConnection], [seedDomain]).adoption).toBeUndefined()
     expect(pickCreateEnvironment([sourceConnection], [registryOf({ ...wireRegistry, status: 'warming' })], [seedDomain]).registry).toBeUndefined()
     expect(templateUsableFor(templateWith({ sourceKinds: ['gitlab-template'], availability: { available: true, sources: [{ kind: 'gitlab-template', available: true }] } }), 'github-template')).toBe(false)
     expect(pickPublishDomain([customDomain, domainOf({ ...wireSeedDomain, source: 'future-source' })])).toBe('acme.dev')
@@ -192,17 +191,11 @@ describe('catalog', () => {
     expect(resolveCreateCatalog([template], [definitionOf({ ...wireDefinition, versions: [{ name: 'v2' }] })], 'github-template')?.definitionRef).toEqual({ name: 'web-postgres' })
   })
 
-  test('a later admitting connection supplies the source repository request id', () => {
-    const blocked = sourceWith({ allowedRepositories: ['appthrust/template-other'] })
-    const admitted = sourceWith({ id: 'github-admitted', allowedRepositories: ['appthrust/template-nextjs'] })
-    const sources = [blocked, admitted]
-    expect(pickSourceConnection(sources, template)).toBe(admitted)
-    expect(templateSourceProblem(template, sources)).toBeUndefined()
-    const environment = pickCreateEnvironment(sources, [registryConnection], [seedDomain], template)
-    const connections = sourceConnectionsOf(environment)!
-    const catalog = resolveCreateCatalog([template], [definition], 'github-template')!
-    expect(buildSourceRepositoryRequest('my-app', catalog, connections).sourceConnectionId).toBe(admitted.id)
-    expect(pickSourceConnection([sourceWith({ id: 'github-admitted', allowedRepositories: ['appthrust/template-nextjs'], capabilities: ['createRepositories'] }), admitted], template)).toBe(admitted)
+  test('where a new repository and its image go is the resolved destination, GHCR or the built-in registry', () => {
+    expect(destinationRepository(ghcrDestination, 'mitsumori')).toBe('acme/mitsumori')
+    expect(destinationImage(ghcrDestination, 'mitsumori')).toBe('ghcr.io/acme/mitsumori')
+    expect(destinationRepository(builtinDestination, 'mitsumori')).toBe('acme/mitsumori')
+    expect(destinationImage(builtinDestination, 'mitsumori')).toBe('registry.appthrust.test/commerce/mitsumori')
   })
 
   test('honours an explicit template choice and pairs the definition structurally', () => {
@@ -212,15 +205,11 @@ describe('catalog', () => {
     expect(resolveCreateCatalog([remix], [definition], 'sample-image')).toBeUndefined()
   })
 
-  test('the ひな形 path needs a ready source connection that can create repositories and a ready registry connection', () => {
+  test('adoption needs a ready connection that can act on repositories; the image entry a ready registry', () => {
     const ready = pickCreateEnvironment([sourceConnection], [registryConnection], [seedDomain])
-    expect(ready).toEqual({ source: sourceConnection, registry: registryConnection, domain: seedDomain.name })
-    expect(sourceConnectionsOf(ready)).toEqual({ source: sourceConnection, registry: registryConnection })
-    expect(pickCreateEnvironment([sourceWith({ status: 'incomplete' })], [registryConnection], []).source).toBeUndefined()
-    expect(
-      pickCreateEnvironment([sourceWith({ capabilities: ['readPackages'] })], [registryConnection], []).source
-    ).toBeUndefined()
-    expect(sourceConnectionsOf(pickCreateEnvironment([sourceConnection], [], []))).toBeUndefined()
+    expect(ready).toEqual({ adoption: sourceConnection, registry: registryConnection, domain: seedDomain.name })
+    expect(pickCreateEnvironment([sourceWith({ status: 'incomplete' })], [registryConnection], []).adoption).toBeUndefined()
+    expect(pickCreateEnvironment([sourceWith({ capabilities: ['readPackages'] })], [registryConnection], []).adoption).toBeUndefined()
   })
 
   test('publish domain: usableForPublish only, the project seed domain preferred', () => {
@@ -231,39 +220,44 @@ describe('catalog', () => {
     expect(appUrl('mitsumori', 'pj-eee7fa8eabbc.appthrust.ink')).toBe('https://mitsumori.pj-eee7fa8eabbc.appthrust.ink')
   })
 
-  test('missing prerequisites name each piece; only the image entry works without GitHub', () => {
-    for (const entry of ['template', 'existing', 'ai'] as const) {
-      expect(missingPrerequisites({}, entry)).toEqual(['github', 'registry', 'domain'])
-    }
+  test('missing prerequisites: GitHub only for adoption, a registry only for an image; new repositories need the destination instead', () => {
+    expect(missingPrerequisites({}, 'existing')).toEqual(['github', 'domain'])
     expect(missingPrerequisites({}, 'image')).toEqual(['registry', 'domain'])
+    expect(missingPrerequisites({}, 'template')).toEqual(['domain'])
+    expect(missingPrerequisites({}, 'ai')).toEqual(['domain'])
     const noRegistry = pickCreateEnvironment([sourceConnection], [registryOf({ ...wireRegistry, status: 'incomplete' })], [seedDomain])
-    expect(missingPrerequisites(noRegistry, 'existing')).toEqual(['registry'])
+    expect(missingPrerequisites(noRegistry, 'existing')).toEqual([])
     expect(missingPrerequisites(noRegistry, 'image')).toEqual(['registry'])
     const ready = pickCreateEnvironment([sourceConnection], [registryConnection], [seedDomain])
-    expect(missingPrerequisites(ready, 'template')).toEqual([])
-    expect(missingPrerequisites(ready, 'ai')).toEqual([])
+    for (const entry of ['template', 'existing', 'ai', 'image'] as const) expect(missingPrerequisites(ready, entry)).toEqual([])
     expect(missingPrerequisites({ ...ready, domain: undefined }, 'image')).toEqual(['domain'])
   })
 })
 
 describe('platform requests', () => {
   const catalog = resolveCreateCatalog([template], [definition], 'github-template')!
-  const connections = { source: sourceConnection, registry: registryConnection }
 
-  test('ひな形: source repository mirrors the Dashboard github-template submission', () => {
-    expect(buildSourceRepositoryRequest('mitsumori', catalog, connections)).toEqual({
-      sourceConnectionId: 'github-source-207cb7ce',
-      registryConnectionRef: 'ghcr-acme',
+  test('ひな形: the request names the template, the name and the shown revision; never a connection, registry or image path', () => {
+    const request = buildSourceRepositoryRequest('mitsumori', catalog, ghcrDestination)
+    expect(request).toEqual({
       template: { repository: 'appthrust/template-nextjs', ref: 'main' },
       destination: { repositoryName: 'mitsumori', visibility: 'private' },
-      image: { imagePath: 'ghcr.io/acme/mitsumori', tagFilter: 'edge-', versioningScheme: 'Alphabetical' },
+      destinationRevision: 'rd-ghcr-1',
       build: { mode: 'observed-image', ref: 'main' },
     })
+    for (const field of ['sourceConnectionId', 'registryConnectionRef', 'registryProviderConnectionRef', 'gitProviderConnectionRef', 'image']) expect(request).not.toHaveProperty(field)
+  })
+
+  test('ひな形 at the built-in registry: the same request, bound to that destination’s revision', () => {
+    const request = buildSourceRepositoryRequest('mitsumori', catalog, builtinDestination)
+    expect(request.destinationRevision).toBe('rd-builtin-2')
+    expect(request).not.toHaveProperty('image')
+    expect(request).not.toHaveProperty('registryConnectionRef')
   })
 
   test('a template without githubTemplate falls back to the appthrust template repository', () => {
     const remixCatalog = resolveCreateCatalog([remix], [definition], 'github-template')!
-    expect(buildSourceRepositoryRequest('a', remixCatalog, connections).template).toEqual({
+    expect(buildSourceRepositoryRequest('a', remixCatalog, ghcrDestination).template).toEqual({
       repository: 'appthrust/template-remix',
       ref: 'main',
     })
@@ -332,18 +326,13 @@ describe('作ったコードから', () => {
     expect(urlNameFromRepository('acme/help')).toBe('help-app')
   })
 
-  test('adopts the repository on its default branch; edge-* images under the registry, build left to the platform', () => {
-    expect(
-      buildExistingSourceRepositoryRequest(
-        { fullName: 'Acme/Claude-Mitsumori', defaultBranch: 'trunk' },
-        { source: sourceConnection, registry: registryConnection }
-      )
-    ).toEqual({
+  test('adopts the repository on its default branch with its connection; Platform derives the image and its access', () => {
+    const request = buildExistingSourceRepositoryRequest({ fullName: 'Acme/Claude-Mitsumori', defaultBranch: 'trunk' }, sourceConnection)
+    expect(request).toEqual({
       sourceConnectionId: 'github-source-207cb7ce',
-      registryConnectionRef: 'ghcr-acme',
       existing: { repository: 'Acme/Claude-Mitsumori', ref: 'trunk' },
-      image: { imagePath: 'ghcr.io/acme/claude-mitsumori', tagFilter: 'edge-', versioningScheme: 'Alphabetical' },
     })
+    for (const field of ['registryConnectionRef', 'registryProviderConnectionRef', 'image', 'destinationRevision']) expect(request).not.toHaveProperty(field)
   })
 })
 
@@ -361,7 +350,7 @@ describe('AI の計画', () => {
     applicationSourceRepositoryRequest: buildSourceRepositoryRequest(
       'mitsumori-ai',
       resolveCreateCatalog([template], [definition], 'github-template')!,
-      { source: sourceConnection, registry: registryConnection }
+      ghcrDestination
     ),
     applicationStackRequest: stackRequest,
   }

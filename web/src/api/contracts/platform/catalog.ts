@@ -7,10 +7,12 @@
 // - nothing is defaulted: the collections read here are never omitted by
 //   Platform (`data`, `sourceKinds`, `components`, `capabilities`, `sources`,
 //   `conditions` have no `omitempty` in internal/api), and the optional ones
-//   keep their meaning (`allowedRepositories` absent = every repository,
-//   `versions` absent = no version to pin);
+//   keep their meaning (`versions` absent = no version to pin);
 // - a write's answer is its `resource`; a malformed success answer never
-//   becomes a value (the write may still have happened: callers read back).
+//   becomes a value (the write may still have happened: callers read back);
+// - the repository destination is Platform's resolution, read as is: only a
+//   resolved answer with a revision offers a create; blocked and unknown
+//   states keep neither the server's reason nor its message.
 import {
   ApplicationDraftCodexUnavailableReason,
   ApplicationDraftCreationToolRegistryResponse,
@@ -31,13 +33,14 @@ import {
   Domain,
   DomainSource,
   GitHubSourceConnection,
-  GitHubSourceConnectionAccount,
   GitHubSourceConnectionCapability,
   GitHubSourceConnectionRepository,
   ProjectOnboardingConnectionStatus,
   Publish,
   PublishAccess,
   RegistryConnection,
+  RepositoryDestination as CanonicalRepositoryDestination,
+  RepositoryDestinationResolution,
 } from '@appthrust/api-schema/platform-api'
 import { z } from 'zod'
 import type {
@@ -47,6 +50,7 @@ import type {
   GitHubRepository,
   PublishDomain,
   RegistryConnection as RegistryConnectionValue,
+  RepositoryDestination,
   SourceConnection,
   SourceRepository,
   SourceRepositoryList,
@@ -56,7 +60,7 @@ import type {
   StackValidation,
   TemplateSummary,
 } from '../../../model/contracts/catalog'
-import { openEnum } from '../../boundary'
+import { openEnum, openUnion } from '../../boundary'
 import { platformContract } from '../define'
 import { openCanonical } from './build'
 
@@ -66,8 +70,7 @@ const resourceOf = <D>(reader: z.ZodType<D>) => z.object({ resource: reader }).t
 
 const connectionStatus = openCanonical(ProjectOnboardingConnectionStatus)
 
-export const sourceConnectionReader: z.ZodType<SourceConnection> = GitHubSourceConnection.pick({ id: true, allowedRepositories: true }).extend({
-  account: GitHubSourceConnectionAccount.pick({ login: true }),
+export const sourceConnectionReader: z.ZodType<SourceConnection> = GitHubSourceConnection.pick({ id: true }).extend({
   capabilities: z.array(openCanonical(GitHubSourceConnectionCapability)),
   status: connectionStatus,
 })
@@ -119,6 +122,25 @@ const stackValidationReader: z.ZodType<StackValidation> = ApplicationStackValida
   runtime: validationSection,
   publish: validationSection.optional(),
 })
+
+const [resolvedResolution] = RepositoryDestinationResolution.options
+
+/**
+ * `Resolved` needs its revision (an empty one would let Platform resolve again
+ * at create time, unbound to what was shown) and the namespaces it shows;
+ * `Blocked` is read without its reason or message; an unknown state is unknown.
+ */
+export const repositoryDestinationReader: z.ZodType<RepositoryDestination> = openUnion({
+  discriminator: 'state',
+  identity: z.object({}),
+  variants: {
+    Resolved: z.object({
+      revision: resolvedResolution.shape.revision.min(1),
+      destination: CanonicalRepositoryDestination.pick({ connectionId: true, repositoryNamespace: true, registryNamespace: true }),
+    }).transform(({ revision, destination }) => ({ kind: 'resolved' as const, revision, ...destination })),
+    Blocked: z.object({}).transform(() => ({ kind: 'blocked' as const })),
+  },
+}).transform((read): RepositoryDestination => (read.kind === 'supported' ? read.value : { kind: 'unknown' }))
 
 const external = PublishAccess.shape.authorization.unwrap().shape.external
 const confirmedAccessReader: z.ZodType<ConfirmedPublishAccess> = PublishAccess.pick({ pending: true }).extend({
@@ -205,7 +227,16 @@ export const validateSourceRepositoryContract = platformContract({
   method: 'POST',
   routeTemplate: `${P}/application-source-repositories/validate`,
   successStatuses: [200],
-  reader: ApplicationSourceRepositoryValidation satisfies z.ZodType<SourceRepositoryValidation>,
+  reader: ApplicationSourceRepositoryValidation.pick({ valid: true, message: true, imagePath: true }) satisfies z.ZodType<SourceRepositoryValidation>,
+})
+
+/** 200 for resolved and blocked alike; a failed read is an error, never "not configured" (platform-api internal/handler/repository_destination.go:74-90). */
+export const getRepositoryDestinationContract = platformContract({
+  operationId: 'platformApiGetProjectRepositoryDestination',
+  method: 'GET',
+  routeTemplate: `${P}/repository-destination`,
+  successStatuses: [200],
+  reader: repositoryDestinationReader,
 })
 
 /** 202 with the mutation envelope (platform-api internal/handler/application_source_repository.go:1154). */

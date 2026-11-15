@@ -3,15 +3,26 @@
 // Console send it, so each step's success is read by its production reader.
 import { describe, expect, test } from 'bun:test'
 import { createCreateApi, type CreateApi } from '../../api/create'
-import { appOf, definitionOf, registryOf, sourceConnectionOf, templateOf } from '../../api/testing/catalog-domain'
+import { decodeResponse } from '../../api/boundary'
+import { getRepositoryDestinationContract } from '../../api/contracts/platform/catalog'
+import { appOf, definitionOf, resolvedDestinationOf, sourceConnectionOf, templateOf } from '../../api/testing/catalog-domain'
 import { createTestGateway } from '../../api/testing/gateway'
 import { copy } from '../../copy'
 import { MOCK_PROJECT_ID, platformRoutes } from '../../dev/mock-platform'
 import { resolveCreateCatalog } from '../../model/create'
 import { text } from './copy'
 import {
+  abandonUnsettled,
+  acceptCandidate,
+  CREATED_BEFORE_HINT_MS,
+  createdBeforeSent,
   confirmCreate,
   CreateFailed,
+  keptElsewhere,
+  keptSource,
+  reconsiderCandidate,
+  rejectCandidate,
+  rejectedCandidate,
   submitCreate,
   type CreateDeps,
   type CreateProgress,
@@ -43,10 +54,9 @@ const definition = definitionOf({
     { id: 'database', definitionRef: { name: 'postgresql' } },
   ],
 })
-const connections = {
-  source: sourceConnectionOf({ id: 'gh', displayName: 'gh', account: { login: 'acme', type: 'Organization' }, capabilities: ['createRepositories'], status: 'ready', source: 'github-source-connection-cr' }),
-  registry: registryOf({ id: 'ghcr', displayName: 'ghcr', registryHost: 'ghcr.io', registryType: 'ghcr', status: 'ready', source: 'registry-connection-cr' }),
-}
+/** The destination the wizard showed (GHCR under `acme`), and the connection a picked repository is adopted with. */
+const destination = resolvedDestinationOf()
+const adoption = sourceConnectionOf({ id: 'gh', displayName: 'gh', account: { login: 'acme', type: 'Organization' }, capabilities: ['createRepositories'], status: 'ready', source: 'github-source-connection-cr' })
 
 const person = { id: 'p1', subject: 's', pending: false, email: 'a@example.test', displayName: '山田', avatarVersion: null }
 /** The console app as the Console server answers it. */
@@ -69,17 +79,23 @@ const request: CreateRequest = {
   share: { scope: 'group', groupIds: ['g1'], extraPersonIds: [] },
 }
 const templateOrigin = { appName: 'mitsumori', kind: 'template' as const, templateId: 'nextjs-postgres' }
+/** Where the ひな形 repository is made at the destination shown (GHCR under `acme`), as progress keeps it. */
+const templateBinding = { repository: 'acme/mitsumori', image: 'ghcr.io/acme/mitsumori', revision: 'rd-ghcr-1', connectionId: 'github-source-207cb7ce' }
+const madeSource = { sourceRepositoryId: 'mitsumori-src', sourceRepositoryOrigin: templateOrigin, sourceRepositoryBinding: templateBinding, sourceRepositoryProvenance: 'created' as const }
+/** The same repository, chosen by the user from a readback (never deleted by the console). */
+const foundSource = { ...madeSource, sourceRepositoryProvenance: 'found' as const }
 
 const json = (body: unknown, status = 200) => Response.json(body, { status })
 const operation = (kind: string, id: string) => ({ id: `op-${id}`, type: `${kind}.create`, state: 'accepted', writeChannel: 'A', resource: { kind, id, projectId: 'pj' }, createdAt: '2026-10-06T00:00:00Z', links: { self: `/api/v1/operations/op-${id}` } })
 /** A Platform mutation answer: the read model, the receipt and the written `resource`. */
 const mutation = (kind: string, resource: { id: string }, status = 202) => json({ ...resource, operation: operation(kind, resource.id), resource }, status)
 const platformError = (status: number, code: string, message: string, details?: Record<string, unknown>) => json({ error: { code, message, ...(details ? { details } : {}) } }, status)
-const wireRepository = (body: { destination?: { repositoryName: string }; existing?: { repository: string }; sourceConnectionId?: string }, id: string) => ({
+const wireRepository = (body: { destination?: { repositoryName: string }; existing?: { repository: string }; sourceConnectionId?: string }, id: string, createdAt?: string) => ({
   id, projectId: 'pj', ...(body.sourceConnectionId ? { sourceConnectionId: body.sourceConnectionId } : {}),
   ...(body.destination ? { destination: { repositoryName: body.destination.repositoryName, visibility: 'private' } } : {}),
   ...(body.existing ? { existing: { repository: body.existing.repository } } : {}),
   image: { imagePath: `ghcr.io/acme/${body.destination?.repositoryName ?? body.existing?.repository.split('/')[1]?.toLowerCase() ?? 'x'}`, tagFilter: 'edge-', versioningScheme: 'Alphabetical' }, status: 'pending', conditions: [],
+  ...(createdAt ? { createdAt } : {}),
 })
 const wireStack = (id: string, applicationName: string, sourceRepositoryRefName?: string) => ({
   id, projectId: 'pj', templateId: 'nextjs-postgres', applicationName, sourceKind: sourceRepositoryRefName ? 'application-source-repository' : 'sample-image',
@@ -144,7 +160,8 @@ function deps(answers: Partial<Record<Op, Answer>> = {}, state: { apps?: unknown
     api,
     catalog: resolveCreateCatalog([template], [definition], 'github-template')!,
     domain: 'pj.appthrust.test',
-    connections,
+    destination,
+    adoption,
     onPhase: () => {},
   }
   return { value, api, calls, bodies, keys }
@@ -157,7 +174,8 @@ describe('submitCreate', () => {
     const { value, calls } = deps()
     const app = await submitCreate(request, {}, value)
     expect(app.stackId).toBe('mitsumori')
-    expect(calls).toEqual(['createApp', 'validateSource', 'createSource', 'validateStack', 'createStack', 'bindApp:mitsumori:mitsumori'])
+    // A ひな形 attempt first reads Platform's list: a same-named repository where it would go means the name is taken.
+    expect(calls).toEqual(['createApp', 'sources', 'validateSource', 'createSource', 'validateStack', 'createStack', 'bindApp:mitsumori:mitsumori'])
   })
 
   test('the template path reports its loading phase synchronously before waiting for the draft', async () => {
@@ -189,7 +207,7 @@ describe('submitCreate', () => {
   test('a stale catalog reaches the mock allowlist rejection and returns to the template step', async () => {
     const viaMock: Answer = (_body, request) => platformRoutes(request, new URL(request.url)).then((response) => response!)
     const { value } = deps({ validateSource: viaMock, createSource: viaMock })
-    value.connections = { ...connections, source: sourceConnectionOf({ id: 'github-source-207cb7ce', displayName: 'gh', account: { login: 'acme', type: 'Organization' }, capabilities: ['createRepositories'], status: 'ready', source: 'github-source-connection-cr' }) }
+    // The mock resolves the same GHCR destination the fixture shows, so only the template allowlist refuses.
     value.catalog = {
       ...value.catalog,
       template: templateOf({
@@ -220,10 +238,26 @@ describe('submitCreate', () => {
   test('changing a business template after a failed attempt uses the newly chosen source', async () => {
     const { value, calls, bodies } = deps()
     value.catalog = { ...value.catalog, template: templateOf({ ...wireTemplate, id: 'biz-master-postgres', category: 'business', githubTemplate: { repository: 'appthrust/template-biz-master', repositoryUrl: 'https://github.com/appthrust/template-biz-master', branch: 'main' } }) }
-    await submitCreate(request, { draft, sourceRepositoryId: 'old-src', sourceRepositoryOrigin: { appName: 'mitsumori', kind: 'template', templateId: 'biz-inventory-postgres' } }, value)
+    await submitCreate(request, { draft, sourceRepositoryId: 'old-src', sourceRepositoryOrigin: { appName: 'mitsumori', kind: 'template', templateId: 'biz-inventory-postgres' }, sourceRepositoryProvenance: 'created' }, value)
     expect(calls).toContain('deleteSource:old-src')
     expect(calls).toContain('createSource')
     expect(bodies.createSource?.[0]).toMatchObject({ template: { repository: 'appthrust/template-biz-master' } })
+  })
+
+  test.each([
+    ['found by a readback and chosen by the user', 'found'],
+    ['kept without how it was learned (older progress)', undefined],
+  ] as const)('a kept repository %s is never deleted on a template or name change; it is left where it is', async (_label, provenance) => {
+    const kept: CreateProgress = { draft, sourceRepositoryId: 'other-src', sourceRepositoryOrigin: { appName: 'mitsumori', kind: 'template', templateId: 'biz-inventory-postgres' }, sourceRepositoryBinding: templateBinding, ...(provenance ? { sourceRepositoryProvenance: provenance } : {}) }
+    // The confirm step says it stays (keptElsewhere); a `created` one is not reported so, as it is removed.
+    expect(keptElsewhere(kept, templateOrigin)).toEqual({ binding: templateBinding })
+    expect(keptElsewhere({ ...kept, sourceRepositoryProvenance: 'created' }, templateOrigin)).toBeUndefined()
+    for (const next of [request, { ...request, urlName: 'mitsumori-2' }]) {
+      const { value, calls, bodies } = deps()
+      await submitCreate(next, kept, value)
+      expect(calls.some((call) => call.startsWith('deleteSource'))).toBe(false)
+      expect(bodies.createStack?.[0]?.source).toEqual({ kind: 'application-source-repository', sourceRepositoryId: `${next.urlName}-src` })
+    }
   })
 
   test('イメージ: no source repository calls', async () => {
@@ -238,7 +272,7 @@ describe('submitCreate', () => {
     expect(failure).toBeInstanceOf(CreateFailed)
     expect(failure.forbidden).toBe(true)
     expect(failure.progress).toEqual({})
-    expect(calls).toEqual(['createApp', 'validateSource', 'removeApp'])
+    expect(calls).toEqual(['createApp', 'sources', 'validateSource', 'removeApp'])
   })
 
   test('other failures keep the draft and what was created; the retry resumes', async () => {
@@ -246,7 +280,7 @@ describe('submitCreate', () => {
     const failure = await fail(submitCreate(request, {}, first.value))
     expect(failure.forbidden).toBe(false)
     expect(failure.data).toEqual({ message: 'name taken' })
-    expect(failure.progress).toEqual({ draft, sourceRepositoryId: 'mitsumori-src', sourceRepositoryOrigin: templateOrigin })
+    expect(failure.progress).toEqual({ draft, ...madeSource })
     expect(first.calls).not.toContain('removeApp')
 
     const retry = deps()
@@ -259,7 +293,7 @@ describe('submitCreate', () => {
     const first = deps({ createStack: () => platformError(409, 'conflict', message, { reason: 'delivery_pending', retryAfterSeconds: 5 }) })
     const failure = await fail(submitCreate(request, {}, first.value))
     expect([failure.retryable, failure.nameTaken, failure.data]).toEqual([true, false, { message }])
-    expect(failure.progress).toEqual({ draft, sourceRepositoryId: 'mitsumori-src', sourceRepositoryOrigin: templateOrigin })
+    expect(failure.progress).toEqual({ draft, ...madeSource })
 
     const retry = deps()
     await submitCreate(request, failure.progress, retry.value)
@@ -339,14 +373,16 @@ describe('submitCreate', () => {
 
     const retry = deps()
     await submitCreate({ ...request, urlName: 'test2' }, failure.progress, retry.value)
-    expect(retry.calls).toEqual(['updateApp', 'deleteSource:test-src', 'validateSource', 'createSource', 'validateStack', 'createStack', 'bindApp:mitsumori:test2'])
-    expect(retry.bodies.createSource?.[0]).toMatchObject({ destination: { repositoryName: 'test2' }, image: { imagePath: 'ghcr.io/acme/test2' } })
+    expect(retry.calls).toEqual(['updateApp', 'deleteSource:test-src', 'sources', 'validateSource', 'createSource', 'validateStack', 'createStack', 'bindApp:mitsumori:test2'])
+    expect(retry.bodies.createSource?.[0]).toMatchObject({ destination: { repositoryName: 'test2' }, destinationRevision: 'rd-ghcr-1' })
+    expect(retry.bodies.createSource?.[0]).not.toHaveProperty('image')
     expect(retry.bodies.createStack?.[0]?.source).toEqual({ kind: 'application-source-repository', sourceRepositoryId: 'test2-src' })
   })
 
   test('a failed delete of the orphaned repository does not block the renamed attempt', async () => {
     const { value, calls } = deps({ deleteSource: () => platformError(409, 'conflict', 'referenced', { reason: 'referenced_by_stack' }) })
-    const app = await submitCreate({ ...request, urlName: 'test2' }, { draft, sourceRepositoryId: 'test-src', sourceRepositoryOrigin: { appName: 'test', kind: 'template' } }, value)
+    const app = await submitCreate({ ...request, urlName: 'test2' }, { draft, sourceRepositoryId: 'test-src', sourceRepositoryOrigin: { appName: 'test', kind: 'template' }, sourceRepositoryProvenance: 'created' }, value)
+    expect(calls).toContain('deleteSource:test-src')
     expect(app.stackId).toBe('mitsumori')
     expect(calls).toContain('createSource')
     expect(calls.at(-1)).toBe('bindApp:mitsumori:test2')
@@ -372,9 +408,9 @@ describe('submitCreate', () => {
     await submitCreate({ ...request, urlName: 'claude-mitsumori', path: { kind: 'existing', repository } }, {}, value)
     expect(calls).toEqual(['createApp', 'validateSource', 'createSource', 'validateStack', 'createStack', 'bindApp:mitsumori:claude-mitsumori'])
     const body = bodies.validateSource?.[0]
-    expect(body).toMatchObject({ existing: { repository: 'acme/claude-mitsumori', ref: 'main' }, image: { imagePath: 'ghcr.io/acme/claude-mitsumori' } })
-    expect(body?.template).toBeUndefined()
-    expect(body?.destination).toBeUndefined()
+    // Adoption keeps its connection; Platform derives the image path and its registry access.
+    expect(body).toMatchObject({ sourceConnectionId: 'gh', existing: { repository: 'acme/claude-mitsumori', ref: 'main' } })
+    for (const field of ['image', 'registryConnectionRef', 'registryProviderConnectionRef', 'destinationRevision', 'template', 'destination']) expect(body).not.toHaveProperty(field)
   })
 
   test('same URL name with a different existing repository deletes the orphan and adopts the new repository', async () => {
@@ -413,9 +449,22 @@ describe('submitCreate', () => {
     const failure = await fail(submitCreate({ ...request, path: { kind: 'existing', repository: { fullName: 'acme/picked-app', defaultBranch: 'main' } } }, {}, deps({ createStack: () => platformError(409, 'conflict', 'name taken') }).value))
     const retry = deps()
     await submitCreate(request, failure.progress, retry.value)
-    expect(retry.calls).toEqual(['deleteSource:mitsumori-src', 'validateSource', 'createSource', 'validateStack', 'createStack', 'bindApp:mitsumori:mitsumori'])
+    expect(retry.calls).toEqual(['deleteSource:mitsumori-src', 'sources', 'validateSource', 'createSource', 'validateStack', 'createStack', 'bindApp:mitsumori:mitsumori'])
     expect(retry.bodies.createSource?.[0]).toMatchObject({ destination: { repositoryName: 'mitsumori' } })
     expect(retry.bodies.createSource?.[0]?.existing).toBeUndefined()
+  })
+
+  test('before the first send, a repository Platform already lists with this name where it would go is a taken name: nothing is validated or created', async () => {
+    const existing = wireRepository({ destination: { repositoryName: 'mitsumori' }, sourceConnectionId: 'github-source-207cb7ce' }, 'someone-src', '2026-10-01T00:00:00Z')
+    const { value, calls } = deps({}, { repositories: [existing] })
+    const failure = await fail(submitCreate(request, {}, value))
+    expect(failure.nameTaken).toBe(true)
+    expect(calls).toEqual(['createApp', 'sources'])
+    expect(failure.progress).toEqual({ draft })
+    // The same name elsewhere (another image path) is not this destination's.
+    const elsewhere = deps({}, { repositories: [{ ...existing, image: { imagePath: 'registry.appthrust.test/commerce/mitsumori' } }] })
+    await submitCreate(request, {}, elsewhere.value)
+    expect(elsewhere.calls).toContain('createSource')
   })
 })
 
@@ -452,7 +501,7 @@ describe('an unreadable 2xx answer to a create step (X5: no resend, readback onl
 
     const retry = deps()
     await submitCreate(request, confirmed.progress, retry.value)
-    expect(retry.calls).toEqual(['validateSource', 'createSource', 'validateStack', 'createStack', 'bindApp:mitsumori:mitsumori'])
+    expect(retry.calls).toEqual(['sources', 'validateSource', 'createSource', 'validateStack', 'createStack', 'bindApp:mitsumori:mitsumori'])
   })
 
   test('console app: when the readback finds nothing, the next attempt creates it once', async () => {
@@ -465,48 +514,59 @@ describe('an unreadable 2xx answer to a create step (X5: no resend, readback onl
     expect(retry.calls.filter((call) => call === 'createApp')).toHaveLength(1)
   })
 
-  test('source repository: the readback adopts the repository the create made, so the retry does not create it again', async () => {
+  test('source repository: the readback offers the same-named repository where it was sent; once the user says it is theirs the retry does not create it again', async () => {
     const first = deps({ createSource: malformed })
     const failure = await fail(submitCreate(request, {}, first.value))
     expectSafe(failure)
     expect(failure.progress).toMatchObject({ draft, unconfirmed: 'source', attempts: { source: { key: first.keys.createSource?.[0] } } })
     expect(failure.progress.sourceRepositoryId).toBeUndefined()
-    expect(first.calls).toEqual(['createApp', 'validateSource', 'createSource'])
+    expect(first.calls).toEqual(['createApp', 'sources', 'validateSource', 'createSource'])
 
     const readback = deps({}, { repositories: [wireRepository({ destination: { repositoryName: 'other' } }, 'other-src'), wireRepository({ destination: { repositoryName: 'mitsumori' } }, 'mitsumori-src')] })
-    const confirmed = await confirmCreate(request, failure.progress, { ...readback.value, connections })
+    const confirmed = await confirmCreate(request, failure.progress, readback.value)
     expect(readback.calls).toEqual(['app', 'sources'])
-    expect(confirmed.progress).toEqual({ draft, sourceRepositoryId: 'mitsumori-src', sourceRepositoryOrigin: templateOrigin })
+    // A candidate, not adopted: the attempt and its key stay, and nothing is sent until the user chooses.
+    expect(confirmed.progress).toMatchObject({ candidate: { step: 'source', id: 'mitsumori-src', binding: templateBinding }, attempts: { source: { key: first.keys.createSource?.[0] } } })
+    expect(confirmed.progress.sourceRepositoryId).toBeUndefined()
+    const waiting = deps()
+    await fail(submitCreate(request, confirmed.progress, waiting.value))
+    expect(waiting.calls).toEqual([])
 
+    const chosen = acceptCandidate(confirmed.progress)
+    expect(chosen).toEqual({ draft, ...foundSource })
     const retry = deps()
-    await submitCreate(request, confirmed.progress, retry.value)
+    await submitCreate(request, chosen, retry.value)
     expect(retry.calls).toEqual(['validateStack', 'createStack', 'bindApp:mitsumori:mitsumori'])
   })
 
-  test('作ったコードから: the adopted repository is found by the picked repository', async () => {
+  test('作ったコードから: the adopted repository is offered by the picked repository', async () => {
     const existing: CreateRequest = { ...request, path: { kind: 'existing', repository: { fullName: 'Acme/Picked-App', defaultBranch: 'main' } } }
     const failure = await fail(submitCreate(existing, {}, deps({ createSource: malformed }).value))
     const readback = deps({}, { repositories: [wireRepository({ existing: { repository: 'acme/picked-app' } }, 'picked-app-src')] })
     const confirmed = await confirmCreate(existing, failure.progress, readback.value)
-    expect(confirmed.progress).toMatchObject({ sourceRepositoryId: 'picked-app-src', sourceRepositoryOrigin: { kind: 'existing', repository: 'Acme/Picked-App' } })
+    expect(confirmed.progress.candidate).toMatchObject({ step: 'source', id: 'picked-app-src' })
+    expect(acceptCandidate(confirmed.progress)).toMatchObject({ sourceRepositoryId: 'picked-app-src', sourceRepositoryOrigin: { kind: 'existing', repository: 'Acme/Picked-App' }, sourceRepositoryProvenance: 'found' })
   })
 
-  test('stack: the readback adopts only the stack made from this attempt\'s source; the retry only binds', async () => {
+  test('stack: the readback offers only the stack made from this attempt\'s source; once chosen, the retry only binds', async () => {
     const first = deps({ createStack: malformed })
     const failure = await fail(submitCreate(request, {}, first.value))
     expectSafe(failure)
     expect(failure.progress).toMatchObject({ draft, sourceRepositoryId: 'mitsumori-src', sourceRepositoryOrigin: templateOrigin, unconfirmed: 'platform', attempts: { stack: { key: first.keys.createStack?.[0] } } })
 
     const foreign = deps({}, { stacks: [wireStack('mitsumori-other', 'mitsumori', 'someone-else-src')] })
-    expect((await confirmCreate(request, failure.progress, foreign.value)).progress.stackId).toBeUndefined()
+    const none = (await confirmCreate(request, failure.progress, foreign.value)).progress
+    expect([none.stackId, none.candidate]).toEqual([undefined, undefined])
 
     const readback = deps({}, { stacks: [wireStack('mitsumori', 'mitsumori', 'mitsumori-src')] })
     const confirmed = await confirmCreate(request, failure.progress, readback.value)
     expect(readback.calls).toEqual(['app', 'stacks'])
-    expect(confirmed.progress).toEqual({ draft, sourceRepositoryId: 'mitsumori-src', sourceRepositoryOrigin: templateOrigin, stackId: 'mitsumori', stackAppName: 'mitsumori' })
+    expect(confirmed.progress.candidate).toEqual({ step: 'stack', id: 'mitsumori', appName: 'mitsumori' })
+    expect(confirmed.progress.stackId).toBeUndefined()
+    expect(acceptCandidate(confirmed.progress)).toEqual({ draft, ...madeSource, stackId: 'mitsumori', stackAppName: 'mitsumori', stackProvenance: 'found' })
 
     const retry = deps()
-    const app = await submitCreate(request, confirmed.progress, retry.value)
+    const app = await submitCreate(request, acceptCandidate(confirmed.progress), retry.value)
     expect(retry.calls).toEqual(['bindApp:mitsumori:mitsumori'])
     expect(app.stackId).toBe('mitsumori')
   })
@@ -530,7 +590,7 @@ describe('an unreadable 2xx answer to a create step (X5: no resend, readback onl
     expectSafe(failure)
     expect(failure.progress.unconfirmed).toBe('checking')
     const confirmed = await confirmCreate(request, failure.progress, deps().value)
-    expect(confirmed.progress).toEqual({ draft, sourceRepositoryId: 'mitsumori-src', sourceRepositoryOrigin: templateOrigin })
+    expect(confirmed.progress).toEqual({ draft, ...madeSource })
     const retry = deps()
     await submitCreate(request, confirmed.progress, retry.value)
     expect(retry.calls).toEqual(['validateStack', 'createStack', 'bindApp:mitsumori:mitsumori'])
@@ -569,7 +629,8 @@ describe('an unreadable 2xx answer to a create step (X5: no resend, readback onl
     const retry = deps()
     await submitCreate(request, confirmed.progress, retry.value)
     expect(retry.keys.createStack).toEqual([firstKey!])
-    expect(retry.calls).toEqual(['validateStack', 'createStack', 'bindApp:mitsumori:mitsumori'])
+    // The unsettled create is resent first, exactly as it was sent; no validation precedes it.
+    expect(retry.calls).toEqual(['createStack', 'bindApp:mitsumori:mitsumori'])
   })
 
   test('a call nothing answered keeps its key; an answer that refused the write ends the attempt', async () => {
@@ -580,14 +641,492 @@ describe('an unreadable 2xx answer to a create step (X5: no resend, readback onl
     expect(refused.progress.attempts).toBeUndefined()
   })
 
-  test('another owner\'s repository of the same name is never adopted', async () => {
+  test('another owner\'s repository of the same name is never offered', async () => {
     const failure = await fail(submitCreate(request, {}, deps({ createSource: malformed }).value))
     const otherOwner = { ...wireRepository({ destination: { repositoryName: 'mitsumori' } }, 'other-src'), image: { imagePath: 'ghcr.io/someone-else/mitsumori' } }
-    const otherConnection = wireRepository({ destination: { repositoryName: 'mitsumori' }, sourceConnectionId: 'gh-other' }, 'other-connection-src')
+    const otherConnection = wireRepository({ destination: { repositoryName: 'mitsumori' }, sourceConnectionId: 'github-other' }, 'other-connection-src')
     const readback = deps({}, { repositories: [otherOwner, otherConnection] })
     const confirmed = await confirmCreate(request, failure.progress, readback.value)
-    expect(confirmed.progress.sourceRepositoryId).toBeUndefined()
-    const mine = deps({}, { repositories: [wireRepository({ destination: { repositoryName: 'mitsumori' }, sourceConnectionId: 'gh' }, 'mitsumori-src')] })
-    expect((await confirmCreate(request, failure.progress, mine.value)).progress.sourceRepositoryId).toBe('mitsumori-src')
+    expect([confirmed.progress.sourceRepositoryId, confirmed.progress.candidate]).toEqual([undefined, undefined])
+    const same = deps({}, { repositories: [wireRepository({ destination: { repositoryName: 'mitsumori' }, sourceConnectionId: 'github-source-207cb7ce' }, 'mitsumori-src')] })
+    expect((await confirmCreate(request, failure.progress, same.value)).progress.candidate?.id).toBe('mitsumori-src')
+  })
+})
+
+describe('the repository destination at submit', () => {
+  const mockCall = async (method: string, path: string, body?: unknown) => {
+    const url = new URL(path, 'http://mock.test')
+    const response = await platformRoutes(new Request(url, { method, ...(body ? { body: JSON.stringify(body), headers: { 'content-type': 'application/json' } } : {}) }), url)
+    return response!.json()
+  }
+  /** The destination the mock Platform resolves now, read through the production contract. */
+  const mockDestination = async (state: string) => {
+    await mockCall('POST', '/api/v1/__mock/repository-destination', { state })
+    const decoded = decodeResponse(getRepositoryDestinationContract, await mockCall('GET', `/api/v1/projects/${MOCK_PROJECT_ID}/repository-destination`))
+    if (!decoded.ok || decoded.value.kind !== 'resolved') throw new Error('the mock destination did not read as resolved')
+    return decoded.value
+  }
+  const viaMock: Answer = (_body, request) => platformRoutes(request, new URL(request.url)).then((response) => response!)
+
+  test.each([
+    ['ghcr', 'ghcr.io/acme'],
+    ['builtin', 'registry.appthrust.test/commerce'],
+  ] as const)('a resolved %s destination makes a valid create through Platform’s checks (mock)', async (state, namespace) => {
+    const shown = await mockDestination(state)
+    expect(shown.registryNamespace).toBe(namespace)
+    const { value, bodies } = deps({ validateSource: viaMock, createSource: viaMock })
+    value.destination = shown
+    const urlName = `dest-${state}`
+    const app = await submitCreate({ ...request, projectId: MOCK_PROJECT_ID, urlName }, {}, value)
+    expect(app.stackId).toBe('mitsumori')
+    expect(bodies.createSource?.[0]).toMatchObject({ destinationRevision: shown.revision, destination: { repositoryName: urlName } })
+    const made = (await mockCall('GET', `/api/v1/projects/${MOCK_PROJECT_ID}/application-source-repositories/${urlName}-src`)) as { image: { imagePath: string }; sourceConnectionId: string }
+    expect(made.image.imagePath).toBe(`${namespace}/${urlName}`)
+    expect(made.sourceConnectionId).toBe('github-source-207cb7ce')
+    await mockCall('POST', '/api/v1/__mock/reset')
+  })
+
+  test('a destination that moved after it was shown: 409 DestinationChanged, nothing created or resent, never a taken name', async () => {
+    const changed = () => platformError(409, 'conflict', `The repository destination changed. ${SECRET}`, { reason: 'DestinationChanged' })
+    const { value, calls } = deps({ validateSource: changed })
+    const failure = await fail(submitCreate(request, {}, value))
+    expect(failure.destination).toBe('changed')
+    expect(failure.nameTaken).toBe(false)
+    expect(failure.forbidden).toBe(false)
+    expect(failure.data).toBeUndefined()
+    expect(calls).toEqual(['createApp', 'sources', 'validateSource'])
+    expect(failure.progress).toEqual({ draft })
+  })
+
+  test('the moved destination answered at the create itself ends the attempt without a resend', async () => {
+    const { value, calls } = deps({ createSource: () => platformError(409, 'conflict', 'changed', { reason: 'DestinationChanged' }) })
+    const failure = await fail(submitCreate(request, {}, value))
+    expect(failure.destination).toBe('changed')
+    expect(calls).toEqual(['createApp', 'sources', 'validateSource', 'createSource'])
+    // The refused write did not happen: its key is not kept for a replay.
+    expect(failure.progress.attempts).toBeUndefined()
+  })
+
+  test('DestinationMismatch is a typed failure, not a retry and not a taken name', async () => {
+    const { value } = deps({ validateSource: () => platformError(409, 'conflict', SECRET, { reason: 'DestinationMismatch' }) })
+    const failure = await fail(submitCreate(request, {}, value))
+    expect([failure.destination, failure.nameTaken, failure.retryable, failure.data]).toEqual(['mismatch', false, false, undefined])
+  })
+
+  test.each([
+    [412, 'failed_precondition', 'NotConfigured'],
+    [412, 'failed_precondition', 'Ambiguous'],
+    [412, 'failed_precondition', 'NotReady'],
+    [403, 'forbidden', 'NotVisible'],
+  ] as const)('a destination blocked at submit (%s %s %s) is no permission and keeps the draft', async (status, code, reason) => {
+    const { value, calls } = deps({ validateSource: () => platformError(status, code, SECRET, { reason }) })
+    const failure = await fail(submitCreate(request, {}, value))
+    expect([failure.destination, failure.forbidden, failure.data]).toEqual(['blocked', false, undefined])
+    expect(calls).not.toContain('removeApp')
+    expect(failure.progress.draft).toEqual(draft)
+  })
+
+  test('without a resolved destination the ひな形 path sends nothing to Platform', async () => {
+    const { value, calls } = deps()
+    value.destination = undefined
+    const failure = await fail(submitCreate(request, {}, value))
+    expect(failure.message).toBe(text.destinationUnavailable)
+    expect(calls).toEqual(['createApp'])
+  })
+})
+
+describe('a create whose outcome is unknown is settled before anything else (review finding 1)', () => {
+  /** An administrator moved the Project default to the built-in registry after the user confirmed GHCR (A → B). */
+  const movedDestination = resolvedDestinationOf({ revision: 'rd-builtin-2', registryNamespace: 'registry.appthrust.test/commerce' })
+  const lost = () => new Response('upstream connect error', { status: 502, headers: { 'Content-Type': 'text/plain' } })
+  const changed = () => platformError(409, 'conflict', 'The repository destination changed.', { reason: 'DestinationChanged' })
+
+  /** POST with key K for A gets no answer: the attempt keeps K, the exact request and where it goes. */
+  async function lostCreate() {
+    const first = deps({ createSource: lost })
+    const failure = await fail(submitCreate(request, {}, first.value))
+    expect(first.calls).toEqual(['createApp', 'sources', 'validateSource', 'createSource'])
+    const key = first.keys.createSource![0]!
+    const sent = first.bodies.createSource![0]!
+    expect(failure.progress.attempts?.source).toEqual({ key, origin: templateOrigin, request: sent as never, binding: templateBinding, sentAt: expect.any(String) })
+    return { progress: failure.progress, key, sent }
+  }
+
+  test('the resend of K is refused: K is held unsettled and nothing more is sent, not even for B (a refusal is no proof K failed)', async () => {
+    const { progress, key, sent } = await lostCreate()
+    // The wizard shows the earlier attempt's destination, not B, while K is unknown.
+    expect(keptSource(progress, templateOrigin)).toEqual({ state: 'pending', binding: templateBinding })
+
+    // Retry while B is the default: K's own request (A's revision) is resent first, with no validation; Platform refuses it.
+    const retry = deps({ validateSource: changed, createSource: changed })
+    retry.value.destination = movedDestination
+    const refused = await fail(submitCreate(request, progress, retry.value))
+    expect(retry.calls).toEqual(['createSource'])
+    expect(retry.keys.createSource).toEqual([key])
+    expect(retry.bodies.createSource).toEqual([sent])
+    expect(sent).toMatchObject({ destinationRevision: 'rd-ghcr-1' })
+    // Not read as "the destination moved, confirm B": K could still be (or have been) applied at A.
+    expect(refused.destination).toBeUndefined()
+    expect(refused.message).toBe(text.unsettled.title)
+    expect(refused.progress).toMatchObject({ unsettled: 'source', attempts: { source: { key, request: sent, binding: templateBinding } } })
+    expect(refused.progress.unsettledSearched).toBeUndefined()
+
+    // Every further 作る sends nothing at all, and giving K up is refused before a readback has looked for it.
+    const again = deps()
+    again.value.destination = movedDestination
+    await fail(submitCreate(request, refused.progress, again.value))
+    expect(again.calls).toEqual([])
+    expect(abandonUnsettled(refused.progress)).toBe(refused.progress)
+  })
+
+  test('held K, the readback finds a same-named repository where it was sent (A): offered, not adopted; once chosen, the app goes on at A', async () => {
+    const { progress, key } = await lostCreate()
+    const refused = await fail(submitCreate(request, progress, deps({ createSource: changed }).value))
+    const atA = wireRepository({ destination: { repositoryName: 'mitsumori' }, sourceConnectionId: 'github-source-207cb7ce' }, 'mitsumori-src')
+    const readback = deps({}, { repositories: [atA] })
+    const confirmed = await confirmCreate(request, refused.progress, { api: readback.api, catalog: readback.value.catalog })
+    expect(readback.calls).toEqual(['app', 'sources'])
+    expect(confirmed.progress).toMatchObject({ candidate: { step: 'source', id: 'mitsumori-src' }, attempts: { source: { key } } })
+
+    const next = deps()
+    next.value.destination = movedDestination
+    await submitCreate(request, acceptCandidate(confirmed.progress), next.value)
+    expect(next.calls).toEqual(['validateStack', 'createStack', 'bindApp:mitsumori:mitsumori'])
+    expect(next.bodies.createStack![0]).toMatchObject({ source: { kind: 'application-source-repository', sourceRepositoryId: 'mitsumori-src' } })
+  })
+
+  test('held K, the readback does not find it at A: still nothing is sent; only the user\'s explicit give-up drops K, and the next 作る is a new attempt at B', async () => {
+    const { progress, key } = await lostCreate()
+    const refused = await fail(submitCreate(request, progress, deps({ createSource: changed }).value))
+    // A same-named repository at B is not K's.
+    const atB = { ...wireRepository({ destination: { repositoryName: 'mitsumori' } }, 'other-src'), image: { imagePath: 'registry.appthrust.test/commerce/mitsumori' } }
+    const readback = deps({}, { repositories: [atB] })
+    const searched = await confirmCreate(request, refused.progress, { api: readback.api, catalog: readback.value.catalog })
+    expect(searched.progress).toMatchObject({ unsettled: 'source', unsettledSearched: true, attempts: { source: { key } } })
+    expect(searched.progress.sourceRepositoryId).toBeUndefined()
+
+    const held = deps()
+    held.value.destination = movedDestination
+    await fail(submitCreate(request, searched.progress, held.value))
+    expect(held.calls).toEqual([])
+
+    const givenUp = abandonUnsettled(searched.progress)
+    expect([givenUp.unsettled, givenUp.unsettledSearched, givenUp.attempts]).toEqual([undefined, undefined, undefined])
+    const fresh = deps()
+    fresh.value.destination = movedDestination
+    await submitCreate(request, givenUp, fresh.value)
+    expect(fresh.calls).toEqual(['sources', 'validateSource', 'createSource', 'validateStack', 'createStack', 'bindApp:mitsumori:mitsumori'])
+    expect(fresh.keys.createSource![0]).not.toBe(key)
+    expect(fresh.bodies.createSource![0]).toMatchObject({ destinationRevision: 'rd-builtin-2' })
+  })
+
+  test('a refused first send still ends its own attempt: no earlier send exists under its fresh key', async () => {
+    const { value, calls } = deps({ createSource: changed })
+    const failure = await fail(submitCreate(request, {}, value))
+    expect(calls).toEqual(['createApp', 'sources', 'validateSource', 'createSource'])
+    expect([failure.destination, failure.progress.attempts, failure.progress.unsettled]).toEqual(['changed', undefined, undefined])
+  })
+
+  test('K was accepted at A: the resend replays A\'s repository, which the app goes on with; nothing is created at B', async () => {
+    const { progress, key, sent } = await lostCreate()
+    // Platform replays the accepted write for K (handler/application_source_repository.go:1101-1114) even though the default moved.
+    const replay = deps({ validateSource: changed, createSource: () => mutation('ApplicationSourceRepository', wireRepository({ destination: { repositoryName: 'mitsumori' } }, 'mitsumori-src')) })
+    replay.value.destination = movedDestination
+    const app = await submitCreate(request, progress, replay.value)
+    expect(replay.calls).toEqual(['createSource', 'validateStack', 'createStack', 'bindApp:mitsumori:mitsumori'])
+    expect(replay.keys.createSource).toEqual([key])
+    expect(replay.bodies.createSource).toEqual([sent])
+    expect(replay.bodies.createStack![0]).toMatchObject({ source: { kind: 'application-source-repository', sourceRepositoryId: 'mitsumori-src' } })
+    expect(app.stackId).toBe('mitsumori')
+  })
+
+  test('another unknown answer to the resend (a 5xx, no answer) keeps K and its request; nothing else is sent', async () => {
+    const { progress, key } = await lostCreate()
+    for (const answer of [lost, () => platformError(500, 'internal', 'idempotency store unavailable'), () => platformError(503, 'unavailable', 'repository destination could not be read')]) {
+      const retry = deps({ createSource: answer })
+      retry.value.destination = movedDestination
+      const failure = await fail(submitCreate(request, progress, retry.value))
+      expect(retry.calls).toEqual(['createSource'])
+      expect(retry.keys.createSource).toEqual([key])
+      expect(failure.progress.attempts?.source?.key).toBe(key)
+    }
+  })
+
+  test('a changed URL name does not drop K: K\'s own request is resent first, and its refusal holds everything', async () => {
+    const { progress, key } = await lostCreate()
+    const renamed: CreateRequest = { ...request, urlName: 'mitsumori-2' }
+    const retry = deps({ createSource: changed })
+    retry.value.destination = movedDestination
+    const refused = await fail(submitCreate(renamed, progress, retry.value))
+    // Nothing for the new name: K's own request (A's revision, the old name) is resent first.
+    expect(retry.calls).toEqual(['createSource'])
+    expect(retry.keys.createSource).toEqual([key])
+    expect(retry.bodies.createSource?.[0]).toMatchObject({ destination: { repositoryName: 'mitsumori' }, destinationRevision: 'rd-ghcr-1' })
+    expect(refused.progress.unsettled).toBe('source')
+    const next = deps()
+    await fail(submitCreate(renamed, refused.progress, next.value))
+    expect(next.calls).toEqual([])
+  })
+
+  test('progress saved before requests were kept: K is not rebuilt against today\'s destination; it is held unsent, and given up only after a readback', async () => {
+    const legacy: CreateProgress = { draft, attempts: { source: { key: 'legacy-key', origin: templateOrigin } } }
+    const first = deps()
+    const held = await fail(submitCreate(request, legacy, first.value))
+    expect(first.calls).toEqual([])
+    expect(held.progress).toMatchObject({ unsettled: 'source', attempts: { source: { key: 'legacy-key' } } })
+    // Without where it was sent, the readback cannot adopt anything; it records that it looked.
+    const readback = deps({}, { repositories: [wireRepository({ destination: { repositoryName: 'mitsumori' } }, 'mitsumori-src')] })
+    const searched = await confirmCreate(request, held.progress, { api: readback.api, catalog: readback.value.catalog })
+    expect(searched.progress).toMatchObject({ unsettled: 'source', unsettledSearched: true })
+    expect(searched.progress.sourceRepositoryId).toBeUndefined()
+    expect(abandonUnsettled(searched.progress).attempts).toBeUndefined()
+  })
+
+  test('a refused resend of an unknown stack create is held the same way: nothing more is sent', async () => {
+    const first = deps({ createStack: lost })
+    const lostStack = await fail(submitCreate(request, {}, first.value))
+    const key = first.keys.createStack![0]!
+    const retry = deps({ createStack: () => platformError(409, 'conflict', 'publish endpoint is already owned by another publish', { reason: 'publish_url_conflict' }) })
+    const refused = await fail(submitCreate(request, lostStack.progress, retry.value))
+    expect(retry.calls).toEqual(['createStack'])
+    expect(retry.keys.createStack).toEqual([key])
+    expect(refused.progress).toMatchObject({ unsettled: 'stack', attempts: { stack: { key } } })
+    expect(refused.nameTaken).toBe(false)
+    const again = deps()
+    await fail(submitCreate(request, refused.progress, again.value))
+    expect(again.calls).toEqual([])
+  })
+
+  test('the readback after an unreadable 2xx looks for the repository where the attempt sent it, not at the default now', async () => {
+    const failure = await fail(submitCreate(request, {}, deps({ createSource: () => json({ resource: { id: 42 } }, 202) }).value))
+    expect(failure.progress.unconfirmed).toBe('source')
+    const atA = wireRepository({ destination: { repositoryName: 'mitsumori' }, sourceConnectionId: 'github-source-207cb7ce' }, 'mitsumori-src')
+    const atB = { ...wireRepository({ destination: { repositoryName: 'mitsumori' } }, 'other-src'), image: { imagePath: 'registry.appthrust.test/commerce/mitsumori' } }
+    const readback = deps({}, { repositories: [atB, atA] })
+    // confirmCreate no longer reads the current destination at all: only the attempt's own binding decides.
+    const confirmed = await confirmCreate(request, failure.progress, { api: readback.api, catalog: readback.value.catalog })
+    expect(confirmed.progress.candidate).toMatchObject({ step: 'source', id: 'mitsumori-src', binding: templateBinding })
+    // Only the repository at B (where the attempt was not sent) is listed: nothing is offered, K stays to be resent.
+    const onlyB = deps({}, { repositories: [atB] })
+    const none = await confirmCreate(request, failure.progress, { api: onlyB.api, catalog: onlyB.value.catalog })
+    expect([none.progress.sourceRepositoryId, none.progress.candidate]).toEqual([undefined, undefined])
+    expect(none.progress.attempts?.source?.key).toBe(failure.progress.attempts!.source!.key)
+  })
+})
+
+describe('a readback hit is a candidate, never adopted or deleted silently (re-review P1)', () => {
+  const lost = () => new Response('upstream connect error', { status: 502, headers: { 'Content-Type': 'text/plain' } })
+  const changed = () => platformError(409, 'conflict', 'The repository destination changed.', { reason: 'DestinationChanged' })
+
+  /** K for A got no answer and its resend was refused: K is held, its first send's time kept. */
+  async function heldK() {
+    const first = deps({ createSource: lost })
+    const lostK = await fail(submitCreate(request, {}, first.value))
+    const refused = await fail(submitCreate(request, lostK.progress, deps({ createSource: changed }).value))
+    expect(refused.progress.unsettled).toBe('source')
+    const attempt = refused.progress.attempts!.source!
+    expect(Date.parse(attempt.sentAt!)).toBeGreaterThan(Date.now() - 60_000)
+    return { progress: refused.progress, key: attempt.key, sentAt: attempt.sentAt! }
+  }
+  /** Another attempt's repository with the same name at A (made by someone else, or an earlier abandoned attempt). */
+  const anotherAtA = (createdAt?: string) => wireRepository({ destination: { repositoryName: 'mitsumori' }, sourceConnectionId: 'github-source-207cb7ce' }, 'source-0f1e2d3c4b5a', createdAt)
+
+  test('another attempt\'s same-named repository at A is offered as a candidate: K is not settled and nothing is sent', async () => {
+    const { progress, key, sentAt } = await heldK()
+    const readback = deps({}, { repositories: [anotherAtA()] })
+    const { progress: offered } = await confirmCreate(request, progress, { api: readback.api, catalog: readback.value.catalog })
+    expect(readback.calls).toEqual(['app', 'sources'])
+    expect(offered.candidate).toEqual({ step: 'source', id: 'source-0f1e2d3c4b5a', binding: templateBinding, sentAt })
+    expect(offered.attempts?.source?.key).toBe(key)
+    expect([offered.sourceRepositoryId, offered.sourceRepositoryProvenance]).toEqual([undefined, undefined])
+    // While it is shown: no create, no resend, no other readback.
+    const blocked = deps()
+    expect((await fail(submitCreate(request, offered, blocked.value))).message).toBe(text.candidate.title)
+    expect(blocked.calls).toEqual([])
+    const again = deps({}, { repositories: [anotherAtA()] })
+    expect((await confirmCreate(request, offered, { api: again.api, catalog: again.value.catalog })).progress).toBe(offered)
+    expect(again.calls).toEqual([])
+  })
+
+  test('the user says it is theirs: the app goes on with that id, kept as found', async () => {
+    const { progress } = await heldK()
+    const readback = deps({}, { repositories: [anotherAtA(new Date().toISOString())] })
+    const chosen = acceptCandidate((await confirmCreate(request, progress, { api: readback.api, catalog: readback.value.catalog })).progress)
+    expect(chosen).toMatchObject({ sourceRepositoryId: 'source-0f1e2d3c4b5a', sourceRepositoryProvenance: 'found', sourceRepositoryOrigin: templateOrigin, sourceRepositoryBinding: templateBinding })
+    expect([chosen.candidate, chosen.attempts, chosen.unsettled]).toEqual([undefined, undefined, undefined])
+    const next = deps()
+    await submitCreate(request, chosen, next.value)
+    expect(next.calls).toEqual(['validateStack', 'createStack', 'bindApp:mitsumori:mitsumori'])
+    expect(next.bodies.createStack![0]).toMatchObject({ source: { kind: 'application-source-repository', sourceRepositoryId: 'source-0f1e2d3c4b5a' } })
+  })
+
+  test('the user says it is not theirs: K stays held, nothing is sent, a readback does not offer it again, and only the explicit give-up moves on', async () => {
+    const { progress, key } = await heldK()
+    const readback = deps({}, { repositories: [anotherAtA()] })
+    const rejected = rejectCandidate((await confirmCreate(request, progress, { api: readback.api, catalog: readback.value.catalog })).progress)
+    expect(rejected).toMatchObject({ unsettled: 'source', unsettledSearched: true, notMine: [{ key, candidate: { step: 'source', id: 'source-0f1e2d3c4b5a' } }], attempts: { source: { key } } })
+    expect(rejected.candidate).toBeUndefined()
+    const held = deps()
+    await fail(submitCreate(request, rejected, held.value))
+    expect(held.calls).toEqual([])
+    // Checking again does not offer it again: K is still not found where it was sent.
+    const recheck = deps({}, { repositories: [anotherAtA()] })
+    const searched = (await confirmCreate(request, rejected, { api: recheck.api, catalog: recheck.value.catalog })).progress
+    expect(searched).toMatchObject({ unsettled: 'source', unsettledSearched: true })
+    expect(searched.candidate).toBeUndefined()
+    // Giving up is the user's explicit choice; the next attempt then finds the name taken at A and sends no create.
+    const givenUp = abandonUnsettled(searched)
+    expect(givenUp.attempts).toBeUndefined()
+    const fresh = deps({}, { repositories: [anotherAtA()] })
+    const taken = await fail(submitCreate(request, givenUp, fresh.value))
+    expect(taken.nameTaken).toBe(true)
+    expect(fresh.calls).toEqual(['sources'])
+  })
+
+  test('a repository created long before K\'s first send (by this browser\'s clock) is still a candidate with both choices and a hint, and can be chosen', async () => {
+    const { progress, sentAt } = await heldK()
+    const anHourBefore = new Date(Date.parse(sentAt) - 3_600_000).toISOString()
+    const readback = deps({}, { repositories: [anotherAtA(anHourBefore)] })
+    const { progress: offered } = await confirmCreate(request, progress, { api: readback.api, catalog: readback.value.catalog })
+    expect(offered.candidate).toEqual({ step: 'source', id: 'source-0f1e2d3c4b5a', binding: templateBinding, createdAt: anHourBefore, sentAt })
+    expect(createdBeforeSent(offered.candidate!)).toBe(true)
+    expect(rejectCandidate(offered)).toMatchObject({ unsettled: 'source', unsettledSearched: true })
+    expect(acceptCandidate(offered)).toMatchObject({ sourceRepositoryId: 'source-0f1e2d3c4b5a', sourceRepositoryProvenance: 'found' })
+    // The hint is display only, past its 1-minute threshold; no hint for times within it or unknown.
+    const near = { step: 'source' as const, id: 'source-0f1e2d3c4b5a', binding: templateBinding, sentAt }
+    expect([createdBeforeSent({ ...near, createdAt: new Date(Date.parse(sentAt) - CREATED_BEFORE_HINT_MS + 1_000).toISOString() }), createdBeforeSent(near)]).toEqual([false, false])
+  })
+
+  test('the browser clock is 10 minutes ahead of the cluster and K really made the repository: it is chosen and creation goes on with its id', async () => {
+    const { progress, sentAt } = await heldK()
+    // K's own repository, stamped by a cluster clock 10 minutes behind this browser's.
+    const stamped = new Date(Date.parse(sentAt) - 10 * 60_000).toISOString()
+    const readback = deps({}, { repositories: [wireRepository({ destination: { repositoryName: 'mitsumori' }, sourceConnectionId: 'github-source-207cb7ce' }, 'mitsumori-src', stamped)] })
+    const { progress: offered } = await confirmCreate(request, progress, { api: readback.api, catalog: readback.value.catalog })
+    expect(offered.candidate).toMatchObject({ step: 'source', id: 'mitsumori-src', createdAt: stamped, sentAt })
+    expect(createdBeforeSent(offered.candidate!)).toBe(true)
+    const chosen = acceptCandidate(offered)
+    expect(chosen).toMatchObject({ draft, ...foundSource })
+    expect([chosen.candidate, chosen.attempts, chosen.unsettled]).toEqual([undefined, undefined, undefined])
+    const next = deps()
+    await submitCreate(request, chosen, next.value)
+    expect(next.calls).toEqual(['validateStack', 'createStack', 'bindApp:mitsumori:mitsumori'])
+    expect(next.bodies.createStack![0]).toMatchObject({ source: { kind: 'application-source-repository', sourceRepositoryId: 'mitsumori-src' } })
+  })
+
+  test('after "not mine" the held attempt can look at the hit again; choosing it then goes on with its id', async () => {
+    const { progress, key, sentAt } = await heldK()
+    const readback = deps({}, { repositories: [anotherAtA()] })
+    const offered = (await confirmCreate(request, progress, { api: readback.api, catalog: readback.value.catalog })).progress
+    const rejected = rejectCandidate(offered)
+    expect(rejectedCandidate(rejected)).toEqual(offered.candidate)
+    const again = reconsiderCandidate(rejected)
+    expect(again).toMatchObject({ candidate: { step: 'source', id: 'source-0f1e2d3c4b5a', binding: templateBinding, sentAt }, attempts: { source: { key } } })
+    expect([again.unsettled, again.unsettledSearched, again.notMine]).toEqual([undefined, undefined, undefined])
+    // Nothing is sent while it is offered again.
+    const blocked = deps()
+    expect((await fail(submitCreate(request, again, blocked.value))).message).toBe(text.candidate.title)
+    expect(blocked.calls).toEqual([])
+    const next = deps()
+    await submitCreate(request, acceptCandidate(again), next.value)
+    expect(next.calls).toEqual(['validateStack', 'createStack', 'bindApp:mitsumori:mitsumori'])
+    expect(next.bodies.createStack![0]).toMatchObject({ source: { kind: 'application-source-repository', sourceRepositoryId: 'source-0f1e2d3c4b5a' } })
+  })
+
+  test('two hits were both rejected: looking again walks through both, so the first one can still be chosen', async () => {
+    const { progress } = await heldK()
+    const readback = deps({}, { repositories: [anotherAtA()] })
+    const offeredA = (await confirmCreate(request, progress, { api: readback.api, catalog: readback.value.catalog })).progress
+    const a = offeredA.candidate!
+    const b = { ...a, id: 'source-second-hit' }
+    // A is rejected, a later readback offers B, and B is rejected too.
+    const bothRejected = rejectCandidate({ ...rejectCandidate(offeredA), candidate: b, unsettled: undefined, unsettledSearched: undefined })
+    expect(bothRejected.notMine?.map((rejected) => rejected.candidate.id)).toEqual([a.id, b.id])
+    const first = reconsiderCandidate(bothRejected)
+    expect(first.candidate?.id).toBe(a.id)
+    // Rejecting A again puts it behind B: the next look offers B, then A again.
+    const second = reconsiderCandidate(rejectCandidate(first))
+    expect(second.candidate?.id).toBe(b.id)
+    const third = reconsiderCandidate(rejectCandidate(second))
+    expect(third.candidate?.id).toBe(a.id)
+    const next = deps()
+    await submitCreate(request, acceptCandidate(third), next.value)
+    expect(next.bodies.createStack![0]).toMatchObject({ source: { kind: 'application-source-repository', sourceRepositoryId: a.id } })
+  })
+
+  test('"not mine" belongs to its attempt: giving up drops it, and a rejection for an earlier key does not hide a later attempt\'s hit', async () => {
+    const { progress, key } = await heldK()
+    const readback = deps({}, { repositories: [anotherAtA()] })
+    const rejected = rejectCandidate((await confirmCreate(request, progress, { api: readback.api, catalog: readback.value.catalog })).progress)
+    const givenUp = abandonUnsettled(rejected)
+    expect([givenUp.attempts, givenUp.notMine, rejectedCandidate(givenUp)]).toEqual([undefined, undefined, undefined])
+    // A later attempt (K2) whose create got no answer; a rejection kept for K must not mask what its readback finds.
+    const lostK2 = await fail(submitCreate(request, givenUp, deps({ createSource: lost }).value))
+    const k2 = lostK2.progress.attempts!.source!.key
+    expect(k2).not.toBe(key)
+    const stale = { ...lostK2.progress, unconfirmed: 'source' as const, notMine: rejected.notMine }
+    const later = deps({}, { repositories: [anotherAtA()] })
+    expect((await confirmCreate(request, stale, { api: later.api, catalog: later.value.catalog })).progress.candidate).toMatchObject({ step: 'source', id: 'source-0f1e2d3c4b5a' })
+  })
+
+  test('a found repository is never sent to DELETE on a rename or template change; a created one still is', async () => {
+    const { progress } = await heldK()
+    const readback = deps({}, { repositories: [anotherAtA()] })
+    const chosen = acceptCandidate((await confirmCreate(request, progress, { api: readback.api, catalog: readback.value.catalog })).progress)
+    const businessTemplate = templateOf({ ...wireTemplate, id: 'biz-master-postgres', category: 'business', githubTemplate: { repository: 'appthrust/template-biz-master', repositoryUrl: 'https://github.com/appthrust/template-biz-master', branch: 'main' } })
+    const renamed = deps()
+    await submitCreate({ ...request, urlName: 'mitsumori-2' }, chosen, renamed.value)
+    const switched = deps()
+    switched.value.catalog = { ...switched.value.catalog, template: businessTemplate }
+    await submitCreate(request, chosen, switched.value)
+    for (const run of [renamed, switched]) {
+      expect(run.calls.some((call) => call.startsWith('deleteSource'))).toBe(false)
+      expect(run.calls).toContain('createSource')
+    }
+
+    const made = await fail(submitCreate(request, {}, deps({ createStack: () => platformError(409, 'conflict', 'name taken') }).value))
+    expect(made.progress.sourceRepositoryProvenance).toBe('created')
+    const replaced = deps()
+    await submitCreate({ ...request, urlName: 'mitsumori-2' }, made.progress, replaced.value)
+    expect(replaced.calls).toContain('deleteSource:mitsumori-src')
+  })
+
+  test('a stack found by a readback is a candidate too; not theirs keeps the stack attempt held', async () => {
+    const first = deps({ createStack: lost })
+    const lostStack = await fail(submitCreate(request, {}, first.value))
+    const refused = await fail(submitCreate(request, lostStack.progress, deps({ createStack: () => platformError(409, 'conflict', 'publish endpoint is already owned by another publish', { reason: 'publish_url_conflict' }) }).value))
+    const readback = deps({}, { stacks: [wireStack('stack-other', 'mitsumori', 'mitsumori-src')] })
+    const { progress: offered } = await confirmCreate(request, refused.progress, { api: readback.api, catalog: readback.value.catalog })
+    expect(offered.candidate).toEqual({ step: 'stack', id: 'stack-other', appName: 'mitsumori' })
+    const rejected = rejectCandidate(offered)
+    expect(rejected).toMatchObject({ unsettled: 'stack', unsettledSearched: true, notMine: [{ key: refused.progress.attempts!.stack!.key, candidate: { step: 'stack', id: 'stack-other' } }] })
+    const held = deps()
+    await fail(submitCreate(request, rejected, held.value))
+    expect(held.calls).toEqual([])
+  })
+})
+
+describe('a resumed creation uses, and shows, the repository it already made (review finding 3)', () => {
+  const movedDestination = resolvedDestinationOf({ revision: 'rd-builtin-2', registryNamespace: 'registry.appthrust.test/commerce' })
+
+  test('source made at A, stack failed, default moved to B: the retry reuses A, and A is what is shown as already created', async () => {
+    const first = deps({ validateStack: () => json({ valid: false, message: 'runtime not ready', source: ok, runtime: { valid: false, message: 'runtime not ready' } }) })
+    const failure = await fail(submitCreate(request, {}, first.value))
+    expect(failure.progress).toEqual({ draft, ...madeSource })
+    // The confirm step shows the repository already made at A, whatever the destination resolves to now.
+    expect(keptSource(failure.progress, templateOrigin)).toEqual({ state: 'created', id: 'mitsumori-src', binding: templateBinding, provenance: 'created' })
+
+    const retry = deps()
+    retry.value.destination = movedDestination
+    await submitCreate(request, failure.progress, retry.value)
+    expect(retry.calls).toEqual(['validateStack', 'createStack', 'bindApp:mitsumori:mitsumori'])
+    expect(retry.bodies.createStack![0]).toMatchObject({ source: { kind: 'application-source-repository', sourceRepositoryId: 'mitsumori-src' } })
+  })
+
+  test('another name or template is not this repository: it is not shown as kept', async () => {
+    expect(keptSource({ draft, ...madeSource }, { ...templateOrigin, appName: 'other' })).toBeUndefined()
+    expect(keptSource({ draft, ...madeSource }, { ...templateOrigin, templateId: 'other-template' })).toBeUndefined()
+    // Progress saved before the binding was kept names only the repository id: the page reads it back.
+    expect(keptSource({ draft, sourceRepositoryId: 'mitsumori-src', sourceRepositoryOrigin: templateOrigin }, templateOrigin)).toEqual({ state: 'created', id: 'mitsumori-src' })
   })
 })

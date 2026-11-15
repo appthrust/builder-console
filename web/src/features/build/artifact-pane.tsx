@@ -121,7 +121,9 @@ export function ArtifactPane({ draft, spec, proposal, stage, progress, implement
     ? { status: databaseStatus, excel: Boolean(draft.source), busy: implementing, pending: previewDatabaseReset.pending, error: previewDatabaseReset.error, onReset: previewDatabaseReset.reset, onConfirm: previewDatabaseReset.confirm }
     : undefined
   const progressFailure = !built && failure && progress?.title === failure.title ? failure : undefined
-  const showFailureNotice = failure && failure.kind !== 'name-taken' && (built ? !implementation.failure : !progressFailure)
+  // A stop at the repository destination is about the proposal in the conversation; it is said there once, next to its action.
+  const destinationStop = failure?.destination === 'changed' || failure?.destination === 'blocked'
+  const showFailureNotice = failure && failure.kind !== 'name-taken' && !destinationStop && (built ? !implementation.failure : !progressFailure)
   return <section aria-label={buildCopy.artifact.title} className="mx-auto w-full max-w-4xl min-w-0 space-y-4 p-4 sm:p-5">
     <div className="hidden items-center justify-between md:flex">
       <h2 className="text-sm font-semibold text-stone-500">{buildCopy.artifact.title}</h2>

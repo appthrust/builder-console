@@ -8,14 +8,14 @@
 import { ORPCError } from '@orpc/client'
 import { isConsoleError } from '../../api/console'
 import type { CreateApi } from '../../api/create'
-import { platformErrorEnvelope } from '../../api/platform-error'
+import { destinationRejection, platformErrorEnvelope } from '../../api/platform-error'
+import type { ResolvedRepositoryDestination } from '../../model/contracts/catalog'
 import {
   buildSourceRepositoryRequest,
   isValidAppName,
   numberedUrlName,
   type CreateCatalog,
   type CreateEntry,
-  type SourceConnections,
 } from '../../model/create'
 import type { CreateProgress } from './submit'
 
@@ -37,7 +37,8 @@ export interface AvailabilityRequest {
   entry: Exclude<CreateEntry, 'ai'> | undefined
   /** ひな形 only: what the repository request is built from. */
   catalog?: CreateCatalog
-  connections?: SourceConnections
+  /** ひな形 only: the destination shown, which the check's request binds like the create's. */
+  destination?: ResolvedRepositoryDestination
   /** What an earlier attempt of this wizard made: the user's own, never "taken". */
   own?: Pick<CreateProgress, 'draft' | 'stackId' | 'sourceRepositoryOrigin'>
 }
@@ -81,19 +82,20 @@ async function consolePathTaken(name: string, request: AvailabilityRequest, deps
 /**
  * ひな形 only: the GitHub repository the platform would create. The platform
  * answers an existing repository with a 409 conflict (`GitHub repository
- * owner/name already exists`); a `valid: false` saying so counts too.
+ * owner/name already exists`); a `valid: false` saying so counts too. A 409
+ * about the destination (it moved) does not answer for the name.
  */
 async function repositoryTaken(name: string, request: AvailabilityRequest, deps: AvailabilityDeps): Promise<Answer> {
-  const { catalog, connections } = request
+  const { catalog, destination } = request
   const origin = request.own?.sourceRepositoryOrigin
   // Only a kept ひな形 repository made for this very name is the user's own; any other origin does not waive the check.
   const own = origin?.kind === 'template' && origin.appName === name
-  if (request.entry !== 'template' || !catalog || !connections || own) return false
+  if (request.entry !== 'template' || !catalog || !destination || own) return false
   try {
-    const validation = await deps.api.validateSourceRepository(request.projectId, buildSourceRepositoryRequest(name, catalog, connections))
+    const validation = await deps.api.validateSourceRepository(request.projectId, buildSourceRepositoryRequest(name, catalog, destination))
     return !validation.valid && /already exists/i.test(validation.message ?? '')
   } catch (error) {
-    if (!(error instanceof ORPCError) || error.status !== 409) return undefined
+    if (!(error instanceof ORPCError) || error.status !== 409 || destinationRejection(error)) return undefined
     const reason = platformErrorEnvelope(error)?.details?.reason
     return reason === 'delivery_pending' || reason === 'delivery_blocked' ? undefined : true
   }

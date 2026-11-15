@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { knownValue } from '../../model/contracts/build'
+import type { SourceRepositoryRequest, StackRequest } from '../../model/contracts/catalog'
 import type { BusinessApp } from '../../model/contracts/console'
 import { initialValues, type CreateValues } from './form'
 import type { CreateProgress, SubmitPhase } from './submit'
@@ -18,6 +19,16 @@ export interface CreateSession {
 }
 
 const phases = z.enum(['draft', 'source', 'checking', 'platform', 'bind'])
+const origin = z.object({ appName: z.string(), kind: z.enum(['template', 'existing']), repository: z.string().optional(), templateId: z.string().optional() })
+const binding = z.object({ repository: z.string(), image: z.string().optional(), revision: z.string().optional(), connectionId: z.string().optional() })
+const provenance = z.enum(['created', 'found'])
+/** A readback hit with what is shown for it: a repository's creation time and its attempt's first send, each as read. */
+const candidate = z.discriminatedUnion('step', [
+  z.object({ step: z.literal('source'), id: z.string(), binding, createdAt: z.string().optional(), sentAt: z.string().optional() }),
+  z.object({ step: z.literal('stack'), id: z.string(), appName: z.string() }),
+])
+/** A create request this tab built and sent: resent exactly as it was (Platform compares it with the first one). */
+const sentRequest = <T,>() => z.custom<T>((value) => typeof value === 'object' && value !== null && !Array.isArray(value))
 
 const sessionSchema = z.object({
   version: z.literal(1),
@@ -34,15 +45,28 @@ const sessionSchema = z.object({
     // This tab's own record of the console app the attempt made (read through the boundary when it was made).
     draft: z.custom<BusinessApp>((value) => typeof value === 'object' && value !== null && 'id' in value && typeof value.id === 'string').optional(),
     sourceRepositoryId: z.string().optional(),
-    sourceRepositoryOrigin: z.object({ appName: z.string(), kind: z.enum(['template', 'existing']), repository: z.string().optional(), templateId: z.string().optional() }).optional(),
-    stackId: z.string().optional(), stackAppName: z.string().optional(),
+    sourceRepositoryOrigin: origin.optional(),
+    // Where the kept repository is: a resumed attempt shows it, not the destination resolved now.
+    sourceRepositoryBinding: binding.optional(),
+    // How the kept ids were learned: only a `created` one is deleted by the wizard's own cleanup; absent = never by it.
+    sourceRepositoryProvenance: provenance.optional(),
+    stackId: z.string().optional(), stackAppName: z.string().optional(), stackProvenance: provenance.optional(),
     // A reload keeps an unconfirmed step unconfirmed: only the readback may follow.
     unconfirmed: phases.optional(),
-    // Keys of creates that may have been applied: a resend reuses them so Platform replays instead of creating twice.
+    // Creates that may have been applied: their key and exact request, resent before anything else so Platform
+    // replays instead of creating twice. `request`/`binding`/`sentAt` are optional for progress saved before they were kept.
     attempts: z.object({
-      source: z.object({ key: z.string(), origin: z.object({ appName: z.string(), kind: z.enum(['template', 'existing']), repository: z.string().optional(), templateId: z.string().optional() }) }).optional(),
-      stack: z.object({ key: z.string(), appName: z.string(), sourceRepositoryId: z.string().optional() }).optional(),
+      source: z.object({ key: z.string(), origin, request: sentRequest<SourceRepositoryRequest>().optional(), binding: binding.optional(), sentAt: z.string().optional() }).optional(),
+      stack: z.object({ key: z.string(), appName: z.string(), sourceRepositoryId: z.string().optional(), request: sentRequest<StackRequest>().optional() }).optional(),
     }).optional(),
+    // A refused resend stays held across reloads: nothing is sent for it until the user chooses a readback's hit or,
+    // after a readback that did not find it, explicitly gives it up.
+    unsettled: z.enum(['source', 'stack']).optional(),
+    unsettledSearched: z.boolean().optional(),
+    // A readback hit awaiting the user's choice stays one across reloads (nothing is sent meanwhile).
+    candidate: candidate.optional(),
+    // Hits the user said are not theirs, each for its resource kind and the attempt (key) it was rejected for.
+    notMine: z.array(z.object({ key: z.string().optional(), candidate })).optional(),
   }),
   phase: phases.optional(),
   failure: z.object({ message: z.string() }).optional(),

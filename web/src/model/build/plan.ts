@@ -14,15 +14,38 @@ export function withDefaultPublish(plan: CreationPlan, { domain, appName }: { do
   }
 }
 
-/** Rename only newly created destinations; adopted sources and tool payload references stay intact. */
+/** The plan's request for a new repository (not an adoption), when it has one. */
+export function newRepositoryRequest(plan: CreationPlan | undefined) {
+  const repository = plan?.applicationSourceRepositoryRequest
+  return repository?.destination && !repository.existing ? repository : undefined
+}
+
+/**
+ * The plan with its new-repository request bound to `revision`: the
+ * destination the user is shown and approves. Platform rejects an approval
+ * without one, and a create whose revision is no longer current.
+ */
+export function withDestinationRevision(plan: CreationPlan, revision: string): CreationPlan {
+  const repository = newRepositoryRequest(plan)
+  if (!repository || repository.destinationRevision === revision) return plan
+  return { ...plan, applicationSourceRepositoryRequest: { ...repository, destinationRevision: revision } }
+}
+
+/**
+ * Rename only newly created destinations; adopted sources and tool payload references stay intact.
+ * A new repository's image path is Platform's (destination registry namespace + repository name):
+ * an `imagePath` the plan still asserts names the old repository, so it is dropped, never rewritten.
+ * The destination revision stays: the destination itself does not change with the name.
+ */
 export function renameCreationPlan(plan: CreationPlan, name: string, { domain }: { domain?: string } = {}): CreationPlan {
-  const repository = plan.applicationSourceRepositoryRequest
   const stack = plan.applicationStackRequest
-  const renamedRepository = repository?.destination ? {
-    ...repository,
-    destination: { ...repository.destination, repositoryName: name },
-    ...(repository.image?.imagePath ? { image: { ...repository.image, imagePath: repository.image.imagePath.replace(/[^/]+$/, name) } } : {}),
-  } : repository
+  const created = newRepositoryRequest(plan)
+  let renamedRepository = plan.applicationSourceRepositoryRequest
+  if (created) {
+    const image = created.image ? { ...created.image } : undefined
+    if (image) delete image.imagePath
+    renamedRepository = { ...created, destination: { ...created.destination!, repositoryName: name }, ...(image ? { image } : {}) }
+  }
   const source = stack?.source.kind === 'github-template' ? {
     ...stack.source,
     githubTemplate: { ...stack.source.githubTemplate, newRepositoryName: name },

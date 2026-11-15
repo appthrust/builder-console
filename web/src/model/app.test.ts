@@ -81,6 +81,8 @@ const succeededPublish: Publish = {
   publicUrl: 'https://shop.example.test/',
   phase: 'succeeded',
   pendingSync: false,
+  serving: true,
+  servingReason: 'Serving',
 }
 
 function release(phase: ReleasePhase, extra: Partial<ApplicationRelease> = {}): ApplicationRelease {

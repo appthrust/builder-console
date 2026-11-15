@@ -34,6 +34,10 @@
 // Toggles:
 // - `POST /api/v1/__mock/role {role}` switches the caller's Team role (Viewer → create calls answer 403).
 // - `POST /api/v1/__mock/registry {connected}` (or `MOCK_REGISTRY=off`) removes the ready registry connection.
+// - `POST /api/v1/__mock/repository-destination {state}` sets the Project's repository destination:
+//   `ghcr` (default, `ghcr.io/acme`), `builtin` (`registry.appthrust.test/commerce`), `unknown` (a
+//   state this console does not know) or a blocked reason (`NotConfigured`, `Ambiguous`, `NotReady`,
+//   `NotVisible`, …). Every call moves the revision, so a create bound to the old one answers 409.
 // - `POST /api/v1/__mock/reject-next-validation` makes the next stack validation fail its `source` section once.
 // - `POST /api/v1/__mock/codex {available, reason?, policy?}` (or `MOCK_CODEX=off`) switches
 //   plan/turn/implementation availability. Reasons and policy names reach creation-tools and 412 details.
@@ -262,14 +266,87 @@ const stamp = () => {
   return new Date(lastStamp).toISOString()
 }
 
-function repositoryFor(appName: string, status: ApplicationSourceRepository['status']): ApplicationSourceRepository {
+// ---- Repository destination, like platform-api internal/repositorydestination and
+// handler/repository_destination.go: the read answers 200 for resolved and blocked alike
+// (repository_destination.go:74-90); a new-repository create is checked by `prepareNewRepository`.
+type MockDestination = { kind: 'ghcr' | 'builtin' } | { kind: 'blocked'; reason: string } | { kind: 'unknown' }
+
+const DESTINATION_CONNECTION = 'github-source-207cb7ce'
+/** The Project's built-in registry: `registry.<domain>/<project>`. */
+const BUILTIN_REGISTRY_NAMESPACE = `registry.appthrust.test/${MOCK_PROJECT_ID}`
+
+interface MockResolvedDestination {
+  revision: string
+  connectionId: string
+  repositoryNamespace: string
+  registryNamespace: string
+  imageAccessId?: string
+}
+
+function resolvedMockDestination(): MockResolvedDestination | undefined {
+  const { destination } = state
+  if (destination.kind !== 'ghcr' && destination.kind !== 'builtin') return undefined
+  return {
+    revision: `rd-${destination.kind}-${state.destinationRevision}`,
+    connectionId: DESTINATION_CONNECTION,
+    repositoryNamespace: 'acme',
+    registryNamespace: destination.kind === 'ghcr' ? 'ghcr.io/acme' : BUILTIN_REGISTRY_NAMESPACE,
+    ...(destination.kind === 'builtin' ? { imageAccessId: 'platform-registry' } : {}),
+  }
+}
+
+function repositoryDestinationRead(): unknown {
+  const resolved = resolvedMockDestination()
+  if (resolved) {
+    const { revision, ...destination } = resolved
+    return { state: 'Resolved', source: 'Project', revision, destination: { ...destination, provider: 'github', displayName: 'Acme GitHub' } }
+  }
+  // A state this console does not know (a newer Platform).
+  if (state.destination.kind === 'unknown') return { state: 'Migrating', message: 'repository destination is migrating' }
+  return { state: 'Blocked', reason: state.destination.kind === 'blocked' ? state.destination.reason : 'NotConfigured', message: 'No repository destination is configured for this Project.' }
+}
+
+/** A repository-destination rejection: its status, error code and `details.reason` (request.go:20-32). */
+interface MockRejection { status: number; code: string; message: string; reason: string }
+
+const rejected = (rejection: MockRejection) => error(rejection.status, rejection.code, rejection.message, { reason: rejection.reason })
+
+/**
+ * repositorydestination.Prepare (request.go:36-86): blocked → 412 failed_precondition (403 for
+ * NotVisible); an older `destinationRevision` → 409 DestinationChanged; an asserted connection,
+ * registry or image path other than the resolution → 409 DestinationMismatch (request.go:20-32,
+ * 56-73). Otherwise the resolved connection and image path (request.go:60,75-77).
+ */
+function prepareNewRepository(body: CreateApplicationSourceRepositoryRequest): { rejection: MockRejection } | { rejection?: undefined; sourceConnectionId: string; imagePath: string; resolved: MockResolvedDestination } {
+  const resolved = resolvedMockDestination()
+  if (!resolved) {
+    const reason = state.destination.kind === 'blocked' ? state.destination.reason : 'NotReady'
+    return {
+      rejection: reason === 'NotVisible'
+        ? { status: 403, code: 'forbidden', message: 'The repository destination is not visible to this Project.', reason }
+        : { status: 412, code: 'failed_precondition', message: 'No repository destination is configured for this Project.', reason },
+    }
+  }
+  if (body.destinationRevision && body.destinationRevision !== resolved.revision) {
+    return { rejection: { status: 409, code: 'conflict', message: 'The repository destination changed. Validate and approve the new destination.', reason: 'DestinationChanged' } }
+  }
+  const imagePath = `${resolved.registryNamespace}/${(body.destination?.repositoryName ?? '').trim()}`
+  const mismatch = (body.sourceConnectionId !== undefined && body.sourceConnectionId !== resolved.connectionId) ||
+    body.gitProviderConnectionRef !== undefined || body.registryProviderConnectionRef !== undefined ||
+    (body.image?.imagePath !== undefined && body.image.imagePath !== imagePath) ||
+    (body.registryConnectionRef !== undefined && (state.destination.kind !== 'ghcr' || body.registryConnectionRef !== 'ghcr-acme'))
+  if (mismatch) return { rejection: { status: 409, code: 'conflict', message: 'The request does not match the Project repository destination.', reason: 'DestinationMismatch' } }
+  return { sourceConnectionId: resolved.connectionId, imagePath, resolved }
+}
+
+function repositoryFor(appName: string, status: ApplicationSourceRepository['status'], imagePath = `ghcr.io/acme/${appName}`): ApplicationSourceRepository {
   return {
     id: `${appName}-src`,
     projectId: MOCK_PROJECT_ID,
-    sourceConnectionId: 'github-source-207cb7ce',
+    sourceConnectionId: DESTINATION_CONNECTION,
     template: { repository: 'appthrust/template-nextjs', ref: 'main' },
     destination: { repositoryName: appName, visibility: 'private' },
-    image: { imagePath: `ghcr.io/acme/${appName}`, tagFilter: 'edge-', versioningScheme: 'Alphabetical' },
+    image: { imagePath, tagFilter: 'edge-', versioningScheme: 'Alphabetical' },
     build: { state: status === 'ready' ? 'healthy' : status === 'failed' ? 'failed' : 'running', runUrl: `https://github.com/acme/${appName}/actions/runs/1`, headSha: 'mock-head', observedAt: stamp() },
     status,
     conditions: [],
@@ -334,18 +411,21 @@ const PLAN_ACTIVITY = [
   '> 計画を確かめています',
 ]
 
-/** The plan the mock "AI" writes: a new repository from the default ひな形, published on the project domain. */
+/**
+ * The plan the mock "AI" writes: a new repository from the default ひな形, published on the project domain.
+ * Like Platform's creation-plan prompt (draftprompt/creation-plan.tmpl:170-171), the request names no
+ * connection, registry or image path and carries the generation context's destination revision.
+ */
 function mockPlan(appName: string, publish = true): ApplicationDraftCreationPlan {
+  const revision = resolvedMockDestination()?.revision
   return {
     summary: '見積書を作って PDF で出せるアプリです。顧客と品目を登録し、見積の一覧から探せます。',
     representation: ['SourceRepository', 'ApplicationStack', 'Application', 'Component', 'Database', 'Publish'],
     markdown: `# ${appName}\n\n- web: Next.js\n- database: PostgreSQL${publish ? `\n- publish: https://${appName}.${BASE_DOMAIN}` : ''}`,
     applicationSourceRepositoryRequest: {
-      sourceConnectionId: 'github-source-207cb7ce',
-      registryConnectionRef: 'ghcr-acme',
       template: { repository: 'appthrust/template-nextjs', ref: 'main' },
       destination: { repositoryName: appName, visibility: 'private' },
-      image: { imagePath: `ghcr.io/acme/${appName}`, tagFilter: 'edge-', versioningScheme: 'Alphabetical' },
+      ...(revision ? { destinationRevision: revision } : {}),
       build: { mode: 'observed-image', ref: 'main' },
     },
     applicationStackRequest: {
@@ -447,7 +527,7 @@ function draftSourceRecord(draft: ApplicationDraft) {
   const request = draft.creationPlan?.applicationSourceRepositoryRequest
   return request?.destination && draft.createdSourceRepositories?.find((record) =>
     record.repositoryName.toLowerCase() === request.destination!.repositoryName.toLowerCase() &&
-    record.sourceConnectionId === request.sourceConnectionId &&
+    (record.sourceConnectionId === (request.sourceConnectionId ?? (request.existing ? undefined : resolvedMockDestination()?.connectionId))) &&
     record.gitProviderConnectionRef?.name === request.gitProviderConnectionRef?.name &&
     record.gitProviderConnectionRef?.namespace === request.gitProviderConnectionRef?.namespace)
 }
@@ -801,14 +881,23 @@ function advanceDraft(draft: ApplicationDraft): boolean {
         continue
       }
       const existing = sourceRequest.existing ?? (record?.repository ? { repository: record.repository, ref: record.defaultBranch } : undefined)
+      // The create step re-evaluates the approved revision immediately before the write (application_source_repository.go:466-470).
+      const prepared = existing ? undefined : prepareNewRepository(sourceRequest)
+      if (prepared?.rejection) {
+        const { message } = prepared.rejection
+        Object.assign(execution, { status: 'failed', finishedAt: now, error: message })
+        execution.steps = execution.steps.map((step) => step.tool === 'appthrust.applicationSourceRepository.create' ? { ...step, status: 'failed', message, finishedAt: now } : step)
+        draft.phase = 'planning'
+        continue
+      }
       repository = existing
         ? adoptedRepository({ ...sourceRequest, template: undefined, destination: undefined, existing })
-        : repositoryFor(name, 'pending')
+        : repositoryFor(name, 'pending', prepared?.imagePath)
       state.repositories.set(repository.id, repository)
       state.githubRepositoryNames.add(name)
       if (!existing || record) {
         draft.createdSourceRepositoryId = repository.id
-        const created = { sourceRepositoryId: repository.id, repositoryName: name, repository: `acme/${name}`, defaultBranch: 'main', sourceConnectionId: sourceRequest.sourceConnectionId, gitProviderConnectionRef: sourceRequest.gitProviderConnectionRef }
+        const created = { sourceRepositoryId: repository.id, repositoryName: name, repository: `acme/${name}`, defaultBranch: 'main', sourceConnectionId: sourceRequest.sourceConnectionId ?? prepared?.sourceConnectionId, gitProviderConnectionRef: sourceRequest.gitProviderConnectionRef }
         draft.createdSourceRepositories = [...(draft.createdSourceRepositories ?? []).filter((item) => item !== record), created]
       }
     }
@@ -1130,6 +1219,13 @@ function seedPlatform() {
     databaseChanges: new Map<string, DatabaseChange[]>(),
     /** Repository names that exist on GitHub (`acme/<name>`); a deleted source repository leaves its name here. */
     githubRepositoryNames: new Set<string>(['uriage']),
+    /**
+     * The Project's repository destination (`__mock/repository-destination`): GHCR under the
+     * connection's account, the Project's built-in registry, a blocked reason, or a state this
+     * console does not know. `destinationRevision` moves with every change, like Platform's digest.
+     */
+    destination: { kind: 'ghcr' } as MockDestination,
+    destinationRevision: 1,
     sequence: 0,
     githubRepositories,
     templates,
@@ -1289,6 +1385,9 @@ function toPublish(stack: MockStack): Publish {
     phase,
     ...(phase === 'succeeded' ? { publicUrl: `https://${stack.host}/` } : {}),
     pendingSync: false,
+    // Platform's read projection (publish_read_projection.go:95,110-111): NotEstablished until served.
+    serving: phase === 'succeeded',
+    servingReason: phase === 'succeeded' ? 'Serving' : 'NotEstablished',
     access,
   }
 }
@@ -1681,6 +1780,19 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
   ],
   [
     'POST',
+    /^\/api\/v1\/__mock\/repository-destination$/,
+    async (_, request) => {
+      const body = (await request.json()) as { state?: unknown }
+      const next = body.state
+      if (typeof next === 'string' && next) {
+        state.destination = next === 'ghcr' || next === 'builtin' ? { kind: next } : next === 'unknown' ? { kind: 'unknown' } : { kind: 'blocked', reason: next }
+        state.destinationRevision++
+      }
+      return json(repositoryDestinationRead())
+    },
+  ],
+  [
+    'POST',
     /^\/api\/v1\/__mock\/reject-next-validation$/,
     () => {
       state.rejectNextValidation = true
@@ -1790,6 +1902,8 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
   ['GET', new RegExp(`^${P}/application-templates$`), () => json(list(state.templates))],
   ['GET', /^\/api\/v1\/application-stack-definitions$/, () => json(list(definitions))],
   ['GET', new RegExp(`^${P}/application-source-repositories$`), () => json(list([...state.repositories.values()]))],
+  // Blocked answers 200 too; only a failed read is an error (handler/repository_destination.go:74-90).
+  ['GET', new RegExp(`^${P}/repository-destination$`), () => json(repositoryDestinationRead())],
   [
     'GET',
     new RegExp(`^${P}/application-source-repositories/([^/]+)$`),
@@ -1810,13 +1924,23 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
           : state.repositories.has(adopted.id)
             ? 'repository is already adopted'
             : undefined
-        return json(problem ? { valid: false, message: problem } : { valid: true })
+        // Adoption resolves no destination; the image path is Platform's GHCR default (application_source_repository.go:919-921, 552).
+        return json(problem ? { valid: false, message: problem } : { valid: true, message: 'Repository can be adopted.', imagePath: adopted.image.imagePath, tagFilter: adopted.image.tagFilter, versioningScheme: adopted.image.versioningScheme })
       }
+      // The destination is resolved first (application_source_repository_destination.go:55, before the name preflight).
+      const prepared = prepareNewRepository(body)
+      if (prepared.rejection) return rejected(prepared.rejection)
       const name = body.destination?.repositoryName
       // Like the platform: an existing GitHub repository is a 409 conflict, not `valid: false`.
       if (name && state.githubRepositoryNames.has(name)) return githubRepositoryExists(name)
       const problem = name && DNS_LABEL.test(name) ? undefined : `'${name ?? ''}' is not a valid DNS label`
-      return json(problem ? { valid: false, message: problem } : { valid: true })
+      if (problem) return json({ valid: false, message: problem })
+      // application_source_repository.go:549-560: the resolution, the repository URL and the derived image.
+      return json({
+        valid: true, message: 'Repository destination, template access, and image access are ready.',
+        imagePath: prepared.imagePath, tagFilter: 'edge-', versioningScheme: 'Alphabetical',
+        repositoryDestination: repositoryDestinationRead(), repositoryUrl: `https://github.com/${prepared.resolved.repositoryNamespace}/${name}`,
+      })
     },
   ],
   [
@@ -1825,7 +1949,8 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
     async (_, request) => {
       if (state.role === 'Viewer') return error(403, 'forbidden', 'team role Viewer cannot create source repositories')
       const body = (await request.json()) as CreateApplicationSourceRepositoryRequest
-      const connection = sourceConnections.find((source) => source.id === body.sourceConnectionId)
+      // Template access is checked on the destination's connection (application_source_repository.go:817).
+      const connection = sourceConnections.find((source) => source.id === (body.existing ? body.sourceConnectionId : DESTINATION_CONNECTION))
       const templateRepository = body.template?.repository.trim().toLowerCase()
       if (templateRepository && connection?.allowedRepositories?.length && !connection.allowedRepositories.some((allowed) => allowed.trim().toLowerCase() === templateRepository)) {
         return error(400, 'invalid_argument', "'template.repository' is not allowed by the selected source connection")
@@ -1836,12 +1961,14 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
         state.repositories.set(repository.id, repository)
         return json(mutation('ApplicationSourceRepository', repository.id, repository), 202)
       }
+      const prepared = prepareNewRepository(body)
+      if (prepared.rejection) return rejected(prepared.rejection)
       const name = body.destination?.repositoryName
       const problem = nameProblem(name)
       if (problem || !name) return error(409, 'conflict', problem ?? 'invalid')
       if (state.githubRepositoryNames.has(name)) return githubRepositoryExists(name)
       state.githubRepositoryNames.add(name)
-      const repository = repositoryFor(name, 'pending')
+      const repository = repositoryFor(name, 'pending', prepared.imagePath)
       state.repositories.set(repository.id, repository)
       return json(mutation('ApplicationSourceRepository', repository.id, repository), 202)
     },
@@ -2282,7 +2409,12 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
       const collision = name && state.githubRepositoryNames.has(name) && !source && !record?.repository
         ? `name already exists: ${name}: GitHub repository acme/${name} already exists. Choose a different repository name.`
         : undefined
-      const problem = !draft.creationPlan ? 'creationPlan is required' : nameProblem(appName) ?? reuseProblem ?? collision ?? publishProblem(draft.creationPlan.applicationStackRequest?.publish)
+      // A new repository needs a destination revision before approval (application_draft.go:2305-2306) and one
+      // that is still current (the source validation's Prepare, request.go:56-57; reported as valid: false, :1137-1144).
+      const destinationProblem = request?.destination && !request.existing && !record
+        ? !request.destinationRevision ? 'Validate a repository destination before approving this creation plan.' : prepareNewRepository(request).rejection?.message
+        : undefined
+      const problem = !draft.creationPlan ? 'creationPlan is required' : destinationProblem ?? nameProblem(appName) ?? reuseProblem ?? collision ?? publishProblem(draft.creationPlan.applicationStackRequest?.publish)
       const validation = problem
         ? { valid: false, message: problem, staticErrors: [problem] }
         : { valid: true, message: record ? `Existing repository ${record.repositoryName} created by this draft will be ${source ? 'reused' : 'adopted by a new SourceRepository'}.` : 'ok', creationPlanFingerprint: `fp-${draft.id}` }

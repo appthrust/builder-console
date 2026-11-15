@@ -1,5 +1,6 @@
-// Step 3 確認して作る: one sentence of what will be made, the answers, and the
-// 詳しい人向け pieces (ひな形 choice, the image reference).
+// Step 3 確認して作る: one sentence of what will be made, the answers, where
+// the repository and its image go, and the 詳しい人向け pieces (ひな形
+// choice, the image reference).
 import { useStore } from '@tanstack/react-form'
 import { useEffect, type ReactNode } from 'react'
 import { copy } from '../../../copy'
@@ -7,6 +8,18 @@ import { Button, Disclosure, focusHeading, Notice } from '../../../ui'
 import { text } from '../copy'
 import type { CreateFormApi } from '../form'
 import { SummaryList } from './summary-list'
+
+/** 作ったコードから: the image path from Platform's validation of the adoption, while it is read. */
+export type AdoptionImage = { kind: 'checking' } | { kind: 'known'; path: string } | { kind: 'unknown' }
+
+/**
+ * The repository an earlier attempt made for this source (`created`, reused where it is), or that a readback found and
+ * the user chose (`found`, reused the same way, never deleted from here), or sent a create for whose outcome is unknown
+ * (`pending`, resent exactly there; `held` once that resend was refused or a readback hit awaits the user's choice:
+ * nothing is sent and the wizard's notice says why); `checking` / `unknown` = progress saved without where it is,
+ * being read back / not showable.
+ */
+export type KeptSourceState = 'created' | 'found' | 'pending' | 'held' | 'checking' | 'unknown'
 
 export function ConfirmStep({
   form,
@@ -16,6 +29,13 @@ export function ConfirmStep({
   templateName,
   sourceProblem,
   onChooseTemplate,
+  newRepository,
+  kept,
+  onStartOver,
+  startingOver,
+  destinationBlocked,
+  leftInPlace,
+  adoptionImage,
 }: {
   form: CreateFormApi
   /** `https://<urlName>.<domain>`. */
@@ -25,6 +45,17 @@ export function ConfirmStep({
   templateName: string | undefined
   sourceProblem: string | undefined
   onChooseTemplate: () => void
+  /** ひな形: where the repository is made and its image pushed: the resolved destination shown before 作る, or the earlier attempt's (`kept`). */
+  newRepository?: { repository: string; image?: string }
+  kept?: KeptSourceState
+  /** `kept: 'unknown'`: leave the earlier repository unused and create a new one at the current destination. */
+  onStartOver?: () => void
+  startingOver?: boolean
+  /** ひな形: no destination is resolved, so nothing is created. */
+  destinationBlocked?: boolean
+  /** An earlier repository the next attempt will not use and that is never deleted from here (`keptElsewhere`): where it is, when known. */
+  leftInPlace?: { where?: string }
+  adoptionImage?: AdoptionImage
 }) {
   const values = useStore(form.store, (state) => state.values)
   useEffect(() => {
@@ -32,10 +63,20 @@ export function ConfirmStep({
     focusHeading('create-template-problem')
     document.getElementById('create-template-problem')?.scrollIntoView({ block: 'nearest' })
   }, [sourceProblem])
+  const mono = (value: string) => <span className="font-mono break-all">{value}</span>
+  const adoptionImageValue = adoptionImage?.kind === 'known' ? mono(adoptionImage.path)
+    : adoptionImage?.kind === 'checking' ? <span className="text-stone-500">{text.destination.imageChecking}</span>
+      : <span className="text-stone-500">{text.destination.imageUnknown}</span>
   const rows: Array<[string, ReactNode]> = [
     ...(values.entry === 'template' && templateName ? [[copy.create.confirm.labels.template, templateName] as [string, ReactNode]] : []),
+    ...(values.entry === 'template' && newRepository
+      ? [
+          [kept === 'created' ? text.destination.created : kept === 'found' ? text.destination.found : kept === 'pending' || kept === 'held' ? text.destination.pending : text.destination.repository, mono(newRepository.repository)],
+          [text.destination.image, newRepository.image ? mono(newRepository.image) : <span className="text-stone-500">{text.destination.imageUnknown}</span>],
+        ] as Array<[string, ReactNode]>
+      : []),
     ...(values.entry === 'existing' && values.repository
-      ? [[copy.create.confirm.labels.repository, <span className="font-mono">{values.repository.fullName}</span>] as [string, ReactNode]]
+      ? [[copy.create.confirm.labels.repository, mono(values.repository.fullName)], [text.destination.image, adoptionImageValue]] as Array<[string, ReactNode]>
       : []),
     [copy.create.details.name, values.displayName],
     [copy.create.confirm.labels.description, values.description || '—'],
@@ -53,10 +94,29 @@ export function ConfirmStep({
           </Notice>
         </div>
       ) : null}
+      {values.entry === 'template' && destinationBlocked ? (
+        <div data-testid="create-destination-blocked"><Notice tone="warning">{text.destination.blocked}</Notice></div>
+      ) : null}
       <p className="text-base leading-relaxed text-stone-900" data-testid="confirm-summary">
         {copy.create.confirm.summary(values.displayName, groupName, shareText)}
       </p>
       <SummaryList rows={rows} />
+      {leftInPlace && values.entry !== 'image' ? (
+        <div data-testid="create-left-in-place"><Notice>{text.destination.leftInPlace(leftInPlace.where)}</Notice></div>
+      ) : null}
+      {kept && kept !== 'held' && values.entry !== 'image' ? (
+        <div data-testid="create-kept-source">
+          {kept === 'created' ? <Notice>{text.destination.createdNote}</Notice>
+            : kept === 'found' ? <Notice>{text.destination.foundNote}</Notice>
+              : kept === 'pending' ? <Notice tone="warning">{text.destination.pendingNote}</Notice>
+                : kept === 'checking' ? <p role="status" className="text-sm text-stone-500">{text.destination.retainedChecking}</p>
+                  : (
+                    <Notice tone="warning" actions={onStartOver ? <Button size="sm" loading={startingOver} onClick={onStartOver}>{text.destination.startOver}</Button> : undefined}>
+                      {text.destination.retainedUnknown}
+                    </Notice>
+                  )}
+        </div>
+      ) : null}
       {values.entry === 'image' ? (
         <Disclosure title={copy.create.advanced.toggle}>
           <p className="font-mono text-sm break-all text-stone-800">{values.imageRef.trim()}</p>

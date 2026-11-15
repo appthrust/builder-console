@@ -18,9 +18,9 @@
     "test:e2e:mock": "playwright test --config e2e/playwright.config.ts --grep @mock"
   },
   "dependencies": {
-    "@appthrust/api-schema": "^0.1.1",
-    "@appthrust/app-launcher": "^0.1.4",
-    "@appthrust/platform-dashboard-i18n": "^0.1.4",
+    "@appthrust/api-schema": "^0.1.5",
+    "@appthrust/app-launcher": "^0.1.5",
+    "@appthrust/platform-dashboard-i18n": "^0.1.5",
     "@orpc/client": "^1.13.13",
     "@orpc/contract": "^1.13.13",
     "@orpc/openapi-client": "^1.13.13",

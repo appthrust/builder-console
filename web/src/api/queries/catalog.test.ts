@@ -64,7 +64,7 @@ test('create connections: the three lists are read through their contracts into 
   expect([...query.queryKey]).toEqual(['create-connections', 'pj-1'])
   const value = await appDefaults().fetchQuery(query)
   expect(value).toEqual({
-    sources: [{ id: 'github-source-207cb7ce', account: { login: 'acme' }, capabilities: [{ kind: 'known', value: 'createRepositories' }, { kind: 'known', value: 'readTemplateRepositories' }], status: { kind: 'known', value: 'ready' } }],
+    sources: [{ id: 'github-source-207cb7ce', capabilities: [{ kind: 'known', value: 'createRepositories' }, { kind: 'known', value: 'readTemplateRepositories' }], status: { kind: 'known', value: 'ready' } }],
     registries: [{ id: 'ghcr-acme', registryHost: 'ghcr.io', status: { kind: 'known', value: 'ready' } }],
     domains: [{ name: 'pj-1.appthrust.test', usableForPublish: true, publishDnsManaged: true, source: { kind: 'known', value: 'seed' } }],
   })

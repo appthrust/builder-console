@@ -1,7 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises'
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test'
 import { decodeResponse, type ResponseContract } from '../../api/boundary'
-import { creationToolsContract, listDomainsContract, listRegistryConnectionsContract, listSourceConnectionsContract, listStackDefinitionsContract, listTemplatesContract } from '../../api/contracts/platform/catalog'
+import { creationToolsContract, getRepositoryDestinationContract, listDomainsContract, listRegistryConnectionsContract, listSourceConnectionsContract, listStackDefinitionsContract, listTemplatesContract } from '../../api/contracts/platform/catalog'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterContextProvider } from '@tanstack/react-router'
 import { act } from 'react'
@@ -10,7 +10,7 @@ import { consoleKeys } from '../../api/queries/console'
 import { createTestGateway } from '../../api/testing/gateway'
 import { groupsContract } from '../../api/contracts/console/groups'
 import { meContract } from '../../api/contracts/console/me'
-import { createConnectionsQuery, creationToolsQuery } from '../../api/queries/catalog'
+import { createConnectionsQuery, creationToolsQuery, repositoryDestinationQuery } from '../../api/queries/catalog'
 import { copy } from '../../copy'
 import { consoleRoutes } from '../../dev/mock-console'
 import { platformRoutes } from '../../dev/mock-platform'
@@ -66,6 +66,7 @@ test.each([true, false])('new app distinguishes pending domain and recovers on i
   const connections = createConnectionsQuery(me.projectId)
   client.setQueryData(connections.queryKey, { sources: read(listSourceConnectionsContract, sources).data, registries: read(listRegistryConnectionsContract, registries).data, domains: read(listDomainsContract, { data: pendingDomains }).data })
   client.setQueryData(creationToolsQuery(me.projectId).queryKey, read(creationToolsContract, { ...tools, codexAvailable: true }))
+  client.setQueryData(repositoryDestinationQuery(me.projectId).queryKey, read(getRepositoryDestinationContract, await (await fixture(`/api/v1/projects/${me.projectId}/repository-destination`)).json()))
 
   const timers = new Map<number, { run: () => void; delay: number }>()
   let nextTimer = 0

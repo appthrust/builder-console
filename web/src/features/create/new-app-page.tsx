@@ -7,19 +7,19 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { buildGroupTree, flattenGroupTree, membershipRoots, type BusinessApp } from '../../model/contracts/console'
 import type { ShareChoice } from '../../model/contracts/catalog'
 import { createApi } from '../../api/create'
-import { useCreateCatalog, useCreateConnections, useCreationTools } from '../../api/queries/catalog'
+import { useAdoptionValidation, useCreateCatalog, useCreateConnections, useCreationTools, useRepositoryDestination, useSourceRepositories } from '../../api/queries/catalog'
 import { copy } from '../../copy'
 import { aiPolicyExplanation } from '../../copy/ai-policy'
 import {
   appUrl,
+  buildExistingSourceRepositoryRequest,
+  destinationImage,
+  destinationRepository,
   isValidAppName,
   missingPrerequisites,
   pickCreateEnvironment,
   resolveCreateCatalog,
-  pickSourceConnection,
   publishDomainPending,
-  sourceConnectionsOf,
-  templateSourceProblem,
   templateUsableFor,
   type CreateEntry,
 } from '../../model/create'
@@ -30,7 +30,7 @@ import { Button, Card, CardBody, focusHeading, LoadFailed, Notice, PageHeader, S
 import { checkNameAvailability, suggestFreeUrlName, type AvailabilityRequest, type NameAvailability } from './availability'
 import { text } from './copy'
 import { effectiveShareGroupIds, stepFields, syncUrlName, useCreateForm, type CreateValues } from './form'
-import { CreatingPanel, FailureNotice, FieldFailureNotice, StaleCatalogNotice, UnconfirmedCreateNotice } from './run-status'
+import { CandidateNotice, CreatingPanel, FailureNotice, FieldFailureNotice, StaleCatalogNotice, UnconfirmedCreateNotice, UnsettledCreateNotice } from './run-status'
 import { beginBuild, resolveBuildGroup } from '../build/entry'
 import { text as buildText } from '../build/copy'
 import { newSessionEngine } from '../build/new-session-engine'
@@ -38,16 +38,25 @@ import { BuildStartFailure } from '../build/start-failure'
 import { consoleConfigQuery } from '../../api/queries/console'
 import { clearCreateSession, createSteps, readCreateSession, restoreCreateDraft, saveCreateSession, type Step } from './persistence'
 import { businessTemplateById, joinBusinessTemplates } from './templates'
-import { ConfirmStep } from './steps/confirm-step'
+import { ConfirmStep, type AdoptionImage, type KeptSourceState } from './steps/confirm-step'
 import { DetailsStep, type TakenUrlName } from './steps/details-step'
 import { ShareStep } from './steps/share-step'
 import { StartStep, type EntryBlocks } from './steps/start-step'
 import {
+  abandonUnsettled,
+  acceptCandidate,
   confirmCreate,
   CreateFailed,
+  keptElsewhere,
+  keptSource,
+  reconsiderCandidate,
+  rejectCandidate,
+  rejectedCandidate,
+  sourceOrigin,
   submitCreate,
   type CreatePath,
   type CreateProgress,
+  type SourceBinding,
   type SubmitPhase,
 } from './submit'
 
@@ -91,6 +100,7 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
   const { templates, definitions } = useCreateCatalog(projectId)
   const connections = useCreateConnections(projectId)
   const tools = useCreationTools(projectId)
+  const destinationRead = useRepositoryDestination(projectId)
 
   const flatGroups = useMemo(() => flattenGroupTree(buildGroupTree(groupRows)), [groupRows])
   const defaultGroupId =
@@ -112,7 +122,7 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
 
   const initialStep = createSteps.indexOf(search.step ?? saved?.step ?? 'start') as Step
   const run = useCreateStore<RunState>({ step: initialStep, resume: saved?.progress ?? {} })
-  const { step, phase, failure, checkingName, advancing, nameTaken } = useSelector(run)
+  const { step, phase, failure, checkingName, advancing, nameTaken, resume } = useSelector(run)
   const [startingBuild, setStartingBuild] = useState(false)
   const [buildError, setBuildError] = useState<{ error: unknown }>()
   const [completed, setCompleted] = useState(false)
@@ -169,9 +179,11 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
   const environment = connections.data
     ? pickCreateEnvironment(connections.data.sources, connections.data.registries, connections.data.domains)
     : {}
-  const sourceConnections = sourceConnectionsOf(values.entry === 'template'
-    ? { ...environment, source: pickSourceConnection(connections.data?.sources ?? [], selectedTemplate) }
-    : environment)
+  // Where a new repository goes is Platform's resolution; the one shown is the one a create binds.
+  const destination = destinationRead.data
+  const resolvedDestination = destination?.kind === 'resolved' ? destination : undefined
+  // Blocked and unknown states read the same: only a Project administrator can set the destination.
+  const destinationNotice = destination && !resolvedDestination ? text.destination.blocked : undefined
   const domain = environment.domain
   const templateCatalog = resolveCreateCatalog(templateRows, definitionRows, 'github-template', values.entry === 'template' ? values.templateId : undefined)
   const defaultCatalog = resolveCreateCatalog(templateRows, definitionRows, 'github-template')
@@ -190,8 +202,8 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
   const imageMissing = missingFor('image')
   const blocked: EntryBlocks = {
     existing: missingFor('existing') ?? (defaultCatalog ? undefined : copy.create.start.existingUnavailable),
-    template: missingFor('template') ?? (defaultCatalog ? undefined : copy.create.start.templateUnavailable),
-    ai: aiPolicyExplanation(tools.data?.codexUnavailableReason, tools.data?.codexPolicy) ?? (!aiGroupId ? buildText.page.noGroup.body : missingFor('ai') ?? (tools.data?.codexAvailable ? undefined : copy.create.start.aiUnavailable)),
+    template: missingFor('template') ?? destinationNotice ?? (defaultCatalog ? undefined : copy.create.start.templateUnavailable),
+    ai: aiPolicyExplanation(tools.data?.codexUnavailableReason, tools.data?.codexPolicy) ?? (!aiGroupId ? buildText.page.noGroup.body : missingFor('ai') ?? destinationNotice ?? (tools.data?.codexAvailable ? undefined : copy.create.start.aiUnavailable)),
     image: imageMissing
       ? `${copy.create.advanced.unavailable}${imageMissing}`
       : imageCatalog
@@ -200,10 +212,11 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
   }
   const setupLink =
     me.isConsoleAdmin && (['existing', 'template', 'ai', 'image'] as const).some((entry) => missingSetupFor(entry).length > 0)
-  const catalogLoading = connections.isPending || templates.isPending || definitions.isPending || tools.isPending
+  const catalogLoading = connections.isPending || templates.isPending || definitions.isPending || tools.isPending || destinationRead.isPending
   // The catalog is the evidence that creating is allowed. A first read that failed is this panel's failure; a
-  // re-read that failed keeps what was shown, says so, and holds every create entry until a read succeeds.
-  const catalogQueries = [templates, definitions, connections]
+  // re-read that failed keeps what was shown, says so, and holds every create entry until a read succeeds. Going on
+  // from an earlier attempt's source is held only by the reads it needs (`continueQueries`), never the destination's.
+  const catalogQueries = [templates, definitions, connections, destinationRead]
   const catalogFailed = catalogQueries.some((query) => query.data === undefined && query.isError)
   const catalogStale = !catalogFailed && catalogQueries.some((query) => query.data !== undefined && query.isError)
   const catalogReadAt = Math.min(...catalogQueries.map((query) => query.dataUpdatedAt))
@@ -211,25 +224,63 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
     void templates.refetch()
     void definitions.refetch()
     void connections.refetch()
+    void destinationRead.refetch()
   }
   const canCreate = me.canCreateApps
-  const sourceProblem = values.entry === 'template' && selectedTemplate
-    ? templateSourceProblem(selectedTemplate, connections.data?.sources ?? [])
-    : undefined
   const templateProblem = values.entry !== 'template' || catalogLoading || catalogFailed
     ? undefined
-    : sourceProblem === 'not-admitted' && selectedTemplate?.githubTemplate
-      ? copy.create.start.templateNotAdmitted(selectedTemplate.githubTemplate.repository)
-      : sourceProblem === 'no-connection'
-        ? copy.create.start.templateNoConnection
-        : !selectedTemplate || !templateUsableFor(selectedTemplate, 'github-template')
-          ? copy.create.start.templateUnavailable
-          : undefined
+    : !selectedTemplate || !templateUsableFor(selectedTemplate, 'github-template')
+      ? copy.create.start.templateUnavailable
+      : undefined
   const entryReady = (entry: CreateEntry | undefined) =>
     entry !== undefined && canCreate && !catalogLoading && !catalogFailed && !catalogStale && !blocked[entry] && (entry !== 'template' || (Boolean(templateCatalog) && !templateProblem))
 
   const catalog = values.entry === 'image' ? imageCatalog : templateCatalog
   const url = domain && isValidAppName(values.urlName) ? appUrl(values.urlName, domain) : undefined
+  // An earlier attempt's repository for the source on screen is shown where it is (made, or sent with an outcome not
+  // known yet), never at the destination resolved now: the next attempt reuses it, or resends exactly that create.
+  const shownOrigin = catalog && values.entry === 'template' ? sourceOrigin(values.urlName, { kind: 'template' }, catalog)
+    : catalog && values.entry === 'existing' && values.repository ? sourceOrigin(values.urlName, { kind: 'existing', repository: values.repository }, catalog) : undefined
+  const kept = keptSource(resume, shownOrigin)
+  // Progress saved before where the repository is was kept names only its id: Platform's record of it says where it is.
+  const keptRead = useSourceRepositories(projectId, kept?.state === 'created' && !kept.binding)
+  const keptRecord = kept?.state === 'created' && !kept.binding ? keptRead.data?.data.find((repository) => repository.id === kept.id) : undefined
+  const keptWhere = keptRecord?.repositoryUrl ?? keptRecord?.existing?.repository
+  const keptBinding: SourceBinding | undefined = kept?.binding ?? (keptRecord && keptWhere ? { repository: keptWhere, image: keptRecord.image.imagePath } : undefined)
+  // Once a stack exists (or may), the source is only shown; otherwise one that cannot be shown holds the create.
+  const stackStarted = Boolean(resume.stackId || resume.attempts?.stack)
+  // An unsettled (refused resend) create is not resent, nor is one whose readback hit awaits the user's choice: their
+  // notice below explains it, the step shows where it went.
+  const keptState: KeptSourceState | undefined = !kept ? undefined
+    : keptBinding ? (kept.state === 'pending' ? (resume.unsettled === 'source' || resume.candidate?.step === 'source' ? 'held' : 'pending') : kept.provenance === 'found' ? 'found' : 'created')
+      : stackStarted ? undefined
+        : keptRead.isPending ? 'checking' : 'unknown'
+  // The next 作る goes on from what an earlier attempt made or sent for the source on screen (its repository, its stack,
+  // or the create to resend exactly): it needs neither today's destination nor the adopting connection. The stack
+  // request names only the repository id, the template and definition, and the domain (`buildCreateStackRequest`).
+  // Only a new ひな形 or 作ったコードから source needs them.
+  const continuing = (values.entry === 'template' || values.entry === 'existing') && (kept !== undefined || stackStarted)
+  const continueQueries = [templates, definitions, connections]
+  const continueReady = canCreate && continueQueries.every((query) => query.data !== undefined && !query.isError) &&
+    (values.entry !== 'template' || (Boolean(templateCatalog) && selectedTemplate !== undefined && templateUsableFor(selectedTemplate, 'github-template')))
+  // A kept repository the next attempt will not use and that is never deleted from here: the user is told it stays.
+  const left = keptElsewhere(resume, shownOrigin)
+  const leftInPlace = left && values.entry !== 'image' ? { where: left.binding?.repository } : undefined
+  const newRepository = values.entry !== 'template' ? undefined
+    : kept ? (keptBinding ? { repository: keptBinding.repository, image: keptBinding.image } : undefined)
+      : resolvedDestination && isValidAppName(values.urlName)
+        ? { repository: destinationRepository(resolvedDestination, values.urlName), image: destinationImage(resolvedDestination, values.urlName) }
+        : undefined
+  // 作ったコードから: the image path is Platform's (its validation answer), read once the confirmation is shown; an
+  // adopted (or pending) repository says it itself.
+  const adoptionRequest = step === 3 && values.entry === 'existing' && values.repository && environment.adoption && !kept
+    ? buildExistingSourceRepositoryRequest(values.repository, environment.adoption)
+    : undefined
+  const adoptionValidation = useAdoptionValidation(projectId, adoptionRequest)
+  const adoptionImage: AdoptionImage = keptBinding?.image ? { kind: 'known', path: keptBinding.image }
+    : adoptionValidation.data?.valid && adoptionValidation.data.imagePath
+      ? { kind: 'known', path: adoptionValidation.data.imagePath }
+      : adoptionValidation.isFetching || (adoptionRequest && adoptionValidation.isPending) ? { kind: 'checking' } : { kind: 'unknown' }
 
   const chooseTemplate = (id: string) => {
     const selected = templateRows.find((item) => item.id === id)
@@ -316,7 +367,7 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
       urlName,
       entry: current.entry,
       catalog: current.entry === 'template' ? templateCatalog : undefined,
-      connections: sourceConnections,
+      destination: current.entry === 'template' ? resolvedDestination : undefined,
       own: run.state.resume,
     }
   }
@@ -425,6 +476,9 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
         if (failed.field.path.startsWith('destination.')) form.setFieldValue('urlNameEdited', true)
         patch({ resume: failed.progress, failure: failed, step: failed.field.step })
       } else {
+        // Any destination answer (moved, mismatched, no longer resolvable) re-reads it and shows the current one;
+        // nothing is sent again until the user confirms what is now shown.
+        if (failed.destination) void destinationRead.refetch()
         patch({ resume: failed.progress, failure: failed })
       }
     } finally {
@@ -481,6 +535,11 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
 
   // An unconfirmed step blocks every create until the readback below has run, also after a reload.
   const unconfirmed = run.state.resume.unconfirmed !== undefined
+  // A refused resend blocks every create until the user chooses a readback's hit, or gives it up after a readback did not
+  // find it (or found only what the user said is not theirs).
+  const unsettledAttempt = resume.unsettled === 'source' ? resume.attempts?.source : undefined
+  const unsettledWhere = resume.unsettled === 'stack' ? text.unsettled.app(resume.attempts?.stack?.appName ?? values.urlName)
+    : unsettledAttempt?.binding ? text.unsettled.repository(unsettledAttempt.binding.repository, unsettledAttempt.binding.image) : text.unsettled.previous
 
   const submitApp = () => {
     const path = createPath()
@@ -490,7 +549,8 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
         api: createApi,
         catalog,
         domain,
-        connections: sourceConnections,
+        destination: resolvedDestination,
+        adoption: environment.adoption,
         onPhase: (next) => patch({ phase: next }),
         onProgress: (resume) => patch({ resume }),
       })
@@ -507,7 +567,7 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
     setConfirming(true)
     setStillUnknown(false)
     try {
-      const confirmed = await confirmCreate({ ...details, path }, run.state.resume, { api: createApi, catalog, connections: sourceConnections })
+      const confirmed = await confirmCreate({ ...details, path }, run.state.resume, { api: createApi, catalog })
       patch({ resume: confirmed.progress, failure: undefined })
       if (confirmed.app) await finish(confirmed.app)
     } catch {
@@ -517,15 +577,57 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
     }
   }
 
+  /** 「前回の操作をあきらめて作り直す」: only offered after a readback did not find it; never automatic (`abandonUnsettled`). */
+  const giveUpUnsettled = () => {
+    setStillUnknown(false)
+    patch({ resume: abandonUnsettled(run.state.resume), failure: undefined })
+  }
+  /** The user's choice on a readback's hit: use it (kept as found) or not theirs (the earlier attempt stays held). Sends nothing. */
+  const judgeCandidate = (mine: boolean) => {
+    setStillUnknown(false)
+    patch({ resume: (mine ? acceptCandidate : rejectCandidate)(run.state.resume), failure: undefined })
+  }
+  /** 「見つかったものをもう一度見る」: the hit rejected for the held attempt is offered again, with both choices. Sends nothing. */
+  const reconsider = () => {
+    setStillUnknown(false)
+    patch({ resume: reconsiderCandidate(run.state.resume), failure: undefined })
+  }
+  const [startingOver, setStartingOver] = useState(false)
+  /**
+   * 「最初から作り直す」: where the earlier repository is cannot be shown, so it is left unused and the next 作る makes a new
+   * one at the destination shown. Only one this console's own keyed create answered is removed (best effort, as for a
+   * renamed attempt); any other stays where it is (the notice says so).
+   */
+  const startOver = async () => {
+    const current = run.state.resume
+    if (startingOver || !current.sourceRepositoryId) return
+    setStartingOver(true)
+    try {
+      if (current.sourceRepositoryProvenance === 'created') await createApi.deleteSourceRepository(projectId, current.sourceRepositoryId).catch(() => undefined)
+      patch({ resume: { ...current, sourceRepositoryId: undefined, sourceRepositoryOrigin: undefined, sourceRepositoryBinding: undefined, sourceRepositoryProvenance: undefined }, failure: undefined })
+    } finally {
+      setStartingOver(false)
+    }
+  }
+
   const busy = phase !== undefined || startingBuild
-  const retrying = failure !== undefined && !failure.forbidden
-  const blockedSubmit = !canCreate || busy || failure?.forbidden === true || unconfirmed
+  // A moved destination is a new confirmation of what is shown now, not a retry of the refused one. An unsettled create,
+  // or a readback hit awaiting the user's choice, offers no retry at all (its notice holds the actions).
+  const retrying = failure !== undefined && !failure.forbidden && failure.destination !== 'changed' && !resume.unsettled && !resume.candidate
+  // After a destination answer the shown destination is re-read; nothing is sent until the new one is on screen.
+  const destinationRereading = failure?.destination !== undefined && destinationRead.isFetching
+  const keptHold = keptState === 'checking' || keptState === 'unknown'
+  const blockedSubmit = !canCreate || busy || failure?.forbidden === true || unconfirmed || resume.unsettled !== undefined || resume.candidate !== undefined || destinationRereading || keptHold
+  // The confirm step's own fixed notice when no destination is resolved; a blocked answer at submit says the same and is not repeated.
+  // Going on from an earlier attempt does not need the destination resolved now.
+  const destinationBlockedShown = step === 3 && values.entry === 'template' && destination !== undefined && !resolvedDestination && !continuing
   const primary =
     step === 0
       ? { label: copy.create.next, disabled: !entryReady(values.entry) }
       : step < 3
         ? { label: copy.create.next, disabled: false }
-        : { label: search.resume ? copy.create.confirm.resume : retrying ? copy.create.confirm.retry : copy.create.confirm.submit, disabled: !entryReady(values.entry) || !catalog || !domain || blockedSubmit }
+        : { label: search.resume ? copy.create.confirm.resume : retrying ? copy.create.confirm.retry : copy.create.confirm.submit, disabled: !(continuing ? continueReady : entryReady(values.entry)) || !catalog || !domain || blockedSubmit }
+
   const onSubmit = (event: FormEvent) => {
     event.preventDefault()
     if (primary.disabled || busy) return
@@ -533,7 +635,8 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
     else submitApp()
   }
 
-  const staleCatalog = catalogStale
+  // A failed re-read holds a create that needs it: going on from an earlier attempt does not need the destination.
+  const staleCatalog = (continuing ? continueQueries.some((query) => query.data !== undefined && query.isError) : catalogStale)
     ? <StaleCatalogNotice readAt={catalogReadAt} retrying={catalogQueries.some((query) => query.isFetching)} onRetry={retryCatalog} />
     : null
   const stepLabels = copy.create.steps
@@ -583,6 +686,7 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
                 onRetryCatalog={retryCatalog}
                 stale={staleCatalog}
                 blocked={blocked}
+                destinationNotice={destinationNotice}
                 setupLink={setupLink}
                 catalog={templateRows}
                 codexAvailable={tools.data?.codexAvailable === true}
@@ -599,7 +703,7 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
               <DetailsStep
                 form={form}
                 projectId={projectId}
-                sourceConnectionId={environment.source?.id}
+                sourceConnectionId={environment.adoption?.id}
                 groups={flatGroups}
                 domain={domain}
                 nameTaken={nameTaken}
@@ -622,6 +726,13 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
                   templateName={templateCatalog ? businessTemplateById(templateCatalog.template.id)?.name ?? templateCatalog.template.displayName : undefined}
                   sourceProblem={templateProblem}
                   onChooseTemplate={() => patch({ step: 0 })}
+                  newRepository={newRepository}
+                  kept={keptState}
+                  onStartOver={keptState === 'unknown' ? () => void startOver() : undefined}
+                  startingOver={startingOver}
+                  destinationBlocked={destinationBlockedShown}
+                  leftInPlace={leftInPlace}
+                  adoptionImage={adoptionImage}
                 />
                 {phase !== undefined && values.entry ? (
                   <CreatingPanel entry={values.entry} phase={phase} />
@@ -635,7 +746,17 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
               <div id="create-failure" tabIndex={-1} className="mt-6 focus:outline-none">
                 <UnconfirmedCreateNotice confirming={confirming} stillUnknown={stillUnknown} disabled={!catalog || !createPath()} onConfirm={() => void confirmLatest()} />
               </div>
-            ) : failure && !failure.field ? (
+            ) : resume.candidate ? (
+              <div id="create-failure" tabIndex={-1} className="mt-6 focus:outline-none" data-testid="create-candidate">
+                <CandidateNotice candidate={resume.candidate} onUse={() => judgeCandidate(true)} onNotMine={() => judgeCandidate(false)} />
+              </div>
+            ) : resume.unsettled ? (
+              <div id="create-failure" tabIndex={-1} className="mt-6 focus:outline-none">
+                <UnsettledCreateNotice where={unsettledWhere} searched={resume.unsettledSearched === true} confirming={confirming} stillUnknown={stillUnknown}
+                  disabled={!catalog || !createPath()} onConfirm={() => void confirmLatest()} onGiveUp={giveUpUnsettled}
+                  {...(rejectedCandidate(resume) ? { onReconsider: reconsider } : {})} />
+              </div>
+            ) : failure && !failure.field && !(failure.destination === 'blocked' && destinationBlockedShown) ? (
               <div id="create-failure" tabIndex={-1} className="mt-6 focus:outline-none">
                 <FailureNotice failure={failure} />
               </div>

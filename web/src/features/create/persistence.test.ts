@@ -45,6 +45,21 @@ describe('create session', () => {
     saveCreateSession(unconfirmedSession, target)
     expect(readCreateSession(draft.id, target)?.progress.unconfirmed).toBe('platform')
   })
+  test('how kept ids were learned, a readback hit awaiting the user\'s choice and rejected hits survive a reload', () => {
+    const target = storage()
+    const binding = { repository: 'acme/stock', image: 'ghcr.io/acme/stock', revision: 'rd-1', connectionId: 'gh' }
+    const held: CreateSession = {
+      ...session,
+      progress: {
+        draft, sourceRepositoryProvenance: 'found', stackProvenance: 'created',
+        notMine: [{ key: 'K', candidate: { step: 'source', id: 'source-old', binding, createdAt: '2026-11-14T00:00:00Z' } }, { candidate: { step: 'stack', id: 'stack-old', appName: 'stock' } }],
+        attempts: { source: { key: 'K', origin: { kind: 'template', appName: 'stock' }, binding, sentAt: '2026-11-15T00:00:00.000Z' } },
+        candidate: { step: 'source', id: 'source-abc', binding, createdAt: '2026-11-15T00:00:01Z', sentAt: '2026-11-15T00:00:00.000Z' },
+      },
+    }
+    saveCreateSession(held, target)
+    expect(readCreateSession(draft.id, target)).toEqual(held)
+  })
   test('malformed, incompatible or inaccessible storage does not block creation', () => {
     const target = storage()
     for (const raw of ['{broken', '{"version":2}', '{"version":1,"values":{}}']) {

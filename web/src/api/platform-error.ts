@@ -43,6 +43,31 @@ export function isPlatformNotFound(error: unknown): boolean {
   return platformErrorEnvelope(error)?.status === 404 || (error instanceof ORPCError && error.status === 404)
 }
 
+/**
+ * How Platform refused a new repository at its repository destination
+ * (platform-api internal/repositorydestination/request.go:20-32, reason in
+ * `details.reason`): `changed` = 409 DestinationChanged, the revision the user
+ * saw is no longer current; `mismatch` = 409 DestinationMismatch, the request
+ * asserted another connection/owner/image; `blocked` = 412 (403 for
+ * NotVisible) with a documented blocker. Anything else is not a destination
+ * answer. The reason itself is never shown.
+ */
+export type DestinationRejection = 'changed' | 'mismatch' | 'blocked'
+
+/** Documented blockers and the status each mutation answers with. */
+const DESTINATION_BLOCKERS: Record<string, number> = {
+  NotConfigured: 412, Ambiguous: 412, NotFound: 412, Deleting: 412, NotReady: 412, MissingCapability: 412, NotVisible: 403,
+  UnsupportedProvider: 412, ImageAccessNotConfigured: 412, ImageAccessAmbiguous: 412, ImageAccessNotReady: 412,
+}
+
+export function destinationRejection(error: unknown): DestinationRejection | undefined {
+  const envelope = platformErrorEnvelope(error)
+  const reason = envelope?.details?.reason
+  if (typeof reason !== 'string' || envelope?.status === undefined) return undefined
+  if (envelope.status === 409) return reason === 'DestinationChanged' ? 'changed' : reason === 'DestinationMismatch' ? 'mismatch' : undefined
+  return Object.hasOwn(DESTINATION_BLOCKERS, reason) && DESTINATION_BLOCKERS[reason] === envelope.status ? 'blocked' : undefined
+}
+
 /** Gateway answers while no Platform API Pod is ready (Envoy during a rollout) or no answer at all. */
 const TRANSIENT_STATUSES = new Set([0, 502, 503, 504])
 /** Envoy's no-upstream body and the browsers' fetch network-failure messages (Chrome, Firefox, Safari). */
