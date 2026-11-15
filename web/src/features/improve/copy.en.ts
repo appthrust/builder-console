@@ -1,6 +1,7 @@
 import type { textJa } from './copy'
 
 export const textEn: typeof textJa = {
+  unreadablePlan: { title: 'This improvement cannot continue', detail: 'This console could not read the change plan saved on the platform. Return to the app page and start a new improvement.' },
   stageLabels: { ask: 'Discuss', fix: 'Change', check: 'Check' },
   state: { asking: 'Improving', proposed: 'Change ready', running: 'Improving', failed: 'Stopped', unsupported: 'State unknown' },
   updated: (version?: string) => (version ? `Updated to ${version}` : 'Updated'),

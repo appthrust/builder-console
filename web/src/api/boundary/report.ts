@@ -9,7 +9,7 @@ export interface ContractFailureReport {
   readonly method: HttpMethod
   readonly routeTemplate: string
   readonly issues: readonly ResponseIssue[]
-  readonly outcome: ResponseOutcome
+  readonly outcome: ResponseOutcome | 'partial'
 }
 
 /** Injected failure sink. Must not throw into the caller (the gateway guards it anyway). */

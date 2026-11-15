@@ -24,6 +24,8 @@ import { preserveLanguage } from '../../../test/language'
 import { BuildPage } from './build-page'
 import { text as uiText } from './copy'
 import { implementationCopy } from './implement/copy'
+import { initialSession, readBuildSession, saveBuildSession } from './session'
+import { rewriteDraftWire } from '../../api/testing/build-domain'
 
 const SECRET = 'SENTINEL-build-page-7f3a'
 const PROJECT = '/api/v1/projects/commerce'
@@ -33,7 +35,7 @@ type Json = Record<string, unknown>
 interface Rewrite { method: string; path: RegExp; body: (wire: Json) => unknown; once: boolean }
 
 let rewrites: Rewrite[] = []
-let requests: { method: string; path: string; status: number }[] = []
+let requests: { method: string; path: string; status: number; body?: Json }[] = []
 /** A read the page waits on until the test releases it (a slow Platform answer). */
 let held: { path: RegExp; until: Promise<void> } | undefined
 /** Answers a request with an error status instead of the mock (the mock never sees it): a failed Platform request. */
@@ -42,15 +44,16 @@ let refusals: { method: string; path: RegExp; status: number; body: unknown }[] 
 async function mockFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const request = input instanceof Request ? input : new Request(new URL(String(input), window.location.href), init)
   const url = new URL(request.url)
+  const body = request.method === 'GET' ? undefined : await request.clone().json().catch(() => undefined) as Json | undefined
   if (request.method === 'GET' && held?.path.test(url.pathname)) await held.until
   const refusal = refusals.find((item) => item.method === request.method && item.path.test(url.pathname))
   if (refusal) {
     refusals = refusals.filter((item) => item !== refusal)
-    requests.push({ method: request.method, path: url.pathname, status: refusal.status })
+    requests.push({ method: request.method, path: url.pathname, status: refusal.status, body })
     return Response.json(refusal.body, { status: refusal.status })
   }
   const response = await (url.pathname.startsWith('/api/console/') ? consoleRoutes : platformRoutes)(request, url)
-  requests.push({ method: request.method, path: url.pathname, status: response?.status ?? 404 })
+  requests.push({ method: request.method, path: url.pathname, status: response?.status ?? 404, body })
   if (!response) return Response.json({ error: { message: 'unhandled' } }, { status: 404 })
   const rewrite = rewrites.find((item) => item.method === request.method && item.path.test(url.pathname))
   if (!rewrite || !response.ok) return response
@@ -68,6 +71,16 @@ async function call(method: string, path: string, body?: unknown) {
 const advance = async (count = 1) => { for (let step = 0; step < count; step++) await call('POST', '/api/v1/__mock/advance') }
 const draftPath = (id: string) => `${PROJECT}/application-drafts/${id}`
 const consoleGateway = createTestGateway({ consoleFetch: (path, init) => mockFetch(path, init) })
+
+function unreadableSnapshot(id: string, field: 'approval' | 'plan') {
+  const change = (draft: Json): Json => field === 'plan'
+    ? { ...draft, creationPlan: { representation: ['future-kind'] } }
+    : { ...draft, creationExecutions: ((draft.creationExecutions ?? []) as Json[]).map((execution) => ({ ...execution, approval: { applicationStackRequest: {} } })) }
+  for (const method of ['GET', 'POST', 'PATCH']) rewrites.push({
+    method, path: new RegExp(`^${PROJECT}/application-drafts(?:$|/${id}(?:$|/creation-executions))`), once: false,
+    body: (wire) => rewriteDraftWire(wire, id, change),
+  })
+}
 
 /** The opening turn answered with a question: the composer is open and no job runs, so nothing polls. */
 async function askingDraft() {
@@ -1016,4 +1029,152 @@ describe('a plan Platform\'s validation rejects is an answer about the plan (APT
     expect(count('POST', generations(draftId))).toBe(before + 1)
     expect(count('POST', validations(draftId))).toBe(0)
   })
+})
+
+describe('APT-1109: a stored plan is read independently', () => {
+  test('an unreadable plan opens with only re-planning; no write happens until the click, then one new plan is approvable', async () => {
+    const id = await plannedDraft()
+    await call('POST', '/api/v1/__mock/stored-plan', { draftId: id, mode: 'unreadable' })
+    const me = await consoleGateway.console(meContract, undefined)
+    saveBuildSession(id, { ...initialSession({ baseIntent: '見積を管理するアプリ', projectId: 'commerce', ownerSubject: me.person.subject, groupId: 'g-team-a' }), prepareRequested: true, planRequested: true, pending: [{ text: 'old queued reply', at: '2026-11-15T00:00:00Z' }] })
+    requests = []
+    const { key } = await renderBuild(id)
+    await settle(12)
+    expect(stage()).toBe('decide')
+    expect(pageText()).toContain(buildCopy.unreadablePlan.detail)
+    expect(actionsOf(buildCopy.unreadablePlan.title).map((item) => item.textContent?.trim())).toEqual([buildCopy.failure.plan.replan])
+    expect(pageText()).not.toContain(buildCopy.primary.prepare)
+    expect(pageText()).not.toContain(buildCopy.failure.plan.recheck)
+    expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
+    expect(client.getQueryData<BuildDraft>(key)?.creationPlan).toBeUndefined()
+    await click(actionsOf(buildCopy.unreadablePlan.title)[0]!)
+    expect(count('POST', /creation-plan-generations$/)).toBe(1)
+    expect(count('POST', /creation-plan-validations$/)).toBe(0)
+    expect(count('POST', /creation-executions$/)).toBe(0)
+    await advance(4)
+    await tick(key)
+    expect(pageText()).not.toContain(buildCopy.unreadablePlan.title)
+    expect(button(buildCopy.primary.prepare).disabled).toBe(false)
+    expect(count('POST', /creation-plan-generations$/)).toBe(1)
+    expect(count('POST', /creation-plan-validations$/)).toBe(0)
+    expect(count('POST', /creation-executions$/)).toBe(0)
+  })
+
+  test.each(['absent', 'disabled'])('a %s publish block follows the same ordinary default-publish flow', async (mode) => {
+    await call('POST', '/api/v1/__mock/plan-generation', { publish: false })
+    const id = await plannedDraft()
+    if (mode === 'disabled') await call('POST', '/api/v1/__mock/stored-plan', { draftId: id, mode: 'unpublished' })
+    requests = []
+    const { key } = await renderBuild(id)
+    expect(button(buildCopy.primary.prepare).disabled).toBe(false)
+    expect(client.getQueryData<BuildDraft>(key)?.creationPlan?.applicationStackRequest?.publish?.enabled).toBe(true)
+    expect(pageText()).not.toContain(buildCopy.unreadablePlan.title)
+    expect(requests.filter((item) => item.method !== 'GET').map(({ method, path }) => [method, path])).toEqual([['PATCH', draftPath(id)]])
+    await click(button(buildCopy.primary.prepare))
+    const writes = requests.filter((item) => item.method !== 'GET')
+    expect(writes.map(({ method, path }) => [method, path.replace(/\/creation-executions\/[^/]+\/run$/, '/creation-executions/{executionId}/run')])).toEqual([
+      ['PATCH', draftPath(id)],
+      ['POST', `${draftPath(id)}/creation-plan-validations`],
+      ['POST', `${draftPath(id)}/creation-executions`],
+      ['POST', `${draftPath(id)}/creation-executions/{executionId}/run`],
+      ['POST', `${draftPath(id)}/conversation-turns`],
+    ])
+    expect(Object.keys(writes[0]!.body!)).toEqual(['creationPlan'])
+    expect((writes[0]!.body!.creationPlan as Json).applicationStackRequest).toMatchObject({ publish: { enabled: true } })
+    expect(writes[1]!.body).toBeUndefined()
+    expect(writes[2]!.body).toEqual({ clientRequestId: expect.any(String), creationPlanFingerprint: expect.any(String) })
+    expect(writes[3]!.body).toBeUndefined()
+    expect(writes.filter((item) => item.body && Object.hasOwn(item.body, 'creationPlan'))).toHaveLength(1)
+  })
+
+  test('a created draft still follows its app when its stored plan is unreadable', async () => {
+    const id = await createdDraft()
+    unreadableSnapshot(id, 'plan')
+    requests = []
+    await renderBuild(id)
+    await act(async () => { await client.invalidateQueries() })
+    await settle(12)
+    expect(stage()).toBe('build')
+    expect(pageText()).toContain(buildCopy.unreadablePlan.title)
+    expect(count('POST', /\/api\/console\/apps\/[^/]+\/bind$/)).toBe(1)
+    expect(count('POST', /implementation-runs$/)).toBe(1)
+    expect(count('POST', /creation-executions$/)).toBe(0)
+    expect(count('POST', /creation-plan-validations$/)).toBe(0)
+  })
+})
+
+test.each(['approval', 'plan'] as const)('reload resumes an existing execution despite an unreadable %s, without another begin', async (field) => {
+  const id = await plannedDraft()
+  const validation = (await call('POST', `${draftPath(id)}/creation-plan-validations`, {})).resource as Json
+  await call('POST', `${draftPath(id)}/creation-executions`, { clientRequestId: 'existing-execution', creationPlanFingerprint: validation.creationPlanFingerprint })
+  unreadableSnapshot(id, field)
+  requests = []
+  const { key } = await renderBuild(id)
+  expect(client.getQueryData<BuildDraft>(key)?.creationExecutions.at(-1)?.status).toEqual({ kind: 'known', value: 'running' })
+  expect(stage()).toBe('build')
+  expect(count('POST', /creation-executions\/[^/]+\/run$/)).toBe(1)
+  expect(count('POST', /creation-executions$/)).toBe(0)
+  expect(count('POST', /creation-plan-validations$/)).toBe(0)
+})
+
+test.each(['unreadable', 'long-summary'])('a %s approval after begin is run, bound, implemented and published', async (snapshot) => {
+  const id = await plannedDraft()
+  const wire = await call('GET', draftPath(id))
+  const plan = wire.creationPlan as Json
+  if (snapshot === 'unreadable') unreadableSnapshot(id, 'approval')
+  else await call('PATCH', draftPath(id), { creationPlan: { ...plan, summary: 'Saved plan '.padEnd(501, 'x') } })
+  const appName = ((plan.applicationStackRequest as Json).application as Json).name
+  // Publication readback has not appeared yet: the existing repair must still run after binding.
+  rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/publishes$`), once: false, body: (wire) => ({ ...wire, data: (wire.data as Json[]).filter((publish) => publish.applicationId !== appName) }) })
+  rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/application-stacks$`), once: false, body: (wire) => ({ ...wire, data: (wire.data as Json[]).map((stack) => stack.applicationId === appName ? { ...stack, publish: undefined } : stack) }) })
+  requests = []
+  const { key } = await renderBuild(id)
+  await click(button(buildCopy.primary.prepare))
+  expect(count('POST', /creation-executions$/)).toBe(1)
+  expect(count('POST', /creation-executions\/[^/]+\/run$/)).toBe(1)
+  const approval = client.getQueryData<BuildDraft>(key)?.creationExecutions.at(-1)
+  if (snapshot === 'unreadable') expect(approval?.approvalUnreadable).toBe(true)
+  else { expect(approval?.approvalUnreadable).toBeUndefined(); expect(approval?.approval?.summary).toHaveLength(501) }
+  await advance(6)
+  for (let step = 0; step < 3; step++) {
+    await act(async () => { await client.invalidateQueries() })
+    await settle(12)
+  }
+  expect(client.getQueryData<BuildDraft>(key)?.creationExecutions.at(-1)?.status).toEqual({ kind: 'known', value: 'succeeded' })
+  expect(count('POST', /\/api\/console\/apps\/[^/]+\/bind$/)).toBe(1)
+  expect(count('POST', /implementation-runs$/)).toBe(1)
+  expect(requests.filter((request) => request.method === 'POST' && request.path === `${PROJECT}/publishes`)).toEqual([expect.objectContaining({ status: 202 })])
+  expect(readBuildSession(id)?.createdAppId).toBeDefined()
+})
+
+test('an unreadable plan with a failed execution offers no re-plan and retains the queued reply', async () => {
+  const id = await plannedDraft()
+  const validation = (await call('POST', `${draftPath(id)}/creation-plan-validations`, {})).resource as Json
+  await call('POST', `${draftPath(id)}/creation-executions`, { clientRequestId: 'existing-execution', creationPlanFingerprint: validation.creationPlanFingerprint })
+  const me = await consoleGateway.console(meContract, undefined)
+  saveBuildSession(id, { ...initialSession({ baseIntent: '見積', projectId: 'commerce', ownerSubject: me.person.subject, groupId: 'g-team-a' }), pending: [{ text: 'Keep this reply', at: '2026-11-15T00:00:00Z' }] })
+  rewrites.push({ method: 'GET', path: new RegExp(`${draftPath(id)}$`), once: false, body: (wire) => ({ ...wire, phase: 'planned', creationPlan: { representation: ['future-kind'] }, creationExecutions: (wire.creationExecutions as Json[]).map((execution) => ({ ...execution, status: 'failed', error: 'creation stopped' })) }) })
+  requests = []
+  await renderBuild(id)
+  expect(actionsOf(buildCopy.unreadablePlan.title)).toEqual([])
+  expect(readBuildSession(id)?.pending.map((message) => message.text)).toEqual(['Keep this reply'])
+  expect(count('POST', /creation-plan-generations$/)).toBe(0)
+  expect(count('POST', /creation-plan-validations$/)).toBe(0)
+})
+
+test('an unreadable plan with a failed execution disables the composer without clearing typed text', async () => {
+  const id = await plannedDraft()
+  const { key } = await renderBuild(id)
+  await act(async () => { type(composer(), 'Keep this unsent text') })
+  expect(composer().disabled).toBe(false)
+  const validation = (await call('POST', `${draftPath(id)}/creation-plan-validations`, {})).resource as Json
+  await call('POST', `${draftPath(id)}/creation-executions`, { clientRequestId: 'failed-after-typing', creationPlanFingerprint: validation.creationPlanFingerprint })
+  rewrites.push({ method: 'GET', path: new RegExp(`${draftPath(id)}$`), once: false, body: (wire) => ({ ...wire, phase: 'planned', creationPlan: { representation: ['future-kind'] }, creationExecutions: (wire.creationExecutions as Json[]).map((execution) => ({ ...execution, status: 'failed', error: 'creation stopped' })) }) })
+  requests = []
+  await tick(key)
+  expect(composer().disabled).toBe(true)
+  expect(composer().value).toBe('Keep this unsent text')
+  await act(async () => { composer().dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }) as unknown as Event) })
+  expect(composer().value).toBe('Keep this unsent text')
+  expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
 })

@@ -55,11 +55,15 @@ type Answer = boolean | undefined
 /** Numbered variants tried for a suggestion (`-2` … `-9`). */
 const SUGGESTION_TRIES = 8
 
-/** Platform application names of the project, without the user's own stack; undefined when they could not be read. */
-async function platformAppNames(request: AvailabilityRequest, deps: AvailabilityDeps): Promise<Set<string> | undefined> {
+/** Known names stay taken even if another row cannot identify itself; only complete lists prove a name free. */
+type PlatformNames = { values: Set<string>; complete: boolean }
+async function platformAppNames(request: AvailabilityRequest, deps: AvailabilityDeps): Promise<PlatformNames | undefined> {
   try {
     const stacks = await deps.api.stacks(request.projectId)
-    return new Set(stacks.filter((stack) => stack.id !== request.own?.stackId).map((stack) => stack.applicationName))
+    return {
+      values: new Set([...stacks.data.filter((stack) => stack.id !== request.own?.stackId).map((stack) => stack.applicationName), ...stacks.unreadable.flatMap((row) => row.id === undefined ? [] : [row.id])]),
+      complete: stacks.unreadable.length === 0,
+    }
   } catch {
     return undefined
   }
@@ -105,18 +109,18 @@ async function takenBy(
   name: string,
   request: AvailabilityRequest,
   deps: AvailabilityDeps,
-  appNames: Set<string> | undefined
+  appNames: PlatformNames | undefined
 ): Promise<{ taken: NameTakenBy | undefined; checked: boolean }> {
   const [onConsole, repository] = await Promise.all([consolePathTaken(name, request, deps), repositoryTaken(name, request, deps)])
   if (onConsole) return { taken: 'console', checked: true }
-  if (appNames?.has(name)) return { taken: 'platform', checked: true }
+  if (appNames?.values.has(name)) return { taken: 'platform', checked: true }
   if (repository) return { taken: 'repository', checked: true }
-  return { taken: undefined, checked: onConsole !== undefined && appNames !== undefined && repository !== undefined }
+  return { taken: undefined, checked: onConsole !== undefined && appNames?.complete === true && repository !== undefined }
 }
 
-async function freeVariant(request: AvailabilityRequest, deps: AvailabilityDeps, appNames: Set<string> | undefined): Promise<string | undefined> {
+async function freeVariant(request: AvailabilityRequest, deps: AvailabilityDeps, appNames: PlatformNames | undefined): Promise<string | undefined> {
   // Without the platform's names no variant can be shown to be free.
-  if (!appNames) return undefined
+  if (!appNames?.complete) return undefined
   for (let n = 2; n < 2 + SUGGESTION_TRIES; n++) {
     if (deps.signal?.aborted) return undefined
     const candidate = numberedUrlName(request.urlName, n)

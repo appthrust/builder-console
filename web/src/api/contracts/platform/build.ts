@@ -37,9 +37,25 @@ import { z } from 'zod'
 import type {
   BuildDraft, BuildDraftList, BuildExecution, BuildExecutionStep, BuildGeneration, BuildTurn, CreationPlanValidation, DraftDeletion, ImplementationRun, ImplementationTask,
 } from '../../../model/contracts/build'
-import { absentMeansEmpty, openEnum } from '../../boundary'
+import { absentMeansEmpty, appendResponseIssues, independentRows, openEnum, unreadableRowIssues, type ResponseIssue } from '../../boundary'
 import { platformContract } from '../define'
 import { excelAnalysisReader, excelProgressReader, uiDesignReader } from './excel'
+import { creationApprovalReader, creationPlanReader } from './stored-plan'
+
+// A present but unreadable value is not an absent one. No part of it escapes the reader.
+const unreadable = z.unknown().transform(() => ({ kind: 'unknown' as const }))
+const storedPlan = z.union([creationPlanReader.transform((value) => ({ kind: 'known' as const, value })), unreadable])
+const storedApproval = z.union([creationApprovalReader.transform((value) => ({ kind: 'known' as const, value })), unreadable])
+
+export function draftRecoveries(draft: BuildDraft, prefix = ''): ResponseIssue[] {
+  const issues: ResponseIssue[] = []
+  if (draft.creationPlanUnreadable) issues.push({ path: `${prefix}/creationPlan`, code: 'invalid_value' })
+  if (draft.creationExecutions.some((execution) => execution.approvalUnreadable)) issues.push({ path: `${prefix}/creationExecutions/*/approval`, code: 'invalid_value' })
+  return issues
+}
+
+/** Platform projection fields whose missing reference is sent as "", otherwise a DNS label. */
+export const dnsLabelOrEmpty = z.union([z.literal(''), DnsLabelName])
 
 /** The canonical enum's values, read as an open enum (shared by this file and workspace.ts). */
 export function openCanonical<K extends string>(canonical: { options: readonly K[] }) {
@@ -69,7 +85,11 @@ const stepReader: z.ZodType<BuildExecutionStep> = ApplicationDraftCreationExecut
 export const executionReader: z.ZodType<BuildExecution> = ApplicationDraftCreationExecution.extend({
   status: openCanonical(ApplicationDraftCreationExecutionStatus),
   steps: z.array(stepReader).max(20),
-})
+  approval: storedApproval.optional(),
+}).transform(({ approval, ...execution }) => ({
+  ...execution,
+  ...(approval?.kind === 'known' ? { approval: approval.value } : approval ? { approvalUnreadable: true as const } : {}),
+}))
 
 export const taskReader: z.ZodType<ImplementationTask> = ApplicationDraftImplementationTask.extend({
   status: openCanonical(ApplicationDraftImplementationTaskStatus),
@@ -97,12 +117,16 @@ export const draftReader: z.ZodType<BuildDraft> = ApplicationDraft.extend({
   phase: openCanonical(ApplicationDraftPhase),
   excelAnalysis: excelAnalysisReader.optional(),
   uiDesign: uiDesignReader.optional(),
+  creationPlan: storedPlan.optional(),
   creationExecutions: creationExecutions.schema,
   creationPlanGenerations: creationPlanGenerations.schema,
   conversationTurns: conversationTurns.schema,
   implementationRuns: implementationRuns.schema,
   createdSourceRepositories: createdSourceRepositories.schema,
-})
+}).transform(({ creationPlan, ...draft }) => ({
+  ...draft,
+  ...(creationPlan?.kind === 'known' ? { creationPlan: creationPlan.value } : creationPlan ? { creationPlanUnreadable: true as const } : {}),
+}))
 
 /** A write's answer: the written resource (the envelope's operation receipt is not read). */
 const resourceOf = <D>(reader: z.ZodType<D>) => z.object({ resource: reader }).transform(({ resource }) => resource)
@@ -117,6 +141,7 @@ export const getApplicationDraftContract = platformContract({
   successStatuses: [200],
   reader: draftReader,
   fieldPolicies: draftFieldPolicies,
+  recoveries: draftRecoveries,
 })
 
 export const listApplicationDraftsContract = platformContract({
@@ -124,8 +149,12 @@ export const listApplicationDraftsContract = platformContract({
   method: 'GET',
   routeTemplate: DRAFTS,
   successStatuses: [200],
-  reader: z.object({ data: z.array(draftReader) }) satisfies z.ZodType<BuildDraftList>,
-  fieldPolicies: nested('/data/*'),
+  reader: independentRows(draftReader, DnsLabelName) satisfies z.ZodType<BuildDraftList>,
+  recoveries: (rows) => {
+    const issues = [...unreadableRowIssues(rows)]
+    for (const draft of rows.data) appendResponseIssues(issues, draftRecoveries(draft, '/data/*'))
+    return issues
+  },
 })
 
 export const createApplicationDraftContract = platformContract({
@@ -135,6 +164,7 @@ export const createApplicationDraftContract = platformContract({
   successStatuses: [201],
   reader: resourceOf(draftReader),
   fieldPolicies: nested('/resource'),
+  recoveries: (draft) => draftRecoveries(draft, '/resource'),
 })
 
 export const updateApplicationDraftContract = platformContract({
@@ -144,6 +174,7 @@ export const updateApplicationDraftContract = platformContract({
   successStatuses: [200],
   reader: resourceOf(draftReader),
   fieldPolicies: nested('/resource'),
+  recoveries: (draft) => draftRecoveries(draft, '/resource'),
 })
 
 export const deleteApplicationDraftContract = platformContract({
@@ -162,6 +193,7 @@ export const cleanupCreationResourcesContract = platformContract({
   successStatuses: [200],
   reader: resourceOf(draftReader),
   fieldPolicies: nested('/resource'),
+  recoveries: (draft) => draftRecoveries(draft, '/resource'),
 })
 
 export const validateCreationPlanContract = platformContract({
@@ -180,6 +212,7 @@ export const beginCreationExecutionContract = platformContract({
   successStatuses: [200, 202],
   reader: resourceOf(draftReader),
   fieldPolicies: nested('/resource'),
+  recoveries: (draft) => draftRecoveries(draft, '/resource'),
 })
 
 export const runCreationExecutionContract = platformContract({
@@ -189,6 +222,7 @@ export const runCreationExecutionContract = platformContract({
   successStatuses: [200, 202],
   reader: resourceOf(draftReader),
   fieldPolicies: nested('/resource'),
+  recoveries: (draft) => draftRecoveries(draft, '/resource'),
 })
 
 export const createConversationTurnContract = platformContract({
@@ -231,6 +265,7 @@ export const addWorkbookContract = platformContract({
   successStatuses: [201],
   reader: z.object({ draft: draftReader, workbook: ApplicationDraftWorkbookSummary }),
   fieldPolicies: nested('/draft'),
+  recoveries: ({ draft }) => draftRecoveries(draft, '/draft'),
 })
 
 export const removeWorkbookContract = platformContract({
@@ -240,4 +275,5 @@ export const removeWorkbookContract = platformContract({
   successStatuses: [200],
   reader: draftReader,
   fieldPolicies: draftFieldPolicies,
+  recoveries: draftRecoveries,
 })

@@ -352,12 +352,11 @@ export interface PlanSummary {
 export function summarizeCreationPlan(plan: CreationPlan): PlanSummary {
   const stack = plan.applicationStackRequest
   const parts: PlanPart[] = []
-  // A plan restored by creation cleanup is persisted with `representation: null`; the Go DTO has no omitempty.
   if (plan.applicationSourceRepositoryRequest || plan.representation?.includes('SourceRepository')) parts.push('source')
   if (stack?.web) parts.push('web')
   if (stack?.database) parts.push('database')
   const appName = stack?.application?.name ?? stack?.applicationName
-  const publish = stack?.publish
+  const publish = stack?.publish?.enabled ? stack.publish : undefined
   const url = publish?.customDomain
     ? publish.hostnamePattern === 'wildcard' && publish.subdomain
       ? appUrl(publish.subdomain, publish.customDomain)

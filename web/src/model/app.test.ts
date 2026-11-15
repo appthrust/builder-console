@@ -334,6 +334,17 @@ describe('deriveConsoleApp', () => {
     expect(app.status).toBe('live')
   })
 
+  test.each(['applicationId', 'branchId', 'componentId'] as const)('a publish with an empty %s is never attributed from the list or stack snapshot', (field) => {
+    const unreferenced = { ...succeededPublish, id: 'unreferenced', [field]: '', publicUrl: 'https://unrelated.example.test/' }
+    const app = deriveConsoleApp(sources({ publishes: [unreferenced, succeededPublish], stack: { ...stack, publish: unreferenced } }))
+    expect(app.status).toBe('live')
+    expect(app.url).toBe(succeededPublish.publicUrl)
+    const alone = deriveConsoleApp(sources({ publishes: [unreferenced], stack: { ...stack, publish: unreferenced } }))
+    expect(alone.publish).toBeUndefined()
+    expect(alone.url).toBeUndefined()
+    expect(alone.status).toBe('live')
+  })
+
   test('failed: a blocked component', () => {
     const app = deriveConsoleApp(
       sources({

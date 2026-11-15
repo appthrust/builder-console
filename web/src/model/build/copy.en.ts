@@ -2,6 +2,7 @@ import type { textJa } from './copy'
 
 export const textEn: typeof textJa = {
   intent: { reply: '### Follow-up', publish: 'Publish: yes' },
+  unreadablePlan: { title: 'The saved plan could not be read', detail: 'This console cannot show the contents of the plan saved on the platform.' },
   questions: {
     firstTurn: 'Ask me one question at a time about the decisions needed to build this app.',
     kickoffReply: 'Propose an app from this',

@@ -4,6 +4,7 @@ import { textEn } from './copy.en'
 
 /** Japanese wording is the default contract; keep the English tree in sync. */
 export const textJa = {
+  unreadablePlan: { title: 'この相談は続けられません', detail: '基盤に保存された変更計画を、このコンソールでは読めません。アプリのページに戻り、新しい改善の相談を始めてください。' },
   stageLabels: { ask: '聞く', fix: '直す', check: '確認' } satisfies Record<ImproveStage, string>,
   /** The session's state in one word (header pill, 作りかけ list); `done` is `updated(version)`. */
   state: { asking: '直しています', proposed: '変更案があります', running: '直しています', failed: '止まっています', unsupported: '状態を確認できません' } satisfies Record<Exclude<ImprovePhase, 'done'>, string>,

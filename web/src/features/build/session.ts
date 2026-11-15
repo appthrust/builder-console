@@ -62,14 +62,15 @@ export function forgetBuildSession(draftId: string, storage?: Pick<Storage, 'rem
 }
 
 /** Persist the reservation with the queued first turn before starting its request. */
-export function startConversation(session: BuildSession, draft: Pick<BuildDraft, 'conversationTurns' | 'creationPlan' | 'creationExecutions' | 'phase'>, at: string): BuildSession {
+export function startConversation(session: BuildSession, draft: Pick<BuildDraft, 'conversationTurns' | 'creationPlan' | 'creationPlanUnreadable' | 'creationExecutions' | 'phase'>, at: string): BuildSession {
   // Only a draft known to be before creation opens the conversation; an unknown phase starts nothing.
+  if (draft.creationPlanUnreadable) return session
   if (session.kickoffSent || session.pending.length || draft.conversationTurns.length || draft.creationPlan || draft.creationExecutions.length || draft.phase.kind !== 'known' || draft.phase.value === 'created') return session
   return queueReply({ ...session, kickoffSent: true }, buildCopy.questions.firstTurn, at)
 }
 
 /** While 用意する runs and the AI is idle, queue the hidden preparation turn once. */
-export function startPrepareConversation(session: BuildSession, draft: Pick<BuildDraft, 'conversationTurns' | 'creationPlanGenerations' | 'creationExecutions' | 'publishPreferences'>, at: string): BuildSession {
+export function startPrepareConversation(session: BuildSession, draft: Pick<BuildDraft, 'conversationTurns' | 'creationPlanGenerations' | 'creationPlanUnreadable' | 'creationExecutions' | 'publishPreferences'>, at: string): BuildSession {
   const turns = draft.conversationTurns
   if ((draft.publishPreferences?.name && draft.publishPreferences.shareScope) || session.pending.length || session.messages.some((message) => message.role === 'user' && isPrepareTurn(message.text)) || !isBuildPending(draft.creationExecutions.at(-1))) return session
   // The AI must be known to be idle: a turn or generation in a state this console does not know may still run.

@@ -42,9 +42,9 @@ import type {
   AppPublish, AppRelease, AppStack, ComponentConfig, ComponentLogs, ComponentSummary, DeletionAccepted, PlatformApplication,
   PublishAccess, ReleaseOverview, ReleaseState, RollbackStarted,
 } from '../../../model/contracts/app'
-import { absentMeansEmpty, openEnum } from '../../boundary'
+import { absentMeansEmpty, independentRows, openEnum, unreadableRowIssues } from '../../boundary'
 import { platformContract } from '../define'
-import { openCanonical } from './build'
+import { dnsLabelOrEmpty, openCanonical } from './build'
 
 const PROJECT = '/api/v1/projects/{projectId}'
 const BRANCH_COMPONENT = `${PROJECT}/applications/{applicationId}/branches/{branchId}/components/{componentId}`
@@ -62,6 +62,9 @@ export const publishAccessReader: z.ZodType<PublishAccess> = z.object({
 })
 
 export const publishReader: z.ZodType<AppPublish> = Publish.pick({ id: true, applicationId: true, branchId: true, componentId: true, publicUrl: true, tailnetUrl: true }).extend({
+  applicationId: dnsLabelOrEmpty,
+  branchId: dnsLabelOrEmpty,
+  componentId: dnsLabelOrEmpty,
   phase: openCanonical(PublishPhase).optional(),
   access: publishAccessReader.optional(),
 })
@@ -69,6 +72,7 @@ export const publishReader: z.ZodType<AppPublish> = Publish.pick({ id: true, app
 export const stackReader: z.ZodType<AppStack> = ApplicationStack.pick({
   id: true, projectId: true, templateId: true, imageRef: true, applicationId: true, branchId: true, webComponentId: true, databaseComponentId: true, sourceRepositoryRefName: true,
 }).extend({
+  templateId: dnsLabelOrEmpty,
   sourceKind: openCanonical(ApplicationTemplateSourceKind),
   publish: publishReader.optional(),
   buildFailure: BuildFailure.pick({ lines: true }).optional(),
@@ -128,7 +132,8 @@ export const listApplicationStacksContract = platformContract({
   method: 'GET',
   routeTemplate: `${PROJECT}/application-stacks`,
   successStatuses: [200],
-  reader: listOf(stackReader),
+  reader: independentRows(stackReader, DnsLabelName),
+  recoveries: unreadableRowIssues,
 })
 
 export const listProjectPublishesContract = platformContract({

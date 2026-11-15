@@ -598,9 +598,20 @@ describe('an unreadable 2xx answer to a create step (X5: no resend, readback onl
 
   test('a readback that cannot read rejects; the step stays unconfirmed for the caller', async () => {
     const failure = await fail(submitCreate(request, {}, deps({ createStack: malformed }).value))
-    const broken = deps({ stacks: () => json({ data: [{ id: SECRET }] }) })
+    const broken = deps({ stacks: () => json({ data: null }) })
     await expect(confirmCreate(request, failure.progress, broken.value)).rejects.toMatchObject({ code: 'response_contract_invalid', outcome: 'read_failed' })
     expect(failure.progress.unconfirmed).toBe('platform')
+  })
+
+  test('any unreadable stack row keeps the readback unconfirmed, even beside a matching candidate', async () => {
+    const failure = await fail(submitCreate(request, {}, deps({ createStack: malformed }).value))
+    for (const bad of [{ id: 'bad' }, {}]) {
+      const readback = deps({ stacks: () => json({ data: [wireStack('mitsumori', 'mitsumori', 'mitsumori-src'), bad] }) })
+      const result = await confirmCreate(request, failure.progress, readback.value)
+      expect(result).toEqual({ progress: failure.progress })
+      expect(result.progress.candidate).toBeUndefined()
+      expect(result.progress.unconfirmed).toBe('platform')
+    }
   })
 
   test('a source repository the readback cannot see yet is not created twice: the resend reuses the first attempt\'s key', async () => {

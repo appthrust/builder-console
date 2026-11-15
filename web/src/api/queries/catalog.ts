@@ -1,7 +1,8 @@
 // What the create paths read: connections, repositories, templates, stack
 // definitions and creation tools. Every answer is decoded at the boundary
-// (contracts/platform/catalog.ts); a failed read is the query's error, never
-// an empty list.
+// (contracts/platform/catalog.ts). Only a forbidden reusable-registry list is
+// unavailable to this caller; other failed reads remain query errors.
+import { ORPCError } from '@orpc/client'
 import { keepPreviousData, queryOptions, skipToken, useQueries, useQuery } from '@tanstack/react-query'
 import type { CreateConnections, SourceRepositoryRequest } from '../../model/contracts/catalog'
 import { publishDomainPending } from '../../model/create'
@@ -25,8 +26,9 @@ export const CREATE_CONNECTIONS_POLL_MS = 10_000
 /**
  * The project's GitHub source connections, the reusable registry connections
  * (the Platform API has no project-scoped registry-connections route) and the
- * project's domain inventory (the publish base for the app URL). All three
- * must be read: one failed answer fails the query (the last good value stays).
+ * project's domain inventory (the publish base for the app URL). A registry
+ * 403 means no reusable registries are visible to this caller, not no domain.
+ * Every other failure still fails the query (the last good value stays).
  */
 export function createConnectionsQuery(projectId: string) {
   return queryOptions({
@@ -34,7 +36,10 @@ export function createConnectionsQuery(projectId: string) {
     queryFn: async (): Promise<CreateConnections> => {
       const [sources, registries, domains] = await Promise.all([
         apiGateway.platform(listSourceConnectionsContract, { projectId }),
-        apiGateway.platform(listRegistryConnectionsContract, undefined),
+        apiGateway.platform(listRegistryConnectionsContract, undefined).catch((error: unknown) => {
+          if (error instanceof ORPCError && error.status === 403) return { data: [] }
+          throw error
+        }),
         apiGateway.platform(listDomainsContract, { projectId }),
       ])
       return { sources: sources.data, registries: registries.data, domains: domains.data }

@@ -19,6 +19,20 @@ import { preserveLanguage } from '../../../test/language'
 import { AppPage } from './app-page'
 import { text } from './copy'
 import { sharingCopy } from '../../copy/sharing'
+import { MinePage } from '../discover/mine'
+import { DraftsPage } from '../discover/drafts'
+import { text as discoverText } from '../discover/copy'
+import { storedDraftWire } from '../../api/testing/stored-plan'
+import { buildKeys } from '../../api/queries/build'
+import { beginBuild } from '../build/entry'
+import { buildCopy } from '../../model/build/copy'
+import { ImprovePage } from '../improve/improve-page'
+import { text as improveText } from '../improve/copy'
+import { initialSession, saveBuildSession } from '../build/session'
+import { saveConsoleCreation } from '../build/console-session-state'
+import { rewriteDraftWire } from '../../api/testing/build-domain'
+import { useAppViews } from './use-app-views'
+import { useDeleteApp, useDiscardDraft } from './mutations'
 
 const SECRET = 'SENTINEL-app-page-5d21'
 const APP_ID = 'a-mitsumori'
@@ -98,8 +112,17 @@ function AppRoute({ tab }: { tab: AppTab }) {
   return app ? <AppPage key={app.id} app={app} tab={tab} /> : null
 }
 
+/** Exercises stale/programmatic mutation entrypoints with a real decoded app view. */
+function DeletionProbe() {
+  const app = useQuery(appQuery(APP_ID)).data!
+  const view = useAppViews('commerce').viewFor(app)
+  const remove = useDeleteApp('commerce', app, view)
+  const discard = useDiscardDraft(app, view)
+  return <><button onClick={() => remove.mutate()}>Attempt delete</button><button onClick={() => discard.mutate()}>Attempt discard</button>{remove.isError && discard.isError ? <p>Both writes refused</p> : null}</>
+}
+
 /** The app page on the app's query defaults (retry policy included), with polling left to the test. */
-async function renderApp(tab: AppTab) {
+async function renderApp(tab: AppTab, scene: 'app' | 'mine' | 'drafts' | 'deletion-probe' | { improve: string } = 'app') {
   client = new QueryClient({ defaultOptions: { queries: { ...appQueryClient.getDefaultOptions().queries, retryDelay: 0, refetchInterval: false, refetchOnWindowFocus: false } } })
   await Promise.all([client.fetchQuery(meQuery), client.fetchQuery(groupsQuery), client.fetchQuery(appQuery(APP_ID))])
   const rootRoute = createRootRoute()
@@ -110,7 +133,7 @@ async function renderApp(tab: AppTab) {
   document.body.append(container)
   root = createRoot(container)
   await act(async () => {
-    root!.render(<QueryClientProvider client={client}><RouterContextProvider router={router}><UnsavedChangesProvider><AppRoute tab={tab} /></UnsavedChangesProvider></RouterContextProvider></QueryClientProvider>)
+    root!.render(<QueryClientProvider client={client}><RouterContextProvider router={router}><UnsavedChangesProvider>{typeof scene === 'object' ? <ImprovePage draftId={scene.improve} /> : scene === 'mine' ? <MinePage /> : scene === 'drafts' ? <DraftsPage /> : scene === 'deletion-probe' ? <DeletionProbe /> : <AppRoute tab={tab} />}</UnsavedChangesProvider></RouterContextProvider></QueryClientProvider>)
   })
   await settle()
 }
@@ -413,4 +436,220 @@ describe('a publishes read that failed', () => {
     await tick(keys.publishes('commerce'))
     expect(container.querySelector('header')!.textContent).toContain(copy.status.live)
   })
+})
+
+describe('APT-1109: isolated rows keep the rest of the project readable', () => {
+  const stackList = new RegExp(`^${PROJECT}/application-stacks$`)
+  const draftList = new RegExp(`^${PROJECT}/application-drafts$`)
+  const rows = () => [...container.querySelectorAll('tbody tr')]
+  const row = (name: string) => rows().find((item) => item.textContent?.includes(name))!
+
+  test('one unreadable stack becomes unknown while a normal neighbour keeps its status, without a project failure notice', async () => {
+    await renderApp('overview', 'mine')
+    const before = rows().map((item) => item.textContent)
+    expect(before.length).toBeGreaterThan(1)
+    rewrites.push({ method: 'GET', path: stackList, once: false, body: (wire) => ({ ...wire, data: (wire.data as Json[]).map((stack) => stack.id === 'mitsumori' ? { ...stack, templateId: 'Bad Id!' } : stack) }) })
+    await tick(keys.stacks('commerce'))
+    expect(pageText()).not.toContain(discoverText.list.statusFailed)
+    expect(row('見積').textContent).toContain(text.unsupported.label)
+    expect(rows().filter((item) => !item.textContent?.includes('見積')).map((item) => item.textContent)).toEqual(before.filter((value) => !value?.includes('見積')))
+    expect(row('見積').textContent).not.toContain(discoverText.list.resume)
+    expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
+    // Without an id only apps lacking their own readable stack become unknown.
+    rewrites = [{ method: 'GET', path: stackList, once: false, body: (wire) => ({ ...wire, data: (wire.data as Json[]).map((stack) => stack.id === 'mitsumori' ? { templateId: 'Bad Id!' } : stack) }) }]
+    await tick(keys.stacks('commerce'))
+    expect(row('見積').textContent).toContain(text.unsupported.label)
+    expect(rows().filter((item) => !item.textContent?.includes('見積')).map((item) => item.textContent)).toEqual(before.filter((value) => !value?.includes('見積')))
+  })
+
+  test('opening the app tied to an unreadable stack offers no edit or deletion', async () => {
+    rewrites.push({ method: 'GET', path: stackList, once: false, body: (wire) => ({ ...wire, data: (wire.data as Json[]).map((stack) => stack.id === 'mitsumori' ? { ...stack, applicationId: '' } : stack) }) })
+    await renderApp('overview')
+    expect(container.querySelector('header')?.textContent).toContain(text.unsupported.label)
+    expect(buttons().some((item) => item.textContent?.trim() === text.header.menu && !item.disabled)).toBe(false)
+    expect(container.querySelector('[data-testid=\"improve-with-ai\"]')).toBeNull()
+    expect(pageText()).not.toContain(discoverText.list.statusFailed)
+    expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
+  })
+
+  test('an unreadable plan in the draft list does not change normal app statuses', async () => {
+    await renderApp('overview', 'mine')
+    const before = rows().map((item) => item.textContent)
+    rewrites.push({ method: 'GET', path: draftList, once: false, body: () => ({ data: [{ ...storedDraftWire, creationPlan: { representation: ['future-kind'] } }] }) })
+    await tick(buildKeys.drafts('commerce'))
+    expect(rows().map((item) => item.textContent)).toEqual(before)
+    expect(pageText()).not.toContain(discoverText.list.statusFailed)
+  })
+
+  test('a bad draft row remains inert without blocking a new legacy AI creation', async () => {
+    rewrites.push({ method: 'GET', path: draftList, once: false, body: () => ({ data: [storedDraftWire, { ...storedDraftWire, id: 'broken-draft', title: SECRET, createdAt: 'not-a-date' }] }) })
+    await renderApp('overview', 'drafts')
+    expect(pageText()).toContain(storedDraftWire.title)
+    const unreadable = [...container.querySelectorAll('li')].find((item) => item.textContent === discoverText.drafts.unreadable)!
+    expect(unreadable).toBeDefined()
+    expect(unreadable.querySelector('a, button')).toBeNull()
+    expect(pageText()).not.toContain(SECRET)
+    expect(pageText()).not.toContain(discoverText.list.statusFailed)
+    const created = await beginBuild('commerce', 'a different app', { groupId: 'g-team-a', ownerSubject: 'owner' })
+    expect(created.id).not.toBe('broken-draft')
+    expect(requests.filter((item) => item.method !== 'GET')).toEqual([{ method: 'POST', path: `${PROJECT}/application-drafts`, status: 201 }])
+    expect(requests.some((item) => item.path.endsWith('/broken-draft'))).toBe(false)
+    // An independently readable exact match still resumes as before.
+    expect((await beginBuild('commerce', storedDraftWire.intent, { groupId: 'g-team-a', ownerSubject: 'owner' })).id).toBe(storedDraftWire.id)
+  })
+})
+
+test('unreferenced project publishes leave the normal app status and URL unchanged', async () => {
+  await renderApp('overview')
+  const status = container.querySelector('[data-testid="status-text"]')!.textContent
+  const url = container.querySelector('[data-testid="app-url"]')!.getAttribute('href')
+  rewrites.push({ method: 'GET', path: PUBLISHES, once: false, body: (wire) => ({ ...wire, data: [{ id: 'unreferenced', applicationId: '', branchId: '', componentId: '', phase: 'succeeded', publicUrl: 'https://unrelated.example.test/' }, ...(wire.data as Json[])] }) })
+  await tick(keys.publishes('commerce'))
+  expect(client.getQueryState(keys.publishes('commerce'))?.status).toBe('success')
+  expect(container.querySelector('[data-testid="status-text"]')!.textContent).toBe(status)
+  expect(container.querySelector('[data-testid="app-url"]')!.getAttribute('href')).toBe(url)
+  expect(pageText()).not.toContain(discoverText.list.statusFailed)
+  expect(pageText()).not.toContain('unrelated.example.test')
+})
+
+test('an unreadable improvement offers no generation and the app can start a new improvement instead', async () => {
+  const response = await mockFetch(`${PROJECT}/application-drafts`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'improvement', applicationStackId: 'mitsumori', intent: 'Change the list', title: 'Unreadable improvement' }) })
+  expect(response.status).toBe(201)
+  const draft = (await response.json()).resource as Json
+  const id = draft.id as string
+  rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/application-drafts(?:$|/${id}$)`), once: false, body: (wire) => rewriteDraftWire(wire, id, (draft) => ({ ...draft, creationPlan: { representation: ['future-kind'] } })) })
+  requests = []
+  await renderApp('overview', { improve: id })
+  expect(pageText()).toContain(improveText.unreadablePlan.detail)
+  expect(buttons().some((item) => item.textContent?.trim() === buildCopy.failure.plan.replan)).toBe(false)
+  expect(container.querySelector<HTMLTextAreaElement>('textarea')?.disabled).toBe(true)
+  expect([...container.querySelectorAll('a')].some((link) => link.getAttribute('href') === APP_PATH)).toBe(true)
+  expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
+  await act(async () => { root?.unmount() })
+  container.remove()
+  client.clear()
+  await renderApp('overview')
+  await click(container.querySelector<HTMLButtonElement>('[data-testid="improve-with-ai"]')!)
+  expect(dialog()).not.toBeNull()
+  const message = dialog()!.querySelector<HTMLTextAreaElement>('textarea')!
+  await act(async () => { type(message, 'Start a different improvement') })
+  await click(button(improveText.entry.submit, dialog()!))
+  expect(count('POST', new RegExp(`^${PROJECT}/application-drafts$`))).toBe(1)
+  expect(count('POST', /creation-plan-generations$/)).toBe(0)
+  expect(requests.some((item) => item.method === 'DELETE' || (item.method === 'PATCH' && item.path.endsWith(`/${id}`)))).toBe(false)
+})
+
+test('any unreadable stack keeps an unmatched wizard app unknown without resume or discard', async () => {
+  await mockFetch('/api/console/__mock/app-draft', { method: 'POST' })
+  rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/application-stacks$`), once: false, body: (wire) => ({ ...wire, data: [...wire.data as Json[], { id: 'stack-3f1234567890abcd', templateId: 'Bad Id!' }] }) })
+  requests = []
+  await renderApp('overview', 'drafts')
+  const row = container.querySelector('a[href$="/draft-stopped"]')!.closest('li')!
+  expect(row.textContent).toContain(text.unsupported.label)
+  expect(row.textContent).not.toContain(discoverText.list.resume)
+  expect(row.querySelectorAll('button')).toHaveLength(0)
+  expect(requests.every((item) => item.method === 'GET')).toBe(true)
+})
+
+test('all unreadable stack rows keep apps listed with unknown status', async () => {
+  rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/application-stacks$`), once: false, body: (wire) => ({ ...wire, data: (wire.data as Json[]).map((stack) => ({ ...stack, templateId: 'Bad Id!' })) }) })
+  await renderApp('overview', 'mine')
+  const rows = [...container.querySelectorAll('tbody tr')]
+  expect(rows.length).toBeGreaterThan(1)
+  for (const row of rows) expect(row.textContent).toContain(text.unsupported.label)
+  expect(pageText()).not.toContain(copy.mine.empty)
+})
+
+test('all unreadable draft rows remain inert rows rather than an empty state', async () => {
+  rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/application-drafts$`), once: false, body: () => ({ data: [{ ...storedDraftWire, id: 'bad-one', createdAt: 'not-a-date' }, { ...storedDraftWire, id: 'bad-two', kind: 'future-kind' }] }) })
+  await renderApp('overview', 'drafts')
+  const rows = [...container.querySelectorAll('li')].filter((row) => row.textContent === discoverText.drafts.unreadable)
+  expect(rows).toHaveLength(2)
+  for (const row of rows) expect(row.querySelector('button, a')).toBeNull()
+  expect(pageText()).not.toContain(discoverText.drafts.empty)
+})
+
+test('readable drafts sort newest first before unreadable rows', async () => {
+  rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/application-drafts$`), once: false, body: () => ({ data: [
+    { ...storedDraftWire, id: 'bad', createdAt: 'not-a-date' },
+    { ...storedDraftWire, id: 'old', title: 'Older draft', updatedAt: '2026-11-01T00:00:00Z' },
+    { ...storedDraftWire, id: 'new', title: 'Newer draft', updatedAt: '2026-11-15T00:00:00Z' },
+  ] }) })
+  await renderApp('overview', 'drafts')
+  const rows = [...container.querySelectorAll(`ul[aria-label="${discoverText.drafts.title}"] > li`)].map((row) => row.textContent ?? '')
+  expect(rows.findIndex((row) => row.includes('Newer draft'))).toBeLessThan(rows.findIndex((row) => row.includes('Older draft')))
+  expect(rows.at(-1)).toBe(discoverText.drafts.unreadable)
+})
+
+test.each(['platform-v1', 'console-v1'] as const)('an unreadable creating-draft row linked by %s tab state makes its app unknown', async (engine) => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage')
+  const values = new Map<string, string>()
+  Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value), removeItem: (key: string) => values.delete(key) } })
+  restore.push(() => descriptor ? Object.defineProperty(globalThis, 'sessionStorage', descriptor) : Reflect.deleteProperty(globalThis, 'sessionStorage'))
+  if (engine === 'platform-v1') saveBuildSession('creating-draft', { ...initialSession({ projectId: 'commerce', ownerSubject: 'owner', groupId: 'g-team-a', baseIntent: 'Create app' }), createdAppId: APP_ID })
+  else saveConsoleCreation('creating-draft', { groupId: 'g-team-a', prepareRequested: false, reusePlan: false, createdAppId: APP_ID })
+  rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/application-drafts$`), once: false, body: () => ({ data: [{ ...storedDraftWire, id: 'creating-draft', createdAt: 'not-a-date' }] }) })
+  await renderApp('overview')
+  expect(container.querySelector('header')?.textContent).toContain(text.unsupported.label)
+  expect(container.querySelector('[data-testid="app-url"]')?.getAttribute('href')).toBe('https://mitsumori.commerce.appthrust.test/')
+  expect(container.querySelector(`button[aria-label="${text.header.menu}"]`)).toBeNull()
+  expect(buttons().some((item) => item.textContent?.trim() === copy.app.settings.deleteAction && !item.disabled)).toBe(false)
+  expect(container.querySelector('[data-testid="improve-with-ai"]')).toBeNull()
+  await click(button(sharingCopy.title))
+  expect(dialog()).not.toBeNull()
+  expect([...dialog()!.querySelectorAll<HTMLButtonElement>('[role="radio"]')].every((item) => item.disabled)).toBe(true)
+  expect(buttons(dialog()!).some((item) => item.textContent?.trim() === copy.app.settings.save)).toBe(false)
+  expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
+  expect(pageText()).not.toContain(discoverText.list.statusFailed)
+  for (const tab of ['settings', 'releases'] as const) {
+    await act(async () => { root?.unmount() })
+    container.remove()
+    client.clear()
+    await renderApp(tab)
+    const edits = buttons().filter((item) => item.textContent?.trim() === copy.app.settings.deleteAction || /この版に戻す/.test(item.getAttribute('aria-label') ?? ''))
+    expect(edits.length).toBeGreaterThan(0)
+    for (const edit of edits) {
+      expect(edit.disabled).toBe(true)
+      await click(edit)
+    }
+    expect(dialog()).toBeNull()
+    expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
+  }
+})
+
+test.each(['stack', 'build'] as const)('delete and discard hooks refuse an unreadable %s view before any request', async (kind) => {
+  if (kind === 'stack') {
+    rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/application-stacks$`), once: false, body: (wire) => ({ ...wire, data: (wire.data as Json[]).map((stack) => stack.id === 'mitsumori' ? { ...stack, templateId: 'Bad Id!' } : stack) }) })
+  } else {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage')
+    const values = new Map<string, string>()
+    Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value) } })
+    restore.push(() => descriptor ? Object.defineProperty(globalThis, 'sessionStorage', descriptor) : Reflect.deleteProperty(globalThis, 'sessionStorage'))
+    saveConsoleCreation('creating-draft', { groupId: 'g-team-a', prepareRequested: false, reusePlan: false, createdAppId: APP_ID })
+    rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/application-drafts$`), once: false, body: () => ({ data: [{ ...storedDraftWire, id: 'creating-draft', createdAt: 'not-a-date' }] }) })
+  }
+  await renderApp('overview', 'deletion-probe')
+  await click(button('Attempt delete'))
+  await click(button('Attempt discard'))
+  expect(pageText()).toContain('Both writes refused')
+  expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
+})
+
+test.each(['improve', 'repair'] as const)('an unreadable draft row does not block a new %s', async (entry) => {
+  await mockFetch('/api/v1/__mock/codex', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ available: true }) })
+  rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/application-drafts$`), once: false, body: () => ({ data: [{ ...storedDraftWire, id: 'unreadable-row', createdAt: 'not-a-date' }] }) })
+  if (entry === 'repair') rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/application-stacks$`), once: false, body: (wire) => ({ ...wire, data: (wire.data as Json[]).map((stack) => stack.id === 'mitsumori' ? { ...stack, buildFailure: { lines: ['Module not found: example'] } } : stack) }) })
+  requests = []
+  await renderApp('overview')
+  await click(container.querySelector<HTMLButtonElement>(`[data-testid="${entry === 'repair' ? 'repair-build-with-ai' : 'improve-with-ai'}"]`)!)
+  if (entry === 'improve') {
+    const input = dialog()!.querySelector<HTMLTextAreaElement>('textarea')!
+    await act(async () => { type(input, 'Improve this app') })
+    await click(button(improveText.entry.submit, dialog()!))
+  }
+  expect(requests.filter((item) => item.method !== 'GET')).toEqual([
+    { method: 'POST', path: `${PROJECT}/application-drafts`, status: 201 },
+    { method: 'POST', path: expect.stringMatching(/\/application-drafts\/[^/]+\/conversation-turns$/), status: 202 },
+  ])
+  expect(requests.some((item) => item.path.includes('/unreadable-row'))).toBe(false)
 })

@@ -28,7 +28,7 @@ export function ImproveButton({ app, stackId, projectId, initialMessage, actionL
 }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const drafts = useQuery({ ...draftsOptions(projectId), enabled: !initialMessage })
+  const drafts = useQuery(draftsOptions(projectId))
   const [open, setOpen] = useState(false)
   const [intent, setIntent] = useState('')
   const inputId = useId()

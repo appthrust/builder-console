@@ -30,7 +30,8 @@ export function resolveBuildGroup(me: Pick<Me, 'effectiveGroupIds'>, groups: rea
 export async function beginBuild(projectId: string, intent: string, options: { groupId: string; ownerSubject: string; newSessionEngine?: NewSessionEngine }): Promise<{ id: string }> {
   if (!options.groupId) throw new Error(text.page.noGroup.body)
   if (options.newSessionEngine === 'console-v1') return startConsoleBuild(intent, options.groupId)
-  const existing = findResumableDraft((await listDrafts(projectId)).data, intent)
+  const drafts = await listDrafts(projectId)
+  const existing = findResumableDraft(drafts.data, intent)
   if (existing) {
     if (!readBuildSession(existing.id)) saveBuildSession(existing.id, initialSession({ projectId, ownerSubject: options.ownerSubject, groupId: options.groupId, baseIntent: existing.intent }))
     return existing

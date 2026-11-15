@@ -79,7 +79,8 @@ function Session({ draft, stale }: { draft: BuildDraft; stale: ReactNode }) {
     {/* Page-level notices share one inset place under the header, whatever raised them. */}
     {stale || state.phase === 'unsupported' ? <div className="mx-5 mt-3 space-y-3">
       {stale}
-      {state.phase === 'unsupported' ? <Notice tone="warning" title={buildCopy.unsupported.title}>{buildCopy.unsupported.detail}</Notice> : null}
+      {draft.creationPlanUnreadable ? <Notice tone="warning" title={text.unreadablePlan.title}>{text.unreadablePlan.detail}</Notice>
+        : state.phase === 'unsupported' ? <Notice tone="warning" title={buildCopy.unsupported.title}>{buildCopy.unsupported.detail}</Notice> : null}
     </div> : null}
     <div role="tablist" aria-label={text.page.tabs} className="flex shrink-0 border-b border-line bg-white md:hidden">
       {(['conversation', 'artifact'] as const).map((value) => <button key={value} id={`build-tab-${value}`} type="button" role="tab" aria-selected={tab === value} aria-controls={`build-${value}`} tabIndex={tab === value ? 0 : -1} className={cn('min-h-11 flex-1 border-b-2 px-3 text-sm', tab === value ? 'border-accent font-semibold text-stone-900' : 'border-transparent text-stone-500')} onClick={() => setTab(value)} onKeyDown={(event) => {

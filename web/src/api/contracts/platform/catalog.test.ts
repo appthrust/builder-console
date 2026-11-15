@@ -3,6 +3,7 @@ import { assertWireContractCases } from '../../testing/wire-contract-cases'
 import {
   createSourceRepositoryContract,
   createStackContract,
+  listStacksContract,
   getRepositoryDestinationContract,
   listSourceConnectionsContract,
   listTemplatesContract,
@@ -106,6 +107,14 @@ describe('create writes', () => {
       { name: 'the envelope resource', variant: 'present', path: '/resource', wire: { ...repository, operation, resource: repository }, expect: { accept: true, check: (value) => expect([value.id, value.status]).toEqual(['mitsumori-src', { kind: 'known', value: 'pending' }]) } },
       { name: 'no resource', variant: 'absent', path: '/resource', wire: { ...repository, operation }, expect: { accept: false, issues: [{ path: '/resource', code: 'missing' }] } },
       { name: 'null conditions (a nil slice) are broken', variant: 'null', path: '/resource/conditions', wire: { operation, resource: { ...repository, conditions: null } }, expect: { accept: false, issues: [{ path: '/resource/conditions', code: 'invalid_type' }] } },
+    ])
+  })
+
+  test('the stack list used for name checks reads a stack installed from the catalog', () => {
+    assertWireContractCases(listStacksContract, [
+      { name: 'a catalog stack next to a template stack', variant: 'empty', path: '/data/*/templateId', wire: { data: [stack, { ...stack, id: 'builder-console', templateId: '', applicationName: 'builder-console' }] }, expect: { accept: true, check: (value) => expect(value.data.map((item) => [item.applicationName, item.templateId])).toEqual([['mitsumori', 'nextjs-postgres'], ['builder-console', '']]) } },
+      { name: 'a rejected row does not discard normal names', variant: 'unknown', path: '/data/*/templateId', wire: { data: [stack, { ...stack, id: 'taken', templateId: 'Bad Id!' }, { templateId: 'Bad Id!' }] }, expect: { accept: true, check: (value) => { expect(value.data.map((item) => item.applicationName)).toEqual(['mitsumori']); expect(value.unreadable).toEqual([{ id: 'taken' }, {}]) } } },
+      { name: 'bad envelope still fails', variant: 'null', path: '/data', wire: { data: null }, expect: { accept: false } },
     ])
   })
 

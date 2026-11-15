@@ -13,6 +13,7 @@ import { text } from './copy'
 import { isImprovementDraft } from '../../model/improve'
 import { readCreateSession } from '../create/persistence'
 import { readBuildSession } from '../build/session'
+import { readConsoleCreation } from '../build/console-session-state'
 
 export interface AppViews {
   /** Status word + second line for one BusinessApp, joined to the platform by `stackId`. */
@@ -42,7 +43,7 @@ export function useAppViews(projectId: string): AppViews {
   const drafts = useQuery(draftsOptions(projectId))
   const repositories = useSourceRepositories(projectId)
   const applicationRows = applications.data
-  const stackRows = stacks.data ?? NO_STACKS
+  const stackRows = stacks.data?.data ?? NO_STACKS
   const targets = useMemo(
     () =>
       (applicationRows ?? []).filter((application) => !application.status.reason).map((application) => ({
@@ -76,11 +77,19 @@ export function useAppViews(projectId: string): AppViews {
       if (loading) return { status: 'deploying', label: copy.status.deploying, text: copy.common.loading, second: copy.common.loading, draft: app.stackId === null }
       // A read that never answered is not an empty list: nothing is derived from it.
       if (failedQuery) return { status: 'unknown', label: text.unsupported.label, text: copy.common.loadFailed, second: copy.common.loadFailed, draft: app.stackId === null }
+      const unreadable = stacks.data?.unreadable ?? []
+      const readable = stackRows.find((stack) => stack.id === app.stackId)
+      if (unreadable.length && (!readable || unreadable.some((row) => row.id === app.stackId || row.id === app.id))) {
+        return { status: 'unknown', label: text.unsupported.label, text: copy.common.loadFailed, second: copy.common.loadFailed, draft: false, unreadableStack: true }
+      }
+      const unreadableBuild = drafts.data?.unreadable.some((row) => row.id !== undefined &&
+        (readBuildSession(row.id)?.createdAppId === app.id || readConsoleCreation(row.id)?.createdAppId === app.id))
       const session = app.stackId ? undefined : readCreateSession(app.id)
       const application = applicationForStack(app.stackId, input)
       // Build progress comes from the session that made the app; improvement sessions have their own page.
       const draft = drafts.data?.data.find((item) => application && !item.proposalId && !isImprovementDraft(item) && item.createdApplicationId === application.id)
-      const handoff = draft?.creationExecutions?.at(-1)?.approval?.implementationHandoff ?? draft?.creationPlan?.implementationHandoff
+      const execution = draft?.creationExecutions.at(-1)
+      const handoff = execution?.approval?.implementationHandoff ?? draft?.creationPlan?.implementationHandoff
       const build = draft && handoff ? {
         draftId: draft.id,
         initialReleaseId: readBuildSession(draft.id)?.initialReleaseId,
@@ -88,15 +97,16 @@ export function useAppViews(projectId: string): AppViews {
         tasks: draft.implementationRuns?.at(-1)?.tasks,
         run: draft.implementationRuns?.at(-1),
       } : undefined
-      return deriveAppView(app, input, Date.now(), {
+      const view = deriveAppView(app, input, Date.now(), {
         observed: drafts.isSuccess,
         // A job in a state this console does not know may still run: it counts as in progress, never as finished.
-        inProgress: drafts.data?.data.some((item) =>
+        inProgress: Boolean(drafts.data?.unreadable.length) || drafts.data?.data.some((item) =>
           !item.proposalId && [...item.creationPlanGenerations, ...item.creationExecutions].some((operation) => jobState(operation) !== 'settled')
         ),
         progress: session?.progress,
         reason: session?.failure?.message,
       }, build)
+      return unreadableBuild ? { ...view, status: 'unknown', label: text.unsupported.label, text: copy.common.loadFailed, second: copy.common.loadFailed, unreadableBuild: true } : view
     },
     input,
     loading,

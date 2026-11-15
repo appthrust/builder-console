@@ -33,7 +33,7 @@ export function needsPlanRefresh(draft: BuildDraft | undefined, lastPlannedInten
 
 /** The server's accepted kickoff survives missing session storage and OIDC round trips. An unknown phase never starts planning. */
 export function hasUnplannedKickoff(draft: BuildDraft): boolean {
-  return !draft.creationPlan && !draft.creationPlanGenerations.length && !draft.creationExecutions.length
+  return !draft.creationPlanUnreadable && !draft.creationPlan && !draft.creationPlanGenerations.length && !draft.creationExecutions.length
     && !draft.createdApplicationStackId && draft.phase.kind === 'known' && draft.phase.value !== 'created'
     && conversationTurns(draft.conversationTurns).some((turn) => isOneOf(turn.status, 'succeeded') && isKickoffReply(turn.userMessage))
 }
@@ -70,6 +70,7 @@ function knownStage(input: StageInput): StageResult {
   const { draft, generation, turn, execution, implementation, published, now } = input
   const copy = buildCopy.primary
   const none: BuildPrimary = { action: 'none', label: '', enabled: false }
+  if (draft?.creationPlanUnreadable && !execution && !draft.createdApplicationId) return { stage: 'decide', primary: none }
   if (published && !input.appProgress?.buildFailed) return { stage: 'publish', primary: { action: 'continue', label: copy.continue, enabled: true } }
   if (isBuildPending(execution)) return {
     stage: 'build', build: { phase: 'preparing' }, primary: none, progress: input.appProgress?.buildFailed ? input.appProgress : progressCard({ kind: 'prepare', operation: execution, execution, now }),

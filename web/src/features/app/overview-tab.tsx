@@ -176,7 +176,7 @@ export function OverviewTab({
               [
                 [copy.app.overview.advanced.image, stack?.imageRef],
                 [copy.app.overview.advanced.port, port],
-                [copy.app.overview.advanced.template, stack?.templateId],
+                [copy.app.overview.advanced.template, stack?.templateId || undefined],
                 [copy.app.overview.advanced.appName, app.appName ?? undefined],
               ] as const
             ).map(([label, value]) => (

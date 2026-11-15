@@ -38,12 +38,88 @@ not raw clients or Console schema directories. No direct `fetch`,
 exceptions, including aliases, type-only imports, barrels and dynamic imports.
 Domain declarations may derive canonical Platform types; only API adapters
 read wire responses. The console-v1 conversation flow obeys the same rules.
-Mocks infer their wire types from the canonical schemas.
+Mocks infer their ordinary wire types from the canonical schemas; explicitly
+stored AI output may differ from request schemas.
 
-Only decoded values enter caches. An unreadable refetch retains the last
-successful snapshot; an unreadable write is unconfirmed and must be read back,
-not blindly repeated. Contract tests replay writer fixtures and malformed
-variants through the real gateway.
+Only decoded values enter caches. An unreadable response envelope or detail
+retains the last successful snapshot on refresh; an unreadable write envelope
+is unconfirmed and must be read back, not blindly repeated.
+
+Draft plans and execution approvals are read independently: an invalid stored
+value is dropped entirely, with `creationPlanUnreadable: true` or
+`approvalUnreadable: true`, never a partially validated object. A stored
+`publish.enabled: false` block is read as absent, matching Platform's plan
+prompt; the Console's ordinary default-publication decisions are unchanged.
+Approval snapshots reuse the plan field schemas for `summary` (nonempty,
+without the snapshot's 500-character cap) and `toolPlan` (without its extra
+20-item cap). Other shared request/handoff schemas remain unchanged.
+
+Starting a new creation requires a readable plan: an unreadable plan cannot
+supply a default-publication, destination-binding or rename replacement, a
+validation or a new begin. Re-planning is offered only before an execution or
+created application exists. Existing executions are still run/resumed and
+observed by id/status; their failure reporting, Console app binding, publication
+repair and completion are not stopped by unreadable plan or approval content.
+Implementation uses a readable approval handoff, otherwise a readable plan or
+the already observed run/tasks. The Console's own request key is not discarded
+because a readback approval is unreadable. Known conversation content stays visible.
+
+Re-planning is not the only action on a creation draft: reads and discard remain
+available when their normal ownership/busy/resource checks allow them
+(discard may clean up known resources before deletion). A created app may
+still expose publication settings/access, mark-published, implementation
+actions from readable task evidence, or a new AI repair/improvement from a
+known build failure. None reconstructs content from an unreadable plan or
+approval. An improvement draft with an unreadable plan cannot continue and
+does not offer creation-plan generation; return to the app and start a new
+improvement. Its old draft remains listed and untouched and is excluded from
+the resumable-improvement lookup.
+
+Normalizing a response never sends a plan back by itself. Only the existing
+destination-binding, default-publication and rename PATCH builders send
+`creationPlan` as an explicit replacement. Validation sends no plan; begin
+sends the fingerprint and client request id; run sends only route ids.
+Plans with `database.lifecycle: {}` or a placement missing `placementProfileRef`
+remain unreadable; standalone `runtimeProfileRef` without `placement` is
+already readable.
+
+Project publish references may be empty strings (`applicationId`, `branchId`,
+`componentId`), including a stack's embedded publish snapshot. Such publishes
+remain readable but are attributed to no app. Other malformed publish rows
+still fail their list; row isolation for that list is not part of this change.
+
+The draft list and both stack-list readers isolate rejected rows as
+`{ data: ReadableRow[], unreadable: { id?: string }[] }`. Only an independently
+validated DNS-label id is retained. Bad envelopes still fail. Recoveries use
+the existing contract-failure reporter with `outcome: 'partial'`, schema-only
+field paths, deduplication and the existing `MAX_ISSUES` cap; no rejected
+content or ids are reported, and partial reports do not construct Error stacks.
+Other project lists retain their existing all-or-nothing contract.
+
+An unreadable stack's known id is conservatively taken, but does not reveal its
+application name: any unreadable stack row makes name availability incomplete
+and prevents free-name suggestions. Any app without a readable matching stack
+is unknown while unreadable stack rows exist, with no resume/delete offered.
+Readable matching stacks remain unaffected. Any unreadable stack keeps creation
+readback unconfirmed.
+
+Unreadable drafts appear as inert 「読めない作りかけ」 rows, after readable rows
+in deterministic order, and keep the list polling at the unknown-state interval.
+A readable exact match can still resume; unreadable rows are never resumed,
+written or deleted, but do not block a new AI creation or improvement.
+A possible second session for the same intent/app is an accepted cost.
+An unreadable creating-draft row linked through saved creation-tab state makes
+that app unknown and read-only, while preserving its readable stack and live URL.
+Known limit: id-less or unlinked unreadable draft rows cannot be associated with
+an app, so they leave that app's existing status behavior unchanged.
+Known limit: when both plan and approval are unreadable and no run supplies readable tasks, the implementation checklist is empty and the Console does not offer publication.
+Known limit: with an unreadable plan, Console app binding waits until its application appears in the applications list.
+Shared behavior: the registry-403 exception also applies on the AI build page and 基盤の設定, not only the new-app page.
+
+The dev mock's `POST /api/v1/__mock/stored-plan` accepts `draftId` and
+`mode: unpublished | unreadable | null-representation`; a new plan replaces
+that stored output. Contract and page tests drive these paths through real
+readers and request logs.
 
 Draft writes cancel older reads before replacing cached data. Excel calls
 `useQuery` inside its hook, so each render gets the current optimistic query
@@ -64,6 +140,13 @@ seconds while no usable domain exists and a managed publish base has either
 pending reason. When a domain becomes usable, the existing AI/template controls
 become available without reloading and polling stops. Missing or unsupported
 configuration still shows the setup guidance, without readiness polling.
+
+The create page reads reusable registry connections from a Platform-admin-only
+route. Its HTTP 403 means no reusable registries are visible to the caller:
+sources and domains remain available, so AI, templates and existing-code
+entries are unaffected. Only the image entry shows the existing registry
+prerequisite. Successful reads are unchanged. Registry 401, 5xx, network and
+contract failures—and every failure of the other reads—still fail the query.
 
 
 ## Excel から作る

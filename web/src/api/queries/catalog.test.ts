@@ -1,13 +1,14 @@
 // The create catalog queries over the production gateway; only `fetch` is in
-// memory. Their answers are the evidence that creating is allowed, so a
-// failure must stay a failure (never an empty list) and a malformed re-read
-// must keep the last good value.
+// memory. Their answers are the evidence that creating is allowed, so
+// failures stay failures except the reusable-registry list's explicit 403
+// (no registries visible to this caller). Malformed re-reads keep the last good value.
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test'
 import { QueryClient, QueryObserver, skipToken } from '@tanstack/react-query'
 import { isResponseContractError } from '../boundary'
 import { domainOf } from '../testing/catalog-domain'
 import { createConnectionsQuery, creationToolsQuery, githubRepositoriesQuery } from './catalog'
 import { queryClient } from './shared'
+import { isSessionExpiredError, sessionExpiryStore } from '../session-expiry'
 
 const SECRET = 'SENTINEL-catalog-query-0d41'
 const originalFetch = globalThis.fetch
@@ -69,6 +70,53 @@ test('create connections: the three lists are read through their contracts into 
     domains: [{ name: 'pj-1.appthrust.test', usableForPublish: true, publishDnsManaged: true, source: { kind: 'known', value: 'seed' } }],
   })
   expect(requests.map((request) => new URL(request.url).pathname).sort()).toEqual(['/api/v1/projects/pj-1/domains', '/api/v1/projects/pj-1/source-connections', '/api/v1/registry-connections'])
+})
+
+test('create connections: only registry 403 means no visible registries; sources and usable domains survive', async () => {
+  connectionsWorld({ registries: () => json({ error: { code: 'forbidden', message: 'Platform Admin role required' } }, 403) })
+  const client = appDefaults()
+  try {
+    const value = await client.fetchQuery(createConnectionsQuery('pj-1'))
+    expect(value.registries).toEqual([])
+    expect(value.sources.map((source) => source.id)).toEqual([wireSource.id])
+    expect(value.domains).toEqual([{ name: wireDomain.name, usableForPublish: true, publishDnsManaged: true, source: { kind: 'known', value: 'seed' } }])
+    expect(requests.map((request) => [request.method, new URL(request.url).pathname]).sort()).toEqual([
+      ['GET', '/api/v1/projects/pj-1/domains'], ['GET', '/api/v1/projects/pj-1/source-connections'], ['GET', '/api/v1/registry-connections'],
+    ])
+  } finally { client.clear() }
+})
+
+test.each([401, 500])('create connections: registry %s remains a failed query', async (status) => {
+  connectionsWorld({ registries: () => json({ error: { code: status === 401 ? 'unauthorized' : 'internal', message: 'registry read failed' } }, status) })
+  const client = appDefaults()
+  const query = createConnectionsQuery('pj-1')
+  try {
+    const error = await client.fetchQuery({ ...query, retry: false }).catch((caught: unknown) => caught)
+    expect(error).toMatchObject({ status })
+    if (status === 401) expect(isSessionExpiredError(error)).toBe(true)
+    expect(client.getQueryState(query.queryKey)?.status).toBe('error')
+    expect(client.getQueryData(query.queryKey)).toBeUndefined()
+  } finally { client.clear(); sessionExpiryStore.setState(() => false) }
+})
+
+test.each(['sources', 'domains'] as const)('create connections: %s 403 is never treated as an empty list', async (source) => {
+  connectionsWorld({ [source]: () => json({ error: { code: 'forbidden', message: 'project read forbidden' } }, 403) })
+  const client = appDefaults()
+  try {
+    await expect(client.fetchQuery(createConnectionsQuery('pj-1'))).rejects.toMatchObject({ status: 403 })
+    expect(client.getQueryData(createConnectionsQuery('pj-1').queryKey)).toBeUndefined()
+  } finally { client.clear() }
+})
+
+test('create connections: a registry network failure remains a failed query', async () => {
+  connectionsWorld({ registries: () => { throw new TypeError('Failed to fetch') } })
+  const client = appDefaults()
+  const query = createConnectionsQuery('pj-1')
+  try {
+    await expect(client.fetchQuery({ ...query, retry: false })).rejects.toBeDefined()
+    expect(client.getQueryState(query.queryKey)?.status).toBe('error')
+    expect(client.getQueryData(query.queryKey)).toBeUndefined()
+  } finally { client.clear() }
 })
 
 test('create connections: a pending publish domain keeps polling; anything else does not', () => {

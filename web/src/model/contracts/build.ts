@@ -32,7 +32,7 @@ import type {
   DevWorkspacePreviewDatabaseEngine,
   DevWorkspaceRead,
 } from '@appthrust/api-schema/platform-api'
-import type { OpenValue } from '../../api/boundary'
+import type { IndependentRows, OpenValue } from '../../api/boundary'
 import type { ExcelAnalysis, ExcelProgress, UiDesign } from './excel'
 
 export type DraftPhase = ApplicationDraftPhase
@@ -54,7 +54,12 @@ export type PreviewDatabaseEngine = DevWorkspacePreviewDatabaseEngine
 export type BuildTurn = Omit<CanonicalTurn, 'kind' | 'status' | 'excelProgress' | 'uiDesign'> & { kind: OpenValue<TurnKind>; status: OpenValue<TurnStatus>; excelProgress?: ExcelProgress; uiDesign?: UiDesign }
 export type BuildGeneration = Omit<CanonicalGeneration, 'status' | 'stage'> & { status: OpenValue<GenerationStatus>; stage?: OpenValue<GenerationStage> }
 export type BuildExecutionStep = Omit<CanonicalStep, 'status' | 'phase'> & { status: OpenValue<ExecutionStepStatus>; phase?: OpenValue<ExecutionStepPhase> }
-export type BuildExecution = Omit<CanonicalExecution, 'status' | 'steps'> & { status: OpenValue<ExecutionStatus>; steps: BuildExecutionStep[] }
+export type BuildExecution = Omit<CanonicalExecution, 'status' | 'steps' | 'approval'> & {
+  status: OpenValue<ExecutionStatus>
+  steps: BuildExecutionStep[]
+  approval?: CreationApproval
+  approvalUnreadable?: true
+}
 export type ImplementationTask = Omit<CanonicalTask, 'status' | 'failureReason'> & { status: OpenValue<TaskStatus>; failureReason?: OpenValue<ImplementationFailureReason> }
 export type ImplementationRun = Omit<CanonicalRun, 'status' | 'step' | 'failureReason' | 'tasks'> & {
   status: OpenValue<RunStatus>
@@ -69,19 +74,24 @@ export type CreatedSourceRepository = ApplicationDraftCreatedSourceRepository
  * arrays (an older server omits them when empty); `phase` and every job
  * status are open values.
  */
-export type BuildDraft = Omit<CanonicalDraft, 'phase' | 'conversationTurns' | 'creationPlanGenerations' | 'creationExecutions' | 'implementationRuns' | 'createdSourceRepositories' | 'excelAnalysis' | 'uiDesign'> & {
+export type BuildDraft = Omit<CanonicalDraft, 'phase' | 'conversationTurns' | 'creationPlanGenerations' | 'creationExecutions' | 'implementationRuns' | 'createdSourceRepositories' | 'excelAnalysis' | 'uiDesign' | 'creationPlan'> & {
   phase: OpenValue<DraftPhase>
   conversationTurns: BuildTurn[]
   creationPlanGenerations: BuildGeneration[]
   creationExecutions: BuildExecution[]
   implementationRuns: ImplementationRun[]
   createdSourceRepositories: CreatedSourceRepository[]
+  /** Only a fully validated response plan can appear here; an unreadable plan is never partly retained. */
+  creationPlan?: CreationPlan
+  creationPlanUnreadable?: true
   /** Read through the Excel readers (model/contracts/excel.ts): open kinds, design parts read one by one. */
   excelAnalysis?: ExcelAnalysis
   uiDesign?: UiDesign
 }
-export type BuildDraftList = { data: BuildDraft[] }
-export type CreationPlan = NonNullable<BuildDraft['creationPlan']>
+export type BuildDraftList = IndependentRows<BuildDraft>
+/** Disabled stored publication is normalized to absence; validated plan/approval types stay canonical. */
+export type CreationPlan = NonNullable<CanonicalDraft['creationPlan']>
+export type CreationApproval = NonNullable<CanonicalExecution['approval']>
 export type ImplementationHandoff = NonNullable<CreationPlan['implementationHandoff']>
 export type PublishPreferences = NonNullable<BuildDraft['publishPreferences']>
 export type DraftSource = NonNullable<BuildDraft['source']>

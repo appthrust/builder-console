@@ -139,7 +139,8 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
   }, [execution?.id])
 
   const { appView, creationAccess, released, url, shareText } = useCreatedAppView({ projectId, draft, app, groups, initialReleaseId: tab.initialReleaseId, tasks: implementation.state.tasks })
-  const started = Boolean(execution || draft.createdApplicationStackId)
+  const appReadOnly = Boolean(appView?.unreadableStack || appView?.unreadableBuild)
+  const started = Boolean(execution || draft.createdApplicationStackId || draft.createdApplicationId)
   const created = session.lifecycle.kind === 'known' && session.lifecycle.value === 'created'
   const proposal = planProposal(creation.proposalDraft, undefined, creation.destination)
   const preparing = tab.prepareRequested && !execution
@@ -170,12 +171,12 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
   // The typed publish preferences are the server's once saved; the publish step starts from the draft they were written to.
   // Asked once the creation has finished (the legacy flow wrote them then too): the Platform draft takes them only then.
   // While the publish step is open it carries the same name and audience (started from these), so they are not shown twice.
-  const askPublish = created && Boolean(draft.createdApplicationStackId) && !running && !published && !sharing
+  const askPublish = !appReadOnly && created && Boolean(draft.createdApplicationStackId) && !running && !published && !sharing
   const publishSaved = publishReady(view.publish)
   useEffect(() => {
     if (publishSaved) void queryClient.invalidateQueries({ queryKey: buildDraftOptions(projectId, draft.id).queryKey, exact: true })
   }, [publishSaved, view.publish?.desired.name, view.publish?.desired.shareScope])
-  const primary = result.primary.action === 'publish' ? { ...result.primary, enabled: result.primary.enabled && publishSaved && !busy && !sharing } : { action: 'none' as const, label: '', enabled: false }
+  const primary = result.primary.action === 'publish' ? { ...result.primary, enabled: result.primary.enabled && publishSaved && !busy && !sharing && !appReadOnly } : { action: 'none' as const, label: '', enabled: false }
 
   // 「AIで直す」 needs the created stack and a finished first build (公開する is offered); a published app gets it in the header.
   const improveName = app?.displayName ?? draft.publishPreferences?.name ?? spec.name ?? draft.title
@@ -187,7 +188,8 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
   // A URL or repository name another app holds: the shared recovery renames and prepares again (legacy NameChoice).
   const suggestion = useNameSuggestion(draft, failure?.failure, groups.find((group) => group.id === session.groupId)?.path)
   const shown = failure?.failure.reasonCode === 'PublishURLConflict' ? { ...failure.failure, suggestedName: suggestion } : failure?.failure
-  const retry = failure && shown?.kind === 'name-taken'
+  const preparationBlocked = failure?.context === 'prepare' && draft.creationPlanUnreadable
+  const retry = preparationBlocked ? undefined : failure && shown?.kind === 'name-taken'
     // The checked suggestion arrives after the failure: start over with it offered instead of an open field.
     ? <NameChoice key={shown.suggestedName ?? ''} suggestion={shown.suggestedName} onUse={(name) => effects.rename(name, failure.failure, () => setFailure(undefined))} />
     : destinationStop === 'changed' ? undefined
@@ -208,7 +210,9 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
     stage: started ? result.stage : 'decide',
     released,
     ...(started ? { headerAction: continuing && improve ? improve : <StageAction stage={result.stage} primary={primary} progress={result.progress} onPrimary={() => { setSharing(true); onOpenArtifact() }} /> } : {}),
-    ...((readiness.kind !== 'none' && proposal) || askPublish ? {
+    ...(draft.creationPlanUnreadable ? {
+      conversationEnd: <><AiTurn><Notice tone="warning" title={buildCopy.unreadablePlan.title} actions={!started ? <PlanRejectionActions replan={{ disabled: !view.canRequestPlan || running, onClick: () => actions.requestPlan() }} /> : undefined}>{buildCopy.unreadablePlan.detail}</Notice></AiTurn>{askPublish ? <AiTurn><ConsolePublishSettings view={view} actions={actions} disabled={view.unsupported} /></AiTurn> : null}</>,
+    } : (readiness.kind !== 'none' && proposal) || askPublish ? {
       conversationEnd: <>
         {readiness.kind !== 'none' && proposal ? <AiTurn><ProposalBody proposal={{ ...proposal, stale: false }} action={proposalAction} /></AiTurn> : null}
         {askPublish ? <AiTurn><ConsolePublishSettings view={view} actions={actions} disabled={view.unsupported} /></AiTurn> : null}
@@ -219,8 +223,8 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
       artifact: <ArtifactPane draft={draft} spec={spec} proposal={proposal} stage={result.stage} progress={failure?.context === 'prepare' ? undefined : result.progress} implementation={implementation.state}
         url={url} shareText={shareText} previewDatabaseReset={implementation.previewDatabaseReset} onOpenPreview={onOpenArtifact} onRetry={implementation.retry} onSkipTask={implementation.skipTask} onConfirm={implementation.confirm}
         onCollapse={() => setArtifactCollapsed(true)}
-        databaseChanges={<DatabaseChanges projectId={projectId} databaseId={app && canEditApp(app, me) ? appView?.stack?.databaseComponentId : undefined} />}
-        shareStep={sharing && app ? <PublishStep app={app} publishId={appView?.platform?.publish?.id} publishPreferences={draft.publishPreferences} onPublished={() => { void effects.markPublished(); setSharing(false) }} onCancel={() => setSharing(false)} /> : undefined} />,
+        databaseChanges={<DatabaseChanges projectId={projectId} databaseId={!appReadOnly && app && canEditApp(app, me) ? appView?.stack?.databaseComponentId : undefined} />}
+        shareStep={sharing && app && !appReadOnly ? <PublishStep app={app} publishId={appView?.platform?.publish?.id} publishPreferences={draft.publishPreferences} onPublished={() => { void effects.markPublished(); setSharing(false) }} onCancel={() => setSharing(false)} /> : undefined} />,
     } : {}),
     notices: [
       earlierSpec ? <Notice key="earlier-spec" tone="warning" title={text.console.createdFromEarlier.title} actions={continuing ? undefined : improve}>
@@ -228,6 +232,7 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
       </Notice> : null,
       failure && shown ? <Notice key="creation-failure" tone={shown.kind === 'unconfirmed' || shown.kind === 'plan' || destinationStop ? 'warning' : 'error'} title={shown.title} actions={retry}>
         {shown.reason}
+        {preparationBlocked ? <p className="mt-2">{buildCopy.unreadablePlan.detail}</p> : null}
         {shown.reference ? <FailureReference reference={shown.reference} /> : null}
         {/* Platform's own words stay folded, as under the legacy pane's 「詳しい人向け」. */}
         {shown.raw ? <div className="mt-3"><Disclosure title={text.artifact.advanced}><pre className="whitespace-pre-wrap break-words text-xs">{shown.raw}</pre></Disclosure></div> : null}
@@ -236,6 +241,6 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
       creationAccess.error ? <ActionError key="creation-access" error={creationAccess.error} /> : null,
       effects.waitingForPublish || creationAccess.waitingForPublish ? <p key="waiting-publish" role="status" className="text-xs text-stone-500">{text.page.waitingForPublish}</p> : null,
     ].filter(Boolean),
-    closed: started,
+    closed: started || Boolean(draft.creationPlanUnreadable),
   }
 }

@@ -20,10 +20,13 @@ export function useCreatedAppView({ projectId, draft, app, groups, initialReleas
   tasks: ImplementationState['tasks']
 }) {
   const lookup = useAppViews(projectId)
-  const appView = app ? lookup.viewFor(app) : undefined
-  const creationAccess = useCreatedAppAccess(projectId, app, appView?.platform?.publish)
+  // The created identity is authoritative even when its old plan is unreadable; never recreate/bind to display it.
+  const stackId = draft.createdApplicationStackId ?? lookup.input.stacks.find((stack) => stack.applicationId === draft.createdApplicationId)?.id
+  const appView = app ? lookup.viewFor(app) : stackId && draft.createdApplicationId
+    ? lookup.viewFor({ id: draft.createdApplicationId, stackId, createdAt: draft.createdAt }) : undefined
+  const creationAccess = useCreatedAppAccess(projectId, appView?.unreadableStack || appView?.unreadableBuild ? undefined : app, appView?.platform?.publish)
   const releases = lookup.input.releasesByApplication[draft.createdApplicationId ?? '']?.components.flatMap((component) => component.releases) ?? []
-  const released = implementedReleaseReady(appView?.platform, releases, { draftId: draft.id, initialReleaseId, taskCount: tasks.length, tasks })
+  const released = draft.creationPlanUnreadable && draft.createdApplicationId ? Boolean(appView?.url) : implementedReleaseReady(appView?.platform, releases, { draftId: draft.id, initialReleaseId, taskCount: tasks.length, tasks })
   const url = released ? appView?.platform?.publish?.publicUrl ?? appView?.platform?.publish?.tailnetUrl : undefined
   const shareText = app ? deriveAccess(appView?.platform?.publish?.access, app, groups, creationAccess.error instanceof AccessForbiddenError ? 'forbidden' : creationAccess.error ? 'failed' : undefined).label : shareScopeLabel('private')
   return { appView, creationAccess, released, url, shareText }

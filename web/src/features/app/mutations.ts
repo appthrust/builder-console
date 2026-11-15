@@ -3,6 +3,7 @@ import { useMutation, useQueryClient, type Query, type QueryClient } from '@tans
 import { useNavigate } from '@tanstack/react-router'
 import { useRef } from 'react'
 import { deleteApplicationSourceRepository, deleteApplicationStack } from '../../api/queries/app'
+import type { IndependentRows } from '../../api/boundary'
 import { keys } from '../../api/queries/shared'
 import {
   approveAccessRequest,
@@ -25,6 +26,7 @@ import { platformErrorEnvelope } from '../../api/platform-error'
 import type { AppView } from '../../model/app'
 import { paths } from '../../routes/paths'
 import { sourceRepositoryIdFor } from './platform'
+import { copy } from '../../copy'
 
 /** Root of every console query key (`consoleKeys.*`): an app edit can change lists, group counts and resolved paths. */
 const CONSOLE_ROOT = [consoleKeys.me[0]] as const
@@ -212,6 +214,7 @@ export function useDeleteApp(projectId: string, app: BusinessApp, view: AppView)
   const deletion = useRef<AppDeletion>(undefined)
   return useMutation({
     mutationFn: async () => {
+      if (view.unreadableStack || view.unreadableBuild) throw new Error(copy.common.loadFailed)
       // A retry after the stack delete was accepted keeps the ids: the stack has left the lists by then.
       if (!deletion.current?.stackDeleted) {
         deletion.current = { appId: app.id, stackId: view.stack?.id, sourceRepositoryId: sourceRepositoryIdFor(view) }
@@ -262,21 +265,24 @@ export async function forgetDeletedApp(queryClient: QueryClient, projectId: stri
     queryClient.cancelQueries({ predicate: (query) => readsDeletedApp(query, projectId, deleted) }),
     ...lists.map((queryKey) => queryClient.cancelQueries({ queryKey })),
   ])
-  // Every list cached here is a decoded domain array.
+  // Remove only validated rows; unreadable entries are never mutation targets.
   const without = <T extends { id: string }>(list: T[] | undefined, id: string | undefined): T[] | undefined =>
     list && id ? list.filter((item) => item.id !== id) : list
   queryClient.setQueryData<{ id: string }[]>(keys.applications(projectId), (list) => without(list, deleted.applicationId))
-  queryClient.setQueryData<{ id: string }[]>(keys.stacks(projectId), (list) => without(list, deleted.stackId))
+  queryClient.setQueryData<IndependentRows<{ id: string }>>(keys.stacks(projectId), (list) => list ? { ...list, data: without(list.data, deleted.stackId)! } : list)
   for (const prefix of [['console', 'apps'], ['console', 'directory-apps']]) {
     queryClient.setQueriesData<{ id: string }[]>({ queryKey: prefix }, (list) => without(list, deleted.appId))
   }
 }
 
 /** 作りかけ「やめる」: a draft has no stack yet, so only the console record goes; the list stays where it is. */
-export function useDiscardDraft(app: BusinessApp) {
+export function useDiscardDraft(app: BusinessApp, view: AppView) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: () => removeApp(app.id),
+    mutationFn: () => {
+      if (view.unreadableStack || view.unreadableBuild || !view.draft || app.stackId) throw new Error(copy.common.loadFailed)
+      return removeApp(app.id)
+    },
     onSuccess: async () => {
       queryClient.removeQueries({ queryKey: consoleKeys.app(app.id) })
       await queryClient.invalidateQueries({ queryKey: CONSOLE_ROOT })

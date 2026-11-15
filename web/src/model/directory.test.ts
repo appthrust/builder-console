@@ -59,6 +59,10 @@ describe('isFinished', () => {
       expect(builds.map((build) => isFinished(view({ status, build, draft: true })))).toEqual([false, false, false])
     })
   }
+  test('a linked unreadable creating draft is not finished; generic unknown status is unchanged', () => {
+    expect(isFinished(view({ status: 'unknown', unreadableBuild: true }))).toBe(false)
+    expect(isFinished(view({ status: 'unknown' }))).toBe(true)
+  })
 })
 
 describe('groupDirectory', () => {

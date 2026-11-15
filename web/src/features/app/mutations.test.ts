@@ -85,11 +85,11 @@ describe('forgetDeletedApp', () => {
   test('takes the app out of every cached list and leaves the others', async () => {
     const queryClient = new QueryClient()
     queryClient.setQueryData(keys.applications('commerce'), [{ id: 'keihi' }, { id: 'nippo' }])
-    queryClient.setQueryData(keys.stacks('commerce'), [{ id: 'keihi' }, { id: 'nippo' }])
+    queryClient.setQueryData(keys.stacks('commerce'), { data: [{ id: 'keihi' }, { id: 'nippo' }], unreadable: [{ id: 'bad' }] })
     queryClient.setQueryData(consoleKeys.apps({ scope: 'mine' }), [{ id: 'a-keihi' }, { id: 'a-nippo' }])
     await forgetDeletedApp(queryClient, 'commerce', deleted)
     expect(queryClient.getQueryData<unknown>(keys.applications('commerce'))).toEqual([{ id: 'nippo' }])
-    expect(queryClient.getQueryData<unknown>(keys.stacks('commerce'))).toEqual([{ id: 'nippo' }])
+    expect(queryClient.getQueryData<unknown>(keys.stacks('commerce'))).toEqual({ data: [{ id: 'nippo' }], unreadable: [{ id: 'bad' }] })
     expect(queryClient.getQueryData<unknown>(consoleKeys.apps({ scope: 'mine' }))).toEqual([{ id: 'a-nippo' }])
   })
 
@@ -125,12 +125,12 @@ describe('cache writes after a delete', () => {
   test('a list read that started before the delete cannot put the deleted app back', async () => {
     const deleted = { appId: 'a-keihi', applicationId: 'keihi', stackId: 'keihi' }
     const queryClient = new QueryClient()
-    queryClient.setQueryData(keys.stacks('commerce'), [{ id: 'keihi' }, { id: 'nippo' }])
-    let resolveRead: (value: { id: string }[]) => void = () => {}
-    const read = queryClient.fetchQuery({ queryKey: keys.stacks('commerce'), queryFn: () => new Promise<{ id: string }[]>((resolve) => { resolveRead = resolve }), staleTime: 0 }).catch(() => {})
+    queryClient.setQueryData(keys.stacks('commerce'), { data: [{ id: 'keihi' }, { id: 'nippo' }], unreadable: [] })
+    const { promise, resolve: resolveRead } = Promise.withResolvers<{ data: { id: string }[]; unreadable: [] }>()
+    const read = queryClient.fetchQuery({ queryKey: keys.stacks('commerce'), queryFn: () => promise, staleTime: 0 }).catch(() => {})
     await forgetDeletedApp(queryClient, 'commerce', deleted)
-    resolveRead([{ id: 'keihi' }, { id: 'nippo' }])
+    resolveRead({ data: [{ id: 'keihi' }, { id: 'nippo' }], unreadable: [] })
     await read
-    expect(queryClient.getQueryData<unknown>(keys.stacks('commerce'))).toEqual([{ id: 'nippo' }])
+    expect(queryClient.getQueryData<unknown>(keys.stacks('commerce'))).toEqual({ data: [{ id: 'nippo' }], unreadable: [] })
   })
 })

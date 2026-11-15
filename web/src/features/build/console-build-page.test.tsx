@@ -13,6 +13,7 @@ import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { buildSessionsApi as api, mintIdempotencyKey } from '../../api/build-sessions'
+import { getDraft } from '../../api/build'
 import { groupsContract } from '../../api/contracts/console/groups'
 import { meContract } from '../../api/contracts/console/me'
 import { buildSessionKeys, isObserving } from '../../api/queries/build-sessions'
@@ -21,6 +22,7 @@ import { queryClient as appQueryClient } from '../../api/queries/shared'
 import { sessionExpiryStore } from '../../api/session-expiry'
 import { createConsoleMockFetch, createSessionApp, resetMocks, type ConsoleMockFetch } from '../../api/testing/console-mock-fetch'
 import { createTestGateway } from '../../api/testing/gateway'
+import { rewriteDraftWire } from '../../api/testing/build-domain'
 import { platformRoutes } from '../../dev/mock-platform'
 import { buildCopy } from '../../model/build/copy'
 import type { BuildTurnInput } from '../../model/contracts/console'
@@ -38,6 +40,17 @@ let mounted: { root: Root; container: HTMLDivElement; client: QueryClient }[] = 
 const originalFetch = globalThis.fetch
 const storageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage')
 const restore: (() => void)[] = []
+
+function unreadableSnapshot(draftId: string, field: 'approval' | 'plan') {
+  for (const method of ['GET', 'POST', 'PATCH']) mock.rewrites.push({
+    method, path: new RegExp(`^/api/v1/projects/commerce/application-drafts(?:$|/${draftId}(?:$|/creation-executions))`), once: false,
+    body: (wire) => rewriteDraftWire(wire, draftId, (draft) => {
+      const executions = (draft.creationExecutions ?? []) as Record<string, unknown>[]
+      if (field === 'plan') return executions.length ? { ...draft, creationPlan: { representation: ['future-kind'] } } : draft
+      return { ...draft, creationExecutions: executions.map((execution) => ({ ...execution, approval: { applicationStackRequest: {} } })) }
+    }),
+  })
+}
 
 beforeEach(async () => {
   restore.push(preserveLanguage())
@@ -657,4 +670,107 @@ describe('wire-boundary rules', () => {
     expect(log(page).textContent).not.toContain('raw upstream text')
     expect(buttons(log(page), buildCopy.failure.confirm)).toHaveLength(1)
   })
+})
+
+test('APT-1109: console-v1 opens an unreadable stored plan with only the typed re-plan, then offers the new plan', async () => {
+  const { draftId, sessionId } = await startSession()
+  const session = await api.get(sessionId)
+  await api.createTurn(sessionId, { kind: 'request_plan', specRevision: 0 }, { key: mintIdempotencyKey(), version: session.version })
+  await finishActive(sessionId)
+  const toggle = new URL('/api/v1/__mock/stored-plan', 'http://mock.test')
+  await platformRoutes(new Request(toggle, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ draftId, mode: 'unreadable' }) }), toggle)
+  mock.requests.length = 0
+  const page = await open(draftId)
+  await settle(30)
+  expect(page.container.textContent).toContain(buildCopy.unreadablePlan.detail)
+  expect(buttons(page.container, buildCopy.primary.prepare)).toHaveLength(0)
+  expect(buttons(page.container, buildCopy.failure.plan.recheck)).toHaveLength(0)
+  expect(buttons(page.container, buildCopy.failure.plan.replan)).toHaveLength(1)
+  expect(mock.requests.filter((item) => item.method !== 'GET')).toEqual([])
+  await act(async () => { button(page.container, buildCopy.failure.plan.replan).click() })
+  await settle()
+  expect(posts(sessionId, '/turns')).toHaveLength(1)
+  await finishActive(sessionId)
+  await reread(page)
+  await act(async () => { await page.client.invalidateQueries({ queryKey: ['build'] }) })
+  await settle(30)
+  expect((await getDraft('commerce', draftId)).creationPlanGenerations).toHaveLength(2)
+  expect(button(page.container, buildCopy.primary.prepare).disabled).toBe(false)
+})
+
+test.each(['approval', 'plan'] as const)('console-v1 follows a begun execution with an unreadable %s through binding and publication', async (field) => {
+  const { draftId, sessionId } = await startSession()
+  const session = await api.get(sessionId)
+  await api.createTurn(sessionId, { kind: 'request_plan', specRevision: 0 }, { key: mintIdempotencyKey(), version: session.version })
+  await finishActive(sessionId)
+  const draft = await getDraft('commerce', draftId)
+  const appName = draft.creationPlan!.applicationStackRequest!.application!.name
+  unreadableSnapshot(draftId, field)
+  const project = '/api/v1/projects/commerce'
+  mock.rewrites.push({ method: 'GET', path: new RegExp(`^${project}/publishes$`), once: false, body: (wire) => ({ ...wire, data: (wire.data as Record<string, unknown>[]).filter((publish) => publish.applicationId !== appName) }) })
+  mock.rewrites.push({ method: 'GET', path: new RegExp(`^${project}/application-stacks$`), once: false, body: (wire) => ({ ...wire, data: (wire.data as Record<string, unknown>[]).map((stack) => stack.applicationId === appName ? { ...stack, publish: undefined } : stack) }) })
+  mock.requests.length = 0
+  const page = await open(draftId)
+  await act(async () => { button(page.container, buildCopy.primary.prepare).click() })
+  await settle(40)
+  expect(mock.requests.filter((item) => item.method === 'POST' && item.path.endsWith('/creation-executions'))).toHaveLength(1)
+  expect(mock.requests.filter((item) => item.method === 'POST' && /\/creation-executions\/[^/]+\/run$/.test(item.path))).toHaveLength(1)
+  const advance = new URL('/api/v1/__mock/advance', 'http://mock.test')
+  for (let step = 0; step < 6; step++) await platformRoutes(new Request(advance, { method: 'POST' }), advance)
+  for (let step = 0; step < 3; step++) {
+    await act(async () => { await page.client.invalidateQueries() })
+    await settle(20)
+  }
+  const current = await getDraft('commerce', draftId)
+  expect(current.creationExecutions.at(-1)?.status).toEqual({ kind: 'known', value: 'succeeded' })
+  if (field === 'approval') expect(current.creationExecutions.at(-1)?.approvalUnreadable).toBe(true)
+  else expect(current.creationPlanUnreadable).toBe(true)
+  expect(mock.requests.filter((item) => item.method === 'POST' && /\/api\/console\/apps\/[^/]+\/bind$/.test(item.path))).toHaveLength(1)
+  expect(mock.requests.filter((item) => item.method === 'POST' && item.path.endsWith('/implementation-runs'))).toHaveLength(1)
+  expect(mock.requests.filter((item) => item.method === 'POST' && item.path === `${project}/publishes`)).toEqual([expect.objectContaining({ status: 202 })])
+  expect(page.container.querySelector('[data-testid="console-publish"]')).not.toBeNull()
+})
+
+test('console-v1 reload resumes run from the execution id when its approval is unreadable', async () => {
+  const { draftId, sessionId } = await startSession()
+  const session = await api.get(sessionId)
+  await api.createTurn(sessionId, { kind: 'request_plan', specRevision: 0 }, { key: mintIdempotencyKey(), version: session.version })
+  await finishActive(sessionId)
+  const base = `/api/v1/projects/commerce/application-drafts/${draftId}`
+  for (const [path, body] of [[`${base}/creation-plan-validations`, {}], [`${base}/creation-executions`, { clientRequestId: 'before-reload', creationPlanFingerprint: `fp-${draftId}` }]] as const) {
+    const url = new URL(path, 'http://mock.test')
+    const response = await platformRoutes(new Request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }), url)
+    expect(response?.ok).toBe(true)
+  }
+  unreadableSnapshot(draftId, 'approval')
+  mock.requests.length = 0
+  await open(draftId)
+  await settle(30)
+  expect(mock.requests.filter((item) => item.method === 'POST' && /\/creation-executions\/[^/]+\/run$/.test(item.path))).toHaveLength(1)
+  expect(mock.requests.filter((item) => item.method === 'POST' && item.path.endsWith('/creation-executions'))).toHaveLength(0)
+})
+
+test('console-v1 keeps a prepare failure visible with unreadable-plan guidance and no dead retry', async () => {
+  const { draftId, sessionId } = await startSession()
+  const session = await api.get(sessionId)
+  await api.createTurn(sessionId, { kind: 'request_plan', specRevision: 0 }, { key: mintIdempotencyKey(), version: session.version })
+  await finishActive(sessionId)
+  const base = `/api/v1/projects/commerce/application-drafts/${draftId}`
+  for (const [path, body] of [[`${base}/creation-plan-validations`, {}], [`${base}/creation-executions`, { clientRequestId: 'failed-preparation', creationPlanFingerprint: `fp-${draftId}` }]] as const) {
+    const url = new URL(path, 'http://mock.test')
+    const response = await platformRoutes(new Request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }), url)
+    expect(response?.ok).toBe(true)
+  }
+  mock.rewrites.push({ method: 'GET', path: new RegExp(`^${base}$`), once: false, body: (wire) => ({ ...wire, phase: 'planned', creationPlan: { representation: ['future-kind'] }, creationExecutions: (wire.creationExecutions as Record<string, unknown>[]).map((execution) => ({ ...execution, status: 'failed', error: 'creation stopped' })) }) })
+  mock.requests.length = 0
+  const page = await open(draftId)
+  await settle(30)
+  const failure = notices(page).find((notice) => notice.textContent?.includes(buildCopy.failure.platform.title))
+  expect(failure).toBeDefined()
+  expect(failure!.textContent).toContain(buildCopy.unreadablePlan.detail)
+  expect(buttons(page.container, text.conversation.retry)).toHaveLength(0)
+  expect(buttons(page.container, buildCopy.primary.prepare)).toHaveLength(0)
+  await reread(page)
+  expect(page.container.textContent).toContain(buildCopy.failure.platform.title)
+  expect(mock.requests.filter((item) => item.method !== 'GET')).toEqual([])
 })

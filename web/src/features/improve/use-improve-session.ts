@@ -22,7 +22,7 @@ export function useImproveSession(projectId: string, draft: BuildDraft) {
   const [sending, setSending] = useState(false)
   const [sendFailure, setSendFailure] = useState<{ text: string; failure: BuildFailure }>()
   const state = deriveImprove(draft)
-  const implementation = useImplementation({ projectId, draft, handoff: draft.creationPlan?.implementationHandoff, enabled: true })
+  const implementation = useImplementation({ projectId, draft, handoff: draft.creationPlan?.implementationHandoff, enabled: !draft.creationPlanUnreadable })
   const proposal = useQuery(proposalOptions(projectId, draft.proposalId))
   const phase = proposal.data?.phase
   const reviewLocked = !!draft.proposalId && improvementLocked(phase)

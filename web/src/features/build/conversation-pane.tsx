@@ -107,7 +107,7 @@ export function ConversationPane({ messages, stage, answering, unsupported = fal
             const reapprove = message.retry === 'prepare' && message.title === buildCopy.failure.destination.changed.title
             // A plan Platform's validation rejected is followed by a new plan: the action says so, it never resends the plan.
             const plan = buildCopy.failure.plan
-            const replan = message.retry === 'plan' && [plan.destination.title, plan.incomplete.title].includes(message.title)
+            const replan = message.retry === 'plan' && [plan.destination.title, plan.incomplete.title, buildCopy.unreadablePlan.title].includes(message.title)
             const label = message.retry === 'confirm' ? buildCopy.failure.confirm : reapprove ? buildCopy.primary.prepare : replan ? buildCopy.failure.plan.replan : uiText.conversation.retry
             // 「もう一度確かめる」 only while that plan is still the rejected one on screen; 「計画を作り直す」 always.
             const actions = stale ? undefined

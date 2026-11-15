@@ -14,6 +14,7 @@
 //   resolved answer with a revision offers a create; blocked and unknown
 //   states keep neither the server's reason nor its message.
 import {
+  DnsLabelName,
   ApplicationDraftCodexUnavailableReason,
   ApplicationDraftCreationToolRegistryResponse,
   ApplicationSourceRepository,
@@ -60,9 +61,9 @@ import type {
   StackValidation,
   TemplateSummary,
 } from '../../../model/contracts/catalog'
-import { openEnum, openUnion } from '../../boundary'
+import { independentRows, openEnum, openUnion, unreadableRowIssues } from '../../boundary'
 import { platformContract } from '../define'
-import { openCanonical } from './build'
+import { dnsLabelOrEmpty, openCanonical } from './build'
 
 const list = <D>(item: z.ZodType<D>) => z.object({ data: z.array(item) })
 /** A write's answer: the written resource (the envelope's operation receipt is not read). */
@@ -101,7 +102,7 @@ const creationToolsReader: z.ZodType<CreationTools> = ApplicationDraftCreationTo
   codexUnavailableReason: openCanonical(ApplicationDraftCodexUnavailableReason).optional().transform((reason) => (reason?.kind === 'known' ? reason.value : undefined)),
 })
 
-export const stackIdentityReader: z.ZodType<StackIdentity> = ApplicationStack.pick({ id: true, templateId: true, applicationName: true, sourceRepositoryRefName: true })
+export const stackIdentityReader: z.ZodType<StackIdentity> = ApplicationStack.pick({ id: true, templateId: true, applicationName: true, sourceRepositoryRefName: true }).extend({ templateId: dnsLabelOrEmpty })
 
 const repositoryShape = ApplicationSourceRepository.shape
 const repositoryBuild = repositoryShape.build.unwrap()
@@ -211,7 +212,8 @@ export const listStacksContract = platformContract({
   method: 'GET',
   routeTemplate: `${P}/application-stacks`,
   successStatuses: [200],
-  reader: list(stackIdentityReader),
+  reader: independentRows(stackIdentityReader, DnsLabelName),
+  recoveries: unreadableRowIssues,
 })
 
 export const listSourceRepositoriesContract = platformContract({

@@ -28,11 +28,14 @@ async function fixture(path: string, init?: RequestInit) {
 
 const storageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
 const sessionStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage')
+const formDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'HTMLFormElement')
 let restoreLanguage: () => void
 beforeEach(() => {
   restoreLanguage = preserveLanguage()
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => null, setItem: () => {}, removeItem: () => {} } })
   Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: { getItem: () => null, setItem: () => {}, removeItem: () => {} } })
+  // Opening Advanced mounts Radix Select, which tests its trigger's associated form.
+  Object.defineProperty(globalThis, 'HTMLFormElement', { configurable: true, value: window.HTMLFormElement })
 })
 afterEach(() => {
   restoreLanguage()
@@ -40,6 +43,8 @@ afterEach(() => {
   else Reflect.deleteProperty(globalThis, 'localStorage')
   if (sessionStorageDescriptor) Object.defineProperty(globalThis, 'sessionStorage', sessionStorageDescriptor)
   else Reflect.deleteProperty(globalThis, 'sessionStorage')
+  if (formDescriptor) Object.defineProperty(globalThis, 'HTMLFormElement', formDescriptor)
+  else Reflect.deleteProperty(globalThis, 'HTMLFormElement')
 })
 
 test.each([true, false])('new app distinguishes pending domain and recovers on its scheduled poll: admin=%s', async (admin) => {
@@ -130,5 +135,83 @@ test.each([true, false])('new app distinguishes pending domain and recovers on i
     fetch.mockRestore()
     interval.mockRestore()
     clearInterval.mockRestore()
+  }
+})
+
+test.each([403, 500])('non-admin create page handles registry-connections %s without confusing it with the domain inventory', async (status) => {
+  await fixture('/api/v1/__mock/reset', { method: 'POST' })
+  await fixture('/api/console/__mock/reset', { method: 'POST' })
+  await fixture('/api/v1/__mock/codex', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ available: true }) })
+  const gateway = createTestGateway({ consoleFetch: fixture })
+  const [me, groups] = await Promise.all([gateway.console(meContract, undefined), gateway.console(groupsContract, undefined)])
+  const project = `/api/v1/projects/${me.projectId}`
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity, gcTime: Infinity } } })
+  client.setQueryData(consoleKeys.me, { ...me, isConsoleAdmin: false, canCreateApps: true, effectiveGroupIds: [groups[0]!.id] })
+  client.setQueryData(consoleKeys.groups, groups)
+  const requests: { method: string; path: string; status: number }[] = []
+  const fetch = spyOn(globalThis, 'fetch').mockImplementation((async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = input instanceof Request ? input : new Request(new URL(String(input), 'http://mock.test'), init)
+    const url = new URL(request.url)
+    const response = url.pathname === '/api/v1/registry-connections'
+      ? Response.json({ error: { code: status === 403 ? 'forbidden' : 'internal', message: status === 403 ? 'Platform Admin role required' : 'registry read failed' } }, { status })
+      : await (url.pathname.startsWith('/api/console/') ? consoleRoutes : platformRoutes)(request, url)
+    requests.push({ method: request.method, path: url.pathname, status: response?.status ?? 404 })
+    return response ?? Response.json({ error: 'unhandled' }, { status: 404 })
+  }) as typeof globalThis.fetch)
+  const container = document.createElement('div')
+  document.body.append(container)
+  const root = createRoot(container)
+  const rootRoute = createRootRoute()
+  const route = createRoute({ getParentRoute: () => rootRoute, path: '/new', component: NewAppPage })
+  const router = createRouter({ routeTree: rootRoute.addChildren([route]), history: createMemoryHistory({ initialEntries: ['/new?step=start'] }), isServer: true })
+  try {
+    await router.load()
+    await act(async () => { root.render(<QueryClientProvider client={client}><RouterContextProvider router={router}><UnsavedChangesProvider><NewAppPage /></UnsavedChangesProvider></RouterContextProvider></QueryClientProvider>) })
+    for (let tick = 0; tick < 8; tick++) await act(async () => { await delay(0) })
+    const intent = container.querySelector<HTMLTextAreaElement>('#create-start-intent')!
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(Object.getPrototypeOf(intent), 'value')!.set!.call(intent, '見積を管理するアプリ')
+      intent.dispatchEvent(new window.Event('input', { bubbles: true }) as unknown as Event)
+    })
+    const buttons = [...container.querySelectorAll<HTMLButtonElement>('button')]
+    const ai = buttons.find((button) => button.textContent?.trim() === copy.create.start.build)!
+    const templates = [...container.querySelectorAll<HTMLButtonElement>('button[data-testid^="template-"]')]
+    const existing = buttons.find((button) => button.textContent?.includes(copy.create.start.upload.title))!
+    const query = createConnectionsQuery(me.projectId)
+    expect(requests.filter((request) => request.path === '/api/v1/registry-connections')).toEqual([{ method: 'GET', path: '/api/v1/registry-connections', status }])
+    for (const path of [`${project}/domains`, `${project}/source-connections`]) {
+      expect(requests.filter((request) => request.path === path)).toEqual([{ method: 'GET', path, status: 200 }])
+    }
+    expect(templates.length).toBeGreaterThan(0)
+    expect(ai).toBeDefined()
+    if (status === 403) {
+      expect(client.getQueryState(query.queryKey)?.status).toBe('success')
+      expect(client.getQueryData(query.queryKey)?.registries).toEqual([])
+      expect(container.textContent).not.toContain(copy.create.missing(['domain']))
+      expect(container.textContent).not.toContain(text.missingAdmin(copy.create.prerequisite.domain))
+      expect(ai.disabled).toBe(false)
+      expect(existing.disabled).toBe(false)
+      // This mock template is independently disallowed; registry visibility must not change that decision.
+      for (const button of templates) expect(button.disabled).toBe(button.dataset.testid === 'template-biz-approval-postgres')
+      const advanced = [...container.querySelectorAll<HTMLElement>('summary, button')].find((item) => item.textContent?.trim() === copy.create.advanced.toggle)!
+      await act(async () => { advanced.click() })
+      expect(container.textContent).toContain(copy.create.missing(['registry']))
+      expect(container.querySelector<HTMLInputElement>('#create-image')?.disabled).toBe(true)
+      expect([...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === copy.create.advanced.use)?.disabled).toBe(true)
+    } else {
+      expect(client.getQueryState(query.queryKey)?.status).toBe('error')
+      expect(client.getQueryData(query.queryKey)).toBeUndefined()
+      expect(container.textContent).toContain(copy.common.loadFailed)
+      expect(ai.disabled).toBe(true)
+      for (const button of templates) expect(button.disabled).toBe(true)
+    }
+    expect(requests.every((request) => request.method === 'GET')).toBe(true)
+  } finally {
+    await act(async () => { root.unmount() })
+    container.remove()
+    client.clear()
+    fetch.mockRestore()
+    await fixture('/api/v1/__mock/reset', { method: 'POST' })
+    await fixture('/api/console/__mock/reset', { method: 'POST' })
   }
 })

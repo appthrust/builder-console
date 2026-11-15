@@ -63,6 +63,7 @@ export function draftsOptions(projectId: string) {
     retryDelay: readRetryDelay,
     refetchInterval: (query) => {
       const intervals = (query.state.data?.data ?? []).map(draftPollInterval).filter((interval) => interval !== false)
+      if (query.state.data?.unreadable.length) intervals.push(POLL_INTERVAL_MS)
       return intervals.length ? Math.min(...intervals) : false
     },
   })

@@ -96,6 +96,19 @@ function world({ consolePaths = [], appNames = [], repositories = [], repository
 }
 
 describe('checkNameAvailability', () => {
+  test('an unreadable stack identity stays taken and an id-less row prevents a free-name claim or suggestion', async () => {
+    const known = world({ stacksAnswer: () => json({ data: [{ id: 'mitsumori', templateId: 'Bad Id!' }] }) })
+    expect(await checkNameAvailability(base, known.deps)).toMatchObject({ taken: 'platform', checked: true })
+    const unknown = world({ stacksAnswer: () => json({ data: [{ templateId: 'Bad Id!' }] }) })
+    expect(await checkNameAvailability(base, unknown.deps)).toEqual({ taken: undefined, checked: false })
+    expect(await suggestFreeUrlName(base, unknown.deps)).toBeUndefined()
+  })
+  test('an unreadable stack id is not proof that its different application name is free', async () => {
+    const { deps } = world({ stacksAnswer: () => json({ data: [{ id: 'stack-3f1234567890abcd', applicationName: 'mitsumori', templateId: 'Bad Id!' }] }) })
+    expect(await checkNameAvailability(base, deps)).toEqual({ taken: undefined, checked: false })
+    expect(await suggestFreeUrlName(base, deps)).toBeUndefined()
+    expect(await checkNameAvailability({ ...base, urlName: 'stack-3f1234567890abcd' }, deps)).toEqual({ taken: 'platform', checked: true, suggestion: undefined })
+  })
   test('a free name is not taken, is checked, and asks each source once', async () => {
     const { deps, calls } = world()
     expect(await checkNameAvailability(base, deps)).toEqual({ taken: undefined, checked: true })
@@ -179,7 +192,7 @@ describe('an unreadable answer is never "free" (X2/X4)', () => {
   const SECRET = 'SENTINEL-availability-3c9e'
 
   test('platform names that cannot be read are not an empty name set: the name is unchecked and no variant is suggested', async () => {
-    const malformed = world({ consolePaths: ['/sales/east/mitsumori'], stacksAnswer: () => json({ data: [{ id: 'stack-1', applicationName: SECRET }] }) })
+    const malformed = world({ consolePaths: ['/sales/east/mitsumori'], stacksAnswer: () => json({ data: [{ applicationName: SECRET }] }) })
     expect(await checkNameAvailability(base, malformed.deps)).toEqual({ taken: 'console', checked: true, suggestion: undefined })
     expect(await checkNameAvailability({ ...base, urlName: 'other' }, malformed.deps)).toEqual({ taken: undefined, checked: false })
     expect(await suggestFreeUrlName(base, malformed.deps)).toBeUndefined()

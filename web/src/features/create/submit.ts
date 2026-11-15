@@ -682,7 +682,9 @@ export async function confirmCreate(
   if (phase === 'platform' && !progress.stackId) {
     const name = stackAttempt?.appName ?? appName
     const sourceRepositoryId = stackAttempt ? stackAttempt.sourceRepositoryId : progress.sourceRepositoryId
-    const hit = (await deps.api.stacks(request.projectId)).find((stack) =>
+    const stacks = await deps.api.stacks(request.projectId)
+    if (stacks.unreadable.length) return { progress: resume }
+    const hit = stacks.data.find((stack) =>
       !rejectedNow(resume, 'stack', stack.id) && stack.applicationName === name && stack.templateId === deps.catalog.template.id && stack.sourceRepositoryRefName === sourceRepositoryId)
     if (hit) return { progress: { ...progress, candidate: { step: 'stack', id: hit.id, appName: name } } }
   }
