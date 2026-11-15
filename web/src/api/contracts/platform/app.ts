@@ -44,7 +44,7 @@ import type {
 } from '../../../model/contracts/app'
 import { absentMeansEmpty, openEnum } from '../../boundary'
 import { platformContract } from '../define'
-import { openCanonical } from './build'
+import { openCanonical, stackTemplateId } from './build'
 
 const PROJECT = '/api/v1/projects/{projectId}'
 const BRANCH_COMPONENT = `${PROJECT}/applications/{applicationId}/branches/{branchId}/components/{componentId}`
@@ -69,8 +69,7 @@ export const publishReader: z.ZodType<AppPublish> = Publish.pick({ id: true, app
 export const stackReader: z.ZodType<AppStack> = ApplicationStack.pick({
   id: true, projectId: true, templateId: true, imageRef: true, applicationId: true, branchId: true, webComponentId: true, databaseComponentId: true, sourceRepositoryRefName: true,
 }).extend({
-  // A stack installed from the catalog has no template: Platform sends "".
-  templateId: z.union([z.literal(''), ApplicationStack.shape.templateId]),
+  templateId: stackTemplateId,
   sourceKind: openCanonical(ApplicationTemplateSourceKind),
   publish: publishReader.optional(),
   buildFailure: BuildFailure.pick({ lines: true }).optional(),
