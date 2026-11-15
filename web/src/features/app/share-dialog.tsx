@@ -46,6 +46,7 @@ export function ShareDialog({ app, me, canEdit, publishId, url, access, open, on
   const requestKey = useRef('')
   const scopeWrite = useMutation({
     mutationFn: async (share: KnownShare) => {
+      if (!canEdit) throw new Error(copy.common.loadFailed)
       if (!publishId) throw new Error(words.unavailable)
       // Never PATCH intent before the user's platform write has succeeded.
       await putAppAccess(me.projectId, publishId, share.scope, requestKey.current)
@@ -62,6 +63,7 @@ export function ShareDialog({ app, me, canEdit, publishId, url, access, open, on
   })
   const add = useMutation({
     mutationFn: async (entry: Parameters<typeof ensurePerson>[0]) => {
+      if (!canEdit) throw new Error(copy.common.loadFailed)
       if (!share) throw new Error(text.unsupported.share)
       const person = await ensurePerson(entry)
       await update.mutateAsync(movePerson({ owners: app.owners, share }, person.id, 'viewer'))
@@ -88,14 +90,14 @@ export function ShareDialog({ app, me, canEdit, publishId, url, access, open, on
   const reachable = members.filter((person): person is Person => !isUnknownPerson(person))
   const dirty = scope !== share?.scope || (scope === 'group' && (groupIds.length !== app.share.groupIds.length || groupIds.some((id) => !app.share.groupIds.includes(id))))
   const saveScope = () => {
-    if (!share || !scope) return
+    if (!canEdit || !share || !scope) return
     const next: KnownShare = { ...share, scope, groupIds: scope === 'group' ? groupIds : [] }
     requestKey.current = crypto.randomUUID()
     if (widensShare(app.share, next)) setConfirm(next)
     else scopeWrite.mutate(next)
   }
   const movePersonTo = (id: string, role: 'editor' | 'viewer' | 'remove') => {
-    if (share) update.mutate(movePerson({ owners: app.owners, share }, id, role))
+    if (canEdit && share) update.mutate(movePerson({ owners: app.owners, share }, id, role))
   }
   const openToAll = isOneOf(app.share.scope, 'company', 'public')
   const invitationOptions = reachable.map((person) => ({ value: person.email, label: person.email }))
@@ -197,7 +199,7 @@ export function ShareDialog({ app, me, canEdit, publishId, url, access, open, on
           </div>
         </div>
       </Dialog>
-      <ConfirmDialog open={Boolean(confirm)} onOpenChange={(next) => { if (!next) setConfirm(undefined) }} title={text.settings.shareConfirmTitle} body={confirm ? text.settings.shareConfirmBody(shareSentence(confirm, groups, app.group)) : null} confirmLabel={text.settings.shareConfirmLabel} confirmText={app.displayName} onConfirm={() => { if (confirm) scopeWrite.mutate(confirm) }} pending={scopeWrite.isPending} error={scopeWrite.error ?? undefined} />
+      <ConfirmDialog open={canEdit && Boolean(confirm)} onOpenChange={(next) => { if (!next) setConfirm(undefined) }} title={text.settings.shareConfirmTitle} body={confirm ? text.settings.shareConfirmBody(shareSentence(confirm, groups, app.group)) : null} confirmLabel={text.settings.shareConfirmLabel} confirmText={app.displayName} onConfirm={() => { if (canEdit && confirm) scopeWrite.mutate(confirm) }} pending={scopeWrite.isPending} error={scopeWrite.error ?? undefined} />
     </>
   )
 }

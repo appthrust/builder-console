@@ -1161,3 +1161,20 @@ test('an unreadable plan with a failed execution offers no re-plan and retains t
   expect(count('POST', /creation-plan-generations$/)).toBe(0)
   expect(count('POST', /creation-plan-validations$/)).toBe(0)
 })
+
+test('an unreadable plan with a failed execution disables the composer without clearing typed text', async () => {
+  const id = await plannedDraft()
+  const { key } = await renderBuild(id)
+  await act(async () => { type(composer(), 'Keep this unsent text') })
+  expect(composer().disabled).toBe(false)
+  const validation = (await call('POST', `${draftPath(id)}/creation-plan-validations`, {})).resource as Json
+  await call('POST', `${draftPath(id)}/creation-executions`, { clientRequestId: 'failed-after-typing', creationPlanFingerprint: validation.creationPlanFingerprint })
+  rewrites.push({ method: 'GET', path: new RegExp(`${draftPath(id)}$`), once: false, body: (wire) => ({ ...wire, phase: 'planned', creationPlan: { representation: ['future-kind'] }, creationExecutions: (wire.creationExecutions as Json[]).map((execution) => ({ ...execution, status: 'failed', error: 'creation stopped' })) }) })
+  requests = []
+  await tick(key)
+  expect(composer().disabled).toBe(true)
+  expect(composer().value).toBe('Keep this unsent text')
+  await act(async () => { composer().dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }) as unknown as Event) })
+  expect(composer().value).toBe('Keep this unsent text')
+  expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
+})

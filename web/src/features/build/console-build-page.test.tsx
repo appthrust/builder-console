@@ -749,3 +749,28 @@ test('console-v1 reload resumes run from the execution id when its approval is u
   expect(mock.requests.filter((item) => item.method === 'POST' && /\/creation-executions\/[^/]+\/run$/.test(item.path))).toHaveLength(1)
   expect(mock.requests.filter((item) => item.method === 'POST' && item.path.endsWith('/creation-executions'))).toHaveLength(0)
 })
+
+test('console-v1 keeps a prepare failure visible with unreadable-plan guidance and no dead retry', async () => {
+  const { draftId, sessionId } = await startSession()
+  const session = await api.get(sessionId)
+  await api.createTurn(sessionId, { kind: 'request_plan', specRevision: 0 }, { key: mintIdempotencyKey(), version: session.version })
+  await finishActive(sessionId)
+  const base = `/api/v1/projects/commerce/application-drafts/${draftId}`
+  for (const [path, body] of [[`${base}/creation-plan-validations`, {}], [`${base}/creation-executions`, { clientRequestId: 'failed-preparation', creationPlanFingerprint: `fp-${draftId}` }]] as const) {
+    const url = new URL(path, 'http://mock.test')
+    const response = await platformRoutes(new Request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }), url)
+    expect(response?.ok).toBe(true)
+  }
+  mock.rewrites.push({ method: 'GET', path: new RegExp(`^${base}$`), once: false, body: (wire) => ({ ...wire, phase: 'planned', creationPlan: { representation: ['future-kind'] }, creationExecutions: (wire.creationExecutions as Record<string, unknown>[]).map((execution) => ({ ...execution, status: 'failed', error: 'creation stopped' })) }) })
+  mock.requests.length = 0
+  const page = await open(draftId)
+  await settle(30)
+  const failure = notices(page).find((notice) => notice.textContent?.includes(buildCopy.failure.platform.title))
+  expect(failure).toBeDefined()
+  expect(failure!.textContent).toContain(buildCopy.unreadablePlan.detail)
+  expect(buttons(page.container, text.conversation.retry)).toHaveLength(0)
+  expect(buttons(page.container, buildCopy.primary.prepare)).toHaveLength(0)
+  await reread(page)
+  expect(page.container.textContent).toContain(buildCopy.failure.platform.title)
+  expect(mock.requests.filter((item) => item.method !== 'GET')).toEqual([])
+})

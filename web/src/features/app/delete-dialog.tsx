@@ -40,6 +40,7 @@ export function DeleteAppDialog({
     queryClient.refetchQueries({ queryKey: consoleKeys.app(app.id) }),
     ...[keys.stacks, keys.applications, keys.sourceRepositories].map((key) => queryClient.refetchQueries({ queryKey: key(projectId) })),
   ]))
+  if (view.unreadableStack || view.unreadableBuild) return null
   return (
     <ConfirmDialog
       open={open}

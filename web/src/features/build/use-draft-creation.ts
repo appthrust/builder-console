@@ -417,7 +417,7 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
   }, [draft.createdApplicationStackId, knownValue(draft.phase), knownValue(execution?.status), app?.stackId, busy, host.groupId, appViews.input.applications])
 
   useEffect(() => {
-    if (!canFollowCreation) return
+    if (!canFollowCreation || appView?.unreadableStack || appView?.unreadableBuild) return
     const platform = appView?.platform
     if (!isOneOf(draft.phase, 'created') || appViews.loading || appViews.failed || !platform?.id || !platform.branchId || !platform.webComponentId || !domain || busy || lock.current || failure) return
     const hasPublish = appViews.input.publishes.some((publish) => publish.applicationId === platform.id && publish.branchId === platform.branchId && publish.componentId === platform.webComponentId)

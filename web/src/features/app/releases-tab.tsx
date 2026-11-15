@@ -137,6 +137,7 @@ export function ReleasesTab({ projectId, view }: { projectId: string; view: AppV
   const [columns] = useState(createColumns)
   const platform = view.platform
   const scope = webScope(projectId, view)
+  const readOnly = Boolean(view.unreadableStack || view.unreadableBuild)
   const overview = useQuery({ ...releasesQuery(projectId, platform?.id ?? '', platform?.branchId ?? ''), enabled: platform !== undefined })
   const releaseState = useReleaseState(scope)
   const rollback = deriveRollbackView(releaseState.data)
@@ -146,6 +147,7 @@ export function ReleasesTab({ projectId, view }: { projectId: string; view: AppV
 
   const mutation = useMutation({
     mutationFn: (targetTransitionId: string) => {
+      if (readOnly) throw new Error(copy.common.loadFailed)
       if (!scope) throw new Error('rollback requires a web component')
       return rollbackComponent(scope, targetTransitionId)
     },
@@ -167,7 +169,7 @@ export function ReleasesTab({ projectId, view }: { projectId: string; view: AppV
     queryClient.refetchQueries({ queryKey: ['releases'] }),
   ]))
   // A rollback needs current evidence: never from a release state that failed to refresh.
-  const busy = rollback.inFlight || mutation.isPending || confirmation.unconfirmed || releaseState.isError
+  const busy = readOnly || rollback.inFlight || mutation.isPending || confirmation.unconfirmed || releaseState.isError
   const resetMutation = mutation.reset
 
   const rows = useMemo<ReleaseRow[]>(() => {
@@ -284,7 +286,7 @@ export function ReleasesTab({ projectId, view }: { projectId: string; view: AppV
       </CardBody>
 
       <ConfirmDialog
-        open={pendingTarget !== undefined}
+        open={!readOnly && pendingTarget !== undefined}
         onOpenChange={(open) => {
           if (!open && !mutation.isPending) setPendingTarget(undefined)
         }}
@@ -300,7 +302,7 @@ export function ReleasesTab({ projectId, view }: { projectId: string; view: AppV
           if (pendingTarget) mutation.mutate(pendingTarget.transitionId)
         }}
         pending={mutation.isPending}
-        disabled={confirmation.unconfirmed}
+        disabled={readOnly || confirmation.unconfirmed}
         error={confirmation.unconfirmed ? undefined : mutation.error ?? undefined}
       />
     </Card>

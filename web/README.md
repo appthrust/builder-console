@@ -105,11 +105,16 @@ readback unconfirmed.
 
 Unreadable drafts appear as inert 「読めない作りかけ」 rows, after readable rows
 in deterministic order, and keep the list polling at the unknown-state interval.
-A readable exact match can still resume; otherwise a partial draft list blocks
-a duplicate start. An unreadable creating-draft row linked to an app through
-its saved platform-v1 or console-v1 creation-tab state makes that app unknown.
+A readable exact match can still resume; unreadable rows are never resumed,
+written or deleted, but do not block a new AI creation or improvement.
+A possible second session for the same intent/app is an accepted cost.
+An unreadable creating-draft row linked through saved creation-tab state makes
+that app unknown and read-only, while preserving its readable stack and live URL.
 Known limit: id-less or unlinked unreadable draft rows cannot be associated with
 an app, so they leave that app's existing status behavior unchanged.
+Known limit: when both plan and approval are unreadable and no run supplies readable tasks, the implementation checklist is empty and the Console does not offer publication.
+Known limit: with an unreadable plan, Console app binding waits until its application appears in the applications list.
+Shared behavior: the registry-403 exception also applies on the AI build page and 基盤の設定, not only the new-app page.
 
 The dev mock's `POST /api/v1/__mock/stored-plan` accepts `draftId` and
 `mode: unpublished | unreadable | null-representation`; a new plan replaces

@@ -341,7 +341,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
     else if (context === 'turn' && !store.state.pending.length && isOneOf(turn?.status, 'failed')) send(turn!.userMessage)
   }
   return {
-    session, spec, app, implementation, failure, busy, result, proposal, domain,
+    session, spec, app, implementation, failure, busy, result, proposal, domain, planBlocksStart,
     messages: [initialMessage, ...messages],
     queued: session.pending.length > 0 && conversing,
     /** The AI is still asking its 用意する questions; its options stay answerable after the app is made. */

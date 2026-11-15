@@ -84,7 +84,6 @@ export function useAppViews(projectId: string): AppViews {
       }
       const unreadableBuild = drafts.data?.unreadable.some((row) => row.id !== undefined &&
         (readBuildSession(row.id)?.createdAppId === app.id || readConsoleCreation(row.id)?.createdAppId === app.id))
-      if (unreadableBuild) return { status: 'unknown', label: text.unsupported.label, text: copy.common.loadFailed, second: copy.common.loadFailed, draft: false, unreadableBuild: true }
       const session = app.stackId ? undefined : readCreateSession(app.id)
       const application = applicationForStack(app.stackId, input)
       // Build progress comes from the session that made the app; improvement sessions have their own page.
@@ -98,7 +97,7 @@ export function useAppViews(projectId: string): AppViews {
         tasks: draft.implementationRuns?.at(-1)?.tasks,
         run: draft.implementationRuns?.at(-1),
       } : undefined
-      return deriveAppView(app, input, Date.now(), {
+      const view = deriveAppView(app, input, Date.now(), {
         observed: drafts.isSuccess,
         // A job in a state this console does not know may still run: it counts as in progress, never as finished.
         inProgress: Boolean(drafts.data?.unreadable.length) || drafts.data?.data.some((item) =>
@@ -107,6 +106,7 @@ export function useAppViews(projectId: string): AppViews {
         progress: session?.progress,
         reason: session?.failure?.message,
       }, build)
+      return unreadableBuild ? { ...view, status: 'unknown', label: text.unsupported.label, text: copy.common.loadFailed, second: copy.common.loadFailed, unreadableBuild: true } : view
     },
     input,
     loading,

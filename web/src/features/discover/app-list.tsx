@@ -11,6 +11,7 @@ import {
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState, type ReactNode } from 'react'
 import type { BusinessApp } from '../../model/contracts/console'
+import type { AppView } from '../../model/app'
 import { personName } from '../../model/directory'
 import { pendingAccessRequestsQuery } from '../../api/queries/console'
 import { copy, relativeTime } from '../../copy'
@@ -62,22 +63,22 @@ export function AppStatus({ app, lookup }: { app: BusinessApp; lookup: AppViews 
         <HrefLink href={paths.build(view.build.draftId)} className={`mt-1 ${actionLink}`}>{text.list.resume}</HrefLink>
       ) : view.status === 'failed' ? (
         <HrefLink href={appHref(app)} className={`mt-1 ${actionLink}`}>{text.list.check}</HrefLink>
-      ) : view.status === 'unfinished' ? (
-        <UnfinishedActions app={app} />
+      ) : view.status === 'unfinished' && !view.unreadableStack && !view.unreadableBuild ? (
+        <UnfinishedActions app={app} view={view} />
       ) : null}
     </div>
   )
 }
 
 /** 作りかけ: carry on, or drop the draft (it has no stack, so nothing else is removed). */
-function UnfinishedActions({ app }: { app: BusinessApp }) {
+function UnfinishedActions({ app, view }: { app: BusinessApp; view: AppView }) {
   const { me } = useShell()
   const [open, setOpen] = useState(false)
   const queryClient = useQueryClient()
-  const discard = useDiscardDraft(app)
+  const discard = useDiscardDraft(app, view)
   // A discard whose answer could not be read may have happened: the lists are read back before it is offered again.
   const confirmation = useWriteConfirmation([discard.error], discard.reset, () => queryClient.refetchQueries({ queryKey: ['console', 'apps'] }))
-  if (!canEditApp(app, me)) return null
+  if (view.unreadableStack || view.unreadableBuild || !canEditApp(app, me)) return null
   return (
     <div className="mt-1 flex flex-wrap items-center gap-x-3">
       <HrefLink href={paths.new({ resume: app.id })} className={actionLink}>{text.list.resume}</HrefLink>
