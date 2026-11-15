@@ -97,8 +97,11 @@ function planGenerationRejection(text: string): BuildFailure | undefined {
   return PLAN_FIELD.test(text) ? planFailure('incomplete', text) : undefined
 }
 
-/** Raw diagnostics stay in the advanced disclosure; stable console codes do not depend on server wording. */
-export function classifyBuildFailure(text: string, status: number | undefined, context: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish', reference?: BuildFailure['reference'], code?: string, operation?: 'apps.create', failureReason?: OpenValue<ImplementationFailureReason>, details?: Record<string, unknown>): BuildFailure {
+/**
+ * Raw diagnostics stay in the advanced disclosure; stable console codes do not depend on server wording. `operation`
+ * names the request that failed when its class differs from the context's: `plan.validate` is the plan's validation.
+ */
+export function classifyBuildFailure(text: string, status: number | undefined, context: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish', reference?: BuildFailure['reference'], code?: string, operation?: 'apps.create' | 'plan.validate', failureReason?: OpenValue<ImplementationFailureReason>, details?: Record<string, unknown>): BuildFailure {
   const copy = buildCopy.failure
   // Admission reasons take precedence over generic status, runtime and provider errors.
   const policy = aiPolicyExplanation(details?.reason, details?.policy)
@@ -128,6 +131,8 @@ export function classifyBuildFailure(text: string, status: number | undefined, c
     return { kind: 'interrupted', title: buildCopy.progress.interrupted.title, reason: buildCopy.progress.interrupted.hint, raw: text }
   }
   if (/(?:generation|conversation.turn).*(?:limit|maximum|at most|20|50)|(?:limit|maximum|reached (?:20|50)).*(?:generation|conversation.turn)/i.test(text)) return { kind: 'limit', ...copy.limit, raw: text }
+  // The plan's validation asks no AI: a gateway answer to it is the platform's failure, with its reference (APT-1094).
+  if (operation === 'plan.validate' && (status === 502 || status === 503 || status === 504)) return { kind: 'platform', ...copy.platform, raw: text, ...(reference ? { reference } : {}) }
   if (status === 412 || status === 502 || status === 503 || status === 504 || /runtime is not available|codex.*(?:unavailable|not available|not configured)|codexAvailable/i.test(text)) return { kind: 'unavailable', ...copy.unavailable, raw: text }
   // The server reports interrupted task streams; retry asks it to resume unfinished work.
   if (context === 'implement' && /AI task stream failed|stream ended before task\.completed|failed to fetch|network|connection (?:interrupted|reset|closed)|load failed/i.test(text)) {

@@ -63,7 +63,8 @@ export function draftFailure(error: unknown, context: 'turn' | CreationContext, 
   const envelope = platformErrorEnvelope(error)
   const status = typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number' ? error.status : envelope?.status
   const raw = envelope?.message ?? (error instanceof Error ? error.message : String(error))
-  return classifyBuildFailure(failedStep?.message ?? raw, status, context, reference, failedStep?.detail?.reason ?? (isConsoleError(error) ? error.code : envelope?.code), error instanceof ConsoleAppCreationError ? 'apps.create' : undefined, undefined, envelope?.details)
+  const operation = error instanceof ConsoleAppCreationError ? 'apps.create' as const : typeof error === 'object' && error !== null && failedValidationRequests.has(error) ? 'plan.validate' as const : undefined
+  return classifyBuildFailure(failedStep?.message ?? raw, status, context, reference, failedStep?.detail?.reason ?? (isConsoleError(error) ? error.code : envelope?.code), operation, undefined, envelope?.details)
 }
 
 /** The approval stopped at the repository destination before anything was sent to create. */
@@ -85,6 +86,9 @@ export class PlanValidationError extends Error {
   }
 }
 
+/** Plan validation requests that failed (no answer about the plan): `draftFailure` reports them as the validation's failure. */
+const failedValidationRequests = new WeakSet<object>()
+
 /**
  * Before the plan is validated and approved, its new repository is bound to the destination the user approved: the
  * revision the proposal showed when 「この内容で作る」 was pressed (`approvedRevision`). Platform's answer now must be
@@ -93,8 +97,9 @@ export class PlanValidationError extends Error {
  * it was shown, or the plan was made against another one): the approval stops, the plan is bound to the current
  * revision, and the proposal shows the current destination for the user to approve again; nothing is sent for them.
  * `stop` withdraws the approval before either stop is reported. A plan without a new repository (adoption, reuse) is not bound.
- * `rejected`: Platform's validation said the stored plan has no current destination; the plan is written bound to the
- * current revision even when this copy already shows it, so the next approval never validates the same stored plan again.
+ * `rejected`: Platform's validation said the stored plan has no current destination. Only a plan bound to another
+ * revision is bound again (and stops as `changed`); one that already carries the current revision returns unchanged,
+ * because binding it again would change nothing: the caller then treats it as a plan to make again.
  */
 export async function bindPlanDestination(
   projectId: string,
@@ -111,9 +116,10 @@ export async function bindPlanDestination(
     deps.stop()
     throw new PlanDestinationError('blocked')
   }
-  if (!rejected && approvedRevision === destination.revision && request.destinationRevision === destination.revision) return
+  const bound = request.destinationRevision === destination.revision
+  if (rejected ? bound : approvedRevision === destination.revision && bound) return
   deps.stop()
-  if (rejected || request.destinationRevision !== destination.revision) {
+  if (!bound) {
     await deps.receive(await deps.updateDraft(projectId, draft.id, { creationPlan: withDestinationRevision(plan, destination.revision) }))
   }
   throw new PlanDestinationError('changed')
@@ -308,11 +314,14 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
       try {
         creationPlanFingerprint = await validatePreparationPlan(projectId, draft.id)
       } catch (error) {
-        if (!(error instanceof PlanValidationError)) throw error
+        if (!(error instanceof PlanValidationError)) {
+          if (typeof error === 'object' && error !== null) failedValidationRequests.add(error)
+          throw error
+        }
         // Platform answered that this plan cannot be approved: it is never validated or begun again unchanged. A
-        // destination that moved or is not set is bound again as an approval binds it (nothing approved): the plan is
-        // bound to the current destination for the user to approve again, or the stop says none is set. A plan that
-        // must change (not a name another app holds: renaming fixes that one) waits for a new plan.
+        // destination that is not set stops as such; a plan bound to a revision that is no longer current is bound to
+        // the current one for the user to approve again (#30's stop). A plan that already carries the current revision,
+        // or must change otherwise (not a name another app holds: renaming fixes that one), waits for a new plan.
         const destination = error.lines.map(destinationSentence).find(Boolean)
         if ((destination === 'changed' || destination === 'blocked') && !host.draftRef.current.creationExecutions.length) {
           await bindPlanDestination(projectId, host.draftRef.current, undefined, destinationDeps, true)

@@ -16,7 +16,7 @@ import { copy } from '../../copy'
 import { consoleRoutes } from '../../dev/mock-console'
 import { platformRoutes } from '../../dev/mock-platform'
 import { buildCopy } from '../../model/build/copy'
-import { classifyBuildFailure } from '../../model/build/failure'
+import { buildFailureReference } from '../../model/build/failure'
 import type { BuildDraft } from '../../model/contracts/build'
 import { setLanguage } from '../../shell/language'
 import { UnsavedChangesProvider } from '../../ui/use-unsaved-changes-guard'
@@ -29,7 +29,7 @@ const SECRET = 'SENTINEL-build-page-7f3a'
 const PROJECT = '/api/v1/projects/commerce'
 
 type Json = Record<string, unknown>
-/** Rewrites a successful answer of the in-memory Platform mock before the page reads it. */
+/** Rewrites a successful answer of the in-memory Platform mock before the page reads it (`body` may first change the mock's state). */
 interface Rewrite { method: string; path: RegExp; body: (wire: Json) => unknown; once: boolean }
 
 let rewrites: Rewrite[] = []
@@ -55,7 +55,7 @@ async function mockFetch(input: RequestInfo | URL, init?: RequestInit): Promise<
   const rewrite = rewrites.find((item) => item.method === request.method && item.path.test(url.pathname))
   if (!rewrite || !response.ok) return response
   if (rewrite.once) rewrites = rewrites.filter((item) => item !== rewrite)
-  return Response.json(rewrite.body((await response.json()) as Json), { status: response.status })
+  return Response.json(await rewrite.body((await response.json()) as Json), { status: response.status })
 }
 
 /** Drives the Platform mock directly (setup and server-side truth); these calls are not the page's requests. */
@@ -591,16 +591,19 @@ describe('a plan Platform\'s validation rejects is an answer about the plan (APT
   const resolvedBranch = { applicationId: 'mitsumori', branchId: 'main', state: 'pending', management: { source: 'applicationStack', mutableFields: [] } }
   const platformTitle = buildCopy.failure.platform.title
 
-  /** Presses 「この内容で作る」; the plan's validation answers `answer` (valid: false) once. */
-  async function rejected(answer: Json) {
+  /** Presses 「この内容で作る」; the plan's validation answers `answer` (valid: false) once, after `meanwhile` changed the mock. */
+  async function rejected(answer: Json, meanwhile?: () => Promise<unknown>) {
     const draftId = await plannedDraft()
     const view = await renderBuild(draftId)
     expect(stage()).toBe('decide')
-    rewrites.push({ method: 'POST', path: validations(draftId), once: true, body: (wire) => ({ ...answer, operation: wire.operation, resource: answer }) })
+    rejectNext(draftId, answer, meanwhile)
     await click(button(buildCopy.primary.prepare))
     await settle(10)
     expect(count('POST', validations(draftId))).toBe(1)
     return { draftId, ...view }
+  }
+  function rejectNext(draftId: string, answer: Json, meanwhile?: () => Promise<unknown>) {
+    rewrites.push({ method: 'POST', path: validations(draftId), once: true, body: async (wire) => { await meanwhile?.(); return { ...answer, operation: wire.operation, resource: answer } } })
   }
 
   /** The re-plan offered after a rejection: one new plan generation, never the rejected plan validated or begun again. */
@@ -608,11 +611,12 @@ describe('a plan Platform\'s validation rejects is an answer about the plan (APT
     expect(actionsOf(title).map((item) => item.textContent?.trim())).toEqual([buildCopy.failure.plan.replan])
     // The proposal no longer offers its approval: the rejected plan is never approved as it is.
     expect(proposalButtons()).not.toContain(buildCopy.primary.prepare)
+    const validated = count('POST', validations(draftId))
     const before = count('POST', generations(draftId))
     await click(actionsOf(title)[0]!)
     await settle(10)
     expect(count('POST', generations(draftId))).toBe(before + 1)
-    expect(count('POST', validations(draftId))).toBe(1)
+    expect(count('POST', validations(draftId))).toBe(validated)
     expect(count('POST', executions(draftId))).toBe(0)
     expect(notices(title)).toHaveLength(0)
     // The new plan arrives: only it can be approved, and its approval validates it once.
@@ -622,28 +626,69 @@ describe('a plan Platform\'s validation rejects is an answer about the plan (APT
     expect(proposalButtons()).toContain(buildCopy.primary.prepare)
     await click(button(buildCopy.primary.prepare))
     await settle(10)
-    expect(count('POST', validations(draftId))).toBe(2)
+    expect(count('POST', validations(draftId))).toBe(validated + 1)
     expect(count('POST', executions(draftId))).toBe(1)
   }
 
-  test('the destination sentence without a reason code reaches the destination stop: the plan is bound again, and only that plan is validated next', async () => {
-    const { draftId } = await rejected({ valid: false, message: 'Creation plan needs changes before AppThrust tools can run.', staticErrors: ['Validate a repository destination before approving this creation plan.'] })
+  test('the destination sentence after the destination moved reaches the destination stop: the plan is bound to the new one; the same sentence again is a plan to make again', async () => {
+    let revisionB = ''
+    const moveToB = async () => {
+      await call('POST', '/api/v1/__mock/repository-destination', { state: 'builtin' })
+      revisionB = (await call('GET', `${PROJECT}/repository-destination`)).revision as string
+    }
+    const staticError = { valid: false, message: 'Creation plan needs changes before AppThrust tools can run.', staticErrors: ['Validate a repository destination before approving this creation plan.'] }
+    const { draftId, key } = await rejected(staticError, moveToB)
     const title = buildCopy.failure.destination.changed.title
     expect(notices(title, '#build-conversation')).toHaveLength(1)
     expect(conversation()).toContain(buildCopy.failure.destination.changed.reason)
     expect(container.textContent).not.toContain(platformTitle)
     expect(container.textContent).not.toContain(buildCopy.failure.copyReference)
     expect(count('POST', executions(draftId))).toBe(0)
-    // The plan was written bound to the current destination after the rejection, before anything else.
+    // The plan was written bound to B after the rejection, before anything else: the plan itself changed.
     const rejectedAt = requests.findIndex((item) => item.method === 'POST' && validations(draftId).test(item.path))
     expect(requests.slice(rejectedAt + 1).filter((item) => item.method !== 'GET').map((item) => `${item.method} ${item.path}`)).toEqual([`PATCH ${draftPath(draftId)}`])
-    // Its action approves the plan now shown (「この内容で作る」); that approval validates the re-bound plan.
+    const stored = (await call('GET', draftPath(draftId))).creationPlan as { applicationSourceRepositoryRequest: { destinationRevision: string } }
+    expect(stored.applicationSourceRepositoryRequest.destinationRevision).toBe(revisionB)
+    expect(proposal()?.textContent).toContain('registry.appthrust.test/commerce/')
+
+    // Its action approves the plan now shown (「この内容で作る」). Platform answers the same sentence again for the plan
+    // already bound to B: binding again would change nothing, so it is a plan to make again, never a third validation.
+    rejectNext(draftId, staticError)
     const actions = actionsOf(title)
     expect(actions.map((item) => item.textContent?.trim())).toEqual([buildCopy.primary.prepare])
     await click(actions[0]!)
     await settle(10)
     expect(count('POST', validations(draftId))).toBe(2)
-    expect(count('POST', executions(draftId))).toBe(1)
+    const again = buildCopy.failure.plan.destination.title
+    expect(notices(again, '#build-conversation')).toHaveLength(1)
+    const secondAt = requests.length - 1 - [...requests].reverse().findIndex((item) => item.method === 'POST' && validations(draftId).test(item.path))
+    expect(requests.slice(secondAt + 1).filter((item) => item.method !== 'GET')).toEqual([])
+    await replans(draftId, again, key)
+  })
+
+  test('the destination sentence for a plan already bound to the current destination is a plan to make again: nothing is rewritten', async () => {
+    const { draftId, key } = await rejected({ valid: false, message: 'Creation plan needs changes before AppThrust tools can run.', staticErrors: ['Validate a repository destination before approving this creation plan.'] })
+    const title = buildCopy.failure.plan.destination.title
+    expect(notices(title, '#build-conversation')).toHaveLength(1)
+    expect(conversation()).toContain(buildCopy.failure.plan.destination.reason)
+    expect(container.textContent).not.toContain(platformTitle)
+    expect(container.textContent).not.toContain(buildCopy.failure.copyReference)
+    const rejectedAt = requests.findIndex((item) => item.method === 'POST' && validations(draftId).test(item.path))
+    expect(requests.slice(rejectedAt + 1).filter((item) => item.method !== 'GET')).toEqual([])
+    await replans(draftId, title, key)
+  })
+
+  test('the destination sentence while no destination is set is the blocked stop: nothing is validated again until one is set', async () => {
+    const { draftId } = await rejected(
+      { valid: false, message: 'No repository destination is configured.', sourceRepositoryValidation: { valid: false, message: 'No repository destination is configured.' } },
+      () => call('POST', '/api/v1/__mock/repository-destination', { state: 'NotConfigured' }),
+    )
+    const title = buildCopy.failure.destination.blocked.title
+    expect(notices(title, '#build-conversation')).toHaveLength(1)
+    expect(container.textContent).not.toContain(platformTitle)
+    await click(actionsOf(title)[0]!)
+    expect(count('POST', validations(draftId))).toBe(1)
+    expect(count('POST', executions(draftId))).toBe(0)
   })
 
   test('an unknown static error shows Platform\'s sentence under a neutral title; 「計画を作り直す」 makes a new plan', async () => {
@@ -700,20 +745,19 @@ describe('a plan Platform\'s validation rejects is an answer about the plan (APT
     await replans(draftId, buildCopy.failure.plan.unknown.title, key)
   })
 
-  // A failed request is not an answer about the plan: it keeps the class it had before (500 the platform failure with
-  // its reference, 503 the "AI unavailable" class of every 502-504), and the same approval may be tried again.
-  test.each([500, 503])('a failed validation request (%i) keeps its class from before and never becomes a plan rejection', async (status) => {
+  // A failed request is not an answer about the plan: preparing asks no AI, so a 500 and a gateway 503 alike are the
+  // platform failure with its reference, and the same approval may be tried again.
+  test.each([500, 503])('a failed validation request (%i) is the platform failure with its reference, never a plan rejection', async (status) => {
     const draftId = await plannedDraft()
     await renderBuild(draftId)
     refusals.push({ method: 'POST', path: validations(draftId), status, body: { error: { code: status === 503 ? 'service_unavailable' : 'internal', message: 'upstream connect error' } } })
     await click(button(buildCopy.primary.prepare))
     await settle(10)
-    const before = classifyBuildFailure('upstream connect error', status, 'prepare', { draftId, at: new Date().toISOString() })
-    expect(before.kind).toBe(status === 500 ? 'platform' : 'unavailable')
-    expect(notices(before.title, '#build-conversation')).toHaveLength(1)
-    if (status === 500) expect(conversation()).toContain(buildCopy.failure.copyReference)
+    expect(notices(platformTitle, '#build-conversation')).toHaveLength(1)
+    expect(conversation()).toContain(buildFailureReference({ draftId, at: new Date().toISOString() }).replace(/ \d\d:\d\d$/, ''))
+    expect(conversation()).toContain(buildCopy.failure.copyReference)
     expect(container.textContent).not.toContain(buildCopy.failure.plan.replan)
-    expect(actionsOf(before.title).map((item) => item.textContent?.trim())).toEqual([uiText.conversation.retry])
+    expect(actionsOf(platformTitle).map((item) => item.textContent?.trim())).toEqual([uiText.conversation.retry])
     expect(count('POST', executions(draftId))).toBe(0)
   })
 
