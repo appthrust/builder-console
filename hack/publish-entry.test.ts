@@ -55,6 +55,21 @@ describe('renderEntry', () => {
     expect(() => renderEntry(template, '0.3.0', nextDigest, previous)).toThrow('version 0.3.0 already has different immutable images')
   })
 
+  test('a withdrawn version stays recorded but is not served, and cannot be published', () => {
+    const withdrawing = template.replace('- 0.5.7', '- 0.3.0')
+    const previous = renderEntry(template, '0.3.0', digest)
+    const entry = renderEntry(withdrawing, '0.3.1', nextDigest, previous)
+    expect(entry.versions.map(version => [version.name, version.served, version.default])).toEqual([
+      ['0.1.0', true, false], ['0.2.0', true, false], ['0.3.0', false, false], ['0.3.1', true, true],
+    ])
+    expect(entry.versions[2]!.images).toEqual(previous.versions[2]!.images)
+    const definition = YAML.parse(entry.definitionYAML)
+    expect(definition.withdrawnVersions).toBeUndefined()
+    expect(definition.spec.versions).toEqual(entry.versions)
+    expect(() => renderEntry(withdrawing, '0.3.0', digest, previous)).toThrow('version 0.3.0 is withdrawn and cannot be published')
+    expect(() => renderEntry(template.replace('- 0.5.7', '- latest'), '0.3.1', nextDigest)).toThrow('withdrawnVersions must list SemVer versions')
+  })
+
   test('rejects malformed release coordinates before publication', () => {
     for (const version of ['v0.3.0', '0.3', '01.2.3', '0.3.0+build', '0.3.0-01']) {
       expect(() => renderEntry(template, version, digest)).toThrow('version must be SemVer')

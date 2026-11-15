@@ -478,6 +478,11 @@ Only a `v<semver>` tag starts publication. The initial standalone release is
 `0.1.0` or `0.2.0`: both served Platform-image floors remain verbatim in the committed
 catalog entry. The publisher retains their images, merges persisted release history,
 keeps earlier versions served, and makes the new version the only default.
+A version listed under the publisher-only `withdrawnVersions` key of `catalog/entry.yaml`
+stays recorded with `served: false`: existing installations keep running, nothing
+installs or moves to it again, and it cannot be published. `0.5.7` is withdrawn
+because an installation of it cannot change version (see the prompt-version
+registration rule above).
 
 The workflow builds `linux/amd64` and `linux/arm64`, signs the image index with
 GitHub OIDC/cosign, then submits the catalog entry to Cloud. A queued publication is
