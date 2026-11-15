@@ -737,12 +737,15 @@ export function rejectCandidate(progress: CreateProgress): CreateProgress {
   return { ...progress, candidate: undefined, notMine: [...(progress.notMine ?? []), rejected], unsettled: candidate.step, unsettledSearched: true }
 }
 
-/** The hit the user last said is not theirs for the held attempt, which the held notice can offer again. */
+/**
+ * The hit the held notice offers again: the one rejected longest ago for the held attempt. A hit rejected again goes to
+ * the back, so looking again repeatedly walks through every rejected hit; none becomes unreachable.
+ */
 export function rejectedCandidate(progress: CreateProgress): CreateCandidate | undefined {
   const step = progress.unsettled
   if (!step || progress.candidate) return undefined
   const key = progress.attempts?.[step]?.key
-  return progress.notMine?.filter((rejected) => rejected.candidate.step === step && rejected.key === key).at(-1)?.candidate
+  return progress.notMine?.find((rejected) => rejected.candidate.step === step && rejected.key === key)?.candidate
 }
 
 /**

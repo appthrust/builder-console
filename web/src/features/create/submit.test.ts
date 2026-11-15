@@ -1033,6 +1033,27 @@ describe('a readback hit is a candidate, never adopted or deleted silently (re-r
     expect(next.bodies.createStack![0]).toMatchObject({ source: { kind: 'application-source-repository', sourceRepositoryId: 'source-0f1e2d3c4b5a' } })
   })
 
+  test('two hits were both rejected: looking again walks through both, so the first one can still be chosen', async () => {
+    const { progress } = await heldK()
+    const readback = deps({}, { repositories: [anotherAtA()] })
+    const offeredA = (await confirmCreate(request, progress, { api: readback.api, catalog: readback.value.catalog })).progress
+    const a = offeredA.candidate!
+    const b = { ...a, id: 'source-second-hit' }
+    // A is rejected, a later readback offers B, and B is rejected too.
+    const bothRejected = rejectCandidate({ ...rejectCandidate(offeredA), candidate: b, unsettled: undefined, unsettledSearched: undefined })
+    expect(bothRejected.notMine?.map((rejected) => rejected.candidate.id)).toEqual([a.id, b.id])
+    const first = reconsiderCandidate(bothRejected)
+    expect(first.candidate?.id).toBe(a.id)
+    // Rejecting A again puts it behind B: the next look offers B, then A again.
+    const second = reconsiderCandidate(rejectCandidate(first))
+    expect(second.candidate?.id).toBe(b.id)
+    const third = reconsiderCandidate(rejectCandidate(second))
+    expect(third.candidate?.id).toBe(a.id)
+    const next = deps()
+    await submitCreate(request, acceptCandidate(third), next.value)
+    expect(next.bodies.createStack![0]).toMatchObject({ source: { kind: 'application-source-repository', sourceRepositoryId: a.id } })
+  })
+
   test('"not mine" belongs to its attempt: giving up drops it, and a rejection for an earlier key does not hide a later attempt\'s hit', async () => {
     const { progress, key } = await heldK()
     const readback = deps({}, { repositories: [anotherAtA()] })
