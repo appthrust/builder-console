@@ -108,6 +108,13 @@ pending reason. When a domain becomes usable, the existing AI/template controls
 become available without reloading and polling stops. Missing or unsupported
 configuration still shows the setup guidance, without readiness polling.
 
+The create page reads reusable registry connections from a Platform-admin-only
+route. Its HTTP 403 means no reusable registries are visible to the caller:
+sources and domains remain available, so AI, templates and existing-code
+entries are unaffected. Only the image entry shows the existing registry
+prerequisite. Successful reads are unchanged. Registry 401, 5xx, network and
+contract failures—and every failure of the other reads—still fail the query.
+
 
 ## Excel から作る
 
