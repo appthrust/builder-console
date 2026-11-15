@@ -15,13 +15,16 @@ type BuildPromptVersion struct {
 	CreatedAt                                     time.Time
 }
 
-// RegisterBuildPromptVersion is startup registration. Reusing a version with
-// different content is an error, not an update to accepted attempts.
+// RegisterBuildPromptVersion registers immutable prompt content at startup.
+// An existing ID must match SchemaVersion, TemplateSHA256 and SchemaSHA256;
+// ReleaseRevision is first-registration provenance, never compared or updated.
+// Releases must start against rows written by other releases: during a version
+// change, the Platform starts the old binary under the new release version name.
 func (t *Tx) RegisterBuildPromptVersion(p BuildPromptVersion) error {
 	var old BuildPromptVersion
 	err := t.SQL.QueryRowContext(t.Context, `SELECT id,schema_version,template_sha256,schema_sha256,release_revision,created_at FROM build_prompt_versions WHERE id=$1`, p.ID).Scan(&old.ID, &old.SchemaVersion, &old.TemplateSHA256, &old.SchemaSHA256, &old.ReleaseRevision, &old.CreatedAt)
 	if err == nil {
-		if old.SchemaVersion != p.SchemaVersion || old.TemplateSHA256 != p.TemplateSHA256 || old.SchemaSHA256 != p.SchemaSHA256 || old.ReleaseRevision != p.ReleaseRevision {
+		if old.SchemaVersion != p.SchemaVersion || old.TemplateSHA256 != p.TemplateSHA256 || old.SchemaSHA256 != p.SchemaSHA256 {
 			return domain.RejectBuild("conflict", "Prompt version is already registered with different content")
 		}
 		return nil

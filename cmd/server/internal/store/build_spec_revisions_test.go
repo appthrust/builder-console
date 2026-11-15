@@ -183,10 +183,26 @@ func TestBuildCursorPaginationAndPromptIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = f.db.Do(context.Background(), true, func(tx *Tx) error {
-		return tx.RegisterBuildPromptVersion(BuildPromptVersion{ID: "prompt/1", SchemaVersion: 1, TemplateSHA256: strings.Repeat("c", 64), SchemaSHA256: strings.Repeat("b", 64), ReleaseRevision: "release", CreatedAt: buildTestAt})
-	})
-	buildErrorCode(t, err, "conflict")
+	for _, tc := range []struct {
+		name   string
+		change func(*BuildPromptVersion)
+	}{
+		{"template_sha256", func(p *BuildPromptVersion) { p.TemplateSHA256 = strings.Repeat("c", 64) }},
+		{"schema_sha256", func(p *BuildPromptVersion) { p.SchemaSHA256 = strings.Repeat("c", 64) }},
+		{"schema_version", func(p *BuildPromptVersion) { p.SchemaVersion++ }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := BuildPromptVersion{ID: "prompt/1", SchemaVersion: 1, TemplateSHA256: strings.Repeat("a", 64), SchemaSHA256: strings.Repeat("b", 64), ReleaseRevision: "another-release", CreatedAt: buildTestAt}
+			tc.change(&p)
+			err := f.db.Do(t.Context(), true, func(tx *Tx) error {
+				return tx.RegisterBuildPromptVersion(p)
+			})
+			buildErrorCode(t, err, "conflict")
+			if err.Error() != "conflict: Prompt version is already registered with different content" {
+				t.Fatal(err)
+			}
+		})
+	}
 	err = f.db.Do(context.Background(), true, func(tx *Tx) error {
 		r := buildReceiptFixture("create", "create-key")
 		r.Body = json.RawMessage(`{"different":true}`)

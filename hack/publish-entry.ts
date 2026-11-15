@@ -34,6 +34,8 @@ interface Definition {
   apiVersion: string
   kind: string
   metadata: { name: string }
+  /** Publisher-only: recorded versions that must not be installed again. Never emitted. */
+  withdrawnVersions?: string[]
   spec: {
     display: { category: string; iconRef?: { name: string } }
     versions: CatalogVersion[]
@@ -57,6 +59,12 @@ export function renderEntry(template: string, version: string, digest: string, p
     throw new Error('template must be the builder-console ApplicationStackDefinition')
   }
   if (previous && previous.slug !== 'builder-console') throw new Error('previous entry must have slug builder-console')
+  const withdrawn = new Set(definition.withdrawnVersions ?? [])
+  delete definition.withdrawnVersions
+  for (const name of withdrawn) {
+    if (typeof name !== 'string' || name.length > 63 || !versionPattern.test(name)) throw new Error('withdrawnVersions must list SemVer versions')
+  }
+  if (withdrawn.has(version)) throw new Error(`version ${version} is withdrawn and cannot be published`)
 
   // Every tag starts from the committed floor. Merge the store's history so the
   // second app release cannot silently remove the first one from the catalog.
@@ -67,7 +75,9 @@ export function renderEntry(template: string, version: string, digest: string, p
       Object.entries(existing.images).some(([slot, image]) => candidate.images[slot] !== image))) {
       throw new Error(`version ${candidate.name} already has different immutable images`)
     }
-    versions.set(candidate.name, { ...candidate, images: { ...candidate.images }, default: false, served: true })
+    // A withdrawn version stays in the catalog (its installations keep
+    // running) but is not served, so nothing installs or moves to it again.
+    versions.set(candidate.name, { ...candidate, images: { ...candidate.images }, default: false, served: !withdrawn.has(candidate.name) })
   }
   const image = `${imageRepository}@${digest}`
   const existing = versions.get(version)
