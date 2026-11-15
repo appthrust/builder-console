@@ -634,14 +634,24 @@ non-engineers, with engineering words only under 「詳しい人向け」
   first sends the one PATCH that binds the plan to the current revision and
   stops for the user's approval (the destination notice), as any approval
   does. The rejection stands until a validation answers valid: then the plan
-  is approvable again and nothing is created until the user presses
+  is approvable again, an information notice says so (no action, not a
+  failure), and nothing is created until the user presses
   「この内容で作る」; `valid: false` leaves the state as it was; a failed
   request (or a failed destination read) leaves the plan rejected, nothing
-  requested, so a reload sends nothing. In the legacy engine the check is not
+  requested, so a reload sends nothing. In the legacy engine the check's
+  buttons are disabled while it cannot run (a job or turn running, the page
+  busy, a reply pending), and the check is not
   offered while the conversation has outgrown the plan (the approval would
   read 「計画を更新して作る」); only 「計画を作り直す」 remains. A preparation
   retry from a notice older than the rejection is not offered and does
-  nothing. Legacy only: when Platform refuses a new plan for its
+  nothing; a check answered "name taken" keeps its name choice. Renaming
+  changes the plan, so it clears the rejection and approves the renamed plan,
+  which is validated before anything begins. A retry of a destination stop
+  met during a check (`prepare()` on a re-checkable plan) runs the check
+  again, never an approval. In console-v1, while a plan is rejected, every
+  creation failure notice (except an unreadable answer, a name choice or a
+  destination stop) carries the rejection's actions instead of a retry.
+  Legacy only: when Platform refuses a new plan for its
   20-generation limit, the limit notice has no action, says the rejected plan
   cannot be used (and, where it applies, that 「もう一度確かめる」 can check it
   again), and the proposal no longer offers 「計画を作り直す」. Console-v1 does

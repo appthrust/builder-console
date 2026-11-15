@@ -732,6 +732,8 @@ describe('a plan Platform\'s validation rejects is an answer about the plan (APT
     expect(count('POST', validations(draftId))).toBe(2)
     expect(count('POST', executions(draftId))).toBe(1)
     expect(count('POST', generations(draftId))).toBe(0)
+    // An ordinary approval says nothing about a check.
+    expect(notices(buildCopy.failure.plan.accepted.title)).toHaveLength(0)
   })
 
   test('a reason this console does not know is the platform failure with its reference, Platform\'s words folded away; nothing validates it again on its own', async () => {
@@ -761,6 +763,11 @@ describe('a plan Platform\'s validation rejects is an answer about the plan (APT
     expect(requests.slice(before).filter((item) => item.method !== 'GET').map((item) => `${item.method} ${item.path}`)).toEqual([`POST ${draftPath(draftId)}/creation-plan-validations`])
     expect(count('POST', executions(draftId))).toBe(0)
     expect(notices(platformTitle)).toHaveLength(0)
+    // The plan is said to be accepted, once, as information: no action, no reference.
+    const accepted = buildCopy.failure.plan.accepted
+    expect(notices(accepted.title, '#build-conversation')).toHaveLength(1)
+    expect(conversation()).toContain(accepted.detail)
+    expect(labels(accepted.title)).toEqual([])
     expect(proposalButtons()).toEqual([buildCopy.primary.prepare])
     await click(button(buildCopy.primary.prepare))
     await settle(10)
@@ -768,6 +775,36 @@ describe('a plan Platform\'s validation rejects is an answer about the plan (APT
     expect(count('POST', generations(draftId))).toBe(0)
     expect(count('POST', executions(draftId))).toBe(1)
     expect(count('POST', runs(draftId))).toBe(1)
+    expect(notices(accepted.title, '#build-conversation')).toHaveLength(1)
+  })
+
+  test('「もう一度確かめる」 answered "name taken" offers the name choice; the new name is written and validated, with no new plan (N1)', async () => {
+    const { draftId } = await rejected(unknownAnswer)
+    rejectNext(draftId, { valid: false, message: 'Creation plan needs changes before AppThrust tools can run.', staticErrors: ['name already exists: mitsumori: GitHub repository acme/mitsumori already exists. Choose a different repository name.'] })
+    await click(action(platformTitle, checkAgain))
+    await settle(10)
+    const suggestion = uiText.nameChoice.useSuggestion('mitsumori-2')
+    expect(labels(buildCopy.failure.nameTaken)).toContain(suggestion)
+    const before = requests.length
+    await click(action(buildCopy.failure.nameTaken, suggestion))
+    await settle(10)
+    const writes = requests.slice(before).filter((item) => item.method !== 'GET').map((item) => `${item.method} ${item.path}`)
+    expect(writes.slice(0, 3)).toEqual([`POST ${draftPath(draftId)}/creation-cleanups`, `PATCH ${draftPath(draftId)}`, `POST ${draftPath(draftId)}/creation-plan-validations`])
+    expect(count('POST', generations(draftId))).toBe(0)
+  })
+
+  test('「もう一度確かめる」 on the notice while a conversation turn runs is disabled: nothing is sent and the notice keeps its reference (N2)', async () => {
+    const { draftId, key } = await rejected(unknownAnswer)
+    await call('POST', `${draftPath(draftId)}/conversation-turns`, { message: '承認のステップを足してください。' })
+    await tick(key)
+    const before = requests.length
+    const check = action(platformTitle, checkAgain)
+    expect(check.disabled).toBe(true)
+    await click(check)
+    await settle(10)
+    expect(requests.slice(before).filter((item) => item.method !== 'GET')).toEqual([])
+    expect(notices(platformTitle, '#build-conversation')).toHaveLength(1)
+    expect(conversation()).toContain(buildCopy.failure.copyReference)
   })
 
   test('「もう一度確かめる」 whose request fails (502) leaves the plan rejected: no approval comes back, and a reload sends nothing (R1)', async () => {

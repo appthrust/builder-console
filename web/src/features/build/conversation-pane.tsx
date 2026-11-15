@@ -17,7 +17,7 @@ type Assistant = Extract<BuildMessage, { role: 'assistant' }>
 /** Pixels from the bottom that still count as "reading the newest message". */
 const STICK = 96
 
-export function ConversationPane({ messages, stage, answering, unsupported = false, thinking: turnPending, waitingForAi, planning, proposalAction, queued, progress, prepareOpen, ownerGroupName, failure, planRejected, onSend, onRetry, onUseName }: {
+export function ConversationPane({ messages, stage, answering, unsupported = false, thinking: turnPending, waitingForAi, planning, proposalAction, queued, progress, prepareOpen, ownerGroupName, failure, planRejected, canRecheck = false, onSend, onRetry, onUseName }: {
   messages: BuildMessage[]
   stage: BuildStage
   answering: boolean
@@ -43,6 +43,8 @@ export function ConversationPane({ messages, stage, answering, unsupported = fal
    * retry from an earlier notice would validate it unchanged: it is not offered meanwhile.
    */
   planRejected?: 'replan' | 'recheck'
+  /** 「もう一度確かめる」 can run now (use-draft-creation `canRecheck`); its button is disabled otherwise. */
+  canRecheck?: boolean
   onSend(text: string): void
   onRetry(kind: NonNullable<Extract<BuildMessage, { role: 'notice' }>['retry']>): void
   onUseName(name: string): void
@@ -95,10 +97,11 @@ export function ConversationPane({ messages, stage, answering, unsupported = fal
         {messages.map((message, index) => {
           const key = `${message.at}-${index}`
           if (message.role === 'notice') {
-            // A preparation retry offered before Platform's validation rejected the plan would validate that plan as it is.
-            const stale = planRejected !== undefined && message.retry === 'prepare'
             // Retrying a prepare with the same name can only fail again: the only way forward is a different name.
             const nameTaken = message.retry === 'prepare' && failure?.kind === 'name-taken' && message.title === failure.title
+            // A preparation retry offered before Platform's validation rejected the plan would validate that plan as it is.
+            // The name choice of a check answered "name taken" stays: renaming changes the plan.
+            const stale = planRejected !== undefined && message.retry === 'prepare' && !nameTaken
             // After an unreadable write answer the action only reads the draft back: it is never labelled as a retry.
             // A destination that moved is approved again with the proposal's own words, not "tried again".
             const reapprove = message.retry === 'prepare' && message.title === buildCopy.failure.destination.changed.title
@@ -108,7 +111,7 @@ export function ConversationPane({ messages, stage, answering, unsupported = fal
             const label = message.retry === 'confirm' ? buildCopy.failure.confirm : reapprove ? buildCopy.primary.prepare : replan ? buildCopy.failure.plan.replan : uiText.conversation.retry
             // 「もう一度確かめる」 only while that plan is still the rejected one on screen; 「計画を作り直す」 always.
             const actions = stale ? undefined
-              : message.retry === 'recheck' ? <PlanRejectionActions size="sm" recheck={planRejected === 'recheck' ? { onClick: () => onRetry('recheck') } : undefined} replan={{ onClick: () => onRetry('plan') }} />
+              : message.retry === 'recheck' ? <PlanRejectionActions size="sm" recheck={planRejected === 'recheck' ? { disabled: !canRecheck, onClick: () => onRetry('recheck') } : undefined} replan={{ onClick: () => onRetry('plan') }} />
                 : nameTaken ? <NameChoice suggestion={failure.suggestedName} onUse={onUseName} />
                   : message.retry ? <Button size="sm" tone={reapprove || replan ? 'primary' : undefined} onClick={() => onRetry(message.retry!)}>{label}</Button> : undefined
             return <Notice key={key} tone={message.tone} title={message.title} actions={actions}>

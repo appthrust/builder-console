@@ -252,6 +252,8 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
     clearFailure: () => setFailure(undefined), busy, lock, failure, running, unsupported: Boolean(result.unsupported),
     holdPreparation: session.pending.length > 0 || unobservedFailure || planFirst, planOutgrown, observedFailures,
     displayName: answers.name ?? spec.name ?? draft.title, description: spec.oneLine ?? '',
+    // A re-check answered valid: one info line in the conversation (no retry, not a failure).
+    planAccepted: () => patch((current) => ({ ...current, messages: [...current.messages, { role: 'notice', tone: 'info', title: buildCopy.failure.plan.accepted.title, detail: buildCopy.failure.plan.accepted.detail, at: new Date().toISOString() }] })),
   })
 
   useEffect(() => {
@@ -305,6 +307,8 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
   function retry(context?: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish' | 'confirm' | 'recheck') {
     const last = session.messages.at(-1)
     context ??= last?.role === 'notice' && last.retry ? last.retry : retryContext.current
+    // A check that cannot run now (a job runs, the page is busy, a reply waits) leaves the notices as they are.
+    if (context === 'recheck' && !creationEffects.canRecheck) return
     // A stop at the repository destination made nothing: trying again is a fresh preparation (it reads the
     // destination again and binds the plan to it), never a cleanup of a creation that did not start.
     const destinationTitles: string[] = [buildCopy.failure.destination.changed.title, buildCopy.failure.destination.blocked.title]
@@ -341,6 +345,8 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
     planRejected: creation.planRejected,
     /** The rejected plan's cause may lie outside it: 「もう一度確かめる」 (`recheck`) is offered too. */
     planRecheck,
+    /** 「もう一度確かめる」 can run now; its buttons are disabled otherwise. */
+    canRecheck: creationEffects.canRecheck,
     /** 「計画を作り直す」: asks for a new plan. */
     replan: () => retry('plan'),
     /** 「もう一度確かめる」: the rejected plan validated once more, unchanged (one validation per click). */

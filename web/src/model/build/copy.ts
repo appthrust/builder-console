@@ -124,6 +124,8 @@ export const textJa = {
       incomplete: { title: '計画に足りないところがありました', reason: 'まだ何も作っていません。AI の作った計画が、アプリを作るときの決まりを満たしていませんでした。計画を作り直すと、AI がもう一度考えます。' },
       replan: '計画を作り直す',
       recheck: 'もう一度確かめる',
+      /** 「もう一度確かめる」 answered valid: the plan may be created now, by the user's 「この内容で作る」. */
+      accepted: { title: '基盤がこの計画を受け付けました', detail: 'まだ何も作っていません。「この内容で作る」を押すと作り始めます。' },
     },
   },
   /** A state this console version does not know: the known parts stay visible, only what depends on it stops. */

@@ -111,6 +111,7 @@ export const textEn: typeof textJa = {
       incomplete: { title: 'The plan is missing something', reason: 'Nothing has been created yet. The plan AI made does not meet the rules for building an app. Make the plan again and AI will rethink it.' },
       replan: 'Make the plan again',
       recheck: 'Check again',
+      accepted: { title: 'The platform accepted this plan', detail: 'Nothing has been created yet. Select “Build this app” to start building it.' },
     },
   },
   /** A state this console version does not know: the known parts stay visible, only what depends on it stops. */

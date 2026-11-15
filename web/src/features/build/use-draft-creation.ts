@@ -263,6 +263,8 @@ export interface DraftCreationHost {
   displayName: string
   /** Its one-line description. */
   description: string
+  /** 「もう一度確かめる」 answered valid: the host says the plan is accepted and may be created with 「この内容で作る」. */
+  planAccepted(): void
 }
 
 /**
@@ -462,6 +464,10 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
     bindingFailed.current = false
     host.patch({ prepareRequested: true, approvedDestinationRevision: shown?.revision })
   }
+  /** Whether 「もう一度確かめる」 can run now: the one predicate for the action and for its buttons. */
+  function recheckReady(): boolean {
+    return creation.planRecheck && !host.planOutgrown && !running && !busy && !lock.current && !draft.createdApplicationStackId && !host.unsupported && !host.holdPreparation && !defaultPending
+  }
   /**
    * 「もう一度確かめる」: the plan Platform's validation rejected for a cause that may lie outside it is checked once, from
    * this click: one validation of the unchanged plan, after the destination check of any approval (a destination that
@@ -471,7 +477,7 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
    * destination read) leaves it rejected, nothing requested, and this action offered again.
    */
   function recheck() {
-    if (!creation.planRecheck || host.planOutgrown || running || busy || lock.current || draft.createdApplicationStackId || host.unsupported || host.holdPreparation || defaultPending) return
+    if (!recheckReady()) return
     host.clearFailure()
     const shown = creation.destination
     if (shown && shown.kind !== 'resolved') {
@@ -483,6 +489,7 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
     void host.perform('prepare', async () => {
       await checkPlan()
       host.patch({ rejectedPlan: undefined, approvedDestinationRevision: undefined })
+      host.planAccepted()
     })
   }
   /** A rejected plan is never approved as it is; a stop on the way of a check (the destination not set) is checked again. */
@@ -496,6 +503,8 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
     markPublished,
     prepare,
     recheck,
+    /** 「もう一度確かめる」 would run now (its buttons are disabled otherwise). */
+    canRecheck: recheckReady(),
     /**
      * The name collision's recovery (NameChoice), then the preparation again with the new name. A URL taken by
      * another app renames the application on the stored plan (never a schema-defaulted client copy, no cleanup);

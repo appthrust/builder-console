@@ -435,6 +435,8 @@ describe('the plan', () => {
     expect(mock.requests.filter((item) => item.method === 'POST' && /\/creation-executions\/[^/]+\/run$/.test(item.path))).toHaveLength(1)
     expect(mock.requests.filter((item) => item.path.includes('/conversation-turns'))).toEqual([])
     expect((await api.get(sessionId)).lifecycle).toEqual({ kind: 'known', value: 'created' })
+    // An ordinary approval says nothing about a check.
+    expect(page.container.textContent).not.toContain(buildCopy.failure.plan.accepted.title)
   })
 
   /** A current plan on the page, its validation answering `answer` (valid: false) once on 「この内容で作る」. */
@@ -500,10 +502,16 @@ describe('the plan', () => {
     // A valid answer makes the plan approvable again; only 「この内容で作る」 begins the execution.
     expect(mock.count('POST', executions)).toBe(0)
     expect(actionLabels(proposal)).toEqual([buildCopy.primary.prepare])
+    // It is said once, as information with no action, until the user approves.
+    const accepted = notices(reloaded).filter((item) => item.querySelector('p')?.textContent === buildCopy.failure.plan.accepted.title)
+    expect(accepted).toHaveLength(1)
+    expect(accepted[0]!.textContent).toContain(buildCopy.failure.plan.accepted.detail)
+    expect(accepted[0]!.querySelectorAll('button')).toHaveLength(0)
     await act(async () => { button(proposal, buildCopy.primary.prepare).click() })
     await settle(40)
     expect(mock.count('POST', validations)).toBe(3)
     expect(mock.count('POST', executions)).toBe(1)
+    expect(reloaded.container.textContent).not.toContain(buildCopy.failure.plan.accepted.title)
   })
 
   test('「もう一度確かめる」 whose request fails (502) leaves the plan rejected: the notice offers the check and a new plan, never the approval, and a reload sends nothing (APT-1094 R1)', async () => {
