@@ -19,6 +19,13 @@ import { preserveLanguage } from '../../../test/language'
 import { AppPage } from './app-page'
 import { text } from './copy'
 import { sharingCopy } from '../../copy/sharing'
+import { MinePage } from '../discover/mine'
+import { DraftsPage } from '../discover/drafts'
+import { text as discoverText } from '../discover/copy'
+import { storedDraftWire } from '../../api/testing/stored-plan'
+import { buildKeys } from '../../api/queries/build'
+import { beginBuild } from '../build/entry'
+import { buildCopy } from '../../model/build/copy'
 
 const SECRET = 'SENTINEL-app-page-5d21'
 const APP_ID = 'a-mitsumori'
@@ -99,7 +106,7 @@ function AppRoute({ tab }: { tab: AppTab }) {
 }
 
 /** The app page on the app's query defaults (retry policy included), with polling left to the test. */
-async function renderApp(tab: AppTab) {
+async function renderApp(tab: AppTab, scene: 'app' | 'mine' | 'drafts' = 'app') {
   client = new QueryClient({ defaultOptions: { queries: { ...appQueryClient.getDefaultOptions().queries, retryDelay: 0, refetchInterval: false, refetchOnWindowFocus: false } } })
   await Promise.all([client.fetchQuery(meQuery), client.fetchQuery(groupsQuery), client.fetchQuery(appQuery(APP_ID))])
   const rootRoute = createRootRoute()
@@ -110,7 +117,7 @@ async function renderApp(tab: AppTab) {
   document.body.append(container)
   root = createRoot(container)
   await act(async () => {
-    root!.render(<QueryClientProvider client={client}><RouterContextProvider router={router}><UnsavedChangesProvider><AppRoute tab={tab} /></UnsavedChangesProvider></RouterContextProvider></QueryClientProvider>)
+    root!.render(<QueryClientProvider client={client}><RouterContextProvider router={router}><UnsavedChangesProvider>{scene === 'mine' ? <MinePage /> : scene === 'drafts' ? <DraftsPage /> : <AppRoute tab={tab} />}</UnsavedChangesProvider></RouterContextProvider></QueryClientProvider>)
   })
   await settle()
 }
@@ -413,4 +420,76 @@ describe('a publishes read that failed', () => {
     await tick(keys.publishes('commerce'))
     expect(container.querySelector('header')!.textContent).toContain(copy.status.live)
   })
+})
+
+describe('APT-1109: isolated rows keep the rest of the project readable', () => {
+  const stackList = new RegExp(`^${PROJECT}/application-stacks$`)
+  const draftList = new RegExp(`^${PROJECT}/application-drafts$`)
+  const rows = () => [...container.querySelectorAll('tbody tr')]
+  const row = (name: string) => rows().find((item) => item.textContent?.includes(name))!
+
+  test('one unreadable stack becomes unknown while a normal neighbour keeps its status, without a project failure notice', async () => {
+    await renderApp('overview', 'mine')
+    const before = rows().map((item) => item.textContent)
+    expect(before.length).toBeGreaterThan(1)
+    rewrites.push({ method: 'GET', path: stackList, once: false, body: (wire) => ({ ...wire, data: (wire.data as Json[]).map((stack) => stack.id === 'mitsumori' ? { ...stack, templateId: 'Bad Id!' } : stack) }) })
+    await tick(keys.stacks('commerce'))
+    expect(pageText()).not.toContain(discoverText.list.statusFailed)
+    expect(row('見積').textContent).toContain(text.unsupported.label)
+    expect(rows().filter((item) => !item.textContent?.includes('見積')).map((item) => item.textContent)).toEqual(before.filter((value) => !value?.includes('見積')))
+    expect(row('見積').textContent).not.toContain(discoverText.list.resume)
+    expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
+    // Without an id only apps lacking their own readable stack become unknown.
+    rewrites = [{ method: 'GET', path: stackList, once: false, body: (wire) => ({ ...wire, data: (wire.data as Json[]).map((stack) => stack.id === 'mitsumori' ? { templateId: 'Bad Id!' } : stack) }) }]
+    await tick(keys.stacks('commerce'))
+    expect(row('見積').textContent).toContain(text.unsupported.label)
+    expect(rows().filter((item) => !item.textContent?.includes('見積')).map((item) => item.textContent)).toEqual(before.filter((value) => !value?.includes('見積')))
+  })
+
+  test('opening the app tied to an unreadable stack offers no edit or deletion', async () => {
+    rewrites.push({ method: 'GET', path: stackList, once: false, body: (wire) => ({ ...wire, data: (wire.data as Json[]).map((stack) => stack.id === 'mitsumori' ? { ...stack, applicationId: '' } : stack) }) })
+    await renderApp('overview')
+    expect(container.querySelector('header')?.textContent).toContain(text.unsupported.label)
+    expect(buttons().some((item) => item.textContent?.trim() === text.header.menu && !item.disabled)).toBe(false)
+    expect(container.querySelector('[data-testid=\"improve-with-ai\"]')).toBeNull()
+    expect(pageText()).not.toContain(discoverText.list.statusFailed)
+    expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
+  })
+
+  test('an unreadable plan in the draft list does not change normal app statuses', async () => {
+    await renderApp('overview', 'mine')
+    const before = rows().map((item) => item.textContent)
+    rewrites.push({ method: 'GET', path: draftList, once: false, body: () => ({ data: [{ ...storedDraftWire, creationPlan: { representation: ['future-kind'] } }] }) })
+    await tick(buildKeys.drafts('commerce'))
+    expect(rows().map((item) => item.textContent)).toEqual(before)
+    expect(pageText()).not.toContain(discoverText.list.statusFailed)
+  })
+
+  test('a bad draft row is listed without resume/delete, and a new entry cannot silently duplicate it', async () => {
+    rewrites.push({ method: 'GET', path: draftList, once: false, body: () => ({ data: [storedDraftWire, { ...storedDraftWire, id: 'broken-draft', title: SECRET, createdAt: 'not-a-date' }] }) })
+    await renderApp('overview', 'drafts')
+    expect(pageText()).toContain(storedDraftWire.title)
+    const unreadable = [...container.querySelectorAll('li')].find((item) => item.textContent === discoverText.drafts.unreadable)!
+    expect(unreadable).toBeDefined()
+    expect(unreadable.querySelector('a, button')).toBeNull()
+    expect(pageText()).not.toContain(SECRET)
+    expect(pageText()).not.toContain(discoverText.list.statusFailed)
+    await expect(beginBuild('commerce', 'a different app', { groupId: 'g-team-a', ownerSubject: 'owner' })).rejects.toThrow(buildCopy.unreadableDrafts)
+    expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
+    // An independently readable exact match still resumes as before.
+    expect((await beginBuild('commerce', storedDraftWire.intent, { groupId: 'g-team-a', ownerSubject: 'owner' })).id).toBe(storedDraftWire.id)
+  })
+})
+
+test('unreferenced project publishes leave the normal app status and URL unchanged', async () => {
+  await renderApp('overview')
+  const status = container.querySelector('[data-testid="status-text"]')!.textContent
+  const url = container.querySelector('[data-testid="app-url"]')!.getAttribute('href')
+  rewrites.push({ method: 'GET', path: PUBLISHES, once: false, body: (wire) => ({ ...wire, data: [{ id: 'unreferenced', applicationId: '', branchId: '', componentId: '', phase: 'succeeded', publicUrl: 'https://unrelated.example.test/' }, ...(wire.data as Json[])] }) })
+  await tick(keys.publishes('commerce'))
+  expect(client.getQueryState(keys.publishes('commerce'))?.status).toBe('success')
+  expect(container.querySelector('[data-testid="status-text"]')!.textContent).toBe(status)
+  expect(container.querySelector('[data-testid="app-url"]')!.getAttribute('href')).toBe(url)
+  expect(pageText()).not.toContain(discoverText.list.statusFailed)
+  expect(pageText()).not.toContain('unrelated.example.test')
 })

@@ -13,6 +13,7 @@ import { createMemoryHistory, createRootRoute, createRoute, createRouter, Outlet
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { buildSessionsApi as api, mintIdempotencyKey } from '../../api/build-sessions'
+import { getDraft } from '../../api/build'
 import { groupsContract } from '../../api/contracts/console/groups'
 import { meContract } from '../../api/contracts/console/me'
 import { buildSessionKeys, isObserving } from '../../api/queries/build-sessions'
@@ -657,4 +658,51 @@ describe('wire-boundary rules', () => {
     expect(log(page).textContent).not.toContain('raw upstream text')
     expect(buttons(log(page), buildCopy.failure.confirm)).toHaveLength(1)
   })
+})
+
+test('APT-1109: console-v1 opens an unreadable stored plan with only the typed re-plan, then offers the new plan', async () => {
+  const { draftId, sessionId } = await startSession()
+  const session = await api.get(sessionId)
+  await api.createTurn(sessionId, { kind: 'request_plan', specRevision: 0 }, { key: mintIdempotencyKey(), version: session.version })
+  await finishActive(sessionId)
+  const toggle = new URL('/api/v1/__mock/stored-plan', 'http://mock.test')
+  await platformRoutes(new Request(toggle, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ draftId, mode: 'unreadable' }) }), toggle)
+  mock.requests.length = 0
+  const page = await open(draftId)
+  await settle(30)
+  expect(page.container.textContent).toContain(buildCopy.unreadablePlan.detail)
+  expect(buttons(page.container, buildCopy.primary.prepare)).toHaveLength(0)
+  expect(buttons(page.container, buildCopy.failure.plan.recheck)).toHaveLength(0)
+  expect(buttons(page.container, buildCopy.failure.plan.replan)).toHaveLength(1)
+  expect(mock.requests.filter((item) => item.method !== 'GET')).toEqual([])
+  await act(async () => { button(page.container, buildCopy.failure.plan.replan).click() })
+  await settle()
+  expect(posts(sessionId, '/turns')).toHaveLength(1)
+  await finishActive(sessionId)
+  await reread(page)
+  await act(async () => { await page.client.invalidateQueries({ queryKey: ['build'] }) })
+  await settle(30)
+  expect((await getDraft('commerce', draftId)).creationPlanGenerations).toHaveLength(2)
+  expect(button(page.container, buildCopy.primary.prepare).disabled).toBe(false)
+})
+
+test('console-v1 holds a begun execution with an unreadable approval instead of running or retrying it', async () => {
+  const { draftId, sessionId } = await startSession()
+  const session = await api.get(sessionId)
+  await api.createTurn(sessionId, { kind: 'request_plan', specRevision: 0 }, { key: mintIdempotencyKey(), version: session.version })
+  await finishActive(sessionId)
+  const draft = await getDraft('commerce', draftId)
+  const url = new URL(`/api/v1/projects/commerce/application-drafts/${draftId}`, 'http://mock.test')
+  const response = await platformRoutes(new Request(url, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ creationPlan: { ...draft.creationPlan!, summary: 'Saved plan '.padEnd(501, 'x') } }) }), url)
+  expect(response?.status).toBe(200)
+  mock.requests.length = 0
+  const page = await open(draftId)
+  await act(async () => { button(page.container, buildCopy.primary.prepare).click() })
+  await settle(40)
+  expect(mock.requests.filter((item) => item.method === 'POST' && item.path.endsWith('/creation-executions'))).toHaveLength(1)
+  expect(mock.requests.filter((item) => item.method === 'POST' && /\/creation-executions\/[^/]+\/run$/.test(item.path))).toEqual([])
+  expect((await getDraft('commerce', draftId)).creationExecutions.at(-1)?.approvalUnreadable).toBe(true)
+  expect(page.container.textContent).toContain(buildCopy.unreadableApproval.detail)
+  expect(buttons(page.container, buildCopy.primary.prepare)).toHaveLength(0)
+  expect(buttons(page.container, text.conversation.retry)).toHaveLength(0)
 })

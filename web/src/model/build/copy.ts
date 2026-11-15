@@ -3,6 +3,9 @@ import { textEn } from './copy.en'
 
 export const textJa = {
   intent: { reply: '### 追記', publish: '公開: する' },
+  unreadablePlan: { title: '保存された計画を読めませんでした', detail: '基盤に保存された計画を、このコンソールでは読めません。計画を作り直すと、内容を確かめて続けられます。' },
+  unreadableApproval: { title: '保存された承認内容を読めませんでした', detail: '基盤に保存された承認内容を、このコンソールでは読めません。作成は再開・再送しません。続けるには新しい計画が必要です。' },
+  unreadableDrafts: '読めない作りかけがあります。重複して作らないよう、新しい作成を止めています。',
   questions: {
     firstTurn: 'このアプリを作るために決めるべきことを、一つずつ質問してください。',
     kickoffReply: 'この内容で提案して',

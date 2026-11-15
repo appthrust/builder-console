@@ -139,7 +139,7 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
   }, [execution?.id])
 
   const { appView, creationAccess, released, url, shareText } = useCreatedAppView({ projectId, draft, app, groups, initialReleaseId: tab.initialReleaseId, tasks: implementation.state.tasks })
-  const started = Boolean(execution || draft.createdApplicationStackId)
+  const started = Boolean(execution || draft.createdApplicationStackId || draft.createdApplicationId)
   const created = session.lifecycle.kind === 'known' && session.lifecycle.value === 'created'
   const proposal = planProposal(creation.proposalDraft, undefined, creation.destination)
   const preparing = tab.prepareRequested && !execution
@@ -170,7 +170,7 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
   // The typed publish preferences are the server's once saved; the publish step starts from the draft they were written to.
   // Asked once the creation has finished (the legacy flow wrote them then too): the Platform draft takes them only then.
   // While the publish step is open it carries the same name and audience (started from these), so they are not shown twice.
-  const askPublish = created && Boolean(draft.createdApplicationStackId) && !running && !published && !sharing
+  const askPublish = !draft.creationPlanUnreadable && created && Boolean(draft.createdApplicationStackId) && !running && !published && !sharing
   const publishSaved = publishReady(view.publish)
   useEffect(() => {
     if (publishSaved) void queryClient.invalidateQueries({ queryKey: buildDraftOptions(projectId, draft.id).queryKey, exact: true })
@@ -208,7 +208,9 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
     stage: started ? result.stage : 'decide',
     released,
     ...(started ? { headerAction: continuing && improve ? improve : <StageAction stage={result.stage} primary={primary} progress={result.progress} onPrimary={() => { setSharing(true); onOpenArtifact() }} /> } : {}),
-    ...((readiness.kind !== 'none' && proposal) || askPublish ? {
+    ...(draft.creationPlanUnreadable ? {
+      conversationEnd: <AiTurn><Notice tone="warning" title={buildCopy.unreadablePlan.title} actions={!started ? <PlanRejectionActions replan={{ disabled: !view.canRequestPlan || running, onClick: () => actions.requestPlan() }} /> : undefined}>{buildCopy.unreadablePlan.detail}</Notice></AiTurn>,
+    } : (readiness.kind !== 'none' && proposal) || askPublish ? {
       conversationEnd: <>
         {readiness.kind !== 'none' && proposal ? <AiTurn><ProposalBody proposal={{ ...proposal, stale: false }} action={proposalAction} /></AiTurn> : null}
         {askPublish ? <AiTurn><ConsolePublishSettings view={view} actions={actions} disabled={view.unsupported} /></AiTurn> : null}
@@ -223,6 +225,7 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
         shareStep={sharing && app ? <PublishStep app={app} publishId={appView?.platform?.publish?.id} publishPreferences={draft.publishPreferences} onPublished={() => { void effects.markPublished(); setSharing(false) }} onCancel={() => setSharing(false)} /> : undefined} />,
     } : {}),
     notices: [
+      execution?.approvalUnreadable ? <Notice key="unreadable-approval" tone="warning" title={buildCopy.unreadableApproval.title}>{buildCopy.unreadableApproval.detail}</Notice> : null,
       earlierSpec ? <Notice key="earlier-spec" tone="warning" title={text.console.createdFromEarlier.title} actions={continuing ? undefined : improve}>
         {improvable ? text.console.createdFromEarlier.reason : text.console.createdFromEarlier.waiting}
       </Notice> : null,
@@ -236,6 +239,6 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
       creationAccess.error ? <ActionError key="creation-access" error={creationAccess.error} /> : null,
       effects.waitingForPublish || creationAccess.waitingForPublish ? <p key="waiting-publish" role="status" className="text-xs text-stone-500">{text.page.waitingForPublish}</p> : null,
     ].filter(Boolean),
-    closed: started,
+    closed: started || Boolean(draft.creationPlanUnreadable),
   }
 }

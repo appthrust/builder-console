@@ -37,6 +37,7 @@ import { ProposalStatus } from '../proposals/proposal-ui'
 import { text as proposalText } from '../proposals/copy'
 
 export type UnfinishedItem =
+  | { kind: 'unreadable'; id: string; name: string; at: string }
   | { kind: 'build'; id: string; name: string; stage: BuildStage; at: string; draft: BuildDraft }
   | { kind: 'improve'; id: string; name: string; state: string; working: boolean; at: string; draft: BuildDraft }
   | { kind: 'app'; id: string; name: string; at: string; app: BusinessApp }
@@ -63,6 +64,7 @@ export function useUnfinished(me: Me, { poll = true }: { poll?: boolean } = {}) 
   // An AI session's own app is briefly unbound before binding; it is listed once, as the session.
   const sessionApps = new Set(builds.map((draft) => readBuildSession(draft.id)?.createdAppId).filter(Boolean))
   const items: UnfinishedItem[] = [
+    ...(drafts.data?.unreadable ?? []).map((_, index) => ({ kind: 'unreadable' as const, id: `unreadable-${index}`, name: text.drafts.unreadable, at: '' })),
     ...(sent.data?.data ?? []).filter((proposal) => !proposalTerminal(proposal.phase)).map((proposal) => ({ kind: 'sent-proposal' as const, id: proposal.id, name: proposal.title, at: proposal.updatedAt, proposal })),
     ...(incoming.data?.data ?? []).map((proposal) => ({ kind: 'review-proposal' as const, id: proposal.id, name: proposal.title, at: proposal.updatedAt, proposal })),
     ...builds.map((draft) => ({ kind: 'build' as const, id: draft.id, name: parseSpec(draft.specMarkdown).spec.name ?? draft.title, stage: buildStage(draft), at: draft.updatedAt, draft })),
@@ -93,6 +95,7 @@ export function DraftsPage() {
       {loading ? <AppListSkeleton /> : items.length ? (
         <ul aria-label={text.drafts.title} className="divide-y divide-stone-100 rounded-lg border border-line bg-white">
           {items.map((item) => {
+            if (item.kind === 'unreadable') return <li key={item.id} className="px-4 py-3 text-sm text-stone-500">{item.name}</li>
             const updated = relativeTime(item.at)
             return <li key={`${item.kind}-${item.id}`} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
             <div className="min-w-0 flex-[1_1_16rem]">

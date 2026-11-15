@@ -1,6 +1,8 @@
 import { expect, test } from 'bun:test'
 import type { ApplicationDraftCreationPlan } from '@appthrust/api-schema/platform-api'
 import { newRepositoryRequest, renameCreationPlan, withDefaultPublish, withDestinationRevision } from './plan'
+import { creationPlanReader } from '../../api/contracts/platform/stored-plan'
+import { storedPlanWire } from '../../api/testing/stored-plan'
 
 const plan: ApplicationDraftCreationPlan = {
   summary: '見積', markdown: '# foo の計画を保持', representation: ['SourceRepository', 'ApplicationStack', 'Publish'],
@@ -63,15 +65,16 @@ test('renames inline template outputs and preserves registry authority and image
   expect(renameCreationPlan(inline, 'foo-2').applicationStackRequest?.source).toMatchObject({ githubTemplate: { newRepositoryName: 'foo-2' }, imageRef: 'registry.test:5000/acme/foo-2:v1' })
 })
 
-test('defaults absent and disabled publish without mutating the plan', () => {
-  for (const publish of [undefined, null, { enabled: false }]) {
-    const original = { ...plan, applicationStackRequest: { ...plan.applicationStackRequest!, publish } }
-    // Real model output is not parsed; disabled/null publish may violate the enabled-only schema.
-    const updated = withDefaultPublish(original as unknown as ApplicationDraftCreationPlan, { domain: 'project.test' })
-    expect(updated.applicationStackRequest?.publish).toEqual({ enabled: true, customDomain: 'project.test', hostnamePattern: 'wildcard', subdomain: 'foo' })
-    expect(original.applicationStackRequest.publish).toBe(publish)
-    expect(updated.toolPlan).toBe(plan.toolPlan)
-  }
+test('a decoded disabled publish follows the same default as an absent publish without mutating its plan', () => {
+  const original = { ...plan, applicationStackRequest: { ...plan.applicationStackRequest!, publish: undefined } }
+  const updated = withDefaultPublish(original, { domain: 'project.test' })
+  expect(updated.applicationStackRequest?.publish).toEqual({ enabled: true, customDomain: 'project.test', hostnamePattern: 'wildcard', subdomain: 'foo' })
+  expect(original.applicationStackRequest.publish).toBeUndefined()
+  expect(updated.toolPlan).toBe(plan.toolPlan)
+  const disabled = creationPlanReader.parse(storedPlanWire)
+  expect(disabled.applicationStackRequest?.publish).toBeUndefined()
+  expect(withDefaultPublish(disabled, { domain: 'project.test' }).applicationStackRequest?.publish?.enabled).toBe(true)
+  expect(renameCreationPlan(disabled, 'loans-2', { domain: 'project.test' }).applicationStackRequest?.publish).toMatchObject({ enabled: true, subdomain: 'loans-2' })
 })
 
 test('keeps enabled publish and does nothing without a domain or stack', () => {
@@ -84,6 +87,6 @@ test('keeps enabled publish and does nothing without a domain or stack', () => {
 
 test('uses the application name fallback and defaults a renamed unpublished plan', () => {
   const absent = { ...plan, applicationStackRequest: { ...plan.applicationStackRequest!, application: { name: '' }, applicationName: 'fallback', publish: undefined } }
-  expect(withDefaultPublish(absent, { domain: 'project.test' }).applicationStackRequest?.publish?.subdomain).toBe('fallback')
+  expect(withDefaultPublish(absent, { domain: 'project.test' }).applicationStackRequest?.publish).toMatchObject({ enabled: true, subdomain: 'fallback' })
   expect(renameCreationPlan(absent, 'foo-2', { domain: 'project.test' }).applicationStackRequest?.publish).toEqual({ enabled: true, customDomain: 'project.test', hostnamePattern: 'wildcard', subdomain: 'foo-2' })
 })

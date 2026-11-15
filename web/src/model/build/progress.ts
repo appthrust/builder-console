@@ -25,7 +25,7 @@ export function executionSteps(execution: BuildExecution): NonNullable<ProgressC
     label: step.tool.endsWith('.validate') ? copy.check
       : step.tool.startsWith('appthrust.applicationSourceRepository.') ? copy.source
         : step.tool === 'appthrust.applicationStack.create' ? copy.release
-          : step.tool === 'appthrust.applicationStack.observe' ? execution.approval?.applicationStackRequest?.publish ? copy.url : copy.ready : copy.records,
+          : step.tool === 'appthrust.applicationStack.observe' ? execution.approval?.applicationStackRequest?.publish?.enabled ? copy.url : copy.ready : copy.records,
     state: stepState(knownValue(step.status)),
     ...(knownValue(step.status) === 'failed' ? { detail: classifyBuildFailure(step.message ?? execution.error ?? '', undefined, 'prepare').reason } : {}),
   }))

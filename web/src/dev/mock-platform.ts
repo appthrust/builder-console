@@ -54,6 +54,8 @@
 //   configures newly-created generations; GET polls advance generations/turns when autoAdvance=true.
 //   priorGenerations (0–19) seeds a new draft's settled history for remaining-count checks.
 //   publish=false reproduces an AI plan that omits publish (default true).
+// - `POST /api/v1/__mock/stored-plan {draftId, mode: 'unpublished'|'unreadable'|'null-representation'}`
+//   stores response-only AI output. A successful re-plan replaces it; execution never reads an invalid plan.
 // - `POST /api/v1/__mock/prepare {stall?: 'building'|'starting'}` pauses the created app at that phase; `{}` resumes.
 // - `POST /api/v1/__mock/implementation-run {outcome?, error?, autoAdvance?}` controls
 //   task completion; manual advance works even with every build tab closed.
@@ -809,6 +811,7 @@ function advanceDraft(draft: ApplicationDraft): boolean {
       } else {
         try {
           draft.creationPlan = deduplicatePlan(mockPlan(`ai-app-${draft.id.slice(-4)}`, outcome?.publish))
+          state.storedPlans.delete(draft.id)
         } catch (error) {
           Object.assign(generation, { status: 'failed', error: error instanceof Error ? error.message : String(error) })
           draft.phase = 'planning'
@@ -1193,6 +1196,8 @@ function seedPlatform() {
     stacks: new Map<string, MockStack>(),
     repositories: new Map<string, ApplicationSourceRepository>(),
     drafts: new Map<string, ApplicationDraft>(),
+    /** Raw persisted AI output, separate from the validated plan used by the mock executor. */
+    storedPlans: new Map<string, unknown>(),
     proposals: new Map<string, SourceChangeProposal>(),
     draftReviewers: new Map<string, string[]>(),
     workbooks: new Map<string, Map<string, StoredWorkbook>>(),
@@ -1599,8 +1604,13 @@ function operation(kind: string, id: string): PublicOperation {
   return { id: `op-${Math.random().toString(36).slice(2, 10)}`, type: kind, state: 'accepted', writeChannel: 'A', resource: { kind, id, projectId: MOCK_PROJECT_ID }, createdAt: now, links: { self: `/api/v1/operations/${id}` } }
 }
 
+function draftWire<T extends object>(id: string, draft: T) {
+  return state.storedPlans.has(id) ? { ...draft, creationPlan: state.storedPlans.get(id) } : draft
+}
+
 function mutation<T extends object>(kind: string, id: string, resource: T) {
-  return { ...resource, resource, operation: operation(kind, id) }
+  const value = kind === 'ApplicationDraft' ? draftWire(id, resource) : resource
+  return { ...value, resource: value, operation: operation(kind, id) }
 }
 
 function turnMutation(draft: ApplicationDraft, turn: ApplicationDraftConversationTurn) {
@@ -1857,6 +1867,21 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
       return json(state.planGeneration)
     },
   ],
+  ['POST', /^\/api\/v1\/__mock\/stored-plan$/, async (_, request) => {
+    const body = await request.json() as { draftId: string; mode: string }
+    const draft = state.drafts.get(body.draftId)
+    if (!draft) return error(404, 'not_found', 'application draft not found')
+    const plan = draft.creationPlan
+    if (body.mode === 'unpublished' && plan?.applicationStackRequest) {
+      const { publish: _publish, ...stack } = plan.applicationStackRequest
+      state.storedPlans.set(draft.id, { ...plan, applicationStackRequest: { ...stack, publish: { enabled: false, subdomain: '…' } } })
+      draft.creationPlan = { ...plan, applicationStackRequest: stack }
+    } else if (body.mode === 'unreadable' || body.mode === 'null-representation') {
+      state.storedPlans.set(draft.id, { summary: 'Saved plan', markdown: 'Saved plan', representation: body.mode === 'unreadable' ? ['future-kind'] : null, applicationStackRequest: {} })
+      delete draft.creationPlan
+    } else return error(400, 'invalid_argument', 'unsupported stored plan mode')
+    return json(draftWire(draft.id, draft))
+  }],
   ['POST', /^\/api\/v1\/__mock\/prepare$/, async (_, request) => {
     const body = await request.json() as { stall?: 'building' | 'starting' }
     if (body.stall !== undefined && body.stall !== 'building' && body.stall !== 'starting') return error(400, 'invalid_argument', "'stall' must be building or starting")
@@ -2035,7 +2060,7 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
   ['GET', new RegExp(`^${P}/application-drafts$`), () => {
     for (const draft of state.drafts.values()) settleImprovement(draft)
     if (state.implementationRun.autoAdvance) for (const draft of state.drafts.values()) advanceImplementation(draft)
-    return json(list([...state.drafts.values()].filter((draft) => draft.ownerUserId === mockSubject())))
+    return json(list([...state.drafts.values()].filter((draft) => draft.ownerUserId === mockSubject()).map((draft) => draftWire(draft.id, draft))))
   }],
   [
     'POST',
@@ -2086,7 +2111,7 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
       if (draft) settleImprovement(draft)
       if (draft && state.planGeneration.autoAdvance) advanceDraft(draft)
       if (draft && state.implementationRun.autoAdvance) advanceImplementation(draft)
-      return draft ? json(draft) : error(404, 'not_found', 'application draft not found')
+      return draft ? json(draftWire(draft.id, draft)) : error(404, 'not_found', 'application draft not found')
     },
   ],
   ['POST', new RegExp(`^${P}/application-drafts/([^/]+)/workbooks$`), async (m, request) => {
@@ -2201,6 +2226,7 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
       if (body.specMarkdown !== undefined) draft.specMarkdown = body.specMarkdown
       if (body.creationPlan !== undefined) {
         draft.creationPlan = body.creationPlan
+        state.storedPlans.delete(draft.id)
         draft.validatedCreationPlanFingerprint = undefined
       }
       draft.updatedAt = stamp()
@@ -2219,6 +2245,7 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
       if ([...(draft.conversationTurns ?? []), ...(draft.creationPlanGenerations ?? []), ...draft.creationExecutions].some((item) => item.status === 'pending' || item.status === 'running')) return error(409, 'conflict', 'application draft creation is running; wait for it to finish before deleting the draft')
       if (draft.createdApplicationStackId || draft.creationExecutions.some((execution) => execution.steps.some((step) => step.status === 'done' && step.tool.endsWith('.create')))) return error(409, 'conflict', 'application draft has AppThrust creation resources; cleanup is required before deleting the draft')
       state.drafts.delete(draft.id)
+      state.storedPlans.delete(draft.id)
       state.workbooks.delete(draft.id)
       return json({ deleted: true, id: draft.id, operation: operation('ApplicationDraft', draft.id) }, 202)
     },
@@ -2451,6 +2478,7 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
           startedAt: stamp(),
           steps,
           approval: {
+            summary: draft.creationPlan?.summary,
             creationPlanFingerprint: body.creationPlanFingerprint,
             applicationSourceRepositoryRequest: structuredClone(draft.creationPlan?.applicationSourceRepositoryRequest),
             applicationStackRequest: structuredClone(draft.creationPlan?.applicationStackRequest),

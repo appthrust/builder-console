@@ -52,7 +52,15 @@ export function createApiGateway({ platformTransport, consoleTransport, reportFa
   const violation = (contract: ResponseContract<unknown>, issue: ResponseIssue): never => fail(contractFailure(contract, [issue]))
   const decode = <D>(contract: ResponseContract<D>, wire: unknown): D => {
     const result = decodeResponse(contract, wire)
-    return result.ok ? result.value : fail(result.error)
+    if (!result.ok) return fail(result.error)
+    if (result.recovered?.length) {
+      try {
+        reportFailure({ ...contractFailureReport(contractFailure(contract, result.recovered)), outcome: 'partial' })
+      } catch {
+        // Reporting an isolated unreadable value must not fail a successful read.
+      }
+    }
+    return result.value
   }
 
   return {

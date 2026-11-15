@@ -5,6 +5,7 @@ import { ConsoleApiError } from '../../api/console'
 import { boundedRetryAfter, buildPollDelay, ERROR_BACKOFF_MS } from '../../api/queries/build-sessions'
 import { membershipRoots, type BuildError, type BuildSession, type Group, type Me } from '../../model/contracts/console'
 import { findResumableDraft } from '../../model/build/resume'
+import { buildCopy } from '../../model/build/copy'
 import { currentLanguage } from '../../shell/language'
 import { readConsoleStart, saveConsoleStart, type ConsoleStart } from './console-session-state'
 import { initialSession, readBuildSession, saveBuildSession, titleFromIntent } from './session'
@@ -30,11 +31,13 @@ export function resolveBuildGroup(me: Pick<Me, 'effectiveGroupIds'>, groups: rea
 export async function beginBuild(projectId: string, intent: string, options: { groupId: string; ownerSubject: string; newSessionEngine?: NewSessionEngine }): Promise<{ id: string }> {
   if (!options.groupId) throw new Error(text.page.noGroup.body)
   if (options.newSessionEngine === 'console-v1') return startConsoleBuild(intent, options.groupId)
-  const existing = findResumableDraft((await listDrafts(projectId)).data, intent)
+  const drafts = await listDrafts(projectId)
+  const existing = findResumableDraft(drafts.data, intent)
   if (existing) {
     if (!readBuildSession(existing.id)) saveBuildSession(existing.id, initialSession({ projectId, ownerSubject: options.ownerSubject, groupId: options.groupId, baseIntent: existing.intent }))
     return existing
   }
+  if (drafts.unreadable.length) throw new Error(buildCopy.unreadableDrafts)
   const draft = await createDraft(projectId, { title: titleFromIntent(intent), intent: intent.trim() })
   saveBuildSession(draft.id, initialSession({ projectId, ownerSubject: options.ownerSubject, groupId: options.groupId, baseIntent: intent.trim() }))
   return draft

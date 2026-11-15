@@ -23,3 +23,4 @@ export {
 export { MAX_ISSUES, ROOT_PATH, safePath, type ResponseIssue, type ResponseIssueCode } from './issues'
 export { absentMeansEmpty, openEnum, openUnion, selectVariant, type OpenValue, type Supported } from './readers'
 export { contractFailureReport, createConsoleWarnReporter, type ContractFailureReport, type ReportFailure } from './report'
+export { independentRows, unreadableRowIssues, type IndependentRows, type UnreadableRow } from './rows'

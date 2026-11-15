@@ -96,7 +96,9 @@ beforeEach(() => {
     return draftOf(next)
   })
   update = spyOn(api, 'updateDraft').mockImplementation(async (_projectId, id, payload) => {
-    const next = { ...drafts.get(id)!, ...payload }
+    const { creationPlan, ...patch } = payload
+    expect(creationPlan).toBeUndefined()
+    const next = { ...drafts.get(id)!, ...patch }
     drafts.set(id, next)
     return draftOf(next)
   })

@@ -52,6 +52,8 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
   // A 412 from the AI gate is usually the platform rolling out (the API pod restarts, the
   // runtime target is briefly unadmitted). Retry with backoff before declaring it unavailable.
   const unavailableRetries = useRef(0)
+  // A stored tab request is not consent to replace a plan this console cannot read.
+  const unreadableReplanRequested = useRef(false)
   const draftRef = useRef(draft)
   draftRef.current = draft
   // The created app, its preparation, the plan's default publish address and the implementation run (shared with console-v1).
@@ -143,6 +145,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
   function send(text: string) {
     const reply = text.trim()
     // A state this console does not know offers no write (stage.ts `unsupported`); reading stays.
+    if (draft.creationPlanUnreadable) return
     if (!reply || reply.length > 4000 || result.unsupported) return
     if (result.stage === 'build' || result.stage === 'publish') {
       patch((current) => queueReply({ ...current, continuedAfterPublishAt: draft.publishedAt }, reply, new Date().toISOString()))
@@ -170,7 +173,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
     // HTTP failures retain their pending reply and notice across reload; only an explicit retry resumes it.
     const lastMessage = session.messages.at(-1)
     if (lastMessage?.role === 'notice' && (lastMessage.retry === 'turn' || (lastMessage.tone === 'error' && !lastMessage.retry))) return
-    if (!pending || conversing || busy || lock.current || failure || result.unsupported || Date.now() < blockedUntil.current) return
+    if (!pending || draft.creationPlanUnreadable || conversing || busy || lock.current || failure || result.unsupported || Date.now() < blockedUntil.current) return
     // 用意する questions are answered in the conversation, even when the app was made before the answer.
     const asking = preparing || answers.open || isPrepareTurn(pending.text)
     if (draft.createdApplicationStackId && !asking) {
@@ -238,14 +241,17 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
     await receive(updated)
     const attemptKey = `build-plan-${draft.id}-${current.conversationTurns.at(-1)?.id ?? 'initial'}-${previousGenerationId ?? 'initial'}`
     const created = await api.createGeneration(projectId, draft.id, {}, attemptKey)
+    unreadableReplanRequested.current = false
     patch({ lastPlannedIntent: intent, planRequested: false, reusePlan: false })
     await receive({ ...draftRef.current, creationPlanGenerations: [...draftRef.current.creationPlanGenerations, created] })
   }
 
   // The plan must be (re)made before the preparation: an accepted kickoff, 用意する on a plan the spec has outgrown, or a
   // new plan asked for after Platform's validation rejected the current one (the same plan is never approved again).
-  const planFirst = (isOneOf(turn?.status, 'succeeded') && (session.planRequested || hasUnplannedKickoff(draft))) || (session.prepareRequested && !session.reusePlan && needsPlanRefresh(draft, session.lastPlannedIntent))
-    || (session.planRequested && creation.planRejected)
+  const planFirst = draft.creationPlanUnreadable
+    ? unreadableReplanRequested.current && session.planRequested
+    : (isOneOf(turn?.status, 'succeeded') && (session.planRequested || hasUnplannedKickoff(draft))) || (session.prepareRequested && !session.reusePlan && needsPlanRefresh(draft, session.lastPlannedIntent))
+      || (session.planRequested && creation.planRejected)
   const unobservedFailure = [generation, turn].some((operation) => isOneOf(operation?.status, 'failed') && !observedFailures.current.has(operation!.id))
   const creationEffects = useDraftCreationEffects(creation, {
     projectId, groupId, draft, draftRef, tab: session, currentTab: () => store.state, patch, receive, perform, fail,
@@ -265,6 +271,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
 
   useEffect(() => {
     for (const [context, operation] of [['turn', turn], ['plan', generation]] as const) {
+      if (draft.creationPlanUnreadable) continue
       if (!operation || !isOneOf(operation.status, 'failed') || observedFailures.current.has(operation.id)) continue
       observedFailures.current.add(operation.id)
       const kind = classifyBuildFailure(operation.error ?? '', undefined, context).kind
@@ -278,6 +285,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
   // Draft preferences are authoritative across tabs. During implementation only the
   // preferences/title are writable; specification alignment waits for its lock.
   useEffect(() => {
+    if (draft.creationPlanUnreadable || execution?.approvalUnreadable) return
     const name = answers.name
     const preferences = { ...draft.publishPreferences, ...(name ? { name } : {}), ...(answers.shareChoice ? { shareScope: answers.shareChoice } : {}) }
     const preferencesChanged = preferences.name !== draft.publishPreferences?.name || preferences.shareScope !== draft.publishPreferences?.shareScope
@@ -305,6 +313,11 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
   }, [answers.name, answers.shareChoice, draft.publishPreferences, draft.title, spec.name, running, implementing, busy, failure, nameRetryAt])
 
   function retry(context?: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish' | 'confirm' | 'recheck') {
+    if (draft.creationPlanUnreadable) {
+      if (context !== 'plan' || busy || running) return
+      unreadableReplanRequested.current = true
+      patch({ prepareRequested: false, approvedDestinationRevision: undefined, reusePlan: false, pending: [] })
+    }
     const last = session.messages.at(-1)
     context ??= last?.role === 'notice' && last.retry ? last.retry : retryContext.current
     // A check that cannot run now (a job runs, the page is busy, a reply waits) leaves the notices as they are.

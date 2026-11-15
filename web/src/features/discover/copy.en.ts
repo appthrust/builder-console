@@ -25,6 +25,7 @@ export const textEn: typeof textJa = {
     discarding: 'Deleting…',
   },
   drafts: {
+    unreadable: 'Unreadable draft',
     title: 'Drafts',
     create: 'Build with AI',
     lead: 'Unfinished apps you can continue building.',

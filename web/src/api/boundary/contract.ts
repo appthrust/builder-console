@@ -17,7 +17,7 @@ export interface FieldPolicy {
   readonly evidence: string
 }
 
-export type ParseResult<D> = { ok: true; value: D } | { ok: false; issues: readonly ResponseIssue[] }
+export type ParseResult<D> = { ok: true; value: D; recovered?: readonly ResponseIssue[] } | { ok: false; issues: readonly ResponseIssue[] }
 
 /** One operation's response: where it comes from, what a success looks like, and how the wire becomes a domain value. */
 export interface ResponseContract<D> {
@@ -34,7 +34,7 @@ export interface ResponseContract<D> {
   readonly parse: (wire: unknown) => ParseResult<D>
 }
 
-export type DecodeResult<D> = { ok: true; value: D } | { ok: false; error: ResponseContractError }
+export type DecodeResult<D> = { ok: true; value: D; recovered?: readonly ResponseIssue[] } | { ok: false; error: ResponseContractError }
 
 type ContractIdentity = Pick<ResponseContract<unknown>, 'operationId' | 'source' | 'method' | 'routeTemplate' | 'successStatuses'>
 
@@ -50,16 +50,18 @@ export function isDeclaredResponsePath(contract: ResponseContract<unknown>, path
 
 /** A JSON-bodied contract whose reader is a zod schema (wire in, domain value out). */
 export function defineResponseContract<D>(
-  spec: ContractIdentity & { reader: z.ZodType<D>; fieldPolicies?: readonly FieldPolicy[] },
+  spec: ContractIdentity & { reader: z.ZodType<D>; fieldPolicies?: readonly FieldPolicy[]; recoveries?: (value: D) => readonly ResponseIssue[] },
 ): ResponseContract<D> {
-  const { reader, fieldPolicies = [], ...identity } = spec
+  const { reader, fieldPolicies = [], recoveries, ...identity } = spec
   const contract: ResponseContract<D> = {
     ...identity,
     body: 'json',
     fieldPolicies,
     parse: (wire) => {
       const result = reader.safeParse(wire)
-      return result.success ? { ok: true, value: result.data } : { ok: false, issues: safeIssues(reader, result.error.issues, wire) }
+      if (!result.success) return { ok: false, issues: safeIssues(reader, result.error.issues, wire) }
+      const recovered = recoveries?.(result.data)
+      return { ok: true, value: result.data, ...(recovered?.length ? { recovered } : {}) }
     },
   }
   contractReaders.set(contract.parse, reader)

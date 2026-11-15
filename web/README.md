@@ -38,12 +38,55 @@ not raw clients or Console schema directories. No direct `fetch`,
 exceptions, including aliases, type-only imports, barrels and dynamic imports.
 Domain declarations may derive canonical Platform types; only API adapters
 read wire responses. The console-v1 conversation flow obeys the same rules.
-Mocks infer their wire types from the canonical schemas.
+Mocks infer their ordinary wire types from the canonical schemas; explicitly
+stored AI output may differ from request schemas.
 
-Only decoded values enter caches. An unreadable refetch retains the last
-successful snapshot; an unreadable write is unconfirmed and must be read back,
-not blindly repeated. Contract tests replay writer fixtures and malformed
-variants through the real gateway.
+Only decoded values enter caches. An unreadable response envelope or detail
+retains the last successful snapshot on refresh; an unreadable write envelope
+is unconfirmed and must be read back, not blindly repeated.
+
+Draft plans and execution approvals are read independently: an invalid stored
+value is dropped entirely, with `creationPlanUnreadable: true` or
+`approvalUnreadable: true`, never a partially validated plan. A stored
+`publish.enabled: false` block is read as absent, matching Platform's plan
+prompt. The plan and request types stay canonical; the Console's ordinary
+default-publish and post-creation decisions remain unchanged. An unreadable plan
+offers only 「計画を作り直す」, never approval, validation, rename, destination
+binding or automatic execution; an already-created app remains visible by its identity.
+
+Normalizing the response never sends a plan back by itself. Only the existing
+destination-binding, default-publication and rename PATCH builders can send
+`creationPlan` as an explicit replacement; validation sends no plan, begin
+sends its fingerprint and client request id, and run sends only route ids.
+An unreadable approval keeps its execution and status visible but does not
+authorize begin/run/retry or an idempotent replay. This includes the answer to
+begin-execution itself: no run follows an unreadable approval snapshot, and the
+tab's replay key is cleared. The UI says a new plan is needed, without deriving
+or resending a request from the discarded approval. Approvals with summaries
+over 500 characters and plans with `database.lifecycle: {}` or a placement
+missing `placementProfileRef` remain explicitly unreadable. A standalone
+`runtimeProfileRef` without `placement` is already canonical and stays readable.
+
+Project publish references may be empty strings (`applicationId`, `branchId`,
+`componentId`), including a stack's embedded publish snapshot. Such publishes
+remain readable but are attributed to no app. Other malformed publish rows
+still fail their list; row isolation for that list is not part of this change.
+
+The draft list and both stack-list readers isolate rejected rows as
+`{ data: ReadableRow[], unreadable: { id?: string }[] }`. Only a string id
+is retained. Bad envelopes still fail. Recoveries use the existing
+contract-failure reporter with `outcome: 'partial'`, without rejected content.
+Other project lists retain their existing all-or-nothing contract.
+An unreadable stack's id blocks that app's writes and counts as a taken name.
+An id-less unreadable stack leaves apps with readable stacks unaffected but
+makes unmatched apps unknown and name availability unchecked. Any unreadable
+stack keeps creation readback unconfirmed. Unreadable drafts appear as plain
+「読めない作りかけ」 rows, with no resume/delete actions; a readable matching
+draft can still resume, but otherwise a partial draft list blocks a duplicate
+start. The dev mock's `POST /api/v1/__mock/stored-plan` accepts `draftId` and
+`mode: unpublished | unreadable | null-representation`; a new plan replaces
+that stored output. Contract and page tests drive these paths through the real
+readers and request logs.
 
 Draft writes cancel older reads before replacing cached data. Excel calls
 `useQuery` inside its hook, so each render gets the current optimistic query

@@ -29,6 +29,7 @@ export const textJa = {
     discarding: '削除しています…',
   },
   drafts: {
+    unreadable: '読めない作りかけ',
     title: '作りかけ',
     create: 'AI と作る',
     lead: '作り終えていないアプリです。続きから作れます。',

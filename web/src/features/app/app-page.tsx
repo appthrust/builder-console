@@ -75,7 +75,7 @@ export function AppPage({ app, tab }: { app: BusinessApp; tab: AppTab }) {
   const logs = useComponentLogs(projectId, view.platform?.webComponentId, view.platform?.branchId, tab === 'logs')
   const logsForbidden = isLogsForbidden(logs.error)
   const sharing = shareSentence(app.share, groups, app.group)
-  const canEdit = canEditApp(app, me)
+  const canEdit = !view.unreadableStack && canEditApp(app, me)
   const requests = useQuery({ ...appAccessRequestsQuery(app.id), enabled: canEdit })
   const pendingCount = canEdit ? requests.data?.filter((request) => isOneOf(request.status, 'pending')).length ?? 0 : 0
   // Phase 1: the データ tab exposes every row, so only people who may edit the app see it (design "Authorization and privacy").

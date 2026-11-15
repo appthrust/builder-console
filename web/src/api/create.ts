@@ -4,6 +4,7 @@
 // rejects with a ResponseContractError (outcome `write_unconfirmed`): the write
 // may have happened, so callers read back instead of sending it again.
 import type { BusinessApp, Resolved } from '../model/contracts/console'
+import type { IndependentRows } from './boundary'
 import type {
   RepositoryDestination,
   SourceRepository,
@@ -48,7 +49,7 @@ export interface CreateApi {
   bindApp(appId: string, binding: { stackId: string; appName: string }): Promise<BusinessApp>
   removeApp(appId: string): Promise<void>
   resolve(path: string): Promise<Resolved>
-  stacks(projectId: string): Promise<StackIdentity[]>
+  stacks(projectId: string): Promise<IndependentRows<StackIdentity>>
   sourceRepositories(projectId: string): Promise<SourceRepositoryList>
   /** Where Platform creates a new repository now; blocked and unknown states are values, a failed read rejects. */
   repositoryDestination(projectId: string): Promise<RepositoryDestination>
@@ -70,7 +71,7 @@ export function createCreateApi(gateway: ApiGateway): CreateApi {
     bindApp: (appId, binding) => gateway.console(bindAppContract, { appId, ...binding }),
     removeApp: (appId) => gateway.console(removeAppContract, appId),
     resolve: (path) => gateway.console(resolveContract, path),
-    stacks: async (projectId) => (await gateway.platform(listStacksContract, { projectId })).data,
+    stacks: (projectId) => gateway.platform(listStacksContract, { projectId }),
     sourceRepositories: (projectId) => gateway.platform(listSourceRepositoriesContract, { projectId }),
     repositoryDestination: (projectId) => gateway.platform(getRepositoryDestinationContract, { projectId }),
     validateSourceRepository: (projectId, request) => gateway.platform(validateSourceRepositoryContract, { projectId, ...request }),

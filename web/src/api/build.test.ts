@@ -118,7 +118,7 @@ test('publish repair retries a real readiness response with the same HTTP idempo
 })
 
 test('draft reads do not mutate or send idempotency keys', async () => {
-  expect(await api.listDrafts('project-1')).toEqual({ data: [draftOf(draft)] })
+  expect(await api.listDrafts('project-1')).toEqual({ data: [draftOf(draft)], unreadable: [] })
   expect(await api.getDraft('project-1', 'draft-1')).toEqual(draftOf(draft))
   expect(requests.every((request) => request.method === 'GET' && !request.headers.has('Idempotency-Key'))).toBe(true)
   expect(requests.map((request) => new URL(request.url).pathname)).toEqual([

@@ -24,6 +24,7 @@ test('cause is plain escaped text; viewers and successful builds have no repair 
 
 test('one click creates an improvement draft and sends exactly the cause lines as its first turn', async () => {
   const create = spyOn(api, 'createDraft').mockResolvedValue(draftOf(draft))
+  const list = spyOn(api, 'listDrafts').mockResolvedValue({ data: [], unreadable: [] })
   const turn = spyOn(api, 'createTurn').mockImplementation(async (_projectId, _draftId, payload) => turnOf({ id: 'turn-1', kind: 'conversation', userMessage: payload.message, status: 'pending', startedAt: at, devWorkspaceId: 'workspace' }))
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   const container = document.createElement('div')
@@ -48,6 +49,7 @@ test('one click creates an improvement draft and sends exactly the cause lines a
     container.remove()
     client.clear()
     create.mockRestore()
+    list.mockRestore()
     turn.mockRestore()
   }
 })

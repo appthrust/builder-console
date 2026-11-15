@@ -21,8 +21,10 @@ export function useImproveSession(projectId: string, draft: BuildDraft) {
   const lock = useRef(false)
   const [sending, setSending] = useState(false)
   const [sendFailure, setSendFailure] = useState<{ text: string; failure: BuildFailure }>()
+  const [planFailure, setPlanFailure] = useState<BuildFailure>()
+  const planning = draft.creationPlanGenerations.some((generation) => isOneOf(generation.status, 'pending', 'running'))
   const state = deriveImprove(draft)
-  const implementation = useImplementation({ projectId, draft, handoff: draft.creationPlan?.implementationHandoff, enabled: true })
+  const implementation = useImplementation({ projectId, draft, handoff: draft.creationPlan?.implementationHandoff, enabled: !draft.creationPlanUnreadable })
   const proposal = useQuery(proposalOptions(projectId, draft.proposalId))
   const phase = proposal.data?.phase
   const reviewLocked = !!draft.proposalId && improvementLocked(phase)
@@ -78,6 +80,24 @@ export function useImproveSession(projectId: string, draft: BuildDraft) {
     reviewLocked,
     implementation,
     sending,
+    planning,
+    planFailure,
+    replan: async () => {
+      if (!draft.creationPlanUnreadable || lock.current || sending || planning || reviewLocked || planFailure?.kind === 'unconfirmed') return
+      lock.current = true
+      setSending(true)
+      setPlanFailure(undefined)
+      try {
+        await api.createGeneration(projectId, draft.id)
+        await queryClient.invalidateQueries({ queryKey: buildDraftOptions(projectId, draft.id).queryKey })
+      } catch (error) {
+        setPlanFailure(isResponseContractError(error) ? unconfirmedFailure({ draftId: draft.id, at: new Date().toISOString() }) : classifyBuildFailure('', undefined, 'plan'))
+        void queryClient.invalidateQueries({ queryKey: buildDraftOptions(projectId, draft.id).queryKey })
+      } finally {
+        lock.current = false
+        setSending(false)
+      }
+    },
     sendFailure: sendFailure?.failure,
     /** Nothing can be sent while a turn or a run is in flight (or in an unknown state), or while a send or start request is out. */
     locked: state.busy || reviewLocked || sending || implementation.pending,

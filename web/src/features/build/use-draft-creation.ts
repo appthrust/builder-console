@@ -208,13 +208,14 @@ export function useDraftCreation({ projectId, draft, tab, hasPending, now }: Dra
   const generation = draft.creationPlanGenerations.at(-1)
   const execution = draft.creationExecutions.at(-1)
   const needsPublishDefault = Boolean(draft.creationPlan?.applicationStackRequest && !draft.creationPlan.applicationStackRequest.publish?.enabled)
-  const connections = useQuery({ ...createConnectionsQuery(projectId), enabled: needsPublishDefault || (isOneOf(draft.phase, 'created') && !appView?.platform?.publish) })
+  const connections = useQuery({ ...createConnectionsQuery(projectId), enabled: !draft.creationPlanUnreadable && (needsPublishDefault || (isOneOf(draft.phase, 'created') && !appView?.platform?.publish)) })
   const domain = connections.data ? pickCreateEnvironment(connections.data.sources, connections.data.registries, connections.data.domains).domain : undefined
   const creationPlan = draft.creationPlan ? withDefaultPublish(draft.creationPlan, { domain }) : undefined
   const defaultPending = !execution && (creationPlan !== draft.creationPlan || (needsPublishDefault && connections.isPending))
   const proposalDraft = creationPlan === draft.creationPlan ? draft : { ...draft, creationPlan }
   const published = draftPublished(draft) && tab.continuedAfterPublishAt !== draft.publishedAt && !hasPending
-  const implementation = useImplementation({ projectId, draft, handoff: execution?.approval?.implementationHandoff ?? draft.creationPlan?.implementationHandoff, enabled: Boolean(draft.createdApplicationStackId) && !published })
+  const readableCreation = !draft.creationPlanUnreadable && !execution?.approvalUnreadable
+  const implementation = useImplementation({ projectId, draft, handoff: execution?.approvalUnreadable ? undefined : execution?.approval?.implementationHandoff ?? draft.creationPlan?.implementationHandoff, enabled: readableCreation && Boolean(draft.createdApplicationStackId) && !published })
   const implementing = implementation.pending || implementation.state.phase === 'starting-workspace' || implementation.state.phase === 'running' || implementation.state.phase === 'pushing'
   // Where the plan's new repository goes, shown on the proposal before 「この内容で作る」. Nothing is approved before a first
   // read has shown it (pending or failed). A later re-read that fails keeps the destination already shown, and approval
@@ -227,7 +228,7 @@ export function useDraftCreation({ projectId, draft, tab, hasPending, now }: Dra
   const retryDestination = () => { void destinationRead.refetch() }
   const planRejected = isPlanRejected(draft, tab)
   /** The rejected plan may be validated once more on the user's 「もう一度確かめる」. */
-  const planRecheck = planRejected && Boolean(tab.rejectedPlan?.recheck)
+  const planRecheck = !draft.creationPlanUnreadable && planRejected && Boolean(tab.rejectedPlan?.recheck)
   return { app, appViews, appView, appProgress, generation, execution, domain, creationPlan, defaultPending, proposalDraft, published, implementation, implementing, destination, retryDestination, planRejected, planRecheck }
 }
 
@@ -276,8 +277,14 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
   const queryClient = useQueryClient()
   const { projectId, draft, tab, busy, lock, failure, running } = host
   const { app, appView, appViews, generation, execution, domain, creationPlan, defaultPending, implementation, published } = creation
+  const readableCreation = !draft.creationPlanUnreadable && !execution?.approvalUnreadable
   const [publishRetryAt, setPublishRetryAt] = useState(0)
   const publishRetries = useRef(0)
+
+  useEffect(() => {
+    // Old tab approval never authorizes a later unreadable plan (or a replacement made by re-planning).
+    if (!readableCreation && (tab.prepareRequested || tab.executionRequestId)) host.patch({ prepareRequested: false, approvedDestinationRevision: undefined, executionRequestId: undefined })
+  }, [readableCreation, tab.prepareRequested, tab.executionRequestId])
   const publishRepairAppId = useRef<string | undefined>(undefined)
   const bindingFailed = useRef(false)
 
@@ -294,6 +301,7 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
   }, [publishRetryAt])
 
   useEffect(() => {
+    if (!readableCreation) return
     // Plan replacement is forbidden after an execution exists.
     if (execution || !isOneOf(generation?.status, 'succeeded') || !creationPlan || creationPlan === draft.creationPlan || running || busy || lock.current || failure) return
     void host.perform('plan', async () => {
@@ -349,6 +357,7 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
 
   /** The preparation an approval asks for: the plan's check, then begin and run. */
   async function preparation() {
+    if (host.draftRef.current.creationPlanUnreadable || !host.draftRef.current.creationPlan) return
     const creationPlanFingerprint = await checkPlan()
     const clientRequestId = host.currentTab().executionRequestId ?? crypto.randomUUID()
     host.patch({ executionRequestId: clientRequestId })
@@ -357,10 +366,16 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
     const created = begun.creationExecutions.at(-1)
     if (!created) throw new Error(text.session.missingExecution)
     host.patch({ prepareRequested: false })
+    // A successful begin can carry an unreadable approval. Its execution exists, but cannot be resumed or replayed.
+    if (created.approvalUnreadable || begun.creationPlanUnreadable) {
+      host.patch({ executionRequestId: undefined })
+      return
+    }
     await host.receive(await api.runExecution(projectId, draft.id, created.id))
   }
 
   useEffect(() => {
+    if (!readableCreation || !draft.creationPlan) return
     // A phase or job state this console does not know starts nothing on its own (stage.ts `unsupported`).
     if (running || busy || lock.current || failure || draft.createdApplicationStackId || host.unsupported || host.holdPreparation) return
     if (isOneOf(execution?.status, 'failed') && !host.observedFailures.current.has(execution!.id)) return
@@ -370,18 +385,21 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
   }, [draft, tab.prepareRequested, host.holdPreparation, running, busy, failure, defaultPending])
 
   useEffect(() => {
+    if (!readableCreation) return
     // A reload between begin and run resumes the existing execution, never begins a second one.
     if (!execution || !isOneOf(execution.status, 'running') || execution.runStartedAt || busy || lock.current || failure) return
     void host.perform('prepare', async () => { await host.receive(await api.runExecution(projectId, draft.id, execution.id)) })
   }, [execution, busy, failure])
 
   useEffect(() => {
+    if (!readableCreation) return
     if (!execution || !isOneOf(execution.status, 'failed') || host.observedFailures.current.has(execution.id)) return
     host.observedFailures.current.add(execution.id)
     host.fail(new Error(execution.error ?? text.session.operationFailed), 'prepare', execution.finishedAt, execution.steps.find((step) => isOneOf(step.status, 'failed')))
   }, [execution])
 
   useEffect(() => {
+    if (!readableCreation) return
     if (!draft.createdApplicationStackId || (!isOneOf(draft.phase, 'created') && !isOneOf(execution?.status, 'succeeded')) || app?.stackId || busy || lock.current || bindingFailed.current) return
     void host.perform('prepare', async () => {
       try {
@@ -402,10 +420,11 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
   }, [draft.createdApplicationStackId, knownValue(draft.phase), knownValue(execution?.status), app?.stackId, busy, host.groupId])
 
   useEffect(() => {
+    if (!readableCreation) return
     const platform = appView?.platform
-    if (!isOneOf(draft.phase, 'created') || appViews.loading || appViews.failed || !platform?.webComponentId || !domain || busy || lock.current || failure) return
+    if (!isOneOf(draft.phase, 'created') || appViews.loading || appViews.failed || !platform?.id || !platform.branchId || !platform.webComponentId || !domain || busy || lock.current || failure) return
     const hasPublish = appViews.input.publishes.some((publish) => publish.applicationId === platform.id && publish.branchId === platform.branchId && publish.componentId === platform.webComponentId)
-      || (platform.publish?.branchId === platform.branchId && platform.publish.componentId === platform.webComponentId)
+      || (platform.publish?.applicationId === platform.id && platform.publish.branchId === platform.branchId && platform.publish.componentId === platform.webComponentId)
     if (hasPublish) {
       publishRetries.current = 0
       setPublishRetryAt(0)
@@ -437,10 +456,11 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
   }, [knownValue(draft.phase), appView?.platform, appViews.loading, appViews.failed, domain, busy, failure, publishRetryAt])
 
   useEffect(() => {
-    if (draft.createdApplicationStackId && implementation.state.phase === 'idle' && !published) implementation.start()
+    if (readableCreation && draft.createdApplicationStackId && implementation.state.phase === 'idle' && !published) implementation.start()
   }, [draft.createdApplicationStackId, implementation.state.phase, published])
 
   async function markPublished() {
+    if (!readableCreation) return
     await host.perform('publish', async () => {
       await host.receive(await api.updateDraft(projectId, draft.id, { markPublished: true }))
       host.patch({ continuedAfterPublishAt: undefined })
@@ -455,6 +475,7 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
    * failed re-read is approvable: the preparation reads Platform's current one fresh and stops unless it is that revision.
    */
   function approve() {
+    if (!readableCreation || !draft.creationPlan) return
     host.clearFailure()
     const shown = creation.destination
     if (shown && shown.kind !== 'resolved') {
@@ -466,7 +487,7 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
   }
   /** Whether 「もう一度確かめる」 can run now: the one predicate for the action and for its buttons. */
   function recheckReady(): boolean {
-    return creation.planRecheck && !host.planOutgrown && !running && !busy && !lock.current && !draft.createdApplicationStackId && !host.unsupported && !host.holdPreparation && !defaultPending
+    return readableCreation && creation.planRecheck && !host.planOutgrown && !running && !busy && !lock.current && !draft.createdApplicationStackId && !host.unsupported && !host.holdPreparation && !defaultPending
   }
   /**
    * 「もう一度確かめる」: the plan Platform's validation rejected for a cause that may lie outside it is checked once, from
@@ -512,7 +533,7 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
      * the host drop what it showed about the collision.
      */
     rename(name: string, failure: BuildFailure | undefined, onRenamed: (updated: BuildDraft) => void) {
-      if (!draft.creationPlan) return
+      if (!readableCreation || !draft.creationPlan) return
       void host.perform('prepare', async () => {
         const publishConflict = failure?.reasonCode === 'PublishURLConflict'
         if (!publishConflict) await api.cleanupCreation(projectId, draft.id)
@@ -530,6 +551,7 @@ export function useDraftCreationEffects(creation: DraftCreation, host: DraftCrea
     resetBinding: () => { bindingFailed.current = false },
     /** The creation's retries: 公開済み again, the implementation run, or a clean preparation after a failed one. */
     retry(context: 'publish' | 'implement' | 'prepare') {
+      if (!readableCreation) return
       if (context === 'publish') void markPublished()
       else if (context === 'implement') implementation.retry()
       // A clean preparation never validates a rejected plan: a retry offered before the rejection does nothing now.

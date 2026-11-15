@@ -158,6 +158,13 @@ function proposalMessage(draft: BuildDraft, lastPlannedIntent?: string, destinat
 }
 
 export function messagesFromDraft(draft: BuildDraft, extra: BuildMessage[], options: { lastPlannedIntent?: string; preparationDone?: boolean; destination?: ShownDestination } = {}): BuildMessage[] {
+  if (draft.creationPlanUnreadable) return [{
+    role: 'notice', tone: 'warning', title: buildCopy.unreadablePlan.title, detail: buildCopy.unreadablePlan.detail,
+    ...(draft.createdApplicationId ? {} : { retry: 'plan' as const }), at: draft.updatedAt,
+  }]
+  if (draft.creationExecutions.at(-1)?.approvalUnreadable) return [{
+    role: 'notice', tone: 'warning', title: buildCopy.unreadableApproval.title, detail: buildCopy.unreadableApproval.detail, at: draft.updatedAt,
+  }]
   const messages: BuildMessage[] = []
   const all = [...draft.conversationTurns].sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt))
   // Excel → app's analysis and screen-design turns read as one line before the conversation,

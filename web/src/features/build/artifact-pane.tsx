@@ -111,6 +111,7 @@ export function ArtifactPane({ draft, spec, proposal, stage, progress, implement
   const specCard = <SpecCard spec={spec} title={draft.title} proposal={proposal} source={draft.source} uiDesign={draft.uiDesign} excelAnalysis={draft.excelAnalysis} />
   // The preview starts with the first task; preparation and implementation remain one ladder.
   const built = stage === 'build' || stage === 'publish'
+  const readableCreation = !draft.creationPlanUnreadable && !draft.creationExecutions.at(-1)?.approvalUnreadable
   // Once published, the working database no longer matters; until then a workspace either has its own or runs without one.
   const databaseStatus = stage === 'publish' ? undefined : implementation.previewDatabaseStatus
   const previewNotice = databaseStatus === 'none' && draft.creationPlan?.applicationStackRequest?.database
@@ -140,8 +141,8 @@ export function ArtifactPane({ draft, spec, proposal, stage, progress, implement
     </Notice> : null}
     {shareStep}
     {stage === 'publish' && url ? <PublishCard url={url} shareText={shareText} published /> : null}
-    {built ? <ImplementPanel state={implementation} preparation={progress} released={Boolean(url)} previewNotice={previewNotice} previewDatabase={previewDatabase} onOpenPreview={onOpenPreview} onRetry={onRetry} onSkipTask={onSkipTask} onConfirm={onConfirm} /> : null}
-    {built ? databaseChanges : null}
+    {built && readableCreation ? <ImplementPanel state={implementation} preparation={progress} released={Boolean(url)} previewNotice={previewNotice} previewDatabase={previewDatabase} onOpenPreview={onOpenPreview} onRetry={onRetry} onSkipTask={onSkipTask} onConfirm={onConfirm} /> : null}
+    {built && readableCreation ? databaseChanges : null}
     {stage === 'build' && url ? <PublishCard url={url} shareText={shareText} /> : null}
     {built && !url ? <p className="text-xs text-stone-500">{text.artifact.waitingForApp}</p> : null}
     {built ? specCard : null}

@@ -42,7 +42,7 @@ export function useAppViews(projectId: string): AppViews {
   const drafts = useQuery(draftsOptions(projectId))
   const repositories = useSourceRepositories(projectId)
   const applicationRows = applications.data
-  const stackRows = stacks.data ?? NO_STACKS
+  const stackRows = stacks.data?.data ?? NO_STACKS
   const targets = useMemo(
     () =>
       (applicationRows ?? []).filter((application) => !application.status.reason).map((application) => ({
@@ -76,11 +76,17 @@ export function useAppViews(projectId: string): AppViews {
       if (loading) return { status: 'deploying', label: copy.status.deploying, text: copy.common.loading, second: copy.common.loading, draft: app.stackId === null }
       // A read that never answered is not an empty list: nothing is derived from it.
       if (failedQuery) return { status: 'unknown', label: text.unsupported.label, text: copy.common.loadFailed, second: copy.common.loadFailed, draft: app.stackId === null }
+      const unreadable = stacks.data?.unreadable ?? []
+      const readable = stackRows.find((stack) => stack.id === app.stackId)
+      if (unreadable.some((row) => row.id === app.stackId || row.id === app.id || (row.id === undefined && !readable))) {
+        return { status: 'unknown', label: text.unsupported.label, text: copy.common.loadFailed, second: copy.common.loadFailed, draft: false, unreadableStack: true }
+      }
       const session = app.stackId ? undefined : readCreateSession(app.id)
       const application = applicationForStack(app.stackId, input)
       // Build progress comes from the session that made the app; improvement sessions have their own page.
       const draft = drafts.data?.data.find((item) => application && !item.proposalId && !isImprovementDraft(item) && item.createdApplicationId === application.id)
-      const handoff = draft?.creationExecutions?.at(-1)?.approval?.implementationHandoff ?? draft?.creationPlan?.implementationHandoff
+      const execution = draft?.creationExecutions.at(-1)
+      const handoff = draft?.creationPlanUnreadable || execution?.approvalUnreadable ? undefined : execution?.approval?.implementationHandoff ?? draft?.creationPlan?.implementationHandoff
       const build = draft && handoff ? {
         draftId: draft.id,
         initialReleaseId: readBuildSession(draft.id)?.initialReleaseId,
@@ -91,7 +97,7 @@ export function useAppViews(projectId: string): AppViews {
       return deriveAppView(app, input, Date.now(), {
         observed: drafts.isSuccess,
         // A job in a state this console does not know may still run: it counts as in progress, never as finished.
-        inProgress: drafts.data?.data.some((item) =>
+        inProgress: Boolean(drafts.data?.unreadable.length) || drafts.data?.data.some((item) =>
           !item.proposalId && [...item.creationPlanGenerations, ...item.creationExecutions].some((operation) => jobState(operation) !== 'settled')
         ),
         progress: session?.progress,

@@ -9,6 +9,7 @@ import type { BusinessApp } from '../../model/contracts/console'
 import { platformErrorEnvelope } from '../../api/platform-error'
 import { copy } from '../../copy'
 import { improvementFor } from '../../model/improve'
+import { buildCopy } from '../../model/build/copy'
 import { paths } from '../../routes/paths'
 import { ActionError, Button, Dialog, Field, Notice, TextArea } from '../../ui'
 import { MAX_LENGTH } from '../build/composer'
@@ -28,12 +29,14 @@ export function ImproveButton({ app, stackId, projectId, initialMessage, actionL
 }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const drafts = useQuery({ ...draftsOptions(projectId), enabled: !initialMessage })
+  const drafts = useQuery(draftsOptions(projectId))
   const [open, setOpen] = useState(false)
   const [intent, setIntent] = useState('')
   const inputId = useId()
   const start = useMutation({
     mutationFn: async (message: string) => {
+      const latest = await queryClient.fetchQuery({ ...draftsOptions(projectId), staleTime: 0 })
+      if (latest.unreadable.length) throw new Error(buildCopy.unreadableDrafts)
       const draft = await createDraft(projectId, { kind: 'improvement', applicationStackId: stackId, intent: message, title: app.displayName })
       // The session exists from here on: a refused first turn is sent again from the session's composer.
       await createTurn(projectId, draft.id, { message }).catch(() => undefined)
@@ -79,6 +82,7 @@ export function ImproveButton({ app, stackId, projectId, initialMessage, actionL
   }
   return <>
     <Button tone="primary" icon={<Sparkles />} onClick={onClick} loading={initialMessage ? start.isPending : drafts.isPending} disabled={unconfirmed} data-testid={initialMessage ? 'repair-build-with-ai' : 'improve-with-ai'}>{actionLabel ?? text.entry.action}</Button>
+    {drafts.data?.unreadable.length ? <Notice tone="warning">{buildCopy.unreadableDrafts}</Notice> : null}
     {initialMessage && start.error ? unconfirmed ? <UnconfirmedNotice onConfirm={() => void confirmLatest()} /> : <ActionError error={start.error} /> : null}
     <Dialog
       open={open}

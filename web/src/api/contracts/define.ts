@@ -2,7 +2,7 @@
 // what the transport needs to make the call. Adapters in ./platform and
 // ./console build their contracts with these and nothing else.
 import type { z } from 'zod'
-import { defineEmptyResponseContract, defineResponseContract, type FieldPolicy, type HttpMethod, type ResponseContract } from '../boundary'
+import { defineEmptyResponseContract, defineResponseContract, type FieldPolicy, type HttpMethod, type ResponseContract, type ResponseIssue } from '../boundary'
 import type { PlatformApiClient } from '../client'
 import type { ConsoleRequest } from '../console'
 
@@ -24,7 +24,7 @@ export interface ConsoleOperationContract<I, D> extends ResponseContract<D> {
 type Identity = { method: HttpMethod; routeTemplate: string; successStatuses: readonly number[] }
 
 export function platformContract<Op extends PlatformOperation, D>(
-  spec: Identity & { operationId: Op; reader: z.ZodType<D>; fieldPolicies?: readonly FieldPolicy[] },
+  spec: Identity & { operationId: Op; reader: z.ZodType<D>; fieldPolicies?: readonly FieldPolicy[]; recoveries?: (value: D) => readonly ResponseIssue[] },
 ): PlatformOperationContract<Op, D> {
   return { ...defineResponseContract({ ...spec, source: 'platform' }), source: 'platform', operationId: spec.operationId }
 }

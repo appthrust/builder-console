@@ -207,13 +207,15 @@ function publishFor(
   branchId: string,
   publishes: readonly AppPublish[]
 ): AppPublish | undefined {
+  // Project-level publishes may have no application, branch or component reference.
+  if (!application.id || !branchId) return undefined
   const scoped = publishes.filter(
-    (publish) => publish.applicationId === application.id && publish.branchId === branchId
+    (publish) => publish.applicationId === application.id && publish.branchId === branchId && Boolean(publish.componentId)
   )
   return (
     scoped.find((publish) => publish.componentId === stack.webComponentId) ??
     scoped[0] ??
-    stack.publish
+    (stack.publish?.applicationId === application.id && stack.publish.branchId === branchId && stack.publish.componentId ? stack.publish : undefined)
   )
 }
 
@@ -376,6 +378,8 @@ export interface AppView {
   url?: string
   /** No platform binding yet (`stackId` null). */
   draft: boolean
+  /** This app may belong to an isolated stack row: its missing fields authorize no write. */
+  unreadableStack?: true
   stack?: AppStack
   platform?: ConsoleApp
 }

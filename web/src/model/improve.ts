@@ -89,14 +89,14 @@ export function improveVersions(draft: Pick<BuildDraft, 'implementationRuns'>): 
 
 const STAGE: Record<Exclude<ImprovePhase, 'unsupported'>, ImproveStage> = { asking: 'ask', proposed: 'fix', running: 'fix', failed: 'fix', done: 'check' }
 
-export function deriveImprove(draft: Pick<BuildDraft, 'conversationTurns' | 'creationPlan' | 'implementationRuns'>): ImproveState {
+export function deriveImprove(draft: Pick<BuildDraft, 'conversationTurns' | 'creationPlan' | 'creationPlanUnreadable' | 'implementationRuns'>): ImproveState {
   const run = draft.implementationRuns.at(-1)
   const turns = sortedTurns(draft)
   const latestTurn = turns.at(-1)
   const turnActive = isBuildPending(latestTurn)
   const runActive = isBuildPending(run)
   // Neither running nor finished can be told apart from a state this console does not know.
-  const unsupported = jobState(latestTurn) === 'unknown' || jobState(run) === 'unknown' || (run?.tasks.some((task) => task.status.kind === 'unknown') ?? false)
+  const unsupported = Boolean(draft.creationPlanUnreadable) || jobState(latestTurn) === 'unknown' || jobState(run) === 'unknown' || (run?.tasks.some((task) => task.status.kind === 'unknown') ?? false)
   const proposal = pendingProposal(draft)
   const runEnded = run ? time(run.finishedAt ?? run.startedAt) : Number.NaN
   // Something was said after the run ended (the same instant counts): the conversation, not the run, is current.
