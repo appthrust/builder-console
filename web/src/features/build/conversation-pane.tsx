@@ -95,11 +95,15 @@ export function ConversationPane({ messages, stage, answering, unsupported = fal
             // After an unreadable write answer the action only reads the draft back: it is never labelled as a retry.
             // A destination that moved is approved again with the proposal's own words, not "tried again".
             const reapprove = message.retry === 'prepare' && message.title === buildCopy.failure.destination.changed.title
-            const label = message.retry === 'confirm' ? buildCopy.failure.confirm : reapprove ? buildCopy.primary.prepare : uiText.conversation.retry
-            const actions = nameTaken ? <NameChoice suggestion={failure.suggestedName} onUse={onUseName} /> : message.retry ? <Button size="sm" tone={reapprove ? 'primary' : undefined} onClick={() => onRetry(message.retry!)}>{label}</Button> : undefined
+            // A plan Platform's validation rejected is followed by a new plan: the action says so, it never resends the plan.
+            const plan = buildCopy.failure.plan
+            const replan = message.retry === 'plan' && [plan.destination.title, plan.incomplete.title, plan.unknown.title].includes(message.title)
+            const label = message.retry === 'confirm' ? buildCopy.failure.confirm : reapprove ? buildCopy.primary.prepare : replan ? buildCopy.failure.plan.replan : uiText.conversation.retry
+            const actions = nameTaken ? <NameChoice suggestion={failure.suggestedName} onUse={onUseName} /> : message.retry ? <Button size="sm" tone={reapprove || replan ? 'primary' : undefined} onClick={() => onRetry(message.retry!)}>{label}</Button> : undefined
             const reference = message.reference ? buildFailureReference(message.reference) : undefined
             return <Notice key={key} tone={message.tone} title={message.title} actions={actions}>
               {message.detail}
+              {message.platformMessage ? <PlatformMessage text={message.platformMessage} /> : null}
               {reference ? <div className="mt-3 flex flex-wrap items-center gap-2"><span className="min-w-0 break-all text-xs">{reference}</span><CopyButton value={reference} label={buildCopy.failure.copyReference} /></div> : null}
             </Notice>
           }
@@ -127,6 +131,14 @@ export function UserMessage({ text }: { text: string }) {
   return <article className="ml-auto max-w-[min(85%,60ch)] rounded-2xl rounded-br-md bg-accent-soft px-3.5 py-2 text-sm leading-relaxed whitespace-pre-wrap break-words text-stone-900">
     <span className="sr-only">{uiText.conversation.you}</span>{text}
   </article>
+}
+
+/** Platform's own sentences for a reason this console does not know, as said (they are not secrets), under their label. */
+export function PlatformMessage({ text }: { text: string }) {
+  return <div className="mt-2">
+    <p className="text-xs font-medium">{buildCopy.failure.plan.said}</p>
+    <p lang="en" className="mt-0.5 whitespace-pre-wrap break-words font-mono text-xs">{text}</p>
+  </div>
 }
 
 export function AiTurn({ label, children }: { label?: string; children: ReactNode }) {

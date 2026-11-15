@@ -607,6 +607,21 @@ non-engineers, with engineering words only under 「詳しい人向け」
   cleanup. 409 `DestinationMismatch` is a fixed-copy
   failure. Stories: `e2e/stories/app-create-destination.mock.spec.ts` (mock
   toggle `repository-destination {state}`).
+- A creation-plan validation that answers `valid: false` is Platform's answer
+  about the plan, not a platform failure: no 「基盤の問題」 wording and no
+  support reference (`model/build/failure.ts` `planRejectionFailure`, kind
+  `plan`). Its destination sentences (no reason code is carried) are bound
+  again as an approval binds them: a moved or missing revision stops as the
+  destination notice with the plan bound to the current destination, an unset
+  one as the blocked notice. A name or URL another app holds is the name choice.
+  Otherwise the plan is marked rejected for this tab (`rejectedPlanGenerationId`):
+  「この内容で作る」 is withdrawn and the only action is 「計画を作り直す」 (a new
+  plan generation; console-v1 `request_plan`), never the same plan validated or
+  begun again. A plan for another destination and a plan that breaks Platform's
+  plan rules get fixed copy; any other reason shows Platform's sentences
+  verbatim under 「基盤からの説明」. A plan generation that failed on the same
+  check reads the same way. 5xx, network and unreadable answers keep the
+  platform failure and its reference.
 - AI build sessions default an absent/disabled plan publish to the wizard's
   `pickCreateEnvironment(...).domain`, using the application's name as the
   wildcard subdomain. Enabled publish destinations are preserved; a rename

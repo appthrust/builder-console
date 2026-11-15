@@ -104,6 +104,13 @@ export const textEn: typeof textJa = {
       blocked: { title: 'The repository destination is not set', reason: 'Where new repositories are created has not been set yet. Ask a project administrator to set the repository destination.' },
       mismatch: { title: 'The repository destination could not be confirmed', reason: 'Nothing has been created yet. If this continues after reopening this page, contact your administrator.' },
     },
+    plan: {
+      destination: { title: 'The plan needs to match the current repository destination', reason: 'Nothing has been created yet. The plan does not match where the project creates repositories now. Make the plan again to match the current destination.' },
+      incomplete: { title: 'The plan is missing something', reason: 'Nothing has been created yet. The plan AI made does not meet the rules for building an app. Make the plan again and AI will rethink it.' },
+      unknown: { title: 'This plan cannot be built', reason: 'Nothing has been created yet. The platform’s explanation is shown below as it was given. Tell AI anything you want to change, then make the plan again.' },
+      said: 'The platform’s explanation',
+      replan: 'Make the plan again',
+    },
   },
   /** A state this console version does not know: the known parts stay visible, only what depends on it stops. */
   unsupported: { title: 'This state cannot be shown on this screen', detail: 'Everything else stays available. Actions that depend on this state are paused until it is known.' },

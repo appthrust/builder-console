@@ -437,6 +437,34 @@ describe('the plan', () => {
     expect((await api.get(sessionId)).lifecycle).toEqual({ kind: 'known', value: 'created' })
   })
 
+  test('a plan Platform\'s validation rejects shows its reason, withdraws 「この内容で作る」 and offers only a new plan (APT-1094)', async () => {
+    const { draftId, sessionId } = await startSession()
+    const session = await api.get(sessionId)
+    await api.createTurn(sessionId, { kind: 'request_plan', specRevision: 0 }, { key: mintIdempotencyKey(), version: session.version })
+    await finishActive(sessionId)
+    const page = await open(draftId)
+    await settle(30)
+    const sentence = 'Tool sequence appthrust.database.attach is not supported by this Platform.'
+    const answer = { valid: false, message: 'Creation plan needs changes before AppThrust tools can run.', staticErrors: [sentence] }
+    const validations = new RegExp(`/application-drafts/${draftId}/creation-plan-validations$`)
+    mock.rewrites.push({ method: 'POST', path: validations, once: true, body: (wire) => ({ ...answer, operation: wire.operation, resource: answer }) })
+    await act(async () => { button(page.container.querySelector('[data-testid="build-proposal"]')!, buildCopy.primary.prepare).click() })
+    await settle(40)
+    const notice = notices(page).find((item) => item.querySelector('p')?.textContent === buildCopy.failure.plan.unknown.title)!
+    expect(notice.textContent).toContain(buildCopy.failure.plan.unknown.reason)
+    expect(notice.textContent).toContain(sentence)
+    expect(notice.textContent).not.toContain('Creation plan needs changes')
+    expect(page.container.textContent).not.toContain(buildCopy.failure.platform.title)
+    expect(page.container.textContent).not.toContain(buildCopy.failure.copyReference)
+    expect([...notice.querySelectorAll('button')].map((item) => item.textContent?.trim())).toEqual([buildCopy.failure.plan.replan])
+    expect(buttons(page.container.querySelector('[data-testid="build-proposal"]')!, buildCopy.primary.prepare)).toHaveLength(0)
+    await act(async () => { button(notice, buildCopy.failure.plan.replan).click() })
+    await settle()
+    expect((await api.allTurns(sessionId)).at(-1)).toMatchObject({ kind: 'request_plan' })
+    expect(mock.count('POST', validations)).toBe(1)
+    expect(mock.count('POST', new RegExp(`/application-drafts/${draftId}/creation-executions$`))).toBe(0)
+  })
+
   test('a spec change accepted after planning makes the plan stale: no creation, re-planning offered', async () => {
     const { draftId, sessionId } = await startSession()
     let session = await api.get(sessionId)

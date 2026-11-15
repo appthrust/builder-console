@@ -17,7 +17,7 @@ import { deriveStage, hasUnplannedKickoff, needsPlanRefresh } from '../../model/
 import type { BuildFailure, BuildMessage } from '../../model/build/types'
 import { implemented } from './implement'
 import { acknowledgeReply, initialSession, queueReply, readBuildSession, saveBuildSession, startConversation, startPrepareConversation, type BuildSession } from './session'
-import { draftFailure, useDraftCreation, useDraftCreationEffects, writeDraft } from './use-draft-creation'
+import { draftFailure, isPlanRejected, useDraftCreation, useDraftCreationEffects, writeDraft } from './use-draft-creation'
 import { text } from './copy'
 
 import { isBuildPending } from '../../model/build/progress'
@@ -99,10 +99,11 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
       const last = current.messages.at(-1)
       const messages = last?.role === 'notice' && last.title === next.title && last.detail === next.reason ? current.messages.slice(0, -1) : current.messages
       // The repository destination moved (approve again, labelled 「この内容で作る」) or is not set (retry once a
-      // Project administrator has set it): neither is an error of this session, and nothing was made to clean up.
-      const calm = unconfirmed || next.destination === 'changed' || next.destination === 'blocked'
-      const retry = unconfirmed ? 'confirm' as const : next.kind !== 'policy' ? context : undefined
-      return { ...current, ...(next.kind === 'quota' || next.kind === 'policy' ? { planRequested: false } : {}), messages: [...messages, { role: 'notice', tone: calm ? 'warning' : 'error', title: next.title, detail: next.reason, ...(retry ? { retry } : {}), at, ...(next.reference ? { reference: next.reference } : {}) }] }
+      // Project administrator has set it), or the plan has to change: none is an error of this session, and nothing
+      // was made to clean up. A rejected plan is followed by a new plan (`retry: 'plan'`), never by the same plan again.
+      const calm = unconfirmed || next.destination === 'changed' || next.destination === 'blocked' || next.kind === 'plan'
+      const retry = unconfirmed ? 'confirm' as const : next.kind === 'plan' ? 'plan' as const : next.kind !== 'policy' ? context : undefined
+      return { ...current, ...(next.kind === 'quota' || next.kind === 'policy' ? { planRequested: false } : {}), messages: [...messages, { role: 'notice', tone: calm ? 'warning' : 'error', title: next.title, detail: next.reason, ...(next.platformMessage ? { platformMessage: next.platformMessage } : {}), ...(retry ? { retry } : {}), at, ...(next.reference ? { reference: next.reference } : {}) }] }
     })
   }
   async function perform(context: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish', action: () => Promise<void>) {
@@ -216,7 +217,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
     const latestGeneration = current.creationPlanGenerations.at(-1)
     if (current.createdApplicationStackId || current.creationExecutions.length
       || latestGeneration?.id !== previousGenerationId
-      || !needsPlanRefresh(current, store.state.lastPlannedIntent)) {
+      || (!needsPlanRefresh(current, store.state.lastPlannedIntent) && !isPlanRejected(current, store.state))) {
       patch({ planRequested: false })
       return
     }
@@ -230,8 +231,10 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
     await receive({ ...draftRef.current, creationPlanGenerations: [...draftRef.current.creationPlanGenerations, created] })
   }
 
-  // The plan must be (re)made before the preparation: an accepted kickoff, or 用意する on a plan the spec has outgrown.
+  // The plan must be (re)made before the preparation: an accepted kickoff, 用意する on a plan the spec has outgrown, or a
+  // new plan asked for after Platform's validation rejected the current one (the same plan is never approved again).
   const planFirst = (isOneOf(turn?.status, 'succeeded') && (session.planRequested || hasUnplannedKickoff(draft))) || (session.prepareRequested && !session.reusePlan && needsPlanRefresh(draft, session.lastPlannedIntent))
+    || (session.planRequested && creation.planRejected)
   const unobservedFailure = [generation, turn].some((operation) => isOneOf(operation?.status, 'failed') && !observedFailures.current.has(operation!.id))
   const creationEffects = useDraftCreationEffects(creation, {
     projectId, groupId, draft, draftRef, tab: session, currentTab: () => store.state, patch, receive, perform, fail,
@@ -252,7 +255,8 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
       if (!operation || !isOneOf(operation.status, 'failed') || observedFailures.current.has(operation.id)) continue
       observedFailures.current.add(operation.id)
       const kind = classifyBuildFailure(operation.error ?? '', undefined, context).kind
-      if (context === 'plan' && session.planRetries === 0 && kind !== 'quota' && kind !== 'policy') {
+      // An unset repository destination stops every plan alike: trying again waits for the user (after an administrator set it).
+      if (context === 'plan' && session.planRetries === 0 && kind !== 'quota' && kind !== 'policy' && kind !== 'destination') {
         patch((current) => ({ ...current, planRetries: 1, planRequested: true, messages: [...current.messages, { role: 'notice', tone: 'info', title: text.session.retryPlan, at: new Date().toISOString() }] }))
       } else fail(new Error(operation.error ?? text.session.operationFailed), context, operation.finishedAt)
     }
@@ -321,6 +325,10 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
       else send(buildCopy.questions.kickoffReply)
     },
     prepare: creationEffects.prepare,
+    /** Platform's validation rejected the plan on screen: it is not approved again; only a new plan (`replan`) goes on. */
+    planRejected: creation.planRejected,
+    /** 「計画を作り直す」: asks for a new plan; the rejected one is never validated or begun again. */
+    replan: () => retry('plan'),
     /** Reads the repository destination again after its read failed (nothing is approved meanwhile). */
     retryDestination: creation.retryDestination,
     /** The shared name-collision recovery (use-draft-creation `rename`). */

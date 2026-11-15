@@ -27,6 +27,76 @@ export function destinationFailure(rejection: 'changed' | 'blocked' | 'mismatch'
   return { kind: 'destination', destination: rejection, ...buildCopy.failure.destination[rejection], ...(reference && rejection === 'mismatch' ? { reference } : {}) }
 }
 
+/**
+ * Platform's own sentences for a repository destination that stops a plan. A validation answer carries them as text
+ * only (the source validation keeps the message, not the reason: platform-api internal/handler/application_draft.go
+ * :1137-1158); the plan's static check (:2305-2306), the revision check and the request match (internal/
+ * repositorydestination/request.go:56-73) and the resolver's blockers (resolver.go:383-409).
+ */
+const DESTINATION_SENTENCES: Record<'changed' | 'blocked' | 'mismatch', readonly string[]> = {
+  changed: ['Validate a repository destination before approving this creation plan.', 'The repository destination changed. Validate and approve the new destination.'],
+  mismatch: ['The request does not match the Project repository destination.'],
+  blocked: [
+    'No repository destination is configured.',
+    'Multiple repository destinations are available; ask a Project administrator to select a default.',
+    'The configured repository destination is unavailable.',
+    'The configured repository destination is being deleted.',
+    'The repository destination is not ready for its current configuration.',
+    'The repository destination cannot create repositories.',
+    'The repository destination is not available to this Project.',
+    'Repository provisioning is not supported for this provider.',
+    'Image access is not configured for the repository destination.',
+    'Multiple image access connections match the repository destination.',
+    'Image access is not ready for the repository destination.',
+  ],
+}
+/** Platform's verdicts that only say the plan needs changes (application_draft.go:1115, :1180, :1194; application_stack_validation.go:165), not why. */
+const PLAN_VERDICTS: readonly string[] = [
+  'Creation plan needs changes before AppThrust tools can run.',
+  'Launch needs changes before resources can be created.',
+  'ApplicationStack request needs changes before AppThrust creation.',
+  'Creation plan is ready for approval.',
+]
+/** The plan's static check (application_draft.go:1113-1117) names the plan's own fields, `'creationPlan…'`; so does a generation stopped by it (application_draft_generation.go:615-621). */
+const PLAN_FIELD = /\bcreationPlan\b|Creation plan could not be fingerprinted/
+
+/** How the repository destination stopped a plan, when one of Platform's destination sentences is in `text`. */
+export function destinationSentence(text: string): 'changed' | 'blocked' | 'mismatch' | undefined {
+  return (['blocked', 'changed', 'mismatch'] as const).find((rejection) => DESTINATION_SENTENCES[rejection].some((sentence) => text.includes(sentence)))
+}
+
+function planFailure(plan: NonNullable<BuildFailure['plan']>, raw: string, platformMessage?: string): BuildFailure {
+  return { kind: 'plan', plan, ...buildCopy.failure.plan[plan], raw, ...(platformMessage ? { platformMessage } : {}) }
+}
+
+/**
+ * Platform's creation-plan validation answered that this plan cannot be approved (`valid: false`): an answer about the
+ * plan, never a platform fault, so no support reference. `lines` are its sentences in order (verdict, plan check,
+ * sections). A name or URL another app holds is the name choice; a plan that does not match the Project's repository
+ * destination, or breaks the plan's rules, is fixed by a new plan; any other reason keeps Platform's sentences verbatim
+ * (they are not secrets) under a neutral title. A destination that moved or is not set is first bound again by the
+ * caller (use-draft-creation), so it reaches the destination display, and reaches this only for a plan without a new repository.
+ */
+export function planRejectionFailure(lines: readonly string[]): BuildFailure {
+  const raw = lines.join('\n')
+  const said = [...new Set(lines.map((line) => line.trim()).filter(Boolean))]
+  if (said.some((line) => destinationSentence(line))) return planFailure('destination', raw)
+  const taken = said.map((line) => classifyBuildFailure(line, undefined, 'prepare')).find((failure) => failure.kind === 'name-taken')
+  if (taken) return { ...taken, raw }
+  if (said.some((line) => PLAN_FIELD.test(line))) return planFailure('incomplete', raw)
+  const reasons = said.filter((line) => !PLAN_VERDICTS.includes(line))
+  return planFailure('unknown', raw, (reasons.length ? reasons : said).join('\n'))
+}
+
+/** A plan generation stopped by Platform's own plan check (its error is that sentence, after an error code). */
+function planGenerationRejection(text: string): BuildFailure | undefined {
+  const destination = destinationSentence(text)
+  // Nothing to bind yet: while none is set only an administrator helps; a plan without the current one is made again.
+  if (destination === 'blocked') return { ...destinationFailure('blocked'), raw: text }
+  if (destination) return planFailure('destination', text)
+  return PLAN_FIELD.test(text) ? planFailure('incomplete', text) : undefined
+}
+
 /** Raw diagnostics stay in the advanced disclosure; stable console codes do not depend on server wording. */
 export function classifyBuildFailure(text: string, status: number | undefined, context: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish', reference?: BuildFailure['reference'], code?: string, operation?: 'apps.create', failureReason?: OpenValue<ImplementationFailureReason>, details?: Record<string, unknown>): BuildFailure {
   const copy = buildCopy.failure
@@ -36,6 +106,8 @@ export function classifyBuildFailure(text: string, status: number | undefined, c
   if (policy) return { kind: 'policy', title: aiPolicyCopy.title, reason: policy, raw: text }
   // A provider cause is more specific than the runtime's generic TaskFailed/stream reason.
   if (context !== 'prepare' && context !== 'publish' && isAIQuotaExhausted(text)) return { kind: 'quota', ...copy.quota, raw: text }
+  const planRejected = context === 'plan' ? planGenerationRejection(text) : undefined
+  if (planRejected) return planRejected
   if (context === 'implement' && failureReason) {
     // A reason this console does not know is a stop like any other, never a resumable interruption.
     switch (failureReason.kind === 'known' ? failureReason.value : undefined) {
