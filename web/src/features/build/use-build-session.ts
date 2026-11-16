@@ -8,7 +8,7 @@ import { buildDraftOptions, readDraft } from '../../api/queries/build'
 import { type Me } from '../../model/contracts/console'
 import { platformErrorEnvelope } from '../../api/platform-error'
 import { isSessionExpiredError, sessionExpiryStore } from '../../api/session-expiry'
-import { classifyBuildFailure } from '../../model/build/failure'
+import { classifyBuildFailure, failureOffers } from '../../model/build/failure'
 import { buildCopy } from '../../model/build/copy'
 import { messagesFromDraft, planProposal } from '../../model/build/messages'
 import { composeBuildIntent, conversationTurns, decomposeBuildIntent, isPrepareTurn, prepareAnswers } from '../../model/build/questions'
@@ -179,7 +179,9 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
     // 用意する questions are answered in the conversation, even when the app was made before the answer.
     const asking = preparing || answers.open || isPrepareTurn(pending.text)
     if (draft.createdApplicationStackId && !asking) {
-      if (!app?.stackId || !implementation.state.tasks.length || implementation.pending || implementation.state.failure) return
+      // A stopped run takes a change instruction only where Platform's decision admits one; otherwise the reply waits.
+      const stopped = implementation.state.failure
+      if (!app?.stackId || !implementation.state.tasks.length || implementation.pending || (stopped && !failureOffers(stopped).change)) return
       void perform('implement', async () => {
         if (await implementation.requestChange(pending.text)) {
           patch((current) => ({ ...current, pending: current.pending.filter((message) => message.at !== pending.at) }))

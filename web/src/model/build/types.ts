@@ -105,9 +105,10 @@ export interface BuildFailure {
   plan?: 'destination' | 'incomplete'
   /**
    * A stopped implementation run that carries Platform's decision (`failure`): whether a new run of the same tasks
-   * (`retry`) and a run that skips the stopped task (`skip`) are offered. Absent: decided by `kind` (`failureOffers`).
+   * (`retry`), a run that skips the stopped task (`skip`) and a run with a change instruction typed in the conversation
+   * (`change`) are offered. Absent: decided by `kind` (`failureOffers`).
    */
-  offers?: { retry: boolean; skip: boolean }
+  offers?: { retry: boolean; skip: boolean; change: boolean }
   /**
    * Platform's validation answered `valid: false` for a cause that may lie outside the plan: a reason this console
    * does not know (kind `platform`, with its reference) or a repository destination Platform calls unusable (kind

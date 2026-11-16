@@ -102,7 +102,7 @@ export function classifyBuildFailure(text: string, status: number | undefined, c
   const copy = buildCopy.failure
   // Admission reasons take precedence over generic status, runtime and provider errors.
   const policy = aiPolicyExplanation(details?.reason, details?.policy)
-    ?? aiPolicyExplanation(policyCode(text))
+    ?? aiPolicyExplanation(policyCode(text), details?.policy)
   if (policy) return { kind: 'policy', title: aiPolicyCopy.title, reason: policy, raw: text }
   // A provider cause is more specific than the runtime's generic TaskFailed/stream reason.
   if (context !== 'prepare' && context !== 'publish' && isAIQuotaExhausted(text)) return { kind: 'quota', ...copy.quota, raw: text }
@@ -183,11 +183,17 @@ export function classifyRunFailure(run: Pick<ImplementationRun, 'status' | 'erro
   return classifyBuildFailure(text, undefined, 'implement', reference, undefined, undefined, run.failureReason ?? task?.failureReason)
 }
 
-type Refinement = Pick<BuildFailure, 'kind' | 'title' | 'reason'> & { skip?: false }
+/**
+ * `newRun: false`: Platform's run admission refuses every new run while this holds, so neither skip nor a change is
+ * offered. `skip: false`: skipping cannot help (the next task meets the same exhausted quota), as before APT-1158.
+ */
+type Refinement = Pick<BuildFailure, 'kind' | 'title' | 'reason'> & { newRun?: false, skip?: false }
 
 /**
- * The wording, and the skip taken away, for a reason this console knows, only when Platform's `retryable` is the one
- * written for it. Never adds an action: a new run is offered exactly when `retryable` says so.
+ * The wording for a reason this console knows, only when Platform's `retryable` is the one written for it. Never adds
+ * an action: a new run of the same tasks is offered exactly when `retryable` says so. Skip and a change are taken away
+ * where Platform refuses any new run (a pending or closed proposal: `admitImprovementImplementation`); skip alone is
+ * taken away for an exhausted quota.
  */
 function refinement(reason: RunFailure['reason'], retryable: boolean, text: string): Refinement | undefined {
   const copy = buildCopy.failure
@@ -197,40 +203,49 @@ function refinement(reason: RunFailure['reason'], retryable: boolean, text: stri
     case 'RuntimeUnavailable': return { kind: 'unavailable', ...copy.unavailable }
     case 'TaskTimedOut': return { kind: 'failed', ...copy.run.timedOut }
     case 'ProviderQuotaExhausted': return { kind: 'quota', ...copy.quota, skip: false }
-    case 'ProposalPending': return { kind: 'failed', ...copy.run.proposalPending, skip: false }
+    case 'ProposalPending': return { kind: 'failed', ...copy.run.proposalPending, newRun: false }
     default: return undefined
   }
   switch (known) {
     case 'InputRequired': return { kind: 'blocked', ...copy.run.inputRequired }
     case 'PolicyDenied': return {
-      kind: 'policy', title: aiPolicyCopy.title, skip: false,
+      kind: 'policy', title: aiPolicyCopy.title,
       reason: aiPolicyExplanation(policyCode(text)) ?? aiPolicyCopy.policy() + aiPolicyCopy.unknown + aiPolicyCopy.contact,
     }
-    case 'AccessDenied': return { kind: 'blocked', ...copy.run.accessDenied, skip: false }
-    case 'ConfigurationMissing': case 'ConfigurationInvalid': return { kind: 'blocked', ...copy.run.configuration, skip: false }
-    case 'ProposalClosed': return { kind: 'blocked', ...copy.run.proposalClosed, skip: false }
-    case 'ProposalInvalid': return { kind: 'blocked', title: copy.failed.implement, reason: copy.run.blocked, skip: false }
+    case 'AccessDenied': return { kind: 'blocked', ...copy.run.accessDenied }
+    case 'ConfigurationMissing': case 'ConfigurationInvalid': return { kind: 'blocked', ...copy.run.configuration }
+    case 'ProposalClosed': return { kind: 'blocked', ...copy.run.proposalClosed, newRun: false }
     default: return undefined
   }
 }
 
 /**
- * `retryable` decides whether a new run is offered; an unknown reason gets the generic wording for it. A run that
- * would stop the same way carries its support reference: the next step is someone else's.
+ * `retryable` decides whether a new run of the same tasks is offered; an unknown reason gets the generic wording for
+ * it. A run that would stop the same way names who acts (with its support reference) and, where Platform still admits
+ * a new run, the way on: what to change, or skip the task.
  */
 function decidedRunFailure(failure: RunFailure, text: string, reference: NonNullable<BuildFailure['reference']>): BuildFailure {
   const copy = buildCopy.failure
-  const { skip = true, ...shown } = refinement(failure.reason, failure.retryable, text)
+  const { newRun = true, skip = true, ...shown } = refinement(failure.reason, failure.retryable, text)
     ?? (failure.retryable ? { kind: 'failed' as const, title: copy.failed.implement, reason: copy.retry } : { kind: 'blocked' as const, title: copy.failed.implement, reason: copy.run.blocked })
-  return { ...shown, offers: { retry: failure.retryable, skip }, raw: text, ...(failure.retryable ? {} : { reference }) }
+  return {
+    ...shown,
+    ...(failure.retryable ? {} : { reason: newRun ? shown.reason + copy.run.then : shown.reason, reference }),
+    offers: { retry: failure.retryable, skip: newRun && skip, change: newRun },
+    raw: text,
+  }
 }
 
-/** Whether a stopped run offers a new run and a skip of its stopped task: Platform's decision, else by `kind` as before. */
-export function failureOffers(failure: BuildFailure): { retry: boolean; skip: boolean } {
+/**
+ * Whether a stopped run offers a new run of the same tasks, a skip of its stopped task, and a run with a change
+ * instruction: Platform's decision, else by `kind` as before (no change while a failure is shown).
+ */
+export function failureOffers(failure: BuildFailure): NonNullable<BuildFailure['offers']> {
   if (failure.offers) return failure.offers
   return {
     retry: failure.kind !== 'policy' && failure.kind !== 'unconfirmed',
     skip: failure.kind !== 'policy' && failure.kind !== 'quota' && failure.kind !== 'unconfirmed',
+    change: false,
   }
 }
 

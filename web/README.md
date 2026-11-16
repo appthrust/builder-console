@@ -782,14 +782,18 @@ non-engineers, with engineering words only under 「詳しい人向け」
   There is no browser-local task state; conversation/UI session storage remains.
   A failed run's notice follows Platform's `failure {reason, retryable}`
   (APT-1158, `model/build/failure.ts#classifyRunFailure`): `retryable` decides
-  whether 「もう一度試す」 is offered; a reason this console knows only refines
-  the words and may take 「この作業を飛ばす」 away (quota, a pending or closed
-  proposal, access, configuration, policy), and applies only when Platform's
-  `retryable` is the one written for it. An unknown reason gets the generic
-  sentence for its `retryable`; a non-retryable run shows its support reference.
-  Without `failure` (an older Platform, an unreadable one, a cancelled run) the
-  run reads as before, from `failureReason` and the error text. Mock
-  `implementation-run` accepts `{ failure: {reason, retryable} | 'legacy' | null }`.
+  whether 「もう一度試す」 is offered. 「この作業を飛ばす」 and a change typed in
+  the conversation (a run with `change`) stay offered unless Platform admits no
+  new run: a pending or closed proposal (`admitImprovementImplementation`). A
+  non-retryable run names who acts and what changes, shows its support
+  reference and, where a new run is admitted, says to tell what to change or
+  skip. A reason this console knows only refines the words, and only when
+  Platform's `retryable` is the one written for it; an unknown reason gets the
+  generic sentence for its `retryable`. Without `failure` (an older Platform, an
+  unreadable one, a cancelled run) the run reads as before, from `failureReason`
+  and the error text, and a typed reply waits until a run is started from the
+  panel. Mock `implementation-run` accepts
+  `{ failure: {reason, retryable} | 'legacy' | null }`.
   The preview reads `run.devWorkspaceId` through the workspace GET. Workspace
   Ready and the `PreviewReady` condition describe containers, not an HTTP-serving
   app: before mounting the iframe, the console probes the same-origin preview

@@ -1,9 +1,10 @@
 import type { APIRequestContext } from '@playwright/test'
-import { test, expect, seed, type MockControl } from '../support/fixtures'
+import { test, expect, seed, captureWrite, type MockControl } from '../support/fixtures'
 
 // APT-1158: a stopped implementation run is worded and offered from Platform's `failure`. `retryable` decides whether
-// 「もう一度試す」 is offered; a reason this console knows only narrows that; an older Platform sends no `failure` and
-// the run reads as before. Only the Platform mock's `implementation-run` control varies between the cases.
+// 「もう一度試す」 is offered; a run an unchanged retry cannot fix says who acts and what changes, and keeps the skip and
+// a change typed in the conversation (Platform still admits those runs). An older Platform sends no `failure` and the
+// run reads as before (no change starts while its notice is shown). Only the mock's `implementation-run` control varies.
 const root = `/api/v1/projects/${seed.projectId}`
 
 /** A draft whose app is created, so opening its build page starts the implementation run. */
@@ -21,19 +22,21 @@ async function createdDraft(request: APIRequestContext, mock: MockControl): Prom
 
 const cases = [
   {
-    name: 'retryable-unknown', story: 'a reason this console does not know follows retryable: retry and skip, generic words',
+    name: 'retryable-unknown', story: 'a reason this console does not know follows retryable: retry, skip and a change, generic words',
     control: { failure: { reason: 'TaskStalled', retryable: true } },
-    title: 'アプリを作る作業が止まりました', reason: '仕様と計画は残っています。もう一度試してください。', retry: true, skip: true, reference: false,
+    title: 'アプリを作る作業が止まりました', reason: ['仕様と計画は残っています。もう一度試してください。'], retry: true, skip: true, change: true, reference: false,
   },
   {
-    name: 'blocked-known', story: 'a known reason that a new run cannot fix: no retry or skip, who acts, with the reference',
+    name: 'blocked-known', story: 'a known reason a retry cannot fix: no retry; who acts and what changes, then a change or skip, with the reference',
     control: { failure: { reason: 'ConfigurationMissing', retryable: false } },
-    title: '基盤の設定の問題で止まりました', reason: '下の問い合わせ番号を基盤の担当者に伝えて、設定を依頼してください。', retry: false, skip: false, reference: true,
+    title: '基盤の設定の問題で止まりました',
+    reason: ['下の問い合わせ番号を基盤の担当者に伝えて、設定を直してもらってください。', 'そのあと、直してほしいことを会話で伝えるか、この作業を飛ばしてください。'],
+    retry: false, skip: true, change: true, reference: true,
   },
   {
     name: 'legacy', story: 'an older Platform without failure keeps today\'s reading of failureReason',
     control: { failure: 'legacy' },
-    title: 'アプリを作る作業が止まりました', reason: '仕様と計画は残っています。もう一度試してください。', retry: true, skip: true, reference: false,
+    title: 'アプリを作る作業が止まりました', reason: ['仕様と計画は残っています。もう一度試してください。'], retry: true, skip: true, change: false, reference: false,
   },
 ] as const
 
@@ -57,7 +60,7 @@ for (const item of cases) {
     expect(run.status).toBe('failed')
     if (item.control.failure === 'legacy') expect(run).not.toHaveProperty('failure')
     else expect(run.failure).toEqual(item.control.failure)
-    await expect(artifact).toContainText(item.reason)
+    for (const sentence of item.reason) await expect(artifact).toContainText(sentence)
     // The panel owns the run's actions; the conversation offers no retry of its own while the run's notice is shown.
     await expect(page.getByRole('button', { name: 'もう一度試す', exact: true })).toHaveCount(item.retry ? 1 : 0)
     await expect(page.getByRole('button', { name: 'この作業を飛ばす', exact: true })).toHaveCount(item.skip ? 1 : 0)
@@ -74,5 +77,22 @@ for (const item of cases) {
     await expect(notice).toBeInViewport()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
     await page.screenshot({ path: testInfo.outputPath(`${item.name}-mobile.png`) })
+    // What to change, typed in the conversation, starts a run with that instruction for the stopped task, unless
+    // the notice comes without Platform's decision (as before: the reply waits until a run is started from the panel).
+    await page.setViewportSize({ width: 1280, height: 900 })
+    const message = '一覧の列を減らして'
+    if (item.change) {
+      await page.getByLabel('AI に伝えること', { exact: true }).fill(message)
+      const changed = await captureWrite(page, 'POST', `${runs}/implementation-runs`, () => page.getByRole('button', { name: '送信', exact: true }).click())
+      expect(changed.body).toEqual({ change: { taskId: run.currentTaskId, message } })
+      await changed.request.response()
+    } else {
+      const starts: string[] = []
+      page.on('request', (sent) => { if (sent.method() === 'POST' && new URL(sent.url()).pathname === `${runs}/implementation-runs`) starts.push(sent.url()) })
+      await page.getByLabel('AI に伝えること', { exact: true }).fill(message)
+      await page.getByRole('button', { name: '送信', exact: true }).click()
+      await page.waitForTimeout(3_000)
+      expect(starts).toEqual([])
+    }
   })
 }

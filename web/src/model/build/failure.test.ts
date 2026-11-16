@@ -94,11 +94,13 @@ const failedRun = (failure?: { reason: RunFailureReason | 'TaskStalled'; retryab
 })
 const decide = (failure?: Parameters<typeof failedRun>[0], failureReason?: Parameters<typeof failedRun>[1]) => classifyRunFailure(failedRun(failure, failureReason), undefined, 'stopped', reference)
 
+const then = () => buildCopy.failure.run.then
+
 test('an unknown reason follows retryable with the generic wording, never the text classifiers', () => {
   const retryable = decide({ reason: 'TaskStalled', retryable: true })
-  expect(retryable).toMatchObject({ kind: 'failed', title: buildCopy.failure.failed.implement, reason: buildCopy.failure.retry, offers: { retry: true, skip: true } })
+  expect(retryable).toMatchObject({ kind: 'failed', title: buildCopy.failure.failed.implement, reason: buildCopy.failure.retry, offers: { retry: true, skip: true, change: true } })
   expect(retryable.reference).toBeUndefined()
-  expect(decide({ reason: 'TaskStalled', retryable: false })).toMatchObject({ kind: 'blocked', title: buildCopy.failure.failed.implement, reason: buildCopy.failure.run.blocked, offers: { retry: false, skip: true }, reference })
+  expect(decide({ reason: 'TaskStalled', retryable: false })).toMatchObject({ kind: 'blocked', title: buildCopy.failure.failed.implement, reason: buildCopy.failure.run.blocked + then(), offers: { retry: false, skip: true, change: true }, reference })
 })
 
 test.each([
@@ -106,27 +108,32 @@ test.each([
   ['RuntimeRestarted', { kind: 'interrupted', ...buildCopy.failure.resumable }, true],
   ['RuntimeUnavailable', { kind: 'unavailable', ...buildCopy.failure.unavailable }, true],
   ['TaskTimedOut', { kind: 'failed', ...buildCopy.failure.run.timedOut }, true],
-  ['ProviderQuotaExhausted', { kind: 'quota', ...buildCopy.failure.quota }, false],
+  // Platform admits no new run while the proposal awaits review (admitImprovementImplementation).
   ['ProposalPending', { kind: 'failed', ...buildCopy.failure.run.proposalPending }, false],
   ['TaskFailed', { kind: 'failed', title: buildCopy.failure.failed.implement, reason: buildCopy.failure.retry }, true],
-] as const)('retryable known reason %s keeps the retry and may only narrow the skip', (reason, shown, skip) => {
-  expect(decide({ reason, retryable: true })).toMatchObject({ ...shown, offers: { retry: true, skip } })
+] as const)('retryable known reason %s keeps the retry; skip and change follow run admission', (reason, shown, newRun) => {
+  expect(decide({ reason, retryable: true })).toMatchObject({ ...shown, offers: { retry: true, skip: newRun, change: newRun } })
+})
+
+test('an exhausted quota keeps the retry and a change, but not skip: the next task meets the same quota', () => {
+  expect(decide({ reason: 'ProviderQuotaExhausted', retryable: true })).toMatchObject({ kind: 'quota', ...buildCopy.failure.quota, offers: { retry: true, skip: false, change: true } })
 })
 
 test.each([
-  ['InputRequired', { kind: 'blocked', ...buildCopy.failure.run.inputRequired }, true],
-  ['AccessDenied', { kind: 'blocked', ...buildCopy.failure.run.accessDenied }, false],
-  ['ConfigurationMissing', { kind: 'blocked', ...buildCopy.failure.run.configuration }, false],
-  ['ConfigurationInvalid', { kind: 'blocked', ...buildCopy.failure.run.configuration }, false],
+  ['InputRequired', { kind: 'blocked', title: buildCopy.failure.run.inputRequired.title, reason: buildCopy.failure.run.inputRequired.reason + then() }, true],
+  ['AccessDenied', { kind: 'blocked', title: buildCopy.failure.run.accessDenied.title, reason: buildCopy.failure.run.accessDenied.reason + then() }, true],
+  ['ConfigurationMissing', { kind: 'blocked', title: buildCopy.failure.run.configuration.title, reason: buildCopy.failure.run.configuration.reason + then() }, true],
+  ['ConfigurationInvalid', { kind: 'blocked', title: buildCopy.failure.run.configuration.title, reason: buildCopy.failure.run.configuration.reason + then() }, true],
+  ['PolicyDenied', { kind: 'policy', title: aiPolicyCopy.title, reason: aiPolicyExplanation('ai_policy_denied') + then() }, true],
+  ['ProposalInvalid', { kind: 'blocked', title: buildCopy.failure.failed.implement, reason: buildCopy.failure.run.blocked + then() }, true],
+  ['WorkspaceBranchDiverged', { kind: 'blocked', title: buildCopy.failure.failed.implement, reason: buildCopy.failure.run.blocked + then() }, true],
+  // A closed proposal admits no new run: no skip, no change, and no sentence offering them.
   ['ProposalClosed', { kind: 'blocked', ...buildCopy.failure.run.proposalClosed }, false],
-  ['ProposalInvalid', { kind: 'blocked', title: buildCopy.failure.failed.implement, reason: buildCopy.failure.run.blocked }, false],
-  ['PolicyDenied', { kind: 'policy', title: aiPolicyCopy.title, reason: aiPolicyExplanation('ai_policy_denied') }, false],
-  ['WorkspaceBranchDiverged', { kind: 'blocked', title: buildCopy.failure.failed.implement, reason: buildCopy.failure.run.blocked }, true],
-] as const)('non-retryable known reason %s offers no retry and names who acts, with its reference', (reason, shown, skip) => {
-  expect(decide({ reason, retryable: false })).toMatchObject({ ...shown, offers: { retry: false, skip }, reference })
+] as const)('non-retryable known reason %s offers no retry, names who acts and what changes, with its reference', (reason, shown, newRun) => {
+  expect(decide({ reason, retryable: false })).toMatchObject({ ...shown, offers: { retry: false, skip: newRun, change: newRun }, reference })
 })
 
-test('a known reason never widens: against its usual retryable it gets only the generic wording for retryable', () => {
+test('a known reason never widens: retry always equals retryable; against its usual retryable only the generic wording stands', () => {
   for (const reason of RUN_FAILURE_REASONS) {
     for (const retryable of [true, false]) {
       const failure = decide({ reason, retryable })
@@ -135,10 +142,10 @@ test('a known reason never widens: against its usual retryable it gets only the 
     }
   }
   // Quota and interruptions are written for a retry: without one, the generic blocked sentence stands.
-  expect(decide({ reason: 'ProviderQuotaExhausted', retryable: false })).toMatchObject({ kind: 'blocked', reason: buildCopy.failure.run.blocked, offers: { retry: false, skip: true } })
+  expect(decide({ reason: 'ProviderQuotaExhausted', retryable: false })).toMatchObject({ kind: 'blocked', reason: buildCopy.failure.run.blocked + then(), offers: { retry: false, skip: true, change: true } })
   expect(decide({ reason: 'StreamInterrupted', retryable: false })).toMatchObject({ kind: 'blocked', offers: { retry: false } })
-  // A reason written for a blocked run never brings back a skip or its wording when Platform says retryable.
-  expect(decide({ reason: 'AccessDenied', retryable: true })).toMatchObject({ kind: 'failed', reason: buildCopy.failure.retry, offers: { retry: true, skip: true } })
+  // A reason written for a blocked run never brings its wording when Platform says retryable.
+  expect(decide({ reason: 'AccessDenied', retryable: true })).toMatchObject({ kind: 'failed', reason: buildCopy.failure.retry, offers: { retry: true, skip: true, change: true } })
 })
 
 test('copy names no reason and no internal term in either language', () => {
@@ -148,6 +155,7 @@ test('copy names no reason and no internal term in either language', () => {
       for (const retryable of [true, false]) {
         const { title, reason: sentence } = decide({ reason, retryable })
         expect(`${title} ${sentence}`).not.toMatch(/retryable|failure|Reason|Proposal(?:Closed|Pending|Invalid)|Configuration|AccessDenied|InputRequired|Platform API/)
+        if (language === 'en') expect(sentence).not.toMatch(/\.\S|\s{2}/)
       }
     }
   }
@@ -161,12 +169,13 @@ test('without failure (older Platform, unreadable failure, cancelled run) the ru
     expect(failure.offers).toBeUndefined()
   }
   // Today the text rules still decide: the policy code wins and takes both actions away.
-  expect(failureOffers(decide(undefined, 'TaskFailed'))).toEqual({ retry: false, skip: false })
+  expect(failureOffers(decide(undefined, 'TaskFailed'))).toEqual({ retry: false, skip: false, change: false })
   const cancelled = classifyRunFailure({ ...failedRun({ reason: 'TaskFailed', retryable: true }), status: { kind: 'known', value: 'cancelled' }, error: undefined }, undefined, 'stopped', reference)
   expect(cancelled.offers).toBeUndefined()
-  expect(failureOffers({ kind: 'quota', title: '', reason: '' })).toEqual({ retry: true, skip: false })
-  expect(failureOffers({ kind: 'failed', title: '', reason: '' })).toEqual({ retry: true, skip: true })
-  expect(failureOffers({ kind: 'unconfirmed', title: '', reason: '' })).toEqual({ retry: false, skip: false })
+  // As today, no change instruction starts a run while a failure without Platform's decision is shown.
+  expect(failureOffers({ kind: 'quota', title: '', reason: '' })).toEqual({ retry: true, skip: false, change: false })
+  expect(failureOffers({ kind: 'failed', title: '', reason: '' })).toEqual({ retry: true, skip: true, change: false })
+  expect(failureOffers({ kind: 'unconfirmed', title: '', reason: '' })).toEqual({ retry: false, skip: false, change: false })
 })
 
 test.each([
@@ -200,6 +209,12 @@ test.each([
   for (const context of ['turn', 'plan', 'implement'] as const) {
     expect(classifyBuildFailure(message, 429, context).kind).not.toBe('quota')
   }
+})
+
+test('a policy code named only in the error text keeps the structured policy name', () => {
+  const failure = classifyBuildFailure('workspace: ai_policy_denied', 412, 'implement', undefined, undefined, undefined, undefined, { policy: 'named-policy' })
+  expect(failure).toMatchObject({ kind: 'policy', reason: aiPolicyExplanation('ai_policy_denied', 'named-policy') })
+  expect(failure.reason).toContain('「named-policy」')
 })
 
 test.each([

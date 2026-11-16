@@ -84,8 +84,9 @@ test('structured run reasons win and task-only reasons survive projection', () =
 
 test('Platform\'s failure decision wins over failureReason and the text; an unreadable one reads as an older Platform', () => {
   const failed = { ...run, status: 'failed' as const, error: 'network failed', failureReason: 'RuntimeRestarted' as const }
-  expect(projectImplementation(draft, { ...failed, failure: { reason: 'ConfigurationMissing', retryable: false } }).failure).toMatchObject({ kind: 'blocked', offers: { retry: false, skip: false }, reference: { draftId: draft.id, executionId: run.id } })
-  expect(projectImplementation(draft, { ...failed, failure: { reason: 'TaskStalled', retryable: true } }).failure).toMatchObject({ kind: 'failed', offers: { retry: true, skip: true } })
+  expect(projectImplementation(draft, { ...failed, failure: { reason: 'ConfigurationMissing', retryable: false } }).failure).toMatchObject({ kind: 'blocked', offers: { retry: false, skip: true, change: true }, reference: { draftId: draft.id, executionId: run.id } })
+  expect(projectImplementation(draft, { ...failed, failure: { reason: 'ProposalClosed', retryable: false } }).failure).toMatchObject({ kind: 'blocked', offers: { retry: false, skip: false, change: false } })
+  expect(projectImplementation(draft, { ...failed, failure: { reason: 'TaskStalled', retryable: true } }).failure).toMatchObject({ kind: 'failed', offers: { retry: true, skip: true, change: true } })
   expect(projectImplementation(draft, { ...failed, failure: { reason: 42 } }).failure).toEqual(projectImplementation(draft, failed).failure)
   expect(projectImplementation(draft, failed).failure?.kind).toBe('interrupted')
 })
