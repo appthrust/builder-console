@@ -47,7 +47,9 @@ export function OverviewTab({
   // The creation marker outlives the URL step until the requested audience is
   // observed on the publish; once applied, the plain overview takes over.
   const finishingCreation = hasCreatedAppAccess(app.id) && !access.applied
-  const creating = !(sourceRepository && isSourceBuildFailed(sourceRepository)) && (view.draft || showsCreateProgress(view) || finishingCreation)
+  // A failed build stops the creation ladder only while no release runs (`AppView.latestBuildFailed` marks one that runs).
+  const stoppedByBuild = Boolean(sourceRepository && isSourceBuildFailed(sourceRepository)) && !view.latestBuildFailed
+  const creating = !stoppedByBuild && (view.draft || showsCreateProgress(view) || finishingCreation)
   const session = view.draft ? readCreateSession(app.id) : undefined
   const steps = creating ? deriveCreateProgress({ view, sourceRepository, shareSentence: sharing, access }) : []
   if (view.status === 'unfinished') {

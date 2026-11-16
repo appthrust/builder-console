@@ -499,7 +499,7 @@ describe('APT-1109: isolated rows keep the rest of the project readable', () => 
   })
 })
 
-describe('APT-1136: a failed latest build of an app that still runs its previous version', () => {
+describe('APT-1136: a reported failure of the latest build of an app that runs a release', () => {
   const repositories = new RegExp(`^${PROJECT}/application-source-repositories$`)
   const summaries = new RegExp(`^${PROJECT}/component-summaries$`)
   const runUrl = 'https://github.com/acme/mitsumori/actions/runs/42'
@@ -523,6 +523,10 @@ describe('APT-1136: a failed latest build of an app that still runs its previous
     expect(notice.querySelector('[role="alert"]')).toBeNull()
     const link = [...notice.querySelectorAll('a')].find((item) => item.textContent === buildCopy.sourceBuild.run)
     expect(link?.getAttribute('href')).toBe(runUrl)
+    // Only what is known: the reported failure can be false, so nothing says the app lacks the new changes.
+    expect(notice.textContent).not.toContain('まだアプリに入っていません')
+    // Without an extracted cause there is no AI repair entry (as in 0.5.9, which had no notice at all for this data).
+    expect(notice.textContent).not.toContain('AI に直させる')
     // 「詳しい人向け」 carries the same fact as its one place outside the notice.
     await click(button(copy.app.overview.advanced.toggle))
     expect(container.querySelector('[data-testid="advanced-latest-build"]')?.textContent).toContain(behind.latestFailed)
@@ -535,6 +539,20 @@ describe('APT-1136: a failed latest build of an app that still runs its previous
     await act(async () => { root?.unmount() })
     await renderApp('overview', 'mine-problems')
     expect(row()).toBeUndefined()
+  })
+
+  test('an extracted cause is shown with 「AI に直させる」 exactly as 0.5.9 offered it for the same stack data', async () => {
+    failBuild()
+    rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/application-stacks$`), once: false, body: (wire) => ({
+      ...wire, data: (wire.data as Json[]).map((stack) => stack.id === 'mitsumori' ? { ...stack, buildFailure: { lines: ["Module not found: './missing'"] } } : stack),
+    }) })
+    await renderApp('overview')
+    const notice = container.querySelector<HTMLElement>('[data-testid="latest-build-failed"]')!
+    expect(notice.querySelector('[data-testid="build-failure-cause"]')?.textContent).toBe(behind.cause("Module not found: './missing'"))
+    expect(buttons(notice).some((item) => item.textContent?.includes('AI に直させる'))).toBe(true)
+    // One notice: the 0.5.9 error notice for the same cause is replaced, not repeated.
+    expect(container.querySelectorAll('[data-testid="build-failure-cause"]')).toHaveLength(1)
+    expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
   })
 
   test('an app with no running release keeps the build failure as its status, without the secondary notice', async () => {

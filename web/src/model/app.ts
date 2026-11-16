@@ -362,12 +362,13 @@ export function deriveConsoleApps(input: ConsoleAppsInput): ConsoleApp[] {
 }
 
 /**
- * The web component serves a release that succeeded: Ready now, and its latest release (a Pending re-application of
- * the running version counts as that version) Succeeded. The app runs a version, whatever its source's latest build
- * did. The facts are the ones the creating view reads for 最初の版 (`model/progress.ts`), both required here.
+ * The web component serves a release: it reports Ready, and its latest release is not known to have Failed. An
+ * unloaded or errored release overview and an in-flight latest release (another version Pending, InProgress,
+ * WaitingPromotion, while the previous one serves) count as running; a Failed latest release does not. `webReady` is
+ * the web component summary's own `Ready` status (`deriveConsoleApp`), never true for a stopped or unstarted one.
  */
 export function hasRunningRelease(platform: Pick<ConsoleApp, 'facts'>): boolean {
-  return platform.facts.webReady && platform.facts.webReleasePhase === 'Succeeded'
+  return platform.facts.webReady && platform.facts.webReleasePhase !== 'Failed'
 }
 
 /** What every screen shows for a BusinessApp: one of the four status words plus a second line. */
@@ -392,8 +393,8 @@ export interface AppView {
   /** A saved creating-draft link points at an unreadable row; completion is unknown. */
   unreadableBuild?: true
   /**
-   * The source's latest build failed while a release still runs (`hasRunningRelease`) and no AI build is still
-   * making the app: the app keeps its own status, and the app page says it in a notice (APT-1136).
+   * The source's latest build failed while a release still runs (`hasRunningRelease`) and the status is known: the
+   * app keeps its own status (also 作っています during an AI build), and the app page says it in a notice (APT-1136).
    */
   latestBuildFailed?: true
   stack?: AppStack
@@ -431,8 +432,8 @@ export function draftState(
  * - bound stack missing from the stack list: 停止中 (deleted or not visible);
  * - stack without an observed Application yet: 準備中;
  * - otherwise the PoC rules of `deriveConsoleApp` on the stack's Application.
- * A failed latest source build is the app's status (ビルドに失敗しています), except for an app that still runs a
- * release (`hasRunningRelease`) and is not being made by an AI build: that one keeps its own status and only
+ * A failed latest source build is the app's status (ビルドに失敗しています), except that an unknown status stays
+ * unknown, and an app that still runs a release (`hasRunningRelease`, AI build or not) keeps its own status and only
  * carries `latestBuildFailed`, so it is neither shown nor counted as 問題あり.
  */
 export function deriveAppView(
@@ -454,7 +455,7 @@ export function deriveAppView(
     second: text,
     draft: false,
     ...extra,
-    ...(buildFailed ? running ? { latestBuildFailed: true as const } : {
+    ...(buildFailed && status !== 'unknown' ? running ? { latestBuildFailed: true as const } : {
       status: 'failed', label: buildCopy.sourceBuild.status, text: buildCopy.sourceBuild.status, second: buildCopy.sourceBuild.status,
       ...(extra.platform ? { platform: { ...extra.platform, status: 'failed', statusText: buildCopy.sourceBuild.status } } : {}),
     } : {}),
@@ -490,7 +491,7 @@ export function deriveAppView(
         build: { draftId: build.draftId, phase: 'implementing' }, stack,
         platform: released ? platform : { ...platform, status: 'deploying', statusText: text, url: undefined },
         ...(released && platform.url ? { url: platform.url } : {}),
-      })
+      }, hasRunningRelease(platform))
     }
   }
   return view(platform.status, appSecondLine(platform, releases, now), {

@@ -88,6 +88,7 @@ export const textEn: typeof textJa = {
     built: 'The app is ready.',
     publishTo: (audience: string) => `Press “Publish” to make it available (${audience}).`,
     publish: 'Press “Publish” and choose who can see it to make it available.',
+    publishAfterSettings: 'Save the name and who can see it in the card above, then “Publish” becomes available.',
     unchanged: 'The AI finished, but every task was skipped, so the app has not changed.',
     unchangedRetry: 'Trying again redoes the skipped tasks.',
   },

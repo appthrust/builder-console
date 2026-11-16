@@ -39,6 +39,7 @@ import { AiTurn, FailureReference, PlanRejectionActions } from './conversation-p
 import { text } from './copy'
 import { stageImplementation } from './implement'
 import { BuildOutcomeTurn } from './build-outcome'
+import { BuildFailureNotice } from './build-failure-notice'
 import { shareScopeLabel } from '../../model/access'
 import { NameChoice } from './name-choice'
 import { ProposalBody } from './proposal'
@@ -213,10 +214,16 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
 
   // What the run means, under the conversation: 公開する is offered there too once the app is built (APT-1124).
   const publishScope = publishSaved ? view.publish?.desired.shareScope : undefined
-  const outcomeTurn = started && result.outcome ? <BuildOutcomeTurn outcome={result.outcome}
+  // A running app's recorded build failure is read where 公開する is pressed and in the publish step (APT-1136).
+  const behind = appView?.latestBuildFailed ? <BuildFailureNotice failure={undefined} projectId={projectId} stackId={draft.createdApplicationStackId} title={improveName} canEdit={false} behind={{ runUrl: creation.sourceRepository?.build?.runUrl }} /> : null
+  // After an unreadable answer only the panel's re-read is offered (ImplementPanel), never another retry.
+  const retryable = !appReadOnly && !implementation.state.failure
+  const outcomeTurn = started && result.outcome ? <BuildOutcomeTurn outcome={result.outcome} notice={behind}
     audience={publishScope ? shareScopeLabel(publishScope, groups.find((group) => group.id === session.groupId)?.name) : undefined}
+    // 公開する waits for the saved audience here: the line points at the settings card first.
+    hint={publishSaved ? undefined : text.outcome.publishAfterSettings}
     publish={{ label: buildCopy.primary.publish, enabled: primary.enabled, onClick: () => { setSharing(true); onOpenArtifact() } }}
-    retry={appReadOnly ? undefined : { pending: Boolean(implementation.state.retryPending), onClick: implementation.retry }} /> : null
+    retry={retryable ? { pending: Boolean(implementation.state.retryPending), onClick: implementation.retry } : undefined} /> : null
   const planEnd = draft.creationPlanUnreadable
     ? <><AiTurn><Notice tone="warning" title={buildCopy.unreadablePlan.title} actions={!started ? <PlanRejectionActions replan={{ disabled: !view.canRequestPlan || running, onClick: () => actions.requestPlan() }} /> : undefined}>{buildCopy.unreadablePlan.detail}</Notice></AiTurn>{askPublish ? <AiTurn><ConsolePublishSettings view={view} actions={actions} disabled={view.unsupported} /></AiTurn> : null}</>
     : (readiness.kind !== 'none' && proposal) || askPublish ? <>
@@ -236,7 +243,7 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
         url={url} shareText={shareText} previewDatabaseReset={implementation.previewDatabaseReset} onOpenPreview={onOpenArtifact} onRetry={implementation.retry} onSkipTask={implementation.skipTask} onConfirm={implementation.confirm}
         onCollapse={() => setArtifactCollapsed(true)}
         databaseChanges={<DatabaseChanges projectId={projectId} databaseId={!appReadOnly && app && canEditApp(app, me) ? appView?.stack?.databaseComponentId : undefined} />}
-        shareStep={sharing && app && !appReadOnly ? <PublishStep app={app} publishId={appView?.platform?.publish?.id} publishPreferences={draft.publishPreferences} onPublished={() => { void effects.markPublished(); setSharing(false) }} onCancel={() => setSharing(false)} /> : undefined} />,
+        shareStep={sharing && app && !appReadOnly ? <>{behind}<PublishStep app={app} publishId={appView?.platform?.publish?.id} publishPreferences={draft.publishPreferences} onPublished={() => { void effects.markPublished(); setSharing(false) }} onCancel={() => setSharing(false)} /></> : undefined} />,
     } : {}),
     notices: [
       earlierSpec ? <Notice key="earlier-spec" tone="warning" title={text.console.createdFromEarlier.title} actions={continuing ? undefined : improve}>

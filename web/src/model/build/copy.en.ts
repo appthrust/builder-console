@@ -71,11 +71,11 @@ export const textEn: typeof textJa = {
     status: 'Build failed',
     run: 'View build run',
     behind: {
-      title: 'The latest build failed',
-      detail: 'The version running now is the previous one that built successfully. The new changes are not in the app yet.',
+      title: 'The latest build is recorded as failed',
+      detail: 'The app keeps running as before. If you made recent changes, they may not be in the app yet.',
       cause: (lines: string) => `Cause: ${lines}`,
       latest: 'Latest build',
-      latestFailed: 'Failed (the previous version is running)',
+      latestFailed: 'Failed (the app is running)',
     },
   },
   failure: {

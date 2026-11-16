@@ -97,6 +97,8 @@ export const textJa = {
     built: 'アプリができました。',
     publishTo: (audience: string) => `「公開する」を押すと、${audience}に公開されて使えるようになります。`,
     publish: '「公開する」を押して見せる相手を選ぶと、使えるようになります。',
+    /** console-v1 before the audience is saved: 公開する stays disabled until the settings card above is saved. */
+    publishAfterSettings: '上のカードで公開する名前と誰に見せるかを保存すると、「公開する」を押せるようになります。',
     unchanged: 'AI の作業は終わりましたが、作業がすべて飛ばされたため、アプリは変わっていません。',
     unchangedRetry: 'もう一度試すと、飛ばした作業をやり直します。',
   },

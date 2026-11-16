@@ -343,6 +343,8 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
   }
   return {
     session, spec, app, implementation, failure, busy, result, proposal, domain, planBlocksStart,
+    /** The created app's source repository (its build run link for the running-app build notice). */
+    sourceRepository: creation.sourceRepository,
     messages: [initialMessage, ...messages],
     queued: session.pending.length > 0 && conversing,
     /** The AI is still asking its 用意する questions; its options stay answerable after the app is made. */

@@ -1,4 +1,5 @@
 import { CheckCircle2, Loader2 } from 'lucide-react'
+import type { ReactNode } from 'react'
 import { buildCopy } from '../../model/build/copy'
 import type { BuildOutcome } from '../../model/build/types'
 import { Button } from '../../ui'
@@ -11,10 +12,14 @@ import { implementationCopy } from './implement/copy'
  * task and the 経過 with what to expect; once built, that the app is made and 「公開する」 as the primary action; a run
  * that skipped everything says the app did not change and offers the run's retry. A stopped run has its own failure UI.
  */
-export function BuildOutcomeTurn({ outcome, audience, publish, retry }: {
+export function BuildOutcomeTurn({ outcome, audience, hint, notice, publish, retry }: {
   outcome?: BuildOutcome
   /** Who the app is published to, in words (`shareScopeLabel`), once chosen. */
   audience?: string
+  /** What to do first when 公開する cannot be pressed yet (engine-specific); replaces the audience sentence. */
+  hint?: string
+  /** Read before publishing, right above 公開する (the running app's recorded build failure, APT-1136). */
+  notice?: ReactNode
   /** The page's own 公開する: the same action, label and enabled state as the header's. */
   publish: { label: string; enabled: boolean; onClick(): void }
   /** The run's retry (an all-skipped retry reopens every task); absent where the page offers none. */
@@ -39,7 +44,8 @@ export function BuildOutcomeTurn({ outcome, audience, publish, retry }: {
   }
   if (outcome.kind === 'built') return <AiTurn><div data-testid="build-outcome" data-outcome="built">
     <p className="flex items-center gap-1.5 font-medium text-stone-900"><CheckCircle2 aria-hidden className="size-4 text-accent" />{copy.built}</p>
-    <p className="mt-1">{audience ? copy.publishTo(audience) : copy.publish}</p>
+    <p className="mt-1">{hint ?? (audience ? copy.publishTo(audience) : copy.publish)}</p>
+    {notice}
     <div className="mt-3"><Button tone="primary" disabled={!publish.enabled} onClick={publish.onClick}>{publish.label}</Button></div>
   </div></AiTurn>
   return <AiTurn><div data-testid="build-outcome" data-outcome="unchanged">

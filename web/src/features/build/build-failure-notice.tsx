@@ -4,9 +4,10 @@ import { Notice } from '../../ui'
 import { ImproveButton } from '../improve/entry'
 
 /**
- * The same current-build cause and one-click repair entry on app and build pages. `behind`: the app still runs its
- * previous version (`AppView.latestBuildFailed`), so the failure is secondary: a warning that says what runs, with the
- * build run when its link is an http(s) URL, instead of the error that stops the app.
+ * The same current-build cause and one-click repair entry on app and build pages. `behind`: the app runs a release
+ * (`AppView.latestBuildFailed`), so the reported failure is secondary and possibly false: a warning that says only what
+ * is known, with the build run when its link is an http(s) URL. 「AI に直させる」 appears in both forms under the 0.5.9
+ * condition only: the server extracted a cause (`failure`), the caller may edit, and the app has a stack.
  */
 export function BuildFailureNotice({ failure, projectId, stackId, title, canEdit, behind }: {
   failure: Pick<DraftBuildFailure, 'lines'> | undefined

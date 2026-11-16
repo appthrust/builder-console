@@ -879,22 +879,34 @@ non-engineers, with engineering words only under 「詳しい人向け」
   `state: healthy|failed|running|unknown` and optional runUrl/headSha/observedAt.
   These observation fields are not part of create requests. Response fixtures
   copied from a create request must add `state: 'unknown'` when `build` is
-  present; an omitted `build` remains omitted. The ladder shows
-  「アプリのビルドに失敗しています」 on the failed startup rung, while app details
-  and `/mine` prioritize 「ビルドに失敗しています」 over 「作っています」.
-  The exact run link is under 「詳しい人向け」. An older Ready image does not
-  hide a new build failure while the app is still being made (no running
-  release, or an AI build that has not finished).
-  An app that runs a release (`model/app.ts#hasRunningRelease`: the web
-  component is Ready and its latest release Succeeded) and is not being made by
-  an unfinished AI build keeps its own status (公開中 …) in the app header,
-  every list and the 問題あり count: a failed latest build is secondary there
-  (`AppView.latestBuildFailed`, APT-1136). The app page shows it as a warning
-  notice above the tabs (「最新のビルドに失敗しました」: the version running is
-  the previous one that built; the run link when it is http(s); the cause and
-  「AI に直させる」 when `buildFailure` is present, in place of the error notice)
-  and as one 「最新のビルド」 row in the overview's 「詳しい人向け」. An unreadable
-  creating-draft link stays unknown and carries no such notice.
+  present; an omitted `build` remains omitted. The build page's ladder shows
+  「アプリのビルドに失敗しています」 on the failed startup rung (and keeps 公開する
+  closed) only while no release runs. App details and `/mine` show
+  「ビルドに失敗しています」 as the status (over 「作っています」 too) under the
+  same condition; an unknown status stays unknown. The exact run link is under
+  「詳しい人向け」. An app that runs a release (`model/app.ts#hasRunningRelease`:
+  the web component reports Ready and its latest release is not known to have
+  Failed; an unloaded or errored release overview and an in-flight release with
+  the old version serving count as running), an AI build's serving template
+  included, keeps its own status (公開中, 作っています …) in the app header, every
+  list and the 問題あり count; its overview keeps the creation ladder it would
+  otherwise show; its build page keeps its stage (a published draft stays on
+  公開), its implementation outcome and 公開する (`sourceBuildFailureProgress`
+  takes the platform; before the console app is bound, the created stack's own
+  projection). Nothing automatic is keyed on `build.state`. A reported failure
+  is secondary there and may be false (another workflow's run recorded as the
+  build), so the wording claims nothing the Console cannot know
+  (`AppView.latestBuildFailed`, APT-1136): a warning notice
+  「最新のビルドが失敗と記録されています」 /
+  「アプリはこれまでどおり動いています。最近の変更がある場合、まだ反映されていない可能性があります。」
+  with the run link when it is http(s). It is shown above the app page's tabs
+  and, on the build page (both engines), right above the conversation's
+  公開する and in the publish step, so it is read before publishing. Only when
+  the stack carries an extracted `buildFailure` (the 0.5.9 condition for the
+  same data) does the app-page notice add the cause and 「AI に直させる」, in
+  place of the error notice. The overview's 「詳しい人向け」 has one 「最新のビルド」
+  row: 「失敗（アプリは動いています）」. An unreadable creating-draft link stays
+  unknown and carries no such notice.
   Stack and draft read responses also expose optional `buildFailure`
   (`lines`, `kind`, `observedAt`, `buildRef`). The API reads at most 512 KiB
   of diagnostic text from the existing bounded Actions log reader, only for a

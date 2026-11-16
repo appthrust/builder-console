@@ -1193,12 +1193,12 @@ describe('APT-1124: what the implementation run means on the build page', () => 
     restore.push(() => form ? Object.defineProperty(globalThis, 'HTMLFormElement', form) : Reflect.deleteProperty(globalThis, 'HTMLFormElement'))
   })
   /** A created draft whose latest run reads as `run` (its tasks take `statuses`), with the audience chosen for publishing. */
-  async function withRun(statuses: string[], run: Json) {
+  async function withRun(statuses: string[], run: Json, draftExtra: Json = {}) {
     const id = await createdDraft()
     const tasks = statuses.map((status, index) => ({ id: `t${index + 1}`, title: titles[index], status, ...(status === 'running' ? { startedAt: ago(30_000) } : {}) }))
     // The page writes its own answers (the publish name it saves) into the draft cache too: those carry the run as well.
     const answer = (wire: Json) => rewriteDraftWire(wire, id, (draft) => ({
-      ...draft, publishPreferences: { name: '見積を管理', shareScope: 'company' },
+      ...draft, publishPreferences: { name: '見積を管理', shareScope: 'company' }, ...draftExtra,
       implementationRuns: [{ id: 'impl-apt1124', devWorkspaceId: '', startedAt: ago(125_000), taskIds: tasks.map((task) => task.id), tasks, ...run }],
     }))
     for (const method of ['GET', 'PATCH']) rewrites.push({ method, path: new RegExp(`^${PROJECT}/application-drafts(?:$|/${id}$)`), once: false, body: answer })
@@ -1206,6 +1206,51 @@ describe('APT-1124: what the implementation run means on the build page', () => 
     await renderBuild(id)
     return id
   }
+
+  // Until the Platform fix ships, healthy apps can carry a false `build.state: failed` (a failed Dependabot run
+  // recorded as the build). With the template serving, the build page must neither stop nor close 公開する.
+  test.each(['implementing', 'done', 'published'] as const)('a reported build failure while the app runs a release: %s keeps its stage, no failure card, no request of its own (APT-1136)', async (state) => {
+    rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/application-source-repositories$`), once: false, body: (wire) => ({
+      ...wire, data: (wire.data as Json[]).map((repository) => ({ ...repository, build: { ...(repository.build as Json), state: 'failed', runUrl: 'https://github.com/acme/app/actions/runs/42' } })),
+    }) })
+    const id = state === 'implementing'
+      ? await withRun(['done', 'running', 'pending'], { status: 'running', step: 'working', currentTaskId: 't2' })
+      : await withRun(['done', 'done', 'done'], { status: 'succeeded', finishedAt: ago(60_000) }, state === 'published' ? { publishedAt: ago(1_000) } : {})
+    await tick(buildKeys.draft('commerce', id))
+    expect(container.textContent).not.toContain(buildCopy.sourceBuild.failed)
+    expect(stage()).toBe(state === 'published' ? 'publish' : 'build')
+    if (state === 'implementing') expect(outcome()?.getAttribute('data-outcome')).toBe('implementing')
+    if (state === 'done') {
+      expect(outcome()?.getAttribute('data-outcome')).toBe('built')
+      expect(publishButtons().length).toBeGreaterThan(0)
+      expect(publishButtons().every((item) => !item.disabled)).toBe(true)
+      // Read before publishing: next to the conversation's 公開する, and again in the publish step it opens.
+      expect(outcome()?.querySelector('[data-testid="latest-build-failed"]')?.textContent).toContain(buildCopy.sourceBuild.behind.detail)
+      await click([...outcome()!.querySelectorAll('button')].find((item) => item.textContent?.trim() === buildCopy.primary.publish)!)
+      const artifact = container.querySelector('#build-artifact')!
+      expect(artifact.textContent).toContain(uiText.publish.title)
+      expect(artifact.querySelector('[data-testid="latest-build-failed"]')).not.toBeNull()
+    }
+    if (state === 'published') expect(button(buildCopy.primary.continue).disabled).toBe(false)
+    // No build, run or creation write follows from the reported failure.
+    expect(requests.filter((item) => item.method !== 'GET' && /\/(implementation-runs|creation-executions|creation-plan-generations|cleanup|application-source-repositories)/.test(item.path))).toEqual([])
+  })
+
+  test('an app with no running release at all (its first build failed) is blocked exactly as before', async () => {
+    rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/application-source-repositories$`), once: false, body: (wire) => ({
+      ...wire, data: (wire.data as Json[]).map((repository) => ({ ...repository, build: { ...(repository.build as Json), state: 'failed' } })),
+    }) })
+    rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/component-summaries$`), once: false, body: (wire) => ({
+      ...wire, items: (wire.items as Json[]).map((item) => String(item.id).startsWith('ai-app-') && String(item.id).endsWith('-web') ? { ...item, statusKey: 'Provisioning', reasonKey: 'DeliveryProgressing' } : item),
+    }) })
+    const id = await withRun(['done', 'done', 'done'], { status: 'succeeded', finishedAt: ago(60_000) })
+    await tick(buildKeys.draft('commerce', id))
+    expect(container.querySelector('#build-artifact')?.textContent).toContain(buildCopy.sourceBuild.failed)
+    expect(stage()).toBe('build')
+    expect(outcome()).toBeNull()
+    expect(container.querySelector('[data-testid="latest-build-failed"]')).toBeNull()
+    expect(publishButtons().every((item) => item.disabled)).toBe(true)
+  })
 
   test('while it runs: tasks done of all and the run time by the header; the current task and what to expect in the conversation', async () => {
     await withRun(['done', 'running', 'pending'], { status: 'running', step: 'working', currentTaskId: 't2' })
