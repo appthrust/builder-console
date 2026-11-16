@@ -184,7 +184,7 @@ test.each(['ja', 'en'] as const)('platform failure has a copyable support refere
   const at = new Date(2026, 9, 17, 9, 9).toISOString()
   const draft: ApplicationDraft = {
     id: 'draft-ae97efbc', projectId: 'project-1', title: '備品管理', intent: '備品を管理したい', phase: 'planned',
-    specMarkdown: '', architectureMarkdown: '', creationExecutions: [], ownerUserId: 'user-1', createdAt: at, updatedAt: at,
+    specMarkdown: '', architectureMarkdown: '', creationPlanGenerations: [], conversationTurns: [], creationExecutions: [], implementationRuns: [], createdSourceRepositories: [], ownerUserId: 'user-1', createdAt: at, updatedAt: at,
   }
   const raw = "Launch needs changes before resources can be created.\n'definitionRef' is required"
   const failure = classifyBuildFailure(raw, undefined, 'prepare', { draftId: draft.id, executionId: 'exec-123', at })
@@ -317,7 +317,7 @@ function previewDraft(excel: boolean, database: boolean): ApplicationDraft {
   const at = '2026-10-27T00:00:00Z'
   return {
     id: 'preview-notice', projectId: 'project-1', title: '点検', intent: '点検を管理する', phase: 'created',
-    specMarkdown: '', architectureMarkdown: '', creationExecutions: [], ownerUserId: 'owner', createdAt: at, updatedAt: at,
+    specMarkdown: '', architectureMarkdown: '', creationPlanGenerations: [], conversationTurns: [], creationExecutions: [], implementationRuns: [], createdSourceRepositories: [], ownerUserId: 'owner', createdAt: at, updatedAt: at,
     ...(excel ? { source: { kind: 'excel', revision: at, workbooks: [{ id: 'wb-0123456789ab', fileName: '点検.xlsx', sheetCount: 1, rowCount: 2, truncated: false, bytes: 64, digest: 'a'.repeat(64), addedAt: at }] } } : {}),
     creationPlan: {
       summary: '点検を管理する', markdown: '# 点検', representation: ['ApplicationStack'],

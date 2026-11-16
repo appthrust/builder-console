@@ -88,8 +88,9 @@ export interface BuildFailure {
    * `destination`: Platform's repository destination moved, is not set, or did not match; nothing was created.
    * `plan`: Platform's validation answered that this plan cannot be approved as it is, for a reason this console knows
    * (or a plan generation's stored error is that check); nothing was created and a new plan goes on.
+   * `blocked`: Platform reports that an unchanged new implementation run would stop the same way (`retryable: false`).
    */
-  kind: 'workspace' | 'unavailable' | 'policy' | 'quota' | 'limit' | 'forbidden' | 'timeout' | 'failed' | 'name-taken' | 'interrupted' | 'platform' | 'group' | 'unconfirmed' | 'destination' | 'plan'
+  kind: 'workspace' | 'unavailable' | 'policy' | 'quota' | 'limit' | 'forbidden' | 'timeout' | 'failed' | 'name-taken' | 'interrupted' | 'platform' | 'group' | 'unconfirmed' | 'destination' | 'plan' | 'blocked'
   title: string
   reason: string
   /**
@@ -102,6 +103,11 @@ export interface BuildFailure {
    * destination (none, or another one); `incomplete`: it breaks Platform's rules for a plan.
    */
   plan?: 'destination' | 'incomplete'
+  /**
+   * A stopped implementation run that carries Platform's decision (`failure`): whether a new run of the same tasks
+   * (`retry`) and a run that skips the stopped task (`skip`) are offered. Absent: decided by `kind` (`failureOffers`).
+   */
+  offers?: { retry: boolean; skip: boolean }
   /**
    * Platform's validation answered `valid: false` for a cause that may lie outside the plan: a reason this console
    * does not know (kind `platform`, with its reference) or a repository destination Platform calls unusable (kind

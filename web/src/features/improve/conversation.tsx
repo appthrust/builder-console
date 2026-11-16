@@ -2,7 +2,7 @@ import { isOneOf, type BuildDraft, type BuildTurn, type ImplementationRun } from
 import { Check, Circle, ExternalLink, Loader2 } from 'lucide-react'
 import { forwardRef, useLayoutEffect, useRef, type ReactNode } from 'react'
 import { buildCopy } from '../../model/build/copy'
-import { buildFailureReference, classifyBuildFailure } from '../../model/build/failure'
+import { buildFailureReference, classifyBuildFailure, classifyRunFailure, failureOffers } from '../../model/build/failure'
 import { assistantMessage } from '../../model/build/messages'
 import { activityLines, formatElapsed } from '../../model/build/progress'
 import type { BuildFailure } from '../../model/build/types'
@@ -117,7 +117,7 @@ export const ImproveConversation = forwardRef<HTMLTextAreaElement, ImproveConver
       </AiTurn>
     }
     const task = run.tasks.find((item) => item.id === run.currentTaskId)
-    const failure = classifyBuildFailure(run.error || task?.error || (isOneOf(run.status, 'cancelled') ? buildText.implement.cancelled : buildText.implement.failed), undefined, 'implement', { draftId: draft.id, executionId: run.id, at: run.finishedAt ?? draft.updatedAt }, undefined, undefined, run.failureReason ?? task?.failureReason)
+    const failure = classifyRunFailure(run, task, isOneOf(run.status, 'cancelled') ? buildText.implement.cancelled : buildText.implement.failed, { draftId: draft.id, executionId: run.id, at: run.finishedAt ?? draft.updatedAt })
     return <FailureNotice key={run.id} failure={failure} onRetry={latest && state.phase === 'failed' && !locked ? onStart : undefined} />
   }
 
@@ -150,7 +150,7 @@ function FailureNotice({ failure, onRetry, onConfirm }: { failure: BuildFailure;
   // An unconfirmed send or start may have happened: it is read back, never offered again from here.
   const action = failure.kind === 'unconfirmed'
     ? onConfirm ? <Button size="sm" onClick={onConfirm}>{buildCopy.failure.confirm}</Button> : undefined
-    : onRetry && failure.kind !== 'policy' ? <Button size="sm" onClick={onRetry}>{buildText.conversation.retry}</Button> : undefined
+    : onRetry && failureOffers(failure).retry ? <Button size="sm" onClick={onRetry}>{buildText.conversation.retry}</Button> : undefined
   return <Notice tone={failure.kind === 'unconfirmed' ? 'warning' : 'error'} title={failure.title} actions={action}>
     {failure.reason}
     {reference ? <div className="mt-3 flex flex-wrap items-center gap-2"><span className="min-w-0 break-all text-xs">{reference}</span><CopyButton value={reference} label={buildCopy.failure.copyReference} /></div> : null}

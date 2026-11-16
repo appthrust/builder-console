@@ -14,7 +14,7 @@ import { currentLanguage, setLanguage } from '../../shell/language'
 
 const base: ApplicationDraft = {
   id: 'd', projectId: 'pj', title: '在庫', intent: '在庫管理したい', phase: 'specifying', specMarkdown: '', architectureMarkdown: '',
-  creationExecutions: [], ownerUserId: 'u1', createdAt: '2026-10-09T00:00:00Z', updatedAt: '2026-10-09T00:00:00Z',
+  creationPlanGenerations: [], conversationTurns: [], creationExecutions: [], implementationRuns: [], createdSourceRepositories: [], ownerUserId: 'u1', createdAt: '2026-10-09T00:00:00Z', updatedAt: '2026-10-09T00:00:00Z',
 }
 
 describe('pressing AI と作る again resumes instead of multiplying', () => {

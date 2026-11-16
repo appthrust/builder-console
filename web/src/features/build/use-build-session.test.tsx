@@ -38,7 +38,7 @@ const turn = (id: string, userMessage: string, minute: number): ApplicationDraft
 const draft: ApplicationDraft = {
   id: 'draft-session-test', projectId: me.projectId, title: '見積台帳', intent: '見積を作る', phase: 'specifying',
   specMarkdown: serializeSpec({ name: '見積台帳', users: [], screens: [], records: [], rules: [], importFrom: 'excel' }, '# 詳細\n'),
-  architectureMarkdown: '', creationExecutions: [], ownerUserId: me.person.subject, createdAt: at, updatedAt: at,
+  architectureMarkdown: '', creationPlanGenerations: [], creationExecutions: [], implementationRuns: [], createdSourceRepositories: [], ownerUserId: me.person.subject, createdAt: at, updatedAt: at,
   conversationTurns: [turn('prepare', buildCopy.questions.prepareTurn, 0), turn('name', '営業見積', 1)],
 }
 const initial = initialSession({ projectId: me.projectId, ownerSubject: me.person.subject, groupId: 'sales', baseIntent: draft.intent })

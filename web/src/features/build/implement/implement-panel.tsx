@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
 import { buildProgress } from '../../../model/build/progress'
 import { buildCopy } from '../../../model/build/copy'
-import { buildFailureReference } from '../../../model/build/failure'
+import { buildFailureReference, failureOffers } from '../../../model/build/failure'
 import { isOneOf } from '../../../model/contracts/build'
 import type { ProgressCard } from '../../../model/build/types'
 import { Button, Card, CardBody, CardHeader, CopyButton, Notice } from '../../../ui'
@@ -36,6 +36,7 @@ export function ImplementPanel({ state, preparation, released, previewNotice, pr
   }, [ticking])
   const failedTask = state.tasks.find((task) => task.id === state.currentTaskId && isOneOf(task.status, 'failed'))
   const reference = state.failure?.reference ? buildFailureReference(state.failure.reference) : undefined
+  const offers = state.failure ? failureOffers(state.failure) : undefined
   const nothingImplemented = state.phase === 'done' && !implemented(state)
   const progress = buildProgress(preparation, state, now, released)
   const previewReady = Boolean(state.previewUrl) && state.previewStatus === 'ready'
@@ -112,8 +113,8 @@ export function ImplementPanel({ state, preparation, released, previewNotice, pr
         // A write whose answer could not be read may have happened: the draft is read back instead of offering to send it again.
         <Notice tone={state.failure.kind === 'unconfirmed' ? 'warning' : 'error'} title={state.failure.title} actions={(
           <>
-            {onRetry && state.failure.kind !== 'policy' && state.failure.kind !== 'unconfirmed' ? <Button size="sm" loading={state.retryPending} disabled={state.retryPending} onClick={onRetry}>{state.retryPending ? copy.retryPending : copy.retry}</Button> : null}
-            {state.failure.kind !== 'policy' && state.failure.kind !== 'quota' && state.failure.kind !== 'unconfirmed' && failedTask && onSkipTask ? <Button size="sm" tone="ghost" disabled={state.retryPending} onClick={() => onSkipTask(failedTask.id)}>{copy.skip}</Button> : null}
+            {onRetry && offers?.retry ? <Button size="sm" loading={state.retryPending} disabled={state.retryPending} onClick={onRetry}>{state.retryPending ? copy.retryPending : copy.retry}</Button> : null}
+            {offers?.skip && failedTask && onSkipTask ? <Button size="sm" tone="ghost" disabled={state.retryPending} onClick={() => onSkipTask(failedTask.id)}>{copy.skip}</Button> : null}
             {state.failure.kind === 'unconfirmed' && onConfirm ? <Button size="sm" onClick={onConfirm}>{buildCopy.failure.confirm}</Button> : null}
           </>
         )}>

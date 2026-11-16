@@ -113,6 +113,19 @@ export const textJa = {
     copyReference: '問い合わせ番号をコピー',
     /** The task stream dropped (tab closed, sleep, sign-in expired): nothing is lost, the rerun continues. */
     resumable: { title: 'AI の作業が途中で止まりました', reason: 'この画面を離れていた間に止まったかもしれません。もう一度試すと、できたところの続きから進めます。' },
+    /**
+     * A stopped implementation run, worded from Platform's decision (APT-1158). Never names the reason. `blocked`: an
+     * unchanged new run would stop the same way, so no retry is offered; the others refine a reason this console knows.
+     */
+    run: {
+      blocked: 'このままもう一度試しても、同じところで止まります。下の問い合わせ番号を基盤の担当者に伝えてください。',
+      timedOut: { title: '作業に時間がかかりすぎて止まりました', reason: 'できたところまでは残っています。もう一度試すと、止まった作業からやり直します。' },
+      inputRequired: { title: 'AI が確認を求めて止まりました', reason: 'この画面からは答えられません。下の問い合わせ番号を基盤の担当者に伝えてください。' },
+      accessDenied: { title: '作業を続ける権限がありません', reason: '下の問い合わせ番号を基盤の担当者に伝えて、権限の確認を依頼してください。' },
+      configuration: { title: '基盤の設定の問題で止まりました', reason: 'あなたの操作の問題ではありません。下の問い合わせ番号を基盤の担当者に伝えて、設定を依頼してください。' },
+      proposalPending: { title: '提案の確認を待っています', reason: 'アプリの所有者が確認し終えてから、もう一度試してください。' },
+      proposalClosed: { title: 'この提案は締め切られています', reason: '反映・見送り・取り下げのどれかが済んでいるため、続けられません。直したいことは、新しく依頼してください。' },
+    },
     nameTaken: '置き場の名前がすでに使われています',
     urlNameTaken: 'URL の名前が別のアプリで使われています',
     suggestName: (name: string) => `「${name}」に変えて、もう一度作りますか？`,

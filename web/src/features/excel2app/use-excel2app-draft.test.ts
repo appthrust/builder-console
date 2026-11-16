@@ -29,7 +29,7 @@ const turn = (id: string, userMessage: string, minute: number, extra: Partial<Ap
 
 const draft: ApplicationDraft = {
   id: 'draft-1', projectId: 'project-1', title: '不具合管理台帳', intent: 'Excel「不具合管理台帳.xlsx」から業務アプリを作る', phase: 'specifying', specMarkdown: '', architectureMarkdown: '',
-  creationExecutions: [], ownerUserId: 'user-1', createdAt: '2026-10-26T00:00:00Z', updatedAt: '2026-10-26T00:00:00Z',
+  creationPlanGenerations: [], conversationTurns: [], creationExecutions: [], implementationRuns: [], createdSourceRepositories: [], ownerUserId: 'user-1', createdAt: '2026-10-26T00:00:00Z', updatedAt: '2026-10-26T00:00:00Z',
 }
 const source = { kind: 'excel' as const, revision: summary.addedAt, workbooks: [summary] }
 

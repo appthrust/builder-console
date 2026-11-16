@@ -23,7 +23,7 @@ const summary = { id: WB, fileName: '受注台帳.xlsx', sheetCount: 1, rowCount
 /** An analysed set without a design yet: entering the preview asks for the default design (one ui-design turn). */
 const analysed: ApplicationDraft = {
   id: 'draft-stale', projectId, title: '受注台帳', intent: 'Excel から作る', phase: 'specifying', specMarkdown: serializeSpec({ name: '受注台帳', users: [], screens: [], records: [], rules: [] }, '# 受注\n'), architectureMarkdown: '',
-  creationExecutions: [], ownerUserId: 'user-1', createdAt: at, updatedAt: at,
+  creationPlanGenerations: [], conversationTurns: [], creationExecutions: [], implementationRuns: [], createdSourceRepositories: [], ownerUserId: 'user-1', createdAt: at, updatedAt: at,
   source: { kind: 'excel', revision: at, workbooks: [summary] },
   excelAnalysis: { summary: '受注を記録する', bullets: [], capabilities: [], workbooks: [{ workbookId: WB, role: 'records', summary: '' }], entities: [], flows: [], findings: [] },
 }

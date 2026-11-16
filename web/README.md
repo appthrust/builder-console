@@ -780,6 +780,16 @@ non-engineers, with engineering words only under 「詳しい人向け」
   create another workspace, or replay a task. Codex, document synchronization,
   commits, retry backoff, leases and recovery are exclusively server-owned.
   There is no browser-local task state; conversation/UI session storage remains.
+  A failed run's notice follows Platform's `failure {reason, retryable}`
+  (APT-1158, `model/build/failure.ts#classifyRunFailure`): `retryable` decides
+  whether 「もう一度試す」 is offered; a reason this console knows only refines
+  the words and may take 「この作業を飛ばす」 away (quota, a pending or closed
+  proposal, access, configuration, policy), and applies only when Platform's
+  `retryable` is the one written for it. An unknown reason gets the generic
+  sentence for its `retryable`; a non-retryable run shows its support reference.
+  Without `failure` (an older Platform, an unreadable one, a cancelled run) the
+  run reads as before, from `failureReason` and the error text. Mock
+  `implementation-run` accepts `{ failure: {reason, retryable} | 'legacy' | null }`.
   The preview reads `run.devWorkspaceId` through the workspace GET. Workspace
   Ready and the `PreviewReady` condition describe containers, not an HTTP-serving
   app: before mounting the iframe, the console probes the same-origin preview

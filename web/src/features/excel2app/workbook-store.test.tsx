@@ -23,7 +23,7 @@ const projectId = 'project-workbook-store'
 const at = '2026-11-01T00:00:00Z'
 const draft: ApplicationDraft = {
   id: 'draft-workbook', projectId, title: '台帳', intent: 'Excel から作る', phase: 'specifying',
-  specMarkdown: '', architectureMarkdown: '', creationExecutions: [], ownerUserId: 'user-1', createdAt: at, updatedAt: at,
+  specMarkdown: '', architectureMarkdown: '', creationPlanGenerations: [], conversationTurns: [], creationExecutions: [], implementationRuns: [], createdSourceRepositories: [], ownerUserId: 'user-1', createdAt: at, updatedAt: at,
 }
 const workbook = SAMPLE_SETS[0]!.workbooks[0]!
 const summary: ApplicationDraftWorkbookSummary = { id: 'wb-000000000001', fileName: workbook.fileName, sheetCount: 3, rowCount: 28, bytes: 100, digest: 'a'.repeat(64), truncated: false, addedAt: at }

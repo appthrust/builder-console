@@ -74,7 +74,7 @@ test('the real oRPC adapter preserves the typed session failure rather than pars
 
 test('cached running draft becomes a visible sign-in notice, removes polling observers and retains data', async () => {
   const at = '2026-11-09T01:55:44Z'
-  const draft: ApplicationDraft = { id: 'draft', projectId: 'project', title: 'App', intent: 'Build app', phase: 'specifying', specMarkdown: '', architectureMarkdown: '', creationExecutions: [], ownerUserId: 'owner', createdAt: at, updatedAt: at, conversationTurns: [{ id: 'kickoff', kind: 'conversation', userMessage: 'この内容で提案して', status: 'running', startedAt: at, devWorkspaceId: 'workspace' }] }
+  const draft: ApplicationDraft = { id: 'draft', projectId: 'project', title: 'App', intent: 'Build app', phase: 'specifying', specMarkdown: '', architectureMarkdown: '', creationPlanGenerations: [], creationExecutions: [], implementationRuns: [], createdSourceRepositories: [], ownerUserId: 'owner', createdAt: at, updatedAt: at, conversationTurns: [{ id: 'kickoff', kind: 'conversation', userMessage: 'この内容で提案して', status: 'running', startedAt: at, devWorkspaceId: 'workspace' }] }
   const options = buildDraftOptions('project', 'draft')
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } })
   const cached = draftOf(draft)

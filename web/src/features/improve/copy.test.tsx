@@ -52,7 +52,7 @@ const at = '2026-10-26T00:00:00Z'
 const tasks = [{ title: '一覧に絞り込みを足す', description: '状態で絞り込めるようにする。', acceptanceCriteria: ['絞り込める'] }]
 const draft: ApplicationDraft = {
   id: 'draft-1', projectId: 'project-1', kind: 'improvement', title: '見積作成', intent: '一覧に絞り込みを足したい', phase: 'created',
-  specMarkdown: '', architectureMarkdown: '', creationPlanGenerations: [], creationExecutions: [], ownerUserId: 'user-1', createdAt: at, updatedAt: at,
+  specMarkdown: '', architectureMarkdown: '', creationPlanGenerations: [], creationExecutions: [], implementationRuns: [], createdSourceRepositories: [], ownerUserId: 'user-1', createdAt: at, updatedAt: at,
   createdApplicationId: 'mitsumori', createdApplicationStackId: 'mitsumori',
   creationPlan: { summary: '絞り込み', markdown: '# 絞り込み', representation: ['ApplicationStack'], implementationHandoff: { summary: '絞り込み', workspaceMode: 'application-develop', targetApplicationRef: 'createdApplicationId', sourceRepositoryStrategy: 'existing-source-repository', tasks } },
   conversationTurns: [{ id: 't1', kind: 'conversation', status: 'succeeded', startedAt: at, finishedAt: at, devWorkspaceId: 'ws', userMessage: '状態で絞り込みたい', assistantMessage: '## 要約\nまとめました。\n## 次の質問\nこの内容で直せます。', suggestedReplies: ['この内容で直して'] }],

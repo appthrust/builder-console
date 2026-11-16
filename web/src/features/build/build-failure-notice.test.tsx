@@ -11,7 +11,7 @@ import { BuildFailureNotice } from './build-failure-notice'
 
 const at = '2026-11-01T00:00:00Z'
 const failure: BuildFailure = { lines: ['./lib/fourm-seed.ts', "Module not found: '[workspace]' <script>"], kind: 'module-not-found', observedAt: at, buildRef: 'https://github.com/acme/app/actions/runs/1' }
-const draft: ApplicationDraft = { id: 'repair-draft', projectId: 'pj-demo', title: '台帳', kind: 'improvement', intent: failure.lines.join('\n'), phase: 'specifying', specMarkdown: '', architectureMarkdown: '', creationExecutions: [], ownerUserId: 'owner', createdAt: at, updatedAt: at }
+const draft: ApplicationDraft = { id: 'repair-draft', projectId: 'pj-demo', title: '台帳', kind: 'improvement', intent: failure.lines.join('\n'), phase: 'specifying', specMarkdown: '', architectureMarkdown: '', creationPlanGenerations: [], conversationTurns: [], creationExecutions: [], implementationRuns: [], createdSourceRepositories: [], ownerUserId: 'owner', createdAt: at, updatedAt: at }
 
 test('cause is plain escaped text; viewers and successful builds have no repair button', () => {
   const html = renderToStaticMarkup(<BuildFailureNotice failure={failure} projectId="pj-demo" stackId="stack-web" title="台帳" canEdit={false} />)

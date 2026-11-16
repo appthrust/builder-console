@@ -24,6 +24,7 @@ import {
   ApplicationDraftCreationPlanGenerationStatus,
   ApplicationDraftCreationPlanValidation,
   DnsLabelName,
+  ApplicationDraftImplementationFailure,
   ApplicationDraftImplementationFailureReason,
   ApplicationDraftImplementationRun,
   ApplicationDraftImplementationRunStatus,
@@ -34,8 +35,9 @@ import {
   ApplicationDraftWorkbookSummary,
 } from '@appthrust/api-schema/platform-api'
 import { z } from 'zod'
-import type {
-  BuildDraft, BuildDraftList, BuildExecution, BuildExecutionStep, BuildGeneration, BuildTurn, CreationPlanValidation, DraftDeletion, ImplementationRun, ImplementationTask,
+import {
+  RUN_FAILURE_REASONS,
+  type BuildDraft, type BuildDraftList, type BuildExecution, type BuildExecutionStep, type BuildGeneration, type BuildTurn, type CreationPlanValidation, type DraftDeletion, type ImplementationRun, type ImplementationTask,
 } from '../../../model/contracts/build'
 import { absentMeansEmpty, appendResponseIssues, independentRows, openEnum, unreadableRowIssues, type ResponseIssue } from '../../boundary'
 import { platformContract } from '../define'
@@ -51,6 +53,7 @@ export function draftRecoveries(draft: BuildDraft, prefix = ''): ResponseIssue[]
   const issues: ResponseIssue[] = []
   if (draft.creationPlanUnreadable) issues.push({ path: `${prefix}/creationPlan`, code: 'invalid_value' })
   if (draft.creationExecutions.some((execution) => execution.approvalUnreadable)) issues.push({ path: `${prefix}/creationExecutions/*/approval`, code: 'invalid_value' })
+  if (draft.implementationRuns.some((run) => run.failureUnreadable)) issues.push({ path: `${prefix}/implementationRuns/*/failure`, code: 'invalid_value' })
   return issues
 }
 
@@ -96,12 +99,26 @@ export const taskReader: z.ZodType<ImplementationTask> = ApplicationDraftImpleme
   failureReason: openCanonical(ApplicationDraftImplementationFailureReason).optional(),
 })
 
-export const runReader: z.ZodType<ImplementationRun> = ApplicationDraftImplementationRun.extend({
+// A failed run's `failure` (APT-1158) is absent on an older Platform; its `reason` is an open value. A present but
+// unreadable one is reported and dropped: the run then reads as one from an older Platform (`failureReason` only).
+const runFailureReason = openEnum(RUN_FAILURE_REASONS)
+const runFailure = z.union([
+  ApplicationDraftImplementationFailure.transform((failure) => ({ kind: 'known' as const, value: { ...failure, reason: runFailureReason.parse(failure.reason) } })),
+  unreadable,
+])
+
+// The canonical run refines `failure` against the wire status; the shape is reread here so the open status is read
+// first. A `failure` beside another status is never used (only a failed run is classified by it).
+export const runReader: z.ZodType<ImplementationRun> = z.object(ApplicationDraftImplementationRun.shape).extend({
   status: openCanonical(ApplicationDraftImplementationRunStatus),
   step: openCanonical(ApplicationDraftImplementationStep).optional(),
   failureReason: openCanonical(ApplicationDraftImplementationFailureReason).optional(),
+  failure: runFailure.optional(),
   tasks: z.array(taskReader),
-})
+}).transform(({ failure, ...run }) => ({
+  ...run,
+  ...(failure?.kind === 'known' ? { failure: failure.value } : failure ? { failureUnreadable: true as const } : {}),
+}))
 
 const creationExecutions = absentMeansEmpty(z.array(executionReader).max(20), { path: '/creationExecutions', evidence: `${DRAFT_OMITS}:830 omits an empty list (omitempty); APT-748` })
 const creationPlanGenerations = absentMeansEmpty(z.array(generationReader), { path: '/creationPlanGenerations', evidence: `${DRAFT_OMITS}:818 omits an empty list (omitempty)` })

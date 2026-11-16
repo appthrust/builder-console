@@ -23,7 +23,7 @@ const workspace: DevWorkspaceRead = {
 // A stopped run: the phase is `failed`, so only `pending` tells that a retry is being submitted.
 const draft: ApplicationDraft = {
   id: 'draft-1', projectId: 'p1', title: '点検', intent: '点検を管理する', phase: 'created',
-  specMarkdown: '', architectureMarkdown: '', creationExecutions: [], ownerUserId: 'owner', createdAt: at, updatedAt: at,
+  specMarkdown: '', architectureMarkdown: '', creationPlanGenerations: [], conversationTurns: [], creationExecutions: [], createdSourceRepositories: [], ownerUserId: 'owner', createdAt: at, updatedAt: at,
   implementationRuns: [{ id: 'run-1', status: 'failed', startedAt: at, devWorkspaceId: 'ws-1', taskIds: ['list'], tasks: [{ id: 'list', title: '点検一覧', status: 'done' }] }],
 }
 
