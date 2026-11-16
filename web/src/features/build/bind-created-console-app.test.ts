@@ -187,7 +187,8 @@ describe('bindCreatedConsoleApp', () => {
 
   test('a slug conflict cannot adopt a same-slug record from another group or another owner', async () => {
     const h = harness()
-    const otherGroup = await h.api.createApp({ ...input, groupId: 'g-sales-east' })
+    // Created where Yamada belongs (a new app goes only there), then moved: the same owner's record in another group.
+    const otherGroup = await h.api.updateApp((await h.api.createApp(input)).id, { groupId: 'g-sales-east' })
     await fetchConsole('/api/console/__mock/caller', { method: 'POST', body: JSON.stringify({ personId: 'p-suzuki', role: 'Editor' }) })
     const otherOwner = await h.api.createApp(input)
     await fetchConsole('/api/console/__mock/caller', { method: 'POST', body: JSON.stringify({ personId: 'p-yamada', role: 'Editor' }) })

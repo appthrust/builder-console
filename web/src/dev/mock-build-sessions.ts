@@ -334,11 +334,16 @@ function resolveTurn(stored: Stored, turnId: string, body: unknown): Response {
   return answer(200, next, { ETag: etag(stored.session.version) })
 }
 
-/** `/api/console/v1/build-sessions…` for the signed-in `owner` (a Project member or not); undefined for any other path. */
-export async function buildSessionRoutes(request: Request, url: URL, caller: { owner: string; member: boolean }): Promise<Response | undefined> {
+/**
+ * `/api/console/v1/build-sessions…` for the signed-in `owner` (a Project member or not); undefined for any other path.
+ * Like the server's store, `groupIds` (the caller's effective Directory groups) scopes every session: one in a group
+ * outside it is not found, and a new session must name one of them.
+ */
+export async function buildSessionRoutes(request: Request, url: URL, caller: { owner: string; member: boolean; groupIds: readonly string[] }): Promise<Response | undefined> {
   if (url.pathname !== BASE && !url.pathname.startsWith(`${BASE}/`)) return undefined
   const { owner } = caller
   if (!caller.member) return fail(403, 'forbidden', 'not a member of this Project')
+  const accessible = (stored: Stored) => stored.owner === owner && caller.groupIds.includes(stored.session.groupId)
   const [id, sub, subId, action] = url.pathname.slice(BASE.length).split('/').filter(Boolean).map(decodeURIComponent)
   const method = request.method
   const page = <T>(items: T[]): Response => {
@@ -351,11 +356,12 @@ export async function buildSessionRoutes(request: Request, url: URL, caller: { o
   }
 
   if (!id) {
-    if (method === 'GET') return page([...sessions.values()].filter((stored) => stored.owner === owner).map((stored) => stored.session))
+    if (method === 'GET') return page([...sessions.values()].filter(accessible).map((stored) => stored.session))
     if (method !== 'POST') return undefined
     return write(request, owner, url.pathname, false, (body) => {
       const parsed = buildCreateSession.safeParse(body)
       if (!parsed.success) return invalid(parsed.error.issues)
+      if (!caller.groupIds.includes(parsed.data.groupId)) return fail(404, 'not_found', 'Build group is not accessible')
       const now = stamp()
       const markdown = specMarkdown(parsed.data.intent)
       const stored: Stored = {
@@ -374,11 +380,11 @@ export async function buildSessionRoutes(request: Request, url: URL, caller: { o
   if (id === 'resolve' && !sub && method === 'GET') {
     const draftId = url.searchParams.get('draftId')
     if (!draftId) return fail(400, 'invalid_argument', 'draftId is required', { field: '/draftId' })
-    const owned = [...sessions.values()].find((stored) => stored.owner === owner && stored.session.draftId === draftId)
+    const owned = [...sessions.values()].find((stored) => accessible(stored) && stored.session.draftId === draftId)
     return answer(200, owned ? { engine: 'console-v1', sessionId: owned.session.id } : { engine: 'platform-v1', draftId })
   }
   const stored = sessions.get(id)
-  if (!stored || stored.owner !== owner) return notFound()
+  if (!stored || !accessible(stored)) return notFound()
   const path = url.pathname
   // `build-session-unavailable`: the server is overloaded; come back after `Retry-After`.
   const unavailable = () => {

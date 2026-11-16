@@ -31,7 +31,7 @@ export function DetailsStep({
   form: CreateFormApi
   projectId: string
   sourceConnectionId: string | undefined
-  /** Depth-first group tree. */
+  /** Depth-first tree of the groups the caller belongs to: a new app goes only into one of them. */
   groups: GroupNode[]
   /** Publish domain; undefined while unknown. */
   domain: string | undefined

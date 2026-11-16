@@ -17,9 +17,13 @@ import { text } from './copy'
  */
 export type NewSessionEngine = 'console-v1' | 'platform-v1'
 
-/** AI creation needs a membership, never an arbitrary visible directory group. */
+/**
+ * Creating needs a membership, never an arbitrary visible directory group: the current group only when the caller
+ * belongs to it (directly or through an ancestor), else the first membership root, else none (creation is blocked).
+ */
 export function resolveBuildGroup(me: Pick<Me, 'effectiveGroupIds'>, groups: readonly Group[], currentGroup?: Pick<Group, 'id'>): string | undefined {
-  return currentGroup?.id ?? membershipRoots(me, groups)[0]?.id ?? me.effectiveGroupIds[0]
+  if (currentGroup && me.effectiveGroupIds.includes(currentGroup.id)) return currentGroup.id
+  return membershipRoots(me, groups)[0]?.id
 }
 
 /**

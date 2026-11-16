@@ -15,6 +15,7 @@ import { copy } from '../../copy'
 import { aiPolicyExplanation } from '../../copy/ai-policy'
 import { consoleRoutes } from '../../dev/mock-console'
 import { platformRoutes } from '../../dev/mock-platform'
+import { paths } from '../../routes/paths'
 import { preserveLanguage } from '../../../test/language'
 import { setLanguage } from '../../shell/language'
 import { UnsavedChangesProvider } from '../../ui/use-unsaved-changes-guard'
@@ -44,7 +45,7 @@ afterEach(() => {
   else Reflect.deleteProperty(globalThis, 'localStorage')
 })
 
-test('AI ownership resolves current group, membership root, effective id, then no group', async () => {
+test('creation resolves the current group only when the caller belongs to it, else the membership root, else no group', async () => {
   const [seed] = await gateway.console(groupsContract, undefined)
   if (!seed) throw new Error('Missing directory fixture')
   const parent: Group = { ...seed, id: 'parent', parentId: null }
@@ -52,14 +53,19 @@ test('AI ownership resolves current group, membership root, effective id, then n
   const other: Group = { ...seed, id: 'other', parentId: null }
   const groups = [child, other, parent]
   const me = { effectiveGroupIds: [child.id, parent.id] }
-  expect(resolveBuildGroup(me, groups, other)).toBe(other.id)
+  // A group the caller only looks at (or that only shares with them) is never where their app goes.
+  expect(resolveBuildGroup(me, groups, other)).toBe(parent.id)
+  // A descendant of a membership is a membership (inherited downwards).
+  expect(resolveBuildGroup(me, groups, child)).toBe(child.id)
   expect(resolveBuildGroup(me, groups)).toBe(parent.id)
-  expect(resolveBuildGroup({ effectiveGroupIds: ['unlisted', 'second'] }, groups)).toBe('unlisted')
-  expect(resolveBuildGroup({ effectiveGroupIds: [] }, groups)).toBeUndefined()
+  // An ancestor of a membership is not one.
+  expect(resolveBuildGroup({ effectiveGroupIds: [child.id] }, groups, parent)).toBe(child.id)
+  expect(resolveBuildGroup({ effectiveGroupIds: ['unlisted'] }, groups)).toBeUndefined()
+  expect(resolveBuildGroup({ effectiveGroupIds: [] }, groups, other)).toBeUndefined()
 })
 
-async function renderPage(path: '/new' | '/-/build/draft-1', hasGroup: boolean, availability?: Partial<ApplicationDraftCreationToolRegistryResponse>) {
-  const [{ BuildPage }, { NewAppPage }] = await Promise.all([import('./build-page'), import('../create/new-app-page')])
+async function renderPage(path: '/new' | '/-/build/draft-1' | '/-/excel2app', hasGroup: boolean, availability?: Partial<ApplicationDraftCreationToolRegistryResponse>) {
+  const [{ BuildPage }, { NewAppPage }, { Excel2AppPage }] = await Promise.all([import('./build-page'), import('../create/new-app-page'), import('../excel2app/page')])
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   const [me, groups] = await Promise.all([gateway.console(meContract, undefined), gateway.console(groupsContract, undefined)])
   const caller = { ...me, canCreateApps: true, effectiveGroupIds: hasGroup ? [groups[0]!.id] : [] }
@@ -87,10 +93,12 @@ async function renderPage(path: '/new' | '/-/build/draft-1', hasGroup: boolean, 
   const root = createRootRoute()
   const newRoute = createRoute({ getParentRoute: () => root, path: '/new', component: NewAppPage })
   const buildRoute = createRoute({ getParentRoute: () => root, path: '/-/build/$draftId', component: () => <BuildPage draftId="draft-1" /> })
-  const router = createRouter({ routeTree: root.addChildren([newRoute, buildRoute]), history: createMemoryHistory({ initialEntries: [path] }), isServer: true })
+  const excelRoute = createRoute({ getParentRoute: () => root, path: '/-/excel2app', component: () => <Excel2AppPage /> })
+  const router = createRouter({ routeTree: root.addChildren([newRoute, buildRoute, excelRoute]), history: createMemoryHistory({ initialEntries: [path] }), isServer: true })
   await router.load()
+  const page = path === '/new' ? <NewAppPage /> : path === '/-/excel2app' ? <Excel2AppPage /> : <BuildPage draftId="draft-1" />
   try {
-    return renderToStaticMarkup(<QueryClientProvider client={client}><RouterContextProvider router={router}><UnsavedChangesProvider>{path === '/new' ? <NewAppPage /> : <BuildPage draftId="draft-1" />}</UnsavedChangesProvider></RouterContextProvider></QueryClientProvider>)
+    return renderToStaticMarkup(<QueryClientProvider client={client}><RouterContextProvider router={router}><UnsavedChangesProvider>{page}</UnsavedChangesProvider></RouterContextProvider></QueryClientProvider>)
   } finally {
     client.clear()
   }
@@ -122,6 +130,45 @@ test.each([false, true])('AI template-customization entry is gated only without 
   for (const action of actions) expect(action[1]?.includes('disabled=""')).toBe(!hasGroup)
   if (hasGroup) expect(html).not.toContain(text.page.noGroup.body)
   else expect(html).toContain(text.page.noGroup.body)
+})
+
+test('a no-group caller can start no creation entry on /new, Excel included, and reads why once', async () => {
+  const html = await renderPage('/new', false)
+  expect(html).toContain('data-testid="create-no-group"')
+  expect(html).toContain(text.page.noGroup.title)
+  expect(html.split(text.page.noGroup.body)).toHaveLength(2)
+  expect(html).toContain('href="/company"')
+  const buttons = [...html.matchAll(/<button\b([^>]*)>(.*?)<\/button>/gs)]
+  for (const label of [copy.create.start.build, createText.customizeWithAi, copy.create.start.upload.title, copy.create.start.excel.title, copy.create.next]) {
+    const matches = buttons.filter((match) => match[2]?.includes(label))
+    expect({ label, found: matches.length > 0 }).toEqual({ label, found: true })
+    for (const match of matches) expect({ label, disabled: match[1]?.includes('disabled=""') }).toEqual({ label, disabled: true })
+  }
+  const templates = buttons.filter((match) => match[1]?.includes('data-testid="template-'))
+  expect(templates.length).toBeGreaterThan(0)
+  for (const template of templates) expect(template[1]).toContain('disabled=""')
+  // The Excel entry is not a link: following it would make a Platform draft on the first upload.
+  expect(html).not.toContain(`href="${paths.excel2app()}"`)
+})
+
+test('a member opens the Excel entry from /new as a link, without the group notice', async () => {
+  const html = await renderPage('/new', true)
+  expect(html).toContain(`href="${paths.excel2app()}"`)
+  expect(html).not.toContain('data-testid="create-no-group"')
+})
+
+test('the Excel page opened directly without a group shows the guidance and never starts the draft flow', async () => {
+  const fetch = spyOn(globalThis, 'fetch')
+  try {
+    const html = await renderPage('/-/excel2app', false)
+    expect(html).toContain('data-testid="excel2app-no-group"')
+    expect(html).toContain(text.page.noGroup.body)
+    expect(html).toContain('href="/company"')
+    expect(html).not.toContain('data-testid="excel2app-drop"')
+    expect(fetch).not.toHaveBeenCalled()
+  } finally {
+    fetch.mockRestore()
+  }
 })
 
 test('beginBuild rejects an empty group before listing or creating any platform draft', async () => {

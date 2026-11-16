@@ -5,6 +5,14 @@ business applications. The Go server serves the React SPA, the console API, and 
 same-origin Platform API proxy. Directory owns people, groups, and memberships;
 Builder Console keeps app metadata, access requests, comments, and sharing policy.
 
+Creating an app requires membership of the target group. Every creation entry
+(AI, templates, existing code, image, Excel) offers only the caller's effective
+groups: direct memberships plus groups inherited from them by descendants, not
+ancestors. `POST /api/console/apps` and `POST /build-sessions` reject any other
+group, with no Console-admin exception. Moving an existing app to another group
+(`PATCH /api/console/apps/{id}`) is a separate rule and does not require
+membership of the destination.
+
 ## Repository
 
 - `cmd/server/`: Go server and tests, using `github.com/appthrust/appserver-go v0.2.0`.

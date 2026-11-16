@@ -16,6 +16,7 @@ import (
 
 func createRequestTestApp(h *harness, group domain.Group, name string) domain.App {
 	h.t.Helper()
+	h.setMember(group.ID, h.directory.person("editor").ID, "member")
 	return call[domain.App](h, "editor", "POST", "/apps", map[string]any{
 		"displayName": name, "groupId": group.ID, "share": domain.SharePolicy{Scope: "private"},
 	}, http.StatusCreated)

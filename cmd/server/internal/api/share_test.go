@@ -10,6 +10,7 @@ import (
 func TestSharePeopleRoleMovesIntegration(t *testing.T) {
 	h := newHarness(t)
 	group := createTestGroup(h, "sharing", nil)
+	h.setMember(group.ID, h.directory.person("editor").ID, "member")
 	app := call[domain.App](h, "editor", "POST", "/apps", map[string]any{"displayName": "Shared", "groupId": group.ID, "share": domain.SharePolicy{Scope: "private"}}, 201)
 	call[httpx.Error](h, "editor", "POST", "/apps", map[string]any{"displayName": "Duplicate role", "groupId": group.ID, "share": domain.SharePolicy{Scope: "private", ExtraPersonIDs: []string{app.Owners[0].ID}}}, 400)
 	person := h.directory.person("invite")

@@ -14,6 +14,8 @@
 // (default role Viewer) for requester/approver stories; reset restores Yamada.
 // `POST /api/console/__mock/role {role}` switches role and caller: Viewer uses
 // Tanaka (who cannot open the private keihi app); Admin/Editor use Yamada.
+// `POST /api/console/__mock/leave-groups {personId?}` removes every direct membership of the person (default the
+// caller), who then belongs to no group: no creation entry opens and `POST /apps` refuses every group, like the server.
 // `POST /api/console/__mock/comments {state: 'empty' | 'many' | 'quota'}` replaces
 // all comments: empty clears them, many seeds 120 on a-mitsumori (100 returned),
 // quota seeds 200 there by the current caller so their next POST returns 429.
@@ -622,6 +624,13 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
     state.teamSlug = input.teamSlug ?? state.teamSlug
     return json({ notMember: state.notMember, teamSlug: state.teamSlug })
   }
+  if (head === '__mock' && id === 'leave-groups' && method === 'POST') {
+    const input = await body<{ personId?: string }>(request).catch(() => ({ personId: undefined }))
+    const personId = input.personId ?? state.callerId
+    if (!state.people.some((entry) => entry.id === personId)) return notFound()
+    for (const rows of state.memberships.values()) rows.delete(personId)
+    return json({ personId, effectiveGroupIds: [...personGroups(personId).keys()] })
+  }
   // Old console drafts (stackId null): the abandoned 作りかけ row.
   if (head === '__mock' && id === 'app-draft' && method === 'POST') {
     const slug = 'draft-stopped'
@@ -666,8 +675,8 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
   if (head === 'me' && method === 'GET') return json(me())
   // The same-origin Directory proxy; the Directory does not gate reads on Project membership.
   if (head === 'directory') return directoryRoutes(request, url, segments.slice(1))
-  // NEW-APP conversation sessions (`/api/console/v1/build-sessions*`, ./mock-build-sessions): the caller's own.
-  if (head === 'v1' && id === 'build-sessions') return buildSessionRoutes(request, url, { owner: state.callerId, member: !state.notMember })
+  // NEW-APP conversation sessions (`/api/console/v1/build-sessions*`, ./mock-build-sessions): the caller's own, in the caller's groups.
+  if (head === 'v1' && id === 'build-sessions') return buildSessionRoutes(request, url, { owner: state.callerId, member: !state.notMember, groupIds: [...personGroups(state.callerId).keys()] })
   const needsRoles = head === 'resolve' || head === 'apps' || head === 'admin' || (head === 'access-requests' && !id && method === 'GET')
   if (state.notMember && needsRoles) {
     return fail(403, 'not_project_member', state.teamSlug
@@ -779,6 +788,8 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
         if (!input.displayName?.trim() || !state.groups.some((g) => g.id === input.groupId)) {
           return fail(400, 'invalid_request', 'displayName and an existing groupId are required')
         }
+        // Like the server: a new app goes only into a group the caller belongs to (no Console administrator exception).
+        if (!personGroups(state.callerId).has(input.groupId)) return fail(400, 'invalid_request', 'groupId must be one of your directory groups')
         const slug = input.slug ?? slugify(input.displayName)
         if (!isValidSlug(slug)) return fail(400, 'invalid_request', 'invalid slug')
         if (state.apps.some((a) => a.groupId === input.groupId && a.slug === slug)) return fail(409, 'slug_taken', `slug ${slug} is taken`)

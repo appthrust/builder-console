@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useCreateStore, useSelector } from '@tanstack/react-store'
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { buildGroupTree, flattenGroupTree, membershipRoots, type BusinessApp } from '../../model/contracts/console'
+import { buildGroupTree, flattenGroupTree, type BusinessApp } from '../../model/contracts/console'
 import type { ShareChoice } from '../../model/contracts/catalog'
 import { createApi } from '../../api/create'
 import { useAdoptionValidation, useCreateCatalog, useCreateConnections, useCreationTools, useRepositoryDestination, useSourceRepositories } from '../../api/queries/catalog'
@@ -26,7 +26,7 @@ import {
 import { shareSentence } from '../../model/share'
 import { paths } from '../../routes/paths'
 import { useShell } from '../../shell/use-shell'
-import { Button, Card, CardBody, focusHeading, LoadFailed, Notice, PageHeader, Stepper, useDocumentTitle, useUnsavedChangesGuard } from '../../ui'
+import { Button, Card, CardBody, focusHeading, LinkButton, LoadFailed, Notice, PageHeader, Stepper, useDocumentTitle, useUnsavedChangesGuard } from '../../ui'
 import { checkNameAvailability, suggestFreeUrlName, type AvailabilityRequest, type NameAvailability } from './availability'
 import { text } from './copy'
 import { effectiveShareGroupIds, stepFields, syncUrlName, useCreateForm, type CreateValues } from './form'
@@ -103,15 +103,26 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
   const destinationRead = useRepositoryDestination(projectId)
 
   const flatGroups = useMemo(() => flattenGroupTree(buildGroupTree(groupRows)), [groupRows])
+  // A new app goes only into a group the caller belongs to (directly or through an ancestor). The choices keep the
+  // directory tree's order and nesting, indented from the caller's membership roots.
+  const memberGroups = useMemo(() => {
+    const effective = new Set(me.effectiveGroupIds)
+    return flattenGroupTree(buildGroupTree(groupRows.filter((group) => effective.has(group.id))))
+  }, [groupRows, me.effectiveGroupIds])
+  const isMemberGroup = (groupId: string) => memberGroups.some((group) => group.id === groupId)
+  const requestedGroupId = groupRows.find((group) => group.path === defaultGroupPath)?.id
   const defaultGroupId =
-    groupRows.find((group) => group.path === defaultGroupPath)?.id ??
-    membershipRoots(me, groupRows)[0]?.id ??
-    me.effectiveGroupIds[0] ??
-    flatGroups[0]?.id ??
+    (requestedGroupId && isMemberGroup(requestedGroupId) ? requestedGroupId : undefined) ??
+    aiGroupId ??
+    memberGroups[0]?.id ??
     ''
+  // Without a membership nothing can be created from any entry: the same guidance as the AI build page.
+  const groupBlock = memberGroups.length === 0 ? buildText.page.noGroup.body : undefined
   const [saved] = useState(() => {
     const stored = readCreateSession(search.resume)
-    return draft ? restoreCreateDraft(draft, stored) : stored
+    const restored = draft ? restoreCreateDraft(draft, stored) : stored
+    // A remembered (or resumed) group the caller no longer belongs to is not offered; the default membership stands in.
+    return restored && !isMemberGroup(restored.values.groupId) ? { ...restored, values: { ...restored.values, groupId: defaultGroupId } } : restored
   })
   const form = useCreateForm(defaultGroupId, saved?.values)
   // `?group=` can change while the wizard is open; follow it until the user picks a group.
@@ -201,14 +212,14 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
   }
   const imageMissing = missingFor('image')
   const blocked: EntryBlocks = {
-    existing: missingFor('existing') ?? (defaultCatalog ? undefined : copy.create.start.existingUnavailable),
-    template: missingFor('template') ?? destinationNotice ?? (defaultCatalog ? undefined : copy.create.start.templateUnavailable),
+    existing: groupBlock ?? missingFor('existing') ?? (defaultCatalog ? undefined : copy.create.start.existingUnavailable),
+    template: groupBlock ?? missingFor('template') ?? destinationNotice ?? (defaultCatalog ? undefined : copy.create.start.templateUnavailable),
     ai: aiPolicyExplanation(tools.data?.codexUnavailableReason, tools.data?.codexPolicy) ?? (!aiGroupId ? buildText.page.noGroup.body : missingFor('ai') ?? destinationNotice ?? (tools.data?.codexAvailable ? undefined : copy.create.start.aiUnavailable)),
-    image: imageMissing
+    image: groupBlock ?? (imageMissing
       ? `${copy.create.advanced.unavailable}${imageMissing}`
       : imageCatalog
         ? undefined
-        : copy.create.advanced.unavailable,
+        : copy.create.advanced.unavailable),
   }
   const setupLink =
     me.isConsoleAdmin && (['existing', 'template', 'ai', 'image'] as const).some((entry) => missingSetupFor(entry).length > 0)
@@ -543,7 +554,7 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
 
   const submitApp = () => {
     const path = createPath()
-    if (!path || !catalog || !values.groupId || !domain || templateProblem || run.state.phase || run.state.resume.unconfirmed) return
+    if (!path || !catalog || !isMemberGroup(values.groupId) || !domain || templateProblem || run.state.phase || run.state.resume.unconfirmed) return
     void attempt(async () => {
       const app = await submitCreate({ ...details, path }, run.state.resume, {
         api: createApi,
@@ -617,7 +628,7 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
   // After a destination answer the shown destination is re-read; nothing is sent until the new one is on screen.
   const destinationRereading = failure?.destination !== undefined && destinationRead.isFetching
   const keptHold = keptState === 'checking' || keptState === 'unknown'
-  const blockedSubmit = !canCreate || busy || failure?.forbidden === true || unconfirmed || resume.unsettled !== undefined || resume.candidate !== undefined || destinationRereading || keptHold
+  const blockedSubmit = !canCreate || !isMemberGroup(values.groupId) || busy || failure?.forbidden === true || unconfirmed || resume.unsettled !== undefined || resume.candidate !== undefined || destinationRereading || keptHold
   // The confirm step's own fixed notice when no destination is resolved; a blocked answer at submit says the same and is not repeated.
   // Going on from an earlier attempt does not need the destination resolved now.
   const destinationBlockedShown = step === 3 && values.entry === 'template' && destination !== undefined && !resolvedDestination && !continuing
@@ -649,6 +660,11 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
       <div className="mt-6">
         <Stepper step={step} labels={stepLabels} />
       </div>
+      {groupBlock ? (
+        <div className="mt-6" data-testid="create-no-group">
+          <Notice tone="warning" title={buildText.page.noGroup.title} actions={<LinkButton href={paths.directory} size="sm">{buildText.page.noGroup.directory}</LinkButton>}>{groupBlock}</Notice>
+        </div>
+      ) : null}
       {!canCreate ? (
         <div className="mt-6">
           <Notice tone="error">{copy.create.forbidden}</Notice>
@@ -686,7 +702,8 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
                 onRetryCatalog={retryCatalog}
                 stale={staleCatalog}
                 blocked={blocked}
-                destinationNotice={destinationNotice}
+                destinationNotice={groupBlock ? undefined : destinationNotice}
+                groupNotice={groupBlock}
                 setupLink={setupLink}
                 catalog={templateRows}
                 codexAvailable={tools.data?.codexAvailable === true}
@@ -704,7 +721,7 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
                 form={form}
                 projectId={projectId}
                 sourceConnectionId={environment.adoption?.id}
-                groups={flatGroups}
+                groups={memberGroups}
                 domain={domain}
                 nameTaken={nameTaken}
                 checkingName={checkingName === true}

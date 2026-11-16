@@ -15,7 +15,7 @@ import { joinBusinessTemplates, type BusinessTemplate } from '../templates'
 
 export type EntryBlocks = Record<CreateEntry, string | undefined>
 
-export function StartStep({ form, disabled, loading, catalogFailed, onRetryCatalog, stale, blocked, destinationNotice, setupLink, catalog, codexAvailable, codexUnavailableReason, codexPolicy, onBuild, onCustomize, startingBuild, onTemplate, onExisting, onUseImage }: {
+export function StartStep({ form, disabled, loading, catalogFailed, onRetryCatalog, stale, blocked, destinationNotice, groupNotice, setupLink, catalog, codexAvailable, codexUnavailableReason, codexPolicy, onBuild, onCustomize, startingBuild, onTemplate, onExisting, onUseImage }: {
   form: CreateFormApi
   disabled: boolean
   loading: boolean
@@ -29,6 +29,11 @@ export function StartStep({ form, disabled, loading, catalogFailed, onRetryCatal
    * administrator can set it, so it never carries the platform-setup link.
    */
   destinationNotice?: string
+  /**
+   * Why nothing can be created at all (the caller belongs to no group). The page shows it once above the wizard;
+   * every entry here, the Excel one too, is unavailable and does not repeat it.
+   */
+  groupNotice?: string
   setupLink: boolean
   catalog: TemplateSummary[]
   codexAvailable: boolean
@@ -48,9 +53,18 @@ export function StartStep({ form, disabled, loading, catalogFailed, onRetryCatal
   // An omitted category is a framework template (canonical rule); an unknown one is neither.
   const frameworks = catalog.filter((item) => (item.category === undefined || isOneOf(item.category, 'framework')) && item.sourceKinds.some((kind) => isOneOf(kind, 'github-template')))
   const setupAction = setupLink ? <LinkButton to="/-/admin/platform" size="sm" icon={<Settings className="size-4" />}>{text.openPlatform}</LinkButton> : undefined
-  const reasons = [...new Set([blocked.existing, blocked.template].filter((reason) => reason !== undefined && reason !== destinationNotice))]
+  // Notices shown once (the destination above this step, the group above the wizard) are not repeated per entry.
+  const shownOnce = (reason: string) => reason === destinationNotice || reason === groupNotice
+  const reasons = [...new Set([blocked.existing, blocked.template].filter((reason) => reason !== undefined && !shownOnce(reason)))]
   const policyExplanation = aiPolicyExplanation(codexUnavailableReason, codexPolicy)
   const showAi = codexAvailable || Boolean(policyExplanation)
+  const excelEntry = (
+    <>
+      <FileSpreadsheet aria-hidden className="size-5 shrink-0 text-emerald-700" />
+      <span className="min-w-0"><span className="block text-sm font-semibold text-stone-900">{copy.create.start.excel.title}</span><span className="mt-1 block text-xs text-stone-600">{copy.create.start.excel.body}</span></span>
+      <ArrowRight aria-hidden className="ml-auto size-4 shrink-0 text-stone-500" />
+    </>
+  )
 
   return (
     <div className="space-y-7">
@@ -65,15 +79,16 @@ export function StartStep({ form, disabled, loading, catalogFailed, onRetryCatal
           )}
         </form.Field>
         {showAi ? <Button onClick={onBuild} tone="primary" loading={startingBuild} disabled={!codexAvailable || Boolean(policyExplanation) || !ready('ai') || !values.intent.trim()} icon={<Sparkles className="size-4" />}>{copy.create.start.build}</Button> : null}
-        {/* The destination notice stands once, above, not again under this button. */}
-        {showAi && (policyExplanation || (blocked.ai && blocked.ai !== destinationNotice)) && !loading ? <p className="text-sm text-stone-500">{policyExplanation ?? blocked.ai}</p> : null}
+        {/* The destination and group notices stand once, above, not again under this button. */}
+        {showAi && (policyExplanation || (blocked.ai && !shownOnce(blocked.ai))) && !loading ? <p className="text-sm text-stone-500">{policyExplanation ?? blocked.ai}</p> : null}
       </div>
 
-      <HrefLink href={paths.excel2app()} data-testid="create-excel2app" className="flex w-full items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50/40 p-4 text-left hover:bg-emerald-50 focus-visible:outline-2 focus-visible:outline-accent">
-        <FileSpreadsheet aria-hidden className="size-5 shrink-0 text-emerald-700" />
-        <span className="min-w-0"><span className="block text-sm font-semibold text-stone-900">{copy.create.start.excel.title}</span><span className="mt-1 block text-xs text-stone-600">{copy.create.start.excel.body}</span></span>
-        <ArrowRight aria-hidden className="ml-auto size-4 shrink-0 text-stone-500" />
-      </HrefLink>
+      {/* Excel makes its draft on the first upload, so without a group it does not open at all. */}
+      {groupNotice ? (
+        <button type="button" disabled data-testid="create-excel2app" className="flex w-full cursor-not-allowed items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50/40 p-4 text-left opacity-60">{excelEntry}</button>
+      ) : (
+        <HrefLink href={paths.excel2app()} data-testid="create-excel2app" className="flex w-full items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50/40 p-4 text-left hover:bg-emerald-50 focus-visible:outline-2 focus-visible:outline-accent">{excelEntry}</HrefLink>
+      )}
 
       <section aria-labelledby="business-templates-title">
         <h3 id="business-templates-title" className="mb-3 text-sm font-semibold text-stone-900">{copy.create.start.popular}</h3>
@@ -97,7 +112,7 @@ export function StartStep({ form, disabled, loading, catalogFailed, onRetryCatal
                     <span className="mt-3 text-xs font-medium text-stone-500">{copy.create.start.includes}</span>
                     <span className="mt-1 space-y-1 text-xs text-stone-600">{template.includes.map((item) => <span className="block" key={item}>・{item}</span>)}</span>
                   </span>
-                  {reason && reason !== destinationNotice ? <span className="mt-3 text-xs leading-relaxed text-amber-800">{reason}</span> : null}
+                  {reason && !shownOnce(reason) ? <span className="mt-3 text-xs leading-relaxed text-amber-800">{reason}</span> : null}
                 </button>
                 {showAi ? <Button tone="ghost" disabled={!codexAvailable || Boolean(policyExplanation) || !ready('ai')} onClick={() => onCustomize(template)}>{text.customizeWithAi}</Button> : null}
                 </div>
@@ -133,7 +148,7 @@ export function StartStep({ form, disabled, loading, catalogFailed, onRetryCatal
                 return <Field id="create-image" label={copy.create.advanced.image} hint={copy.create.advanced.imageHint} error={error}><TextInput id="create-image" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} onBlur={field.handleBlur} onKeyDown={(event) => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); onUseImage() } }} invalid={Boolean(error)} autoComplete="off" spellCheck={false} className="font-mono" disabled={!ready('image')} /></Field>
               }}
             </form.Field>
-            {!loading && !catalogFailed && blocked.image ? <Notice tone="warning" actions={setupAction}>{blocked.image}</Notice> : null}
+            {!loading && !catalogFailed && blocked.image && !shownOnce(blocked.image) ? <Notice tone="warning" actions={setupAction}>{blocked.image}</Notice> : null}
             <Button onClick={onUseImage} disabled={!ready('image')}>{copy.create.advanced.use}</Button>
           </div>
         </div>
