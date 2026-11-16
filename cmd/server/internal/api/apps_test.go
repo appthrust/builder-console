@@ -180,3 +180,94 @@ func TestCreateAppChecksProjectPermissionFirst(t *testing.T) {
 		}
 	}
 }
+
+func TestCreateAppRejectsRevokedMembershipWithoutCacheReset(t *testing.T) {
+	h := newHarness(t)
+	group := createTestGroup(h, "sales", nil)
+	h.setMember(group.ID, h.directory.person("editor").ID, "member")
+	app := call[domain.App](h, "editor", "POST", "/apps", map[string]any{"displayName": "Quote Desk", "groupId": group.ID}, 201)
+	// Warm the shared Directory view through a cached route before revocation.
+	require.Len(t, call[list[domain.App]](h, "editor", "GET", "/apps?scope=mine", nil, 200).Data, 1)
+	h.directory.mu.Lock()
+	h.directory.memberships = nil
+	h.directory.mu.Unlock()
+
+	failure := call[httpx.Error](h, "editor", "POST", "/apps", map[string]any{"displayName": "Another Desk", "groupId": group.ID}, 400)
+	require.Equal(t, "invalid_request", failure.Code)
+	require.Equal(t, "groupId must be one of your directory groups", failure.Message)
+	owned := call[list[domain.App]](h, "editor", "GET", "/apps?scope=mine", nil, 200)
+	require.Len(t, owned.Data, 1)
+	require.Equal(t, app.ID, owned.Data[0].ID)
+}
+
+func TestBindAppRequiresFreshEffectiveGroupMembership(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		subject string
+		revoke  bool
+		move    bool
+		status  int
+	}{
+		{name: "member first bind", subject: "editor", status: 200},
+		{name: "revoked owner", subject: "editor", revoke: true, status: 400},
+		{name: "admin without groups", subject: "admin", status: 400},
+		{name: "moved to non-member group", subject: "editor", move: true, status: 400},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			group := createTestGroup(h, "sales", nil)
+			destination := createTestGroup(h, "operations", nil)
+			h.setMember(group.ID, h.directory.person("editor").ID, "member")
+			app := call[domain.App](h, "editor", "POST", "/apps", map[string]any{"displayName": "Quote Desk", "groupId": group.ID}, 201)
+			// Warm cached membership, then mutate the Directory fixture directly.
+			call[list[domain.App]](h, tc.subject, "GET", "/apps", nil, 200)
+			if tc.revoke {
+				h.directory.mu.Lock()
+				h.directory.memberships = nil
+				h.directory.mu.Unlock()
+			}
+			if tc.move {
+				app = call[domain.App](h, "editor", "PATCH", "/apps/"+app.ID, map[string]any{"groupId": destination.ID}, 200)
+				require.Equal(t, destination.ID, app.Group.ID)
+			}
+			require.False(t, app.Bound())
+			input := map[string]string{"stackId": "stack-quote", "appName": "quote-live"}
+			if tc.status == 200 {
+				bound := call[domain.App](h, tc.subject, "POST", "/apps/"+app.ID+"/bind", input, tc.status)
+				require.True(t, bound.Bound())
+				require.Equal(t, input["stackId"], *bound.StackID)
+				require.Equal(t, input["appName"], *bound.AppName)
+				require.Equal(t, app.Group.ID, bound.Group.ID)
+			} else {
+				failure := call[httpx.Error](h, tc.subject, "POST", "/apps/"+app.ID+"/bind", input, tc.status)
+				require.Equal(t, "invalid_request", failure.Code)
+				require.Equal(t, "groupId must be one of your directory groups", failure.Message)
+				unchanged := call[domain.App](h, "editor", "GET", "/apps/"+app.ID, nil, 200)
+				require.False(t, unchanged.Bound())
+				require.Equal(t, app.AppName, unchanged.AppName)
+				require.Equal(t, app.Group.ID, unchanged.Group.ID)
+			}
+		})
+	}
+}
+
+func TestBindAppAlreadyBoundKeepsConflictWithoutMembership(t *testing.T) {
+	h := newHarness(t)
+	group := createTestGroup(h, "sales", nil)
+	h.setMember(group.ID, h.directory.person("editor").ID, "member")
+	app := call[domain.App](h, "editor", "POST", "/apps", map[string]any{"displayName": "Quote Desk", "groupId": group.ID}, 201)
+	input := map[string]string{"stackId": "stack-quote", "appName": "quote-live"}
+	call[domain.App](h, "editor", "POST", "/apps/"+app.ID+"/bind", input, 200)
+	call[list[domain.App]](h, "editor", "GET", "/apps", nil, 200)
+	h.directory.mu.Lock()
+	h.directory.memberships = nil
+	h.directory.mu.Unlock()
+
+	for _, subject := range []string{"editor", "admin"} {
+		for _, binding := range []map[string]string{input, {"stackId": "other-stack", "appName": "other-app"}} {
+			failure := call[httpx.Error](h, subject, "POST", "/apps/"+app.ID+"/bind", binding, 409)
+			require.Equal(t, "already_bound", failure.Code)
+			require.Equal(t, "The app is already bound to a platform stack", failure.Message)
+		}
+	}
+}

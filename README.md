@@ -8,8 +8,10 @@ Builder Console keeps app metadata, access requests, comments, and sharing polic
 Creating an app requires membership of the target group. Every creation entry
 (AI, templates, existing code, image, Excel) offers only the caller's effective
 groups: direct memberships plus groups inherited from them by descendants, not
-ancestors. `POST /api/console/apps` and `POST /build-sessions` reject any other
-group, with no Console-admin exception. Moving an existing app to another group
+ancestors. `POST /api/console/apps`, the first `POST /api/console/apps/{id}/bind`
+of an unbound record, and `POST /api/console/v1/build-sessions` check fresh
+Directory membership and reject any other group, with no Console-admin
+exception. Moving an existing app to another group
 (`PATCH /api/console/apps/{id}`) is a separate rule and does not require
 membership of the destination.
 

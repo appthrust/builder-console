@@ -104,7 +104,7 @@ func (a *API) registerBuildSessions() {
 		{"POST " + base + "/{id}/advance", a.advanceBuildSession}, {"POST " + base + "/{id}/turns", a.createBuildTurn}, {"GET " + base + "/{id}/turns", a.listBuildTurns}, {"GET " + base + "/{id}/turns/{turnId}", a.getBuildTurn},
 		{"POST " + base + "/{id}/turns/{turnId}/resolution", a.resolveBuildTurn}, {"GET " + base + "/{id}/spec-revisions/{revision}", a.getBuildSpecRevision}, {"PATCH " + base + "/{id}/publish-preferences", a.patchBuildPublish}, {"POST " + base + "/{id}/archive", a.archiveBuildSession},
 	} {
-		a.mux.HandleFunc(route.pattern, a.routeHandlerMode(false, false, false, route.handler))
+		a.mux.HandleFunc(route.pattern, a.routeHandlerMode(false, false, false, true, route.handler))
 	}
 }
 func writeBuildError(w http.ResponseWriter, err error) {

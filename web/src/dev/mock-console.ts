@@ -781,18 +781,18 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
           description?: string
           icon?: string
           tags?: string[]
-          groupId: string
+          groupId?: string | null
           slug?: string
           share?: SharePolicy
         }>(request)
-        if (!input.displayName?.trim() || !state.groups.some((g) => g.id === input.groupId)) {
-          return fail(400, 'invalid_request', 'displayName and an existing groupId are required')
-        }
-        // Like the server: a new app goes only into a group the caller belongs to (no Console administrator exception).
-        if (!personGroups(state.callerId).has(input.groupId)) return fail(400, 'invalid_request', 'groupId must be one of your directory groups')
+        // Like the server: a named target (unknown, empty, or a group the caller does not belong to; no Console
+        // administrator exception) is refused as such before the required fields are checked.
+        if (input.groupId != null && !personGroups(state.callerId).has(input.groupId)) return fail(400, 'invalid_request', 'groupId must be one of your directory groups')
+        if (!input.displayName?.trim() || input.groupId == null) return fail(400, 'invalid_request', 'displayName and groupId are required')
+        const groupId = input.groupId
         const slug = input.slug ?? slugify(input.displayName)
         if (!isValidSlug(slug)) return fail(400, 'invalid_request', 'invalid slug')
-        if (state.apps.some((a) => a.groupId === input.groupId && a.slug === slug)) return fail(409, 'slug_taken', `slug ${slug} is taken`)
+        if (state.apps.some((a) => a.groupId === groupId && a.slug === slug)) return fail(409, 'slug_taken', `slug ${slug} is taken`)
         let appName = slug
         for (let n = 2; state.apps.some((a) => a.appName === appName); n++) appName = `${slug}-${n}`
         const now = new Date().toISOString()
@@ -806,12 +806,12 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
           guide: '',
           capabilities: [],
           screenshots: [],
-          groupId: input.groupId,
+          groupId,
           ownerIds: [state.callerId],
           stackId: null,
           // The suggested label until /bind fixes it.
           appName,
-          share: input.share ?? share('group', [input.groupId]),
+          share: input.share ?? share('group', [groupId]),
           createdById: state.callerId,
           createdAt: now,
           updatedAt: now,

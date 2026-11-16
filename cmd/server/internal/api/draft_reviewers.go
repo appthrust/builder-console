@@ -55,7 +55,7 @@ func WithDraftReviewers(next http.Handler, projectID string, current func() *API
 				writeDraftError(w, httpx.Fail(401, "unauthenticated", "A valid bearer token is required"))
 				return
 			}
-			err = a.withRequest(ctx, claims, bearer, false, true, false, func(s *request) error {
+			err = a.withRequest(ctx, claims, bearer, false, true, false, false, func(s *request) error {
 				apps, err := s.tx.Apps(s.actor, "all", "", "")
 				if err != nil {
 					return err

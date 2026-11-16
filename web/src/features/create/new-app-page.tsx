@@ -121,8 +121,10 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
   const [saved] = useState(() => {
     const stored = readCreateSession(search.resume)
     const restored = draft ? restoreCreateDraft(draft, stored) : stored
-    // A remembered (or resumed) group the caller no longer belongs to is not offered; the default membership stands in.
-    return restored && !isMemberGroup(restored.values.groupId) ? { ...restored, values: { ...restored.values, groupId: defaultGroupId } } : restored
+    if (!restored || isMemberGroup(restored.values.groupId)) return restored
+    // An app this attempt already made stays in its group: going on never moves it (`keptGroup` below holds the attempt
+    // when that group is no longer the caller's). Only a form with nothing made yet takes the default membership.
+    return { ...restored, values: { ...restored.values, groupId: restored.progress.draft?.group.id ?? defaultGroupId } }
   })
   const form = useCreateForm(defaultGroupId, saved?.values)
   // `?group=` can change while the wizard is open; follow it until the user picks a group.
@@ -134,6 +136,10 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
   const initialStep = createSteps.indexOf(search.step ?? saved?.step ?? 'start') as Step
   const run = useCreateStore<RunState>({ step: initialStep, resume: saved?.progress ?? {} })
   const { step, phase, failure, checkingName, advancing, nameTaken, resume } = useSelector(run)
+  // An app this attempt already made, in a group the caller no longer belongs to: the creation is not continued here,
+  // and never moved to another group as part of it (moving an app is its settings' own action).
+  const keptGroup = resume.draft && !isMemberGroup(resume.draft.group.id) ? resume.draft.group : undefined
+  const entryBlock = groupBlock ?? (keptGroup ? text.keptGroup.body(keptGroup.name) : undefined)
   const [startingBuild, setStartingBuild] = useState(false)
   const [buildError, setBuildError] = useState<{ error: unknown }>()
   const [completed, setCompleted] = useState(false)
@@ -212,10 +218,10 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
   }
   const imageMissing = missingFor('image')
   const blocked: EntryBlocks = {
-    existing: groupBlock ?? missingFor('existing') ?? (defaultCatalog ? undefined : copy.create.start.existingUnavailable),
-    template: groupBlock ?? missingFor('template') ?? destinationNotice ?? (defaultCatalog ? undefined : copy.create.start.templateUnavailable),
-    ai: aiPolicyExplanation(tools.data?.codexUnavailableReason, tools.data?.codexPolicy) ?? (!aiGroupId ? buildText.page.noGroup.body : missingFor('ai') ?? destinationNotice ?? (tools.data?.codexAvailable ? undefined : copy.create.start.aiUnavailable)),
-    image: groupBlock ?? (imageMissing
+    existing: entryBlock ?? missingFor('existing') ?? (defaultCatalog ? undefined : copy.create.start.existingUnavailable),
+    template: entryBlock ?? missingFor('template') ?? destinationNotice ?? (defaultCatalog ? undefined : copy.create.start.templateUnavailable),
+    ai: aiPolicyExplanation(tools.data?.codexUnavailableReason, tools.data?.codexPolicy) ?? (!aiGroupId ? buildText.page.noGroup.body : entryBlock ?? missingFor('ai') ?? destinationNotice ?? (tools.data?.codexAvailable ? undefined : copy.create.start.aiUnavailable)),
+    image: entryBlock ?? (imageMissing
       ? `${copy.create.advanced.unavailable}${imageMissing}`
       : imageCatalog
         ? undefined
@@ -554,7 +560,7 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
 
   const submitApp = () => {
     const path = createPath()
-    if (!path || !catalog || !isMemberGroup(values.groupId) || !domain || templateProblem || run.state.phase || run.state.resume.unconfirmed) return
+    if (!path || !catalog || keptGroup || !isMemberGroup(values.groupId) || !domain || templateProblem || run.state.phase || run.state.resume.unconfirmed) return
     void attempt(async () => {
       const app = await submitCreate({ ...details, path }, run.state.resume, {
         api: createApi,
@@ -628,7 +634,7 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
   // After a destination answer the shown destination is re-read; nothing is sent until the new one is on screen.
   const destinationRereading = failure?.destination !== undefined && destinationRead.isFetching
   const keptHold = keptState === 'checking' || keptState === 'unknown'
-  const blockedSubmit = !canCreate || !isMemberGroup(values.groupId) || busy || failure?.forbidden === true || unconfirmed || resume.unsettled !== undefined || resume.candidate !== undefined || destinationRereading || keptHold
+  const blockedSubmit = !canCreate || keptGroup !== undefined || !isMemberGroup(values.groupId) || busy || failure?.forbidden === true || unconfirmed || resume.unsettled !== undefined || resume.candidate !== undefined || destinationRereading || keptHold
   // The confirm step's own fixed notice when no destination is resolved; a blocked answer at submit says the same and is not repeated.
   // Going on from an earlier attempt does not need the destination resolved now.
   const destinationBlockedShown = step === 3 && values.entry === 'template' && destination !== undefined && !resolvedDestination && !continuing
@@ -663,6 +669,10 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
       {groupBlock ? (
         <div className="mt-6" data-testid="create-no-group">
           <Notice tone="warning" title={buildText.page.noGroup.title} actions={<LinkButton href={paths.directory} size="sm">{buildText.page.noGroup.directory}</LinkButton>}>{groupBlock}</Notice>
+        </div>
+      ) : keptGroup ? (
+        <div className="mt-6" data-testid="create-kept-group">
+          <Notice tone="warning" title={text.keptGroup.title} actions={<LinkButton href={paths.directory} size="sm">{buildText.page.noGroup.directory}</LinkButton>}>{text.keptGroup.body(keptGroup.name)}</Notice>
         </div>
       ) : null}
       {!canCreate ? (
@@ -702,8 +712,8 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
                 onRetryCatalog={retryCatalog}
                 stale={staleCatalog}
                 blocked={blocked}
-                destinationNotice={groupBlock ? undefined : destinationNotice}
-                groupNotice={groupBlock}
+                destinationNotice={entryBlock ? undefined : destinationNotice}
+                groupNotice={entryBlock}
                 setupLink={setupLink}
                 catalog={templateRows}
                 codexAvailable={tools.data?.codexAvailable === true}

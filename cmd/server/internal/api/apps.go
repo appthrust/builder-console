@@ -139,7 +139,7 @@ func (s *request) applyApp(input appInput, app *domain.App, creating bool) error
 	}
 	if input.GroupID != nil {
 		group, err := s.findGroup(*input.GroupID)
-		// Creation requires the same effective membership as build sessions.
+		// Creation requires the same fresh effective membership as build sessions.
 		// PATCH keeps directory-wide destinations for existing app editors.
 		if err != nil || (creating && !slices.Contains(s.effectiveGroupIDs, group.ID)) {
 			return httpx.Invalid("groupId must be one of your directory groups")
@@ -330,6 +330,12 @@ func (a *API) bindApp(s *request) (any, int, error) {
 	}
 	if !domain.ValidSlug(input.StackID) || !domain.ValidSlug(input.AppName) {
 		return nil, 0, httpx.Invalid("stackId and appName must be valid DNS labels")
+	}
+	// First binding completes creation in the record's current group, even if
+	// an owner moved the unbound record there using the separate PATCH policy.
+	// Already-bound records retain the store's existing conflict response.
+	if !app.Bound() && !slices.Contains(s.effectiveGroupIDs, app.Group.ID) {
+		return nil, 0, httpx.Invalid("groupId must be one of your directory groups")
 	}
 	if err := s.tx.Bind(app, input.StackID, input.AppName); err != nil {
 		return nil, 0, err

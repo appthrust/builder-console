@@ -76,9 +76,10 @@ func New(database *store.Store, auth *identity.Authenticator, upstream *platform
 	a.route("GET /api/console/apps/{id}", false, true, a.app)
 	a.route("GET /api/console/apps/{id}/tools", false, true, a.appTools)
 	a.route("GET /api/console/apps/{id}/directory-entry", false, true, a.directoryEntry)
-	a.route("POST /api/console/apps", true, true, a.createApp)
+	// Creation and binding resolve fresh Directory authority before the transaction.
+	a.mux.HandleFunc("POST /api/console/apps", a.routeHandlerMode(true, true, true, true, a.createApp))
 	a.route("PATCH /api/console/apps/{id}", true, true, a.patchApp)
-	a.route("POST /api/console/apps/{id}/bind", true, true, a.bindApp)
+	a.mux.HandleFunc("POST /api/console/apps/{id}/bind", a.routeHandlerMode(true, true, true, true, a.bindApp))
 	a.route("DELETE /api/console/apps/{id}", true, true, a.deleteApp)
 	a.route("GET /api/console/apps/{id}/comments", false, true, a.comments)
 	a.route("POST /api/console/apps/{id}/comments", true, true, a.createComment)
@@ -137,12 +138,12 @@ func (a *API) route(pattern string, mutation, needsRoles bool, handler endpoint)
 }
 
 func (a *API) routeHandler(mutation, needsRoles bool, handler endpoint) http.HandlerFunc {
-	return a.routeHandlerMode(mutation, needsRoles, true, handler)
+	return a.routeHandlerMode(mutation, needsRoles, true, false, handler)
 }
 
 // Build handlers reuse authentication and Directory resolution, but own their
 // short transactions so no external HTTP call occurs inside Store.Do.
-func (a *API) routeHandlerMode(mutation, needsRoles, transactional bool, handler endpoint) http.HandlerFunc {
+func (a *API) routeHandlerMode(mutation, needsRoles, transactional, fresh bool, handler endpoint) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
@@ -173,11 +174,11 @@ func (a *API) routeHandlerMode(mutation, needsRoles, transactional bool, handler
 		me := r.Method == http.MethodGet && r.URL.Path == "/api/console/me"
 		run := a.withRequest
 		if !transactional {
-			run = func(ctx context.Context, claims identity.Identity, bearer string, mutation, needsRoles, me bool, handler func(*request) error) error {
-				return a.withResolvedRequest(ctx, claims, bearer, needsRoles, me, true, handler)
+			run = func(ctx context.Context, claims identity.Identity, bearer string, mutation, needsRoles, me, fresh bool, handler func(*request) error) error {
+				return a.withResolvedRequest(ctx, claims, bearer, needsRoles, me, fresh, handler)
 			}
 		}
-		err = run(ctx, claims, bearer, mutation, needsRoles, me, func(state *request) error {
+		err = run(ctx, claims, bearer, mutation, needsRoles, me, fresh, func(state *request) error {
 			state.r, state.w = r, w
 			if !transactional {
 				// Authenticate may normalize the scheme; forwarding must preserve
@@ -221,9 +222,10 @@ func (a *API) routeHandlerMode(mutation, needsRoles, transactional bool, handler
 
 // withRequest shares Directory membership, project access and transaction setup
 // between console routes and capability providers. me retains the self-profile
-// route's degraded-platform and non-member behavior.
-func (a *API) withRequest(ctx context.Context, claims identity.Identity, bearer string, mutation, needsRoles, me bool, handler func(*request) error) error {
-	return a.withResolvedRequest(ctx, claims, bearer, needsRoles, me, false, func(state *request) error {
+// route's degraded-platform and non-member behavior. fresh resolves the same
+// uncached Directory view as build sessions before opening the transaction.
+func (a *API) withRequest(ctx context.Context, claims identity.Identity, bearer string, mutation, needsRoles, me, fresh bool, handler func(*request) error) error {
+	return a.withResolvedRequest(ctx, claims, bearer, needsRoles, me, fresh, func(state *request) error {
 		return directoryError(a.store.Do(ctx, mutation, func(tx *store.Tx) error {
 			state.tx = tx
 			tx.DirectoryGroups = state.groups

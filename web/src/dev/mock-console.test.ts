@@ -721,3 +721,43 @@ describe('app tools (Built-in app Connect)', () => {
     }
   })
 })
+
+describe('creation needs a membership of the target group (like the server)', () => {
+  beforeEach(async () => { await call('POST', '/api/console/__mock/reset') })
+  afterEach(async () => { await call('POST', '/api/console/__mock/reset') })
+
+  test('a named target that is unknown, empty or not the caller\'s answers the server\'s 400; missing fields stay required', async () => {
+    const refused = { status: 400, body: { error: 'invalid_request', message: 'groupId must be one of your directory groups' } }
+    // 山田 (a Console administrator) belongs to 営業1課 only.
+    for (const groupId of ['g-missing', '', 'g-soumu', 'g-sales']) {
+      expect(await call('POST', '/api/console/apps', { displayName: 'Target', slug: 'target', groupId })).toMatchObject(refused)
+    }
+    // The target is judged before the other required field, as on the server.
+    expect(await call('POST', '/api/console/apps', { displayName: '', slug: 'target', groupId: 'g-missing' })).toMatchObject(refused)
+    const required = { status: 400, body: { error: 'invalid_request', message: 'displayName and groupId are required' } }
+    expect(await call('POST', '/api/console/apps', { displayName: 'Target', slug: 'target' })).toMatchObject(required)
+    expect(await call('POST', '/api/console/apps', { displayName: 'Target', slug: 'target', groupId: null })).toMatchObject(required)
+    expect(await call('POST', '/api/console/apps', { displayName: ' ', slug: 'target', groupId: 'g-team-a' })).toMatchObject(required)
+    expect((await call('POST', '/api/console/apps', { displayName: 'Target', slug: 'target', groupId: 'g-team-a' })).status).toBe(201)
+  })
+
+  test('a session create replayed with its key after the caller left the group is not found, like the server', async () => {
+    const create = async () => {
+      const url = new URL('/api/console/v1/build-sessions', 'http://mock.test')
+      const response = await consoleRoutes(new Request(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'replay-after-leaving' },
+        body: JSON.stringify({ kind: 'new-app', groupId: 'g-team-a', intent: '備品の貸し出しを記録したい', locale: 'ja' }),
+      }), url)
+      if (!response) throw new Error('unhandled build-session create')
+      return { status: response.status, body: await response.json() }
+    }
+    const first = await create()
+    expect(first.status).toBe(202)
+    // The same key replays the stored success while the caller still belongs to the group.
+    expect(await create()).toEqual(first)
+    await call('POST', '/api/console/__mock/leave-groups', {})
+    expect(await create()).toEqual({ status: 404, body: { error: 'not_found', message: 'Build group is not accessible' } })
+    expect((await call('GET', `/api/console/v1/build-sessions/${first.body.id}`)).status).toBe(404)
+  })
+})

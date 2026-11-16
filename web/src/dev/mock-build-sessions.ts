@@ -227,10 +227,11 @@ async function observe(stored: Stored, turn: TurnWire): Promise<TurnWire> {
 }
 
 /**
- * The write preconditions in contract order: headers present (428), well-formed (400), replay lookup
- * (original success, or 409 for another request with the same key), then the handler's version check.
+ * The write preconditions in contract order: headers present (428), well-formed (400), `authorize` (the server's
+ * group check, which precedes its receipt lookup), replay lookup (original success, or 409 for another request with
+ * the same key), then the handler's version check.
  */
-async function write(request: Request, owner: string, path: string, conditional: boolean, handler: (body: unknown, version: number) => Response | Promise<Response>): Promise<Response> {
+async function write(request: Request, owner: string, path: string, conditional: boolean, handler: (body: unknown, version: number) => Response | Promise<Response>, authorize?: (body: unknown) => Response | undefined): Promise<Response> {
   const key = request.headers.get('Idempotency-Key')
   const match = request.headers.get('If-Match')
   if (key === null || (conditional && match === null)) return fail(428, 'precondition_required', conditional ? 'Idempotency-Key and If-Match are required' : 'Idempotency-Key is required')
@@ -238,6 +239,8 @@ async function write(request: Request, owner: string, path: string, conditional:
   if (conditional && !buildETag.safeParse(match).success) return fail(400, 'invalid_argument', 'malformed If-Match', { field: '/If-Match' })
   let body: unknown
   try { body = JSON.parse(await request.text()) } catch { return fail(400, 'invalid_argument', 'request body is not JSON') }
+  const refused = authorize?.(body)
+  if (refused) return refused
   const canonical = `${request.method} ${path} ${JSON.stringify(body)}`
   const scope = `${owner}|${request.method} ${path}|${key}`
   const replay = replays.get(scope)
@@ -361,7 +364,6 @@ export async function buildSessionRoutes(request: Request, url: URL, caller: { o
     return write(request, owner, url.pathname, false, (body) => {
       const parsed = buildCreateSession.safeParse(body)
       if (!parsed.success) return invalid(parsed.error.issues)
-      if (!caller.groupIds.includes(parsed.data.groupId)) return fail(404, 'not_found', 'Build group is not accessible')
       const now = stamp()
       const markdown = specMarkdown(parsed.data.intent)
       const stored: Stored = {
@@ -375,6 +377,10 @@ export async function buildSessionRoutes(request: Request, url: URL, caller: { o
       }
       sessions.set(stored.session.id, stored)
       return sessionAnswer(stored, 202)
+    }, (body) => {
+      // A malformed body is the handler's 400; a well-formed one names a group the caller must belong to now, also on replay.
+      const parsed = buildCreateSession.safeParse(body)
+      return parsed.success && !caller.groupIds.includes(parsed.data.groupId) ? fail(404, 'not_found', 'Build group is not accessible') : undefined
     })
   }
   if (id === 'resolve' && !sub && method === 'GET') {
