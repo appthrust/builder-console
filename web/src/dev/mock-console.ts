@@ -984,8 +984,12 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
     }
     if (sub === 'bind' && method === 'POST') {
       if (!canEdit) return forbidden()
-      if (stored.stackId) return fail(409, 'already_bound', 'already bound')
       const input = await body<{ stackId: string; appName: string }>(request)
+      // Like the server: the first bind completes creation in the record's current group, so the caller must belong to
+      // it now (no Console administrator exception), also after an owner moved the unbound record there. A record
+      // already bound keeps the conflict, whatever the caller's memberships.
+      if (stored.stackId) return fail(409, 'already_bound', 'The app is already bound to a platform stack')
+      if (!personGroups(state.callerId).has(stored.groupId)) return fail(400, 'invalid_request', 'groupId must be one of your directory groups')
       Object.assign(stored, { stackId: input.stackId, appName: input.appName, updatedAt: new Date().toISOString() })
       return json(toApp(stored))
     }

@@ -760,4 +760,53 @@ describe('creation needs a membership of the target group (like the server)', ()
     expect(await create()).toEqual({ status: 404, body: { error: 'not_found', message: 'Build group is not accessible' } })
     expect((await call('GET', `/api/console/v1/build-sessions/${first.body.id}`)).status).toBe(404)
   })
+
+  describe('the first bind of an unbound app needs the caller to belong to its current group now', () => {
+    const refused = { status: 400, body: { error: 'invalid_request', message: 'groupId must be one of your directory groups' } }
+    const alreadyBound = { status: 409, body: { error: 'already_bound', message: 'The app is already bound to a platform stack' } }
+    const as = (personId: string, role: 'Admin' | 'Editor') => call('POST', '/api/console/__mock/caller', { personId, role })
+    const unbound = async (slug: string) => {
+      const created = await call('POST', '/api/console/apps', { displayName: 'Bind check', slug, groupId: 'g-team-a' })
+      expect(created.status).toBe(201)
+      return created.body as { id: string; appName: string }
+    }
+    const bind = (app: { id: string; appName: string }) => call('POST', `/api/console/apps/${app.id}/bind`, { stackId: app.appName, appName: app.appName })
+
+    test('an owner whose membership was revoked after creating cannot complete it', async () => {
+      await as('p-suzuki', 'Editor')
+      const app = await unbound('revoked-owner')
+      await call('POST', '/api/console/__mock/leave-groups', {})
+      expect(await bind(app)).toEqual(refused)
+      expect((await call('GET', `/api/console/apps/${app.id}`)).body.stackId).toBeNull()
+    })
+
+    test('a Console administrator who belongs to no group cannot complete another person\'s creation', async () => {
+      await as('p-suzuki', 'Editor')
+      const app = await unbound('admin-no-group')
+      await as('p-yamada', 'Admin')
+      await call('POST', '/api/console/__mock/leave-groups', {})
+      expect(await bind(app)).toEqual(refused)
+    })
+
+    test('an owner who moved the unbound record into a group they do not belong to cannot complete it there', async () => {
+      await as('p-yamada', 'Editor')
+      const app = await unbound('moved-away')
+      // Moving is the separate PATCH policy (unchanged): the owner may move it anywhere.
+      expect((await call('PATCH', `/api/console/apps/${app.id}`, { groupId: 'g-soumu' })).status).toBe(200)
+      expect(await bind(app)).toEqual(refused)
+    })
+
+    test('a member completes the first bind; a bound record stays a conflict whatever the caller\'s memberships', async () => {
+      await as('p-yamada', 'Editor')
+      const app = await unbound('member-binds')
+      const bound = await bind(app)
+      expect(bound.status).toBe(200)
+      expect(bound.body).toMatchObject({ id: app.id, stackId: app.appName, appName: app.appName })
+      expect(await bind(app)).toEqual(alreadyBound)
+      await as('p-yamada', 'Admin')
+      await call('POST', '/api/console/__mock/leave-groups', {})
+      expect(await bind(app)).toEqual(alreadyBound)
+      expect(await call('POST', '/api/console/apps/a-mitsumori/bind', { stackId: 'other', appName: 'other' })).toEqual(alreadyBound)
+    })
+  })
 })
