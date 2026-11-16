@@ -74,6 +74,14 @@ export const textJa = {
     failed: 'アプリのビルドに失敗しています',
     status: 'ビルドに失敗しています',
     run: 'ビルドの実行を見る',
+    /** A failed latest build of an app that still runs its previous version (APT-1136): secondary, never 問題あり. */
+    behind: {
+      title: '最新のビルドに失敗しました',
+      detail: 'いま動いているのは、前にビルドに成功した版です。新しい変更は、まだアプリに入っていません。',
+      cause: (lines: string) => `原因: ${lines}`,
+      latest: '最新のビルド',
+      latestFailed: '失敗しました（前の版が動いています）',
+    },
   },
   failure: {
     forbidden: { title: 'アプリを作る権限がありません', reason: '基盤の担当者に「アプリを作る権限」を依頼してください。' },

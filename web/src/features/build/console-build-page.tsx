@@ -88,7 +88,7 @@ function ConsoleLayout({ view, actions, stale, stages, draftError, openArtifact 
       : undefined)
   const busy = Boolean(planWaiting) || stages?.stage === 'build'
   return <div className="flex min-h-0 flex-1 flex-col" data-testid="build-session" data-engine="console-v1" data-stage={stages?.stage ?? (lifecycle ? STAGE_BY_LIFECYCLE[lifecycle] : undefined)}>
-    <SessionHeader name={name} stage={stages?.stage ?? (lifecycle ? STAGE_BY_LIFECYCLE[lifecycle]! : 'ask')} released={stages?.released ?? false} unsupported={!lifecycle} action={action} />
+    <SessionHeader name={name} stage={stages?.stage ?? (lifecycle ? STAGE_BY_LIFECYCLE[lifecycle]! : 'ask')} released={stages?.released ?? false} unsupported={!lifecycle} outcome={stages?.outcome} action={action} />
     <PageNotices view={view} actions={actions} stale={stale} archived={archived} extra={[
       ...(draftError !== undefined && draftError !== null ? [<ActionError key="draft-error" error={draftError} />] : []),
       ...(stages?.notices ?? []),

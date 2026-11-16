@@ -185,6 +185,10 @@ export function OverviewTab({
                 <dd className="mt-0.5 font-mono break-all text-stone-800">{value ?? copy.app.overview.advanced.none}</dd>
               </div>
             ))}
+            {view.latestBuildFailed ? <div data-testid="advanced-latest-build">
+              <dt className="text-stone-500">{buildCopy.sourceBuild.behind.latest}</dt>
+              <dd className="mt-0.5 text-busy-ink">{buildCopy.sourceBuild.behind.latestFailed}</dd>
+            </div> : null}
             {sourceRepository?.build?.runUrl ? <div>
               <dt className="text-stone-500">{buildCopy.sourceBuild.run}</dt>
               <dd className="mt-0.5 break-all"><a href={sourceRepository.build.runUrl} target="_blank" rel="noopener noreferrer" className="text-accent-strong underline">{sourceRepository.build.runUrl}</a></dd>

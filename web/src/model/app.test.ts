@@ -751,6 +751,24 @@ describe('source build status on app details and mine rows', () => {
       expect(deriveAppView(app, { ...input, sourceRepositories: [repositoryFacts({ ...repository, build: { state } })] }).status).toBe('live')
     }
   })
+  test('an app that still runs a release keeps its own status and carries the failure only as secondary (APT-1136)', () => {
+    const result = deriveAppView(app, input)
+    expect(result).toMatchObject({ status: 'live', label: copy.status.live, latestBuildFailed: true, platform: { status: 'live' } })
+    expect(result.second).not.toBe('ビルドに失敗しています')
+    expect(model.hasRunningRelease(result.platform!)).toBe(true)
+    // Recovered: nothing secondary is left.
+    expect(deriveAppView(app, { ...input, sourceRepositories: [repositoryFacts({ ...repository, build: { state: 'healthy' } })] }).latestBuildFailed).toBeUndefined()
+  })
+  test('without a running release (not Ready, or a latest release that did not succeed) the build failure stays the status', () => {
+    for (const changed of [
+      { componentSummaries: [summary('shop-web', { statusKey: 'Provisioning', reasonKey: 'DeliveryProgressing' }), readyComponents[1]!] },
+      { releasesByApplication: { shop: overview(release('InProgress')) } },
+    ]) {
+      const result = deriveAppView(app, { ...input, ...changed })
+      expect(result).toMatchObject({ status: 'failed', label: 'ビルドに失敗しています', second: 'ビルドに失敗しています' })
+      expect(result.latestBuildFailed).toBeUndefined()
+    }
+  })
   test('drafts use the retained source reference before a stack exists', () => {
     expect(deriveAppView({ ...app, stackId: null }, input, Date.now(), { observed: true, progress: { sourceRepositoryId: repository.id } })).toMatchObject({ status: 'failed', second: 'ビルドに失敗しています', draft: true })
   })

@@ -79,6 +79,18 @@ export const textEn: typeof textJa = {
     drafts: 'Drafts',
     back: (label: string) => `Back to ${label}`,
   },
+  outcome: {
+    word: { built: 'Ready', unchanged: 'No changes', stopped: 'Stopped', interrupted: 'Waiting to resume' },
+    tasks: (finished: number, total: number) => `Task ${finished} / ${total}`,
+    current: (title: string) => `Now: ${title}`,
+    elapsed: (label: string) => `Elapsed ${label}`,
+    expectation: 'It takes about 10–30 minutes in total. The work continues even if you close this page.',
+    built: 'The app is ready.',
+    publishTo: (audience: string) => `Press “Publish” to make it available (${audience}).`,
+    publish: 'Press “Publish” and choose who can see it to make it available.',
+    unchanged: 'The AI finished, but every task was skipped, so the app has not changed.',
+    unchangedRetry: 'Trying again redoes the skipped tasks.',
+  },
   proposal: {
     title: (name: string) => `Proposal: ${name}`,
     purposeSeparator: ' — ',

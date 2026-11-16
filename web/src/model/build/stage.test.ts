@@ -247,3 +247,39 @@ describe('long-operation progress', () => {
     expect(JSON.stringify(steps)).not.toContain('secret-ws-id')
   })
 })
+
+describe('what the implementation run means (APT-1124)', () => {
+  const created = draftOf({ ...draftWire, phase: 'created' })
+  const tasks = [
+    { id: 'one', title: '顧客一覧', status: { kind: 'known', value: 'done' } },
+    { id: 'two', title: '見積の編集', status: { kind: 'known', value: 'running' } },
+    { id: 'three', title: '承認', status: { kind: 'known', value: 'pending' } },
+  ] as const
+  const running = { phase: 'running', done: false, implemented: true, tasks, currentTaskId: 'two', runStartedAt: startedAt }
+  test('while it runs: tasks finished of all, the current task and the time since the run started', () => {
+    expect(deriveStage({ ...base, draft: created, implementation: running })).toMatchObject({
+      stage: 'build', build: { phase: 'implementing' }, primary: { action: 'publish', enabled: false },
+      outcome: { kind: 'implementing', finished: 1, total: 3, current: '見積の編集', elapsedLabel: '1:07', interrupted: false },
+    })
+    // A skipped task is finished work; a title that is not product language is not shown.
+    const skipped = [{ ...tasks[0], status: { kind: 'known', value: 'skipped' } }, { ...tasks[1], title: 'Codex workspace setup' }, tasks[2]] as const
+    expect(deriveStage({ ...base, draft: created, implementation: { ...running, tasks: skipped } }).outcome).toEqual({ kind: 'implementing', finished: 1, total: 3, elapsedLabel: '1:07', interrupted: false })
+    for (const phase of ['starting-workspace', 'pushing']) expect(deriveStage({ ...base, draft: created, implementation: { ...running, phase } }).outcome?.kind).toBe('implementing')
+    expect(deriveStage({ ...base, draft: created, implementation: { ...running, runStartedAt: 'not-a-date' } }).outcome).not.toHaveProperty('elapsedLabel')
+  })
+  test('a running run whose lease lapsed is interrupted; a lease still ahead is not', () => {
+    expect(deriveStage({ ...base, draft: created, implementation: { ...running, leaseExpiresAt: new Date(now - 1).toISOString() } }).outcome).toMatchObject({ kind: 'implementing', interrupted: true })
+    expect(deriveStage({ ...base, draft: created, implementation: { ...running, leaseExpiresAt: new Date(now + 1000).toISOString() } }).outcome).toMatchObject({ interrupted: false })
+  })
+  test('finished with something pushed is built (公開する enabled); all skipped is unchanged (公開 stays closed); a failed run is stopped', () => {
+    expect(deriveStage({ ...base, draft: created, implementation: { phase: 'done', done: true, implemented: true } })).toMatchObject({ build: { phase: 'done' }, primary: { enabled: true }, outcome: { kind: 'built' } })
+    expect(deriveStage({ ...base, draft: created, implementation: { phase: 'done', done: true, implemented: false } })).toMatchObject({ primary: { enabled: false }, outcome: { kind: 'unchanged' } })
+    expect(deriveStage({ ...base, draft: created, implementation: { phase: 'failed', done: false, implemented: true } })).toMatchObject({ primary: { enabled: false }, outcome: { kind: 'stopped' } })
+  })
+  test('says nothing for an idle checklist, while a preparation card speaks, or for a draft in an unknown state', () => {
+    for (const phase of ['idle', 'unsupported']) expect(deriveStage({ ...base, draft: created, implementation: { phase, done: false, implemented: false } }).outcome).toBeUndefined()
+    const appProgress = progressCard({ kind: 'prepare', now })
+    expect(deriveStage({ ...base, draft: created, appProgress, implementation: { phase: 'done', done: true, implemented: true } }).outcome).toBeUndefined()
+    expect(deriveStage({ ...base, draft: created, execution: executionOf({ ...executionWire, status: 'a-state-added-later' }), implementation: { phase: 'done', done: true, implemented: true } })).not.toHaveProperty('outcome')
+  })
+})

@@ -17,7 +17,7 @@ type Assistant = Extract<BuildMessage, { role: 'assistant' }>
 /** Pixels from the bottom that still count as "reading the newest message". */
 const STICK = 96
 
-export function ConversationPane({ messages, stage, answering, unsupported = false, thinking: turnPending, waitingForAi, planning, proposalAction, queued, progress, prepareOpen, ownerGroupName, failure, planRejected, canRecheck = false, onSend, onRetry, onUseName }: {
+export function ConversationPane({ messages, stage, answering, unsupported = false, thinking: turnPending, waitingForAi, planning, proposalAction, queued, progress, prepareOpen, ownerGroupName, failure, planRejected, canRecheck = false, end, onSend, onRetry, onUseName }: {
   messages: BuildMessage[]
   stage: BuildStage
   answering: boolean
@@ -36,6 +36,8 @@ export function ConversationPane({ messages, stage, answering, unsupported = fal
   prepareOpen?: boolean
   ownerGroupName?: string
   progress?: ProgressCard
+  /** What the implementation run means (build-outcome.tsx), under the messages. */
+  end?: ReactNode
   /** The current failure; a name collision turns the notice's action into the name choice. */
   failure?: BuildFailure
   /**
@@ -123,6 +125,7 @@ export function ConversationPane({ messages, stage, answering, unsupported = fal
           if (message.role === 'user') return isFirstTurn(message.text) || isPrepareTurn(message.text) ? null : <UserMessage key={key} text={message.text} />
           return <AssistantMessage key={key} message={message} active={message === latest && answerable} action={message.proposal ? proposalAction : undefined} />
         })}
+        {end}
         {thinking ? <AiTurn>
           <p className="flex items-center gap-2 text-stone-600"><Loader2 aria-hidden className="size-4 animate-spin text-accent" />{thinking.title}{thinking.elapsedLabel ? <span className="tabular-nums text-stone-400">{thinking.elapsedLabel}</span> : null}</p>
           {thinking.hint ? <p className="mt-1 text-xs text-stone-500">{thinking.hint}</p> : null}

@@ -70,6 +70,13 @@ export const textEn: typeof textJa = {
     failed: 'The app could not be built',
     status: 'Build failed',
     run: 'View build run',
+    behind: {
+      title: 'The latest build failed',
+      detail: 'The version running now is the previous one that built successfully. The new changes are not in the app yet.',
+      cause: (lines: string) => `Cause: ${lines}`,
+      latest: 'Latest build',
+      latestFailed: 'Failed (the previous version is running)',
+    },
   },
   failure: {
     forbidden: { title: 'Permission needed', reason: 'Ask your administrator for permission to create apps.' },

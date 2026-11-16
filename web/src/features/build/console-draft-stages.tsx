@@ -24,7 +24,7 @@ import { isBuildPending } from '../../model/build/progress'
 import { planReadiness } from '../../model/build/replies'
 import { parseSpec } from '../../model/build/spec'
 import { deriveStage } from '../../model/build/stage'
-import type { BuildFailure, BuildStage } from '../../model/build/types'
+import type { BuildFailure, BuildOutcome, BuildStage } from '../../model/build/types'
 import type { BuildDraft, BuildExecutionStep } from '../../model/contracts/build'
 import type { Group, Me } from '../../model/contracts/console'
 import { setArtifactCollapsed } from '../../shell/store'
@@ -37,7 +37,9 @@ import { readConsoleCreation, saveConsoleCreation } from './console-session-stat
 import type { ConsoleBuildView } from './console-view'
 import { AiTurn, FailureReference, PlanRejectionActions } from './conversation-pane'
 import { text } from './copy'
-import { implemented } from './implement'
+import { stageImplementation } from './implement'
+import { BuildOutcomeTurn } from './build-outcome'
+import { shareScopeLabel } from '../../model/access'
 import { NameChoice } from './name-choice'
 import { ProposalBody } from './proposal'
 import { PublishStep } from './publish-step'
@@ -55,7 +57,9 @@ export interface ConsoleStages {
   released: boolean
   /** The header's stage action once building started (公開する, progress); undefined keeps the plan action. */
   headerAction?: ReactNode
-  /** The plan's proposal under the conversation, with 「この内容で作る」 or the re-plan action. */
+  /** What the implementation run means once building started (stage `outcome`): the header's state word and rail. */
+  outcome?: BuildOutcome
+  /** The plan's proposal under the conversation, with 「この内容で作る」 or the re-plan action, then the run's outcome. */
   conversationEnd?: ReactNode
   /** What is being built, once the creation started; undefined keeps the specification pane. */
   artifact?: ReactNode
@@ -93,9 +97,9 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
   const spec = useMemo(() => parseSpec(session.specification.markdown).spec, [session.specification.markdown])
 
   const creation = useDraftCreation({ projectId, draft, tab, hasPending: false, now })
-  const { app, appProgress, generation, execution, implementation, published } = creation
+  const { app, appProgress, generation, execution, implementation, implementing, published } = creation
   const running = [generation, execution].some(isBuildPending)
-  const result = deriveStage({ draft, generation, execution, appProgress, implementation: { phase: implementation.state.phase, done: implementation.state.phase === 'done', implemented: implemented(implementation.state), activityTail: implementation.state.activityTail }, published, now })
+  const result = deriveStage({ draft, generation, execution, appProgress, implementation: stageImplementation(implementation.state), published, now })
 
   function patch(next: Partial<CreationTab>) {
     tabRef.current = { ...tabRef.current, ...next }
@@ -128,10 +132,11 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
   })
 
   useEffect(() => {
-    if (!running && !tab.prepareRequested && !appProgress) return
+    // The implementation's 経過 (stage `outcome`) needs the clock too; nothing is sent on a tick by itself.
+    if (!running && !tab.prepareRequested && !appProgress && !implementing) return
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
-  }, [running, tab.prepareRequested, Boolean(appProgress)])
+  }, [running, tab.prepareRequested, Boolean(appProgress), implementing])
 
   // The server moves the session to `created` once the draft has an execution: read the session again.
   useEffect(() => {
@@ -206,18 +211,25 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
             else if (context !== 'plan') effects.retry(context)
           }}>{failure.failure.kind === 'unconfirmed' ? buildCopy.failure.confirm : text.conversation.retry}</Button> : undefined
 
+  // What the run means, under the conversation: 公開する is offered there too once the app is built (APT-1124).
+  const publishScope = publishSaved ? view.publish?.desired.shareScope : undefined
+  const outcomeTurn = started && result.outcome ? <BuildOutcomeTurn outcome={result.outcome}
+    audience={publishScope ? shareScopeLabel(publishScope, groups.find((group) => group.id === session.groupId)?.name) : undefined}
+    publish={{ label: buildCopy.primary.publish, enabled: primary.enabled, onClick: () => { setSharing(true); onOpenArtifact() } }}
+    retry={appReadOnly ? undefined : { pending: Boolean(implementation.state.retryPending), onClick: implementation.retry }} /> : null
+  const planEnd = draft.creationPlanUnreadable
+    ? <><AiTurn><Notice tone="warning" title={buildCopy.unreadablePlan.title} actions={!started ? <PlanRejectionActions replan={{ disabled: !view.canRequestPlan || running, onClick: () => actions.requestPlan() }} /> : undefined}>{buildCopy.unreadablePlan.detail}</Notice></AiTurn>{askPublish ? <AiTurn><ConsolePublishSettings view={view} actions={actions} disabled={view.unsupported} /></AiTurn> : null}</>
+    : (readiness.kind !== 'none' && proposal) || askPublish ? <>
+      {readiness.kind !== 'none' && proposal ? <AiTurn><ProposalBody proposal={{ ...proposal, stale: false }} action={proposalAction} /></AiTurn> : null}
+      {askPublish ? <AiTurn><ConsolePublishSettings view={view} actions={actions} disabled={view.unsupported} /></AiTurn> : null}
+    </> : null
+
   return {
     stage: started ? result.stage : 'decide',
     released,
     ...(started ? { headerAction: continuing && improve ? improve : <StageAction stage={result.stage} primary={primary} progress={result.progress} onPrimary={() => { setSharing(true); onOpenArtifact() }} /> } : {}),
-    ...(draft.creationPlanUnreadable ? {
-      conversationEnd: <><AiTurn><Notice tone="warning" title={buildCopy.unreadablePlan.title} actions={!started ? <PlanRejectionActions replan={{ disabled: !view.canRequestPlan || running, onClick: () => actions.requestPlan() }} /> : undefined}>{buildCopy.unreadablePlan.detail}</Notice></AiTurn>{askPublish ? <AiTurn><ConsolePublishSettings view={view} actions={actions} disabled={view.unsupported} /></AiTurn> : null}</>,
-    } : (readiness.kind !== 'none' && proposal) || askPublish ? {
-      conversationEnd: <>
-        {readiness.kind !== 'none' && proposal ? <AiTurn><ProposalBody proposal={{ ...proposal, stale: false }} action={proposalAction} /></AiTurn> : null}
-        {askPublish ? <AiTurn><ConsolePublishSettings view={view} actions={actions} disabled={view.unsupported} /></AiTurn> : null}
-      </>,
-    } : {}),
+    ...(started && result.outcome ? { outcome: result.outcome } : {}),
+    ...(planEnd || outcomeTurn ? { conversationEnd: <>{planEnd}{outcomeTurn}</> } : {}),
     ...(started ? {
       // The failure is one page notice with its retry; the pane does not repeat it (a failed preparation's card says the same).
       artifact: <ArtifactPane draft={draft} spec={spec} proposal={proposal} stage={result.stage} progress={failure?.context === 'prepare' ? undefined : result.progress} implementation={implementation.state}

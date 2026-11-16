@@ -15,7 +15,7 @@ import { composeBuildIntent, conversationTurns, decomposeBuildIntent, isPrepareT
 import { parseSpec, serializeSpec } from '../../model/build/spec'
 import { deriveStage, hasUnplannedKickoff, needsPlanRefresh } from '../../model/build/stage'
 import type { BuildFailure, BuildMessage } from '../../model/build/types'
-import { implemented } from './implement'
+import { stageImplementation } from './implement'
 import { acknowledgeReply, initialSession, queueReply, readBuildSession, saveBuildSession, startConversation, startPrepareConversation, type BuildSession } from './session'
 import { draftFailure, isPlanRejected, useDraftCreation, useDraftCreationEffects, writeDraft } from './use-draft-creation'
 import { text } from './copy'
@@ -62,7 +62,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
   const planBlocksStart = Boolean(draft.creationPlanUnreadable) && !isBuildPending(execution) && !draft.createdApplicationId
   const turn = draft.conversationTurns.at(-1)
   const running = [generation, turn, execution].some(isBuildPending)
-  const result = deriveStage({ draft, generation, turn, execution, appProgress, implementation: { phase: implementation.state.phase, done: implementation.state.phase === 'done', implemented: implemented(implementation.state), activityTail: implementation.state.activityTail }, published, lastPlannedIntent: session.lastPlannedIntent, now })
+  const result = deriveStage({ draft, generation, turn, execution, appProgress, implementation: stageImplementation(implementation.state), published, lastPlannedIntent: session.lastPlannedIntent, now })
   const { spec } = useMemo(() => parseSpec(draft.specMarkdown), [draft.specMarkdown])
   const preparationDone = Boolean(appView?.platform) && !appProgress
   const messages = useMemo(() => messagesFromDraft(proposalDraft, session.messages, { lastPlannedIntent: session.lastPlannedIntent, preparationDone, destination }), [proposalDraft, session.messages, session.lastPlannedIntent, preparationDone, destination])
@@ -128,10 +128,11 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
   }
   useEffect(() => { saveBuildSession(draft.id, store.state) }, [draft.id, store])
   useEffect(() => {
-    if (!running && !session.pending.length && !session.prepareRequested && !appProgress) return
+    // The implementation's 経過 (stage `outcome`) needs the clock too; nothing is sent on a tick by itself.
+    if (!running && !session.pending.length && !session.prepareRequested && !appProgress && !implementing) return
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
-  }, [running, session.pending.length, session.prepareRequested, Boolean(appProgress)])
+  }, [running, session.pending.length, session.prepareRequested, Boolean(appProgress), implementing])
 
   useEffect(() => {
     nameRetries.current = 0

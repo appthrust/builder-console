@@ -1,8 +1,10 @@
-import { isOneOf, jobState, knownValue, type BuildDraft, type BuildExecution, type BuildGeneration, type BuildTurn } from '../contracts/build'
+import type { OpenValue } from '../../api/boundary'
+import { isOneOf, jobState, knownValue, type BuildDraft, type BuildExecution, type BuildGeneration, type BuildTurn, type TaskStatus } from '../contracts/build'
 import { buildCopy } from './copy'
-import { isBuildPending, progressCard } from './progress'
+import { formatElapsed, isBuildPending, progressCard } from './progress'
 import { conversationTurns, isKickoffReply, prepareAnswers } from './questions'
-import type { BuildPhase, BuildPrimary, BuildStage, ProgressCard } from './types'
+import type { BuildOutcome, BuildPhase, BuildPrimary, BuildStage, ProgressCard } from './types'
+import { isProductLanguage } from './wording'
 
 /** Publication belongs to the draft; a later implementation invalidates that published version. */
 export function draftPublished(draft: Pick<BuildDraft, 'publishedAt' | 'implementationRuns'>): boolean {
@@ -44,15 +46,27 @@ export interface StageInput {
   turn?: BuildTurn
   execution?: BuildExecution
   lastPlannedIntent?: string
-  /** `implemented`: at least one task was pushed, so the app is more than the template. */
-  implementation?: { phase: string; done: boolean; implemented: boolean; activityTail?: string }
+  /**
+   * `implemented`: at least one task was pushed, so the app is more than the template. The run's tasks, current task,
+   * start and lease (`leaseExpiresAt` only for a run known to be running) feed `outcome` (APT-1124).
+   */
+  implementation?: {
+    phase: string; done: boolean; implemented: boolean; activityTail?: string
+    tasks?: readonly { id: string; title: string; status: OpenValue<TaskStatus> }[]
+    currentTaskId?: string
+    runStartedAt?: string
+    leaseExpiresAt?: string
+  }
   appProgress?: ProgressCard
   published: boolean
   now: number
 }
 
-/** `unsupported`: the draft's phase or its latest job's state is unknown to this console; no stage action is offered. */
-export interface StageResult { stage: BuildStage; build?: { phase: BuildPhase }; primary: BuildPrimary; progress?: ProgressCard; unsupported?: true }
+/**
+ * `unsupported`: the draft's phase or its latest job's state is unknown to this console; no stage action is offered.
+ * `outcome`: what the implementation run means for the user, once the app is made and no preparation card speaks.
+ */
+export interface StageResult { stage: BuildStage; build?: { phase: BuildPhase }; primary: BuildPrimary; progress?: ProgressCard; outcome?: BuildOutcome; unsupported?: true }
 
 export function deriveStage(input: StageInput): StageResult {
   const { draft } = input
@@ -63,7 +77,32 @@ export function deriveStage(input: StageInput): StageResult {
   // The draft's phase or the state of its latest job is a value this console does not know:
   // keep showing what is known, but nothing that depends on that state can be started.
   const unsupported = draft?.phase.kind === 'unknown' || [generation, turn, execution].some((job) => jobState(job) === 'unknown')
-  return unsupported ? { ...result, primary: { action: 'none', label: '', enabled: false }, unsupported: true } : result
+  if (!unsupported) return result
+  // Nothing that depends on an unknown state is said or offered, including what the run is up to.
+  const { outcome: _outcome, ...known } = result
+  return { ...known, primary: { action: 'none', label: '', enabled: false }, unsupported: true }
+}
+
+/**
+ * The run in the user's terms. Only a known phase says something: an idle checklist (not started, or a run that
+ * ended with unfinished tasks) and an unknown run state keep the plain building word.
+ */
+export function buildOutcome(implementation: NonNullable<StageInput['implementation']>, now: number): BuildOutcome | undefined {
+  if (implementation.done) return { kind: implementation.implemented ? 'built' : 'unchanged' }
+  if (implementation.phase === 'failed') return { kind: 'stopped' }
+  if (!['starting-workspace', 'running', 'pushing'].includes(implementation.phase)) return undefined
+  const tasks = implementation.tasks ?? []
+  const current = tasks.find((task) => task.id === implementation.currentTaskId)
+  const started = Date.parse(implementation.runStartedAt ?? '')
+  const lease = Date.parse(implementation.leaseExpiresAt ?? '')
+  return {
+    kind: 'implementing',
+    finished: tasks.filter((task) => isOneOf(task.status, 'done', 'skipped')).length,
+    total: tasks.length,
+    ...(current && isProductLanguage(current.title) ? { current: current.title } : {}),
+    ...(Number.isFinite(started) ? { elapsedLabel: formatElapsed(now - started) } : {}),
+    interrupted: lease < now,
+  }
 }
 
 function knownStage(input: StageInput): StageResult {
@@ -81,11 +120,14 @@ function knownStage(input: StageInput): StageResult {
     // A checklist that was only skipped is not an app: 公開 waits for something pushed.
     const built = implementation?.done === true && implementation.implemented === true
     const phase: BuildPhase = input.appProgress ? 'preparing' : built ? 'done' : 'implementing'
+    // A preparation card (the template still starting, or its build failed) speaks for the stage until it is gone.
+    const outcome = implementation && !input.appProgress ? buildOutcome(implementation, now) : undefined
     return {
       stage: 'build', build: { phase },
       primary: { action: 'publish', label: copy.publish, enabled: !publishing && phase === 'done' },
       ...(active ? { progress: progressCard({ kind: 'implement', now }) } : {}),
       ...(input.appProgress ? { progress: input.appProgress } : {}),
+      ...(outcome ? { outcome } : {}),
     }
   }
   // There is no turn sub-stage in the API. Only the first turn includes known

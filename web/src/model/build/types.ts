@@ -1,5 +1,15 @@
 export type BuildStage = 'ask' | 'decide' | 'build' | 'publish'
 export type BuildPhase = 'preparing' | 'implementing' | 'done'
+/**
+ * What the build stage says about the implementation run in the header and the conversation (APT-1124).
+ * `implementing`: tasks finished (done or skipped) of all, the current task's title when it is product language,
+ * the time since the run started, and whether its lease lapsed while running (server-side recovery owns it).
+ * `built`: finished with something pushed (公開する is the next step); `unchanged`: finished with every task skipped;
+ * `stopped`: the run failed or was cancelled.
+ */
+export type BuildOutcome =
+  | { kind: 'implementing'; finished: number; total: number; current?: string; elapsedLabel?: string; interrupted: boolean }
+  | { kind: 'built' | 'unchanged' | 'stopped' }
 export interface BuildSpecRecord { name: string; fields: string[] }
 export interface BuildSpec {
   name?: string
