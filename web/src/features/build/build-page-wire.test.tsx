@@ -1178,3 +1178,134 @@ test('an unreadable plan with a failed execution disables the composer without c
   expect(composer().value).toBe('Keep this unsent text')
   expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
 })
+
+describe('APT-1124: what the implementation run means on the build page', () => {
+  const ago = (ms: number) => new Date(Date.now() - ms).toISOString()
+  const titles = ['見積の一覧', '見積の編集', '承認']
+  const runs = /\/implementation-runs$/
+  const header = () => container.querySelector('header')!
+  const outcome = () => container.querySelector<HTMLElement>('#build-conversation [data-testid="build-outcome"]')
+  const publishButtons = () => [...container.querySelectorAll('button')].filter((item) => item.textContent?.trim() === buildCopy.primary.publish)
+  beforeEach(() => {
+    // Radix RadioGroup (the publish step) checks `closest('form') instanceof HTMLFormElement`; the shared DOM preload does not expose it.
+    const form = Object.getOwnPropertyDescriptor(globalThis, 'HTMLFormElement')
+    Object.defineProperty(globalThis, 'HTMLFormElement', { configurable: true, value: window.HTMLFormElement })
+    restore.push(() => form ? Object.defineProperty(globalThis, 'HTMLFormElement', form) : Reflect.deleteProperty(globalThis, 'HTMLFormElement'))
+  })
+  /** A created draft whose latest run reads as `run` (its tasks take `statuses`), with the audience chosen for publishing. */
+  async function withRun(statuses: string[], run: Json, draftExtra: Json = {}) {
+    const id = await createdDraft()
+    const tasks = statuses.map((status, index) => ({ id: `t${index + 1}`, title: titles[index], status, ...(status === 'running' ? { startedAt: ago(30_000) } : {}) }))
+    // The page writes its own answers (the publish name it saves) into the draft cache too: those carry the run as well.
+    const answer = (wire: Json) => rewriteDraftWire(wire, id, (draft) => ({
+      ...draft, publishPreferences: { name: '見積を管理', shareScope: 'company' }, ...draftExtra,
+      implementationRuns: [{ id: 'impl-apt1124', devWorkspaceId: '', startedAt: ago(125_000), taskIds: tasks.map((task) => task.id), tasks, ...run }],
+    }))
+    for (const method of ['GET', 'PATCH']) rewrites.push({ method, path: new RegExp(`^${PROJECT}/application-drafts(?:$|/${id}$)`), once: false, body: answer })
+    requests = []
+    await renderBuild(id)
+    return id
+  }
+
+  // Until the Platform fix ships, healthy apps can carry a false `build.state: failed` (a failed Dependabot run
+  // recorded as the build). With the template serving, the build page must neither stop nor close 公開する.
+  test.each(['implementing', 'done', 'published'] as const)('a reported build failure while the app runs a release: %s keeps its stage, no failure card, no request of its own (APT-1136)', async (state) => {
+    rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/application-source-repositories$`), once: false, body: (wire) => ({
+      ...wire, data: (wire.data as Json[]).map((repository) => ({ ...repository, build: { ...(repository.build as Json), state: 'failed', runUrl: 'https://github.com/acme/app/actions/runs/42' } })),
+    }) })
+    const id = state === 'implementing'
+      ? await withRun(['done', 'running', 'pending'], { status: 'running', step: 'working', currentTaskId: 't2' })
+      : await withRun(['done', 'done', 'done'], { status: 'succeeded', finishedAt: ago(60_000) }, state === 'published' ? { publishedAt: ago(1_000) } : {})
+    await tick(buildKeys.draft('commerce', id))
+    expect(container.textContent).not.toContain(buildCopy.sourceBuild.failed)
+    expect(stage()).toBe(state === 'published' ? 'publish' : 'build')
+    if (state === 'implementing') expect(outcome()?.getAttribute('data-outcome')).toBe('implementing')
+    if (state === 'done') {
+      expect(outcome()?.getAttribute('data-outcome')).toBe('built')
+      expect(publishButtons().length).toBeGreaterThan(0)
+      expect(publishButtons().every((item) => !item.disabled)).toBe(true)
+      // Read before publishing: next to the conversation's 公開する, and again in the publish step it opens.
+      expect(outcome()?.querySelector('[data-testid="latest-build-failed"]')?.textContent).toContain(buildCopy.sourceBuild.behind.detail)
+      await click([...outcome()!.querySelectorAll('button')].find((item) => item.textContent?.trim() === buildCopy.primary.publish)!)
+      const artifact = container.querySelector('#build-artifact')!
+      expect(artifact.textContent).toContain(uiText.publish.title)
+      expect(artifact.querySelector('[data-testid="latest-build-failed"]')).not.toBeNull()
+    }
+    if (state === 'published') expect(button(buildCopy.primary.continue).disabled).toBe(false)
+    // No build, run or creation write follows from the reported failure.
+    expect(requests.filter((item) => item.method !== 'GET' && /\/(implementation-runs|creation-executions|creation-plan-generations|cleanup|application-source-repositories)/.test(item.path))).toEqual([])
+  })
+
+  test('an app with no running release at all (its first build failed) is blocked exactly as before', async () => {
+    rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/application-source-repositories$`), once: false, body: (wire) => ({
+      ...wire, data: (wire.data as Json[]).map((repository) => ({ ...repository, build: { ...(repository.build as Json), state: 'failed' } })),
+    }) })
+    rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/component-summaries$`), once: false, body: (wire) => ({
+      ...wire, items: (wire.items as Json[]).map((item) => String(item.id).startsWith('ai-app-') && String(item.id).endsWith('-web') ? { ...item, statusKey: 'Provisioning', reasonKey: 'DeliveryProgressing' } : item),
+    }) })
+    const id = await withRun(['done', 'done', 'done'], { status: 'succeeded', finishedAt: ago(60_000) })
+    await tick(buildKeys.draft('commerce', id))
+    expect(container.querySelector('#build-artifact')?.textContent).toContain(buildCopy.sourceBuild.failed)
+    expect(stage()).toBe('build')
+    expect(outcome()).toBeNull()
+    expect(container.querySelector('[data-testid="latest-build-failed"]')).toBeNull()
+    expect(publishButtons().every((item) => item.disabled)).toBe(true)
+  })
+
+  test('while it runs: tasks done of all and the run time by the header; the current task and what to expect in the conversation', async () => {
+    await withRun(['done', 'running', 'pending'], { status: 'running', step: 'working', currentTaskId: 't2' })
+    expect(header().querySelector('[data-testid="build-state"]')?.textContent).toBe(uiText.header.stateWord.build)
+    expect(header().querySelector('[data-testid="build-run-progress"]')?.textContent).toMatch(/^作業 1 \/ 3・2:\d\d$/)
+    expect(outcome()?.getAttribute('data-outcome')).toBe('implementing')
+    expect(outcome()?.textContent).toContain(uiText.outcome.current('見積の編集'))
+    expect(outcome()?.textContent).toMatch(/経過 2:\d\d/)
+    expect(outcome()?.textContent).toContain(uiText.outcome.expectation)
+    expect(publishButtons().every((item) => item.disabled)).toBe(true)
+    expect(count('POST', runs)).toBe(0)
+  })
+
+  test('a running run whose lease lapsed waits to resume, not 作っています', async () => {
+    await withRun(['done', 'running', 'pending'], { status: 'running', step: 'working', currentTaskId: 't2', runLeaseExpiresAt: ago(60_000) })
+    expect(header().querySelector('[data-testid="build-state"]')?.textContent).toBe(uiText.outcome.word.interrupted)
+    expect(outcome()?.getAttribute('data-outcome')).toBe('interrupted')
+    expect(outcome()?.textContent).toContain(buildCopy.progress.interrupted.title)
+  })
+
+  test('once built: できました with 公開 as the current step, one guidance line, and 公開する as the primary action in the conversation', async () => {
+    await withRun(['done', 'done', 'done'], { status: 'succeeded', finishedAt: ago(1_000) })
+    const state = header().querySelector('[data-testid="build-state"] [data-status]')
+    expect(state?.textContent).toBe(uiText.outcome.word.built)
+    expect(state?.getAttribute('data-status')).toBe('live')
+    expect(header().querySelector('[aria-current="step"]')?.textContent).toContain(uiText.session.stageLabels.publish)
+    expect(header().textContent).not.toContain(uiText.header.stateWord.build)
+    expect(outcome()?.getAttribute('data-outcome')).toBe('built')
+    expect(outcome()?.textContent).toContain(uiText.outcome.publishTo(copy.create.share.company.title))
+    const primary = [...outcome()!.querySelectorAll('button')].find((item) => item.textContent?.trim() === buildCopy.primary.publish)!
+    expect(primary.disabled).toBe(false)
+    // It is the page's own 公開する: it opens the publish step and sends nothing by itself.
+    const before = requests.filter((item) => item.method !== 'GET').length
+    await click(primary)
+    expect(container.querySelector('#build-artifact')?.textContent).toContain(uiText.publish.title)
+    expect(requests.filter((item) => item.method !== 'GET')).toHaveLength(before)
+  })
+
+  test('every task skipped: the app did not change, 公開 stays closed, and the run\'s retry reopens every task', async () => {
+    const id = await withRun(['skipped', 'skipped', 'skipped'], { status: 'succeeded', finishedAt: ago(1_000) })
+    expect(header().querySelector('[data-testid="build-state"]')?.textContent).toBe(uiText.outcome.word.unchanged)
+    expect(outcome()?.getAttribute('data-outcome')).toBe('unchanged')
+    expect(outcome()?.textContent).toContain(uiText.outcome.unchanged)
+    expect(publishButtons().every((item) => item.disabled)).toBe(true)
+    await click([...outcome()!.querySelectorAll('button')].find((item) => item.textContent?.trim() === implementationCopy.retry)!)
+    expect(requests.filter((item) => item.method === 'POST' && runs.test(item.path)).map((item) => [item.path, item.body])).toEqual([[`${draftPath(id)}/implementation-runs`, { taskIds: ['t1', 't2', 't3'] }]])
+  })
+
+  test('a failed run is 止まっています in the header and keeps its own failure notice', async () => {
+    await withRun(['done', 'failed', 'pending'], { status: 'failed', currentTaskId: 't2', error: 'Implementation task failed', finishedAt: ago(1_000) })
+    const state = header().querySelector('[data-testid="build-state"] [data-status]')
+    expect(state?.textContent).toBe(uiText.outcome.word.stopped)
+    expect(state?.getAttribute('data-status')).toBe('failed')
+    expect(header().textContent).not.toContain(uiText.header.stateWord.build)
+    expect(outcome()).toBeNull()
+    expect(notices(buildCopy.failure.failed.implement, '#build-artifact')).toHaveLength(1)
+  })
+})

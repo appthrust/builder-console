@@ -22,7 +22,19 @@ export interface ImplementationState {
   workspaceId?: string
   /** The current task's clock, not the run's clock. */
   startedAt?: string
+  /** The run's own clock (the build page's 経過). */
+  runStartedAt?: string
+  /** The run's lease, only while the run is known to be running: a lapsed one means interrupted, not failed. */
+  runLeaseExpiresAt?: string
   step?: OpenValue<RunStep>
+}
+
+/** What the build stage reads of the implementation (`model/build/stage.ts` `StageInput.implementation`). */
+export function stageImplementation(state: ImplementationState) {
+  return {
+    phase: state.phase, done: state.phase === 'done', implemented: implemented(state), activityTail: state.activityTail,
+    tasks: state.tasks, currentTaskId: state.currentTaskId, runStartedAt: state.runStartedAt, leaseExpiresAt: state.runLeaseExpiresAt,
+  }
 }
 
 /** At least one task was pushed: the app contains something the AI made, not only the template. */
@@ -64,6 +76,8 @@ export function projectImplementation(draft: Pick<BuildDraft, 'id' | 'updatedAt'
     currentTaskId: run.currentTaskId,
     workspaceId: run.devWorkspaceId || undefined,
     startedAt: task?.startedAt,
+    runStartedAt: run.startedAt,
+    ...(isOneOf(run.status, 'running') && run.runLeaseExpiresAt ? { runLeaseExpiresAt: run.runLeaseExpiresAt } : {}),
     step: run.step,
     activityTail: run.activityTail,
     ...(stopped ? { failure: classifyBuildFailure(run.error || task?.error || (isOneOf(run.status, 'cancelled') ? text.implement.cancelled : text.implement.failed), undefined, 'implement', { draftId: draft.id, executionId: run.id, at: run.finishedAt ?? task?.finishedAt ?? draft.updatedAt }, undefined, undefined, run.failureReason ?? task?.failureReason) } : {}),

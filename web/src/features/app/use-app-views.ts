@@ -106,7 +106,10 @@ export function useAppViews(projectId: string): AppViews {
         progress: session?.progress,
         reason: session?.failure?.message,
       }, build)
-      return unreadableBuild ? { ...view, status: 'unknown', label: text.unsupported.label, text: copy.common.loadFailed, second: copy.common.loadFailed, unreadableBuild: true } : view
+      if (!unreadableBuild) return view
+      // Unknown is unknown: no secondary build notice speaks for an app whose creating draft cannot be read.
+      const { latestBuildFailed: _latest, ...known } = view
+      return { ...known, status: 'unknown', label: text.unsupported.label, text: copy.common.loadFailed, second: copy.common.loadFailed, unreadableBuild: true }
     },
     input,
     loading,

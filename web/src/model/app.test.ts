@@ -738,17 +738,59 @@ describe('source build status on app details and mine rows', () => {
     publishes: [succeededPublish], componentSummaries: readyComponents, releasesByApplication: { shop: overview(release('Succeeded')) },
     sourceRepositories: [repositoryFacts(repository)],
   }
-  test('an observed failure overrides AI 作っています and an older Ready image', () => {
-    const result = deriveAppView(app, input, Date.now(), undefined, { draftId: 'draft', taskCount: 1, tasks: [taskOf({ id: 'screen', title: '顧客一覧', status: 'running' })] })
-    expect(result).toMatchObject({ status: 'failed', label: 'ビルドに失敗しています', text: 'ビルドに失敗しています', second: 'ビルドに失敗しています', platform: { status: 'failed', statusText: 'ビルドに失敗しています' } })
-    expect(result.build?.draftId).toBe('draft')
+  test('during an AI build the failure is the status only while no release runs; a serving template keeps 作っています', () => {
+    const building = { draftId: 'draft', taskCount: 1, tasks: [taskOf({ id: 'screen', title: '顧客一覧', status: 'running' })] }
+    const serving = deriveAppView(app, input, Date.now(), undefined, building)
+    expect(serving).toMatchObject({ status: 'deploying', label: '作っています', latestBuildFailed: true, platform: { status: 'deploying' }, build: { draftId: 'draft', phase: 'implementing' } })
+    expect(serving.second).not.toBe('ビルドに失敗しています')
+    const starting = { ...input, componentSummaries: [summary('shop-web', { statusKey: 'Provisioning', reasonKey: 'DeliveryProgressing' }), readyComponents[1]!] }
+    const notServing = deriveAppView(app, starting, Date.now(), undefined, building)
+    expect(notServing).toMatchObject({ status: 'failed', label: 'ビルドに失敗しています', text: 'ビルドに失敗しています', second: 'ビルドに失敗しています', platform: { status: 'failed', statusText: 'ビルドに失敗しています' } })
+    expect(notServing.build?.draftId).toBe('draft')
+    expect(notServing.latestBuildFailed).toBeUndefined()
     expect(deriveAppView(app, { ...input, applications: [] }).second).toBe('ビルドに失敗しています')
+  })
+  test('an unknown status stays unknown: a failed build neither replaces it nor adds the secondary notice', () => {
+    const result = deriveAppView(app, { ...input, componentSummaries: [readyComponents[0]!, summary('shop-db', { statusKey: 'Unknown', reasonKey: 'CanonicalStatusUnavailable' })] })
+    expect(result.status).toBe('unknown')
+    expect(result.label).toBe(copy.status.unknown)
+    expect(result.second).not.toBe('ビルドに失敗しています')
+    expect(result.latestBuildFailed).toBeUndefined()
   })
   test('joins only the explicit source and recovers with the next observation', () => {
     expect(deriveAppView(app, { ...input, stacks: [stack] }).status).toBe('live')
     expect(deriveAppView(app, { ...input, sourceRepositories: [repositoryFacts({ ...repository, id: 'other-src' })] }).status).toBe('live')
     for (const state of ['healthy', 'running', 'unknown', 'a-state-added-later']) {
       expect(deriveAppView(app, { ...input, sourceRepositories: [repositoryFacts({ ...repository, build: { state } })] }).status).toBe('live')
+    }
+  })
+  test('an app that still runs a release keeps its own status and carries the failure only as secondary (APT-1136)', () => {
+    const result = deriveAppView(app, input)
+    expect(result).toMatchObject({ status: 'live', label: copy.status.live, latestBuildFailed: true, platform: { status: 'live' } })
+    expect(result.second).not.toBe('ビルドに失敗しています')
+    expect(model.hasRunningRelease(result.platform!)).toBe(true)
+    // Recovered: nothing secondary is left.
+    expect(deriveAppView(app, { ...input, sourceRepositories: [repositoryFacts({ ...repository, build: { state: 'healthy' } })] }).latestBuildFailed).toBeUndefined()
+  })
+  test('without a running release (web not Ready, or its latest release Failed) the build failure stays the status', () => {
+    for (const changed of [
+      { componentSummaries: [summary('shop-web', { statusKey: 'Provisioning', reasonKey: 'DeliveryProgressing' }), readyComponents[1]!] },
+      { releasesByApplication: { shop: overview(release('Failed')) } },
+    ]) {
+      const result = deriveAppView(app, { ...input, ...changed })
+      expect(result).toMatchObject({ status: 'failed', label: 'ビルドに失敗しています', second: 'ビルドに失敗しています' })
+      expect(result.latestBuildFailed).toBeUndefined()
+    }
+  })
+  test('a Ready web component whose latest release is not known to have failed is running: overview not loaded or errored, in flight', () => {
+    // Not loaded yet and errored both reach the model as no overview for the application.
+    for (const releasesByApplication of [{}, { shop: undefined }]) {
+      expect(deriveAppView(app, { ...input, releasesByApplication })).toMatchObject({ status: 'live', latestBuildFailed: true })
+    }
+    for (const phase of ['WaitingPromotion', 'InProgress'] as const) {
+      const result = deriveAppView(app, { ...input, releasesByApplication: { shop: overview(release(phase, { version: '1.3.0' })) } })
+      expect(result).toMatchObject({ status: 'deploying', latestBuildFailed: true })
+      expect(result.second).not.toBe('ビルドに失敗しています')
     }
   })
   test('drafts use the retained source reference before a stack exists', () => {

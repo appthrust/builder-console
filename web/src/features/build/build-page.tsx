@@ -41,6 +41,8 @@ import { text } from './copy'
 import { resolveBuildGroup } from './entry'
 import { BuildFailureNotice } from './build-failure-notice'
 import { useCreatedAppView } from './use-created-app-view'
+import { BuildOutcomeTurn } from './build-outcome'
+import { shareScopeLabel } from '../../model/access'
 
 export function BuildPage({ draftId }: { draftId: string }) {
   const { me, groups, currentGroup } = useShell()
@@ -118,8 +120,17 @@ function Session({ draft, groupId, stale }: { draft: BuildDraft; groupId: string
   const useName = (next: string) => build.rename(next, build.failure, (updated) => build.patch((current) => ({
     ...current, lastPlannedIntent: updated.intent, messages: current.messages.filter((message) => message.role !== 'notice' || message.retry !== 'prepare'),
   })))
+  // What the run means, under the conversation: 公開する is offered there too once the app is built (APT-1124).
+  const shareScope = draft.publishPreferences?.shareScope
+  // A running app's recorded build failure is read where 公開する is pressed and in the publish step (APT-1136).
+  const behind = appView?.latestBuildFailed ? <BuildFailureNotice failure={undefined} projectId={me.projectId} stackId={draft.createdApplicationStackId} title={name} canEdit={false} behind={{ runUrl: build.sourceRepository?.build?.runUrl }} /> : null
+  // After an unreadable answer only the panel's re-read is offered (ImplementPanel), never another retry.
+  const retryable = !appReadOnly && !build.implementation.state.failure
+  const outcome = <BuildOutcomeTurn outcome={build.result.outcome} audience={shareScope ? shareScopeLabel(shareScope, ownerGroupName) : undefined} notice={behind}
+    publish={{ label: buildCopy.primary.publish, enabled: primary.action === 'publish' && primary.enabled, onClick: onPrimary }}
+    retry={retryable ? { pending: Boolean(build.implementation.state.retryPending), onClick: build.implementation.retry } : undefined} />
   return <div className="flex min-h-0 flex-1 flex-col" data-testid="build-session" data-stage={stage}>
-    <SessionHeader name={name} stage={stage} released={released} unsupported={build.result.unsupported} action={<StageAction stage={stage} primary={primary} progress={progress} onPrimary={onPrimary} />} />
+    <SessionHeader name={name} stage={stage} released={released} unsupported={build.result.unsupported} outcome={build.result.outcome} action={<StageAction stage={stage} primary={primary} progress={progress} onPrimary={onPrimary} />} />
     {/* Page-level notices share one inset place under the header, whatever raised them. */}
     {stale || build.result.unsupported || draft.buildFailure || creationAccess.error ? <div className="mx-5 mt-3 space-y-3">
       {stale}
@@ -135,10 +146,10 @@ function Session({ draft, groupId, stale }: { draft: BuildDraft; groupId: string
     </div>
     <div className={cn('flex min-h-0 flex-1 md:grid md:grid-rows-[minmax(0,1fr)]', artifactCollapsed ? 'md:grid-cols-[minmax(0,1fr)_2.75rem]' : 'md:grid-cols-[minmax(0,1fr)_minmax(18rem,22rem)] lg:grid-cols-[minmax(0,1fr)_26rem] xl:grid-cols-[minmax(0,1fr)_28rem]')}>
       <div id="build-conversation" role="tabpanel" aria-labelledby="build-tab-conversation" className={cn('min-h-0 min-w-0 flex-1 flex-col md:flex md:border-r md:border-line', tab === 'conversation' ? 'flex' : 'hidden')}>
-        <ConversationPane messages={build.messages} stage={stage} answering={build.busy} unsupported={build.result.unsupported || build.planBlocksStart} thinking={isBuildPending(draft.conversationTurns.at(-1))} waitingForAi={build.waitingForAi} planning={planning} proposalAction={proposalAction} queued={build.queued} progress={progress} prepareOpen={build.prepareOpen} ownerGroupName={ownerGroupName} failure={failure} planRejected={build.planRejected ? (build.planRecheck ? 'recheck' : 'replan') : undefined} canRecheck={build.canRecheck} onSend={build.send} onRetry={build.retry} onUseName={useName} />
+        <ConversationPane messages={build.messages} stage={stage} answering={build.busy} unsupported={build.result.unsupported || build.planBlocksStart} thinking={isBuildPending(draft.conversationTurns.at(-1))} waitingForAi={build.waitingForAi} planning={planning} proposalAction={proposalAction} queued={build.queued} progress={progress} prepareOpen={build.prepareOpen} ownerGroupName={ownerGroupName} failure={failure} planRejected={build.planRejected ? (build.planRecheck ? 'recheck' : 'replan') : undefined} canRecheck={build.canRecheck} end={outcome} onSend={build.send} onRetry={build.retry} onUseName={useName} />
       </div>
       <div id="build-artifact" role="tabpanel" aria-labelledby="build-tab-artifact" className={cn('relative min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain', tab === 'artifact' ? 'block' : 'hidden', artifactCollapsed ? 'md:hidden' : 'md:block')}>
-        <ArtifactPane draft={draft} spec={build.spec} proposal={build.proposal} stage={stage} progress={progress} implementation={build.implementation.state} failure={build.failure} url={url} shareText={shareText} previewDatabaseReset={build.implementation.previewDatabaseReset} onOpenPreview={openPreview} onRetry={build.implementation.retry} onSkipTask={build.implementation.skipTask} onConfirm={build.implementation.confirm} onCollapse={() => setArtifactCollapsed(true)} databaseChanges={<DatabaseChanges projectId={me.projectId} databaseId={!appReadOnly && build.app && canEditApp(build.app, me) ? appView?.stack?.databaseComponentId : undefined} />} shareStep={sharing && build.app && !appReadOnly ? <PublishStep app={build.app} publishId={appView?.platform?.publish?.id} publishPreferences={draft.publishPreferences} onPublished={() => { build.published(); setSharing(false) }} onCancel={() => setSharing(false)} /> : undefined} />
+        <ArtifactPane draft={draft} spec={build.spec} proposal={build.proposal} stage={stage} progress={progress} implementation={build.implementation.state} failure={build.failure} url={url} shareText={shareText} previewDatabaseReset={build.implementation.previewDatabaseReset} onOpenPreview={openPreview} onRetry={build.implementation.retry} onSkipTask={build.implementation.skipTask} onConfirm={build.implementation.confirm} onCollapse={() => setArtifactCollapsed(true)} databaseChanges={<DatabaseChanges projectId={me.projectId} databaseId={!appReadOnly && build.app && canEditApp(build.app, me) ? appView?.stack?.databaseComponentId : undefined} />} shareStep={sharing && build.app && !appReadOnly ? <>{behind}<PublishStep app={build.app} publishId={appView?.platform?.publish?.id} publishPreferences={draft.publishPreferences} onPublished={() => { build.published(); setSharing(false) }} onCancel={() => setSharing(false)} /></> : undefined} />
       </div>
       {artifactCollapsed ? (
         <div className="hidden min-h-0 flex-col items-center gap-2 bg-white py-2 md:flex">

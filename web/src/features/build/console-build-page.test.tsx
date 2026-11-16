@@ -31,6 +31,8 @@ import { setLanguage } from '../../shell/language'
 import { UnsavedChangesProvider } from '../../ui/use-unsaved-changes-guard'
 import { preserveLanguage } from '../../../test/language'
 import { text } from './copy'
+import { implementationCopy } from './implement/copy'
+import { copy } from '../../copy'
 import { startConsoleBuild } from './entry'
 
 const BASE = '/api/console/v1/build-sessions'
@@ -773,4 +775,106 @@ test('console-v1 keeps a prepare failure visible with unreadable-plan guidance a
   await reread(page)
   expect(page.container.textContent).toContain(buildCopy.failure.platform.title)
   expect(mock.requests.filter((item) => item.method !== 'GET')).toEqual([])
+})
+
+describe('APT-1124: what the implementation run means on the console-v1 build page', () => {
+  const ago = (ms: number) => new Date(Date.now() - ms).toISOString()
+  const word = text.outcome.word
+  const header = (page: Page) => page.container.querySelector('header')!
+  const outcome = (page: Page) => log(page).querySelector<HTMLElement>('[data-testid="build-outcome"]')
+  /** A created session whose template runs and whose Platform draft's latest run reads as `run` (its tasks take `statuses`). */
+  async function withRun(statuses: string[], run: Record<string, unknown>, draftExtra: Record<string, unknown> = {}) {
+    const { draftId, sessionId } = await createdSession()
+    // The template's startup finishes first (the server's work): until then its preparation card speaks for the stage.
+    const advance = new URL('/api/v1/__mock/advance', 'http://mock.test')
+    for (let step = 0; step < 6; step++) await platformRoutes(new Request(advance, { method: 'POST' }), advance)
+    const tasks = statuses.map((status, index) => ({ id: `t${index + 1}`, title: ['点検の一覧', '点検の記録'][index], status, ...(status === 'running' ? { startedAt: ago(30_000) } : {}) }))
+    const answer = (wire: Record<string, unknown>) => rewriteDraftWire(wire, draftId, (draft) => ({
+      ...draft, ...draftExtra, implementationRuns: [{ id: 'impl-apt1124', devWorkspaceId: '', startedAt: ago(125_000), taskIds: tasks.map((task) => task.id), tasks, ...run }],
+    }))
+    for (const method of ['GET', 'PATCH']) mock.rewrites.push({ method, path: new RegExp(`^/api/v1/projects/commerce/application-drafts(?:$|/${draftId}$)`), once: false, body: answer })
+    mock.requests.length = 0
+    const page = await open(draftId)
+    await settle(30)
+    return { draftId, sessionId, page }
+  }
+
+  test('while it runs: tasks done of all and the run time by the header; the current task and what to expect in the conversation', async () => {
+    const { page } = await withRun(['done', 'running'], { status: 'running', step: 'working', currentTaskId: 't2' })
+    expect(header(page).querySelector('[data-testid="build-state"]')?.textContent).toBe(text.header.stateWord.build)
+    expect(header(page).querySelector('[data-testid="build-run-progress"]')?.textContent).toMatch(/^作業 1 \/ 2・2:\d\d$/)
+    expect(outcome(page)?.getAttribute('data-outcome')).toBe('implementing')
+    expect(outcome(page)?.textContent).toContain(text.outcome.current('点検の記録'))
+    expect(outcome(page)?.textContent).toContain(text.outcome.expectation)
+    expect(mock.requests.filter((item) => item.method === 'POST' && item.path.endsWith('/implementation-runs'))).toEqual([])
+  })
+
+  test('once built: できました with 公開 current; 公開する in the conversation waits for the saved audience, then names it', async () => {
+    const { sessionId, page } = await withRun(['done', 'done'], { status: 'succeeded', finishedAt: ago(1_000) })
+    const state = header(page).querySelector('[data-testid="build-state"] [data-status]')
+    expect(state?.textContent).toBe(word.built)
+    expect(state?.getAttribute('data-status')).toBe('live')
+    expect(header(page).querySelector('[aria-current="step"]')?.textContent).toContain(text.session.stageLabels.publish)
+    expect(outcome(page)?.getAttribute('data-outcome')).toBe('built')
+    const primary = () => [...outcome(page)!.querySelectorAll('button')].find((item) => item.textContent?.trim() === buildCopy.primary.publish)!
+    expect(primary().disabled).toBe(true)
+    expect(outcome(page)?.textContent).toContain(text.outcome.publishAfterSettings)
+    expect(outcome(page)?.textContent).not.toContain(text.outcome.publish)
+    let session = await api.get(sessionId)
+    await api.setPublishPreferences(sessionId, { name: '点検ノート', shareScope: 'company' }, { key: mintIdempotencyKey(), version: session.version })
+    session = await api.get(sessionId)
+    await api.advance(sessionId, { key: mintIdempotencyKey(), version: session.version })
+    await reread(page)
+    await act(async () => { await page.client.invalidateQueries({ queryKey: ['build'] }) })
+    await settle(30)
+    expect(outcome(page)?.textContent).toContain(text.outcome.publishTo(copy.create.share.company.title))
+    expect(primary().disabled).toBe(false)
+  })
+
+  // A false `build.state: failed` on a healthy app (APT-1136): the build page keeps its stage and 公開する.
+  const failBuilds = () => mock.rewrites.push({ method: 'GET', path: /^\/api\/v1\/projects\/commerce\/application-source-repositories$/, once: false, body: (wire) => ({
+    ...wire, data: (wire.data as Record<string, unknown>[]).map((repository) => ({ ...repository, build: { ...(repository.build as Record<string, unknown>), state: 'failed', runUrl: 'https://github.com/acme/app/actions/runs/42' } })),
+  }) })
+  const stageOf = (page: Page) => page.container.querySelector('[data-testid="build-session"]')?.getAttribute('data-stage')
+  test.each(['implementing', 'done', 'published'] as const)('a reported build failure while the app runs a release: %s keeps its stage and 公開する, no failure card, no request of its own', async (state) => {
+    failBuilds()
+    const { page } = state === 'implementing'
+      ? await withRun(['done', 'running'], { status: 'running', step: 'working', currentTaskId: 't2' })
+      : await withRun(['done', 'done'], { status: 'succeeded', finishedAt: ago(60_000) }, state === 'published' ? { publishedAt: ago(1_000) } : {})
+    expect(page.container.textContent).not.toContain(buildCopy.sourceBuild.failed)
+    expect(stageOf(page)).toBe(state === 'published' ? 'publish' : 'build')
+    if (state === 'implementing') expect(outcome(page)?.getAttribute('data-outcome')).toBe('implementing')
+    if (state === 'done') {
+      expect(header(page).querySelector('[data-testid="build-state"]')?.textContent).toBe(word.built)
+      // Read before publishing, right above the conversation's 公開する.
+      expect(outcome(page)?.querySelector('[data-testid="latest-build-failed"]')?.textContent).toContain(buildCopy.sourceBuild.behind.detail)
+    }
+    expect(mock.requests.filter((item) => item.method !== 'GET' && /\/(implementation-runs|creation-executions|creation-plan-generations|cleanup|application-source-repositories)/.test(item.path))).toEqual([])
+  })
+
+  test('an app with no running release at all (its first build failed) is blocked exactly as before', async () => {
+    failBuilds()
+    mock.rewrites.push({ method: 'GET', path: /^\/api\/v1\/projects\/commerce\/component-summaries(\?|$)/, once: false, body: (wire) => ({
+      ...wire, items: (wire.items as Record<string, unknown>[]).map((item) => String(item.id).startsWith('ai-app-') && String(item.id).endsWith('-web') ? { ...item, statusKey: 'Provisioning', reasonKey: 'DeliveryProgressing' } : item),
+    }) })
+    const { page } = await withRun(['done', 'done'], { status: 'succeeded', finishedAt: ago(60_000) })
+    expect(specPane(page).textContent).toContain(buildCopy.sourceBuild.failed)
+    expect(outcome(page)).toBeNull()
+    expect(page.container.querySelector('[data-testid="latest-build-failed"]')).toBeNull()
+    expect(buttons(page.container, buildCopy.primary.publish).every((item) => item.disabled)).toBe(true)
+  })
+
+  test('every task skipped: the app did not change and the run\'s retry is offered; a failed run is 止まっています', async () => {
+    const skipped = await withRun(['skipped', 'skipped'], { status: 'succeeded', finishedAt: ago(1_000) })
+    expect(header(skipped.page).querySelector('[data-testid="build-state"]')?.textContent).toBe(word.unchanged)
+    expect(outcome(skipped.page)?.getAttribute('data-outcome')).toBe('unchanged')
+    expect(buttons(outcome(skipped.page)!, implementationCopy.retry)).toHaveLength(1)
+    expect(buttons(skipped.page.container, buildCopy.primary.publish).every((item) => item.disabled)).toBe(true)
+    const failed = await withRun(['done', 'failed'], { status: 'failed', currentTaskId: 't2', error: 'Implementation task failed', finishedAt: ago(1_000) })
+    const state = header(failed.page).querySelector('[data-testid="build-state"] [data-status]')
+    expect(state?.textContent).toBe(word.stopped)
+    expect(state?.getAttribute('data-status')).toBe('failed')
+    expect(header(failed.page).textContent).not.toContain(text.header.stateWord.build)
+    expect(outcome(failed.page)).toBeNull()
+  })
 })

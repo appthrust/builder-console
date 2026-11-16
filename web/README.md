@@ -799,6 +799,22 @@ non-engineers, with engineering words only under 「詳しい人向け」
   with every task pending, so the app is not reloaded.
   `model/build/progress.ts#implementationProgress` takes tasks, current task,
   step, the current task's start time and activity tail, plus a clock.
+  Once no preparation card speaks, `model/build/stage.ts#buildOutcome` says
+  what the run means, for both engines (APT-1124): while it runs, the header's
+  作っています is followed by 「作業 n / total」 (done or skipped) and the run's
+  経過 (`run.startedAt`, on the page clock), and the conversation ends with the
+  current task's title (product language only) and what to expect (10–30
+  minutes; the run is server-owned, so closing the page does not stop it). A
+  `running` run whose `runLeaseExpiresAt` has passed reads 再開を待っています
+  with the existing interruption sentence. A finished run with a pushed task
+  reads できました, the rail marks 作る done and 公開 current, and the
+  conversation says the app is made and offers the page's own 公開する (same
+  action and enabled state as the header's; the audience comes from the saved
+  publish preferences). Every task skipped reads 変更がありません and offers the
+  run's retry (which reopens every task); 公開 stays closed. A failed or
+  cancelled run reads 止まっています and keeps its own failure notice. An idle
+  checklist, an unknown run state or a draft in a state this console does not
+  know keep the plain 作っています.
 - Improvement sessions (`design/platform/builder-console-app-improvement.md`)
   are drafts with `kind: 'improvement'`, born `created` and bound to the app's
   stack. 「AIで直す」 on the app page (editors, bound app, no unfinished build)
@@ -863,11 +879,34 @@ non-engineers, with engineering words only under 「詳しい人向け」
   `state: healthy|failed|running|unknown` and optional runUrl/headSha/observedAt.
   These observation fields are not part of create requests. Response fixtures
   copied from a create request must add `state: 'unknown'` when `build` is
-  present; an omitted `build` remains omitted. The ladder shows
-  「アプリのビルドに失敗しています」 on the failed startup rung, while app details
-  and `/mine` prioritize 「ビルドに失敗しています」 over 「作っています」.
-  The exact run link is under 「詳しい人向け」. An older Ready image does not
-  hide a new build failure.
+  present; an omitted `build` remains omitted. The build page's ladder shows
+  「アプリのビルドに失敗しています」 on the failed startup rung (and keeps 公開する
+  closed) only while no release runs. App details and `/mine` show
+  「ビルドに失敗しています」 as the status (over 「作っています」 too) under the
+  same condition; an unknown status stays unknown. The exact run link is under
+  「詳しい人向け」. An app that runs a release (`model/app.ts#hasRunningRelease`:
+  the web component reports Ready and its latest release is not known to have
+  Failed; an unloaded or errored release overview and an in-flight release with
+  the old version serving count as running), an AI build's serving template
+  included, keeps its own status (公開中, 作っています …) in the app header, every
+  list and the 問題あり count; its overview keeps the creation ladder it would
+  otherwise show; its build page keeps its stage (a published draft stays on
+  公開), its implementation outcome and 公開する (`sourceBuildFailureProgress`
+  takes the platform; before the console app is bound, the created stack's own
+  projection). Nothing automatic is keyed on `build.state`. A reported failure
+  is secondary there and may be false (another workflow's run recorded as the
+  build), so the wording claims nothing the Console cannot know
+  (`AppView.latestBuildFailed`, APT-1136): a warning notice
+  「最新のビルドが失敗と記録されています」 /
+  「アプリはこれまでどおり動いています。最近の変更がある場合、まだ反映されていない可能性があります。」
+  with the run link when it is http(s). It is shown above the app page's tabs
+  and, on the build page (both engines), right above the conversation's
+  公開する and in the publish step, so it is read before publishing. Only when
+  the stack carries an extracted `buildFailure` (the 0.5.9 condition for the
+  same data) does the app-page notice add the cause and 「AI に直させる」, in
+  place of the error notice. The overview's 「詳しい人向け」 has one 「最新のビルド」
+  row: 「失敗（アプリは動いています）」. An unreadable creating-draft link stays
+  unknown and carries no such notice.
   Stack and draft read responses also expose optional `buildFailure`
   (`lines`, `kind`, `observedAt`, `buildRef`). The API reads at most 512 KiB
   of diagnostic text from the existing bounded Actions log reader, only for a

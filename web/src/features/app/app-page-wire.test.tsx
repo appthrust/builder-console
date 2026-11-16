@@ -122,7 +122,7 @@ function DeletionProbe() {
 }
 
 /** The app page on the app's query defaults (retry policy included), with polling left to the test. */
-async function renderApp(tab: AppTab, scene: 'app' | 'mine' | 'drafts' | 'deletion-probe' | { improve: string } = 'app') {
+async function renderApp(tab: AppTab, scene: 'app' | 'mine' | 'mine-problems' | 'drafts' | 'deletion-probe' | { improve: string } = 'app') {
   client = new QueryClient({ defaultOptions: { queries: { ...appQueryClient.getDefaultOptions().queries, retryDelay: 0, refetchInterval: false, refetchOnWindowFocus: false } } })
   await Promise.all([client.fetchQuery(meQuery), client.fetchQuery(groupsQuery), client.fetchQuery(appQuery(APP_ID))])
   const rootRoute = createRootRoute()
@@ -133,7 +133,7 @@ async function renderApp(tab: AppTab, scene: 'app' | 'mine' | 'drafts' | 'deleti
   document.body.append(container)
   root = createRoot(container)
   await act(async () => {
-    root!.render(<QueryClientProvider client={client}><RouterContextProvider router={router}><UnsavedChangesProvider>{typeof scene === 'object' ? <ImprovePage draftId={scene.improve} /> : scene === 'mine' ? <MinePage /> : scene === 'drafts' ? <DraftsPage /> : scene === 'deletion-probe' ? <DeletionProbe /> : <AppRoute tab={tab} />}</UnsavedChangesProvider></RouterContextProvider></QueryClientProvider>)
+    root!.render(<QueryClientProvider client={client}><RouterContextProvider router={router}><UnsavedChangesProvider>{typeof scene === 'object' ? <ImprovePage draftId={scene.improve} /> : scene === 'mine' ? <MinePage /> : scene === 'mine-problems' ? <MinePage status="problem" /> : scene === 'drafts' ? <DraftsPage /> : scene === 'deletion-probe' ? <DeletionProbe /> : <AppRoute tab={tab} />}</UnsavedChangesProvider></RouterContextProvider></QueryClientProvider>)
   })
   await settle()
 }
@@ -496,6 +496,81 @@ describe('APT-1109: isolated rows keep the rest of the project readable', () => 
     expect(requests.some((item) => item.path.endsWith('/broken-draft'))).toBe(false)
     // An independently readable exact match still resumes as before.
     expect((await beginBuild('commerce', storedDraftWire.intent, { groupId: 'g-team-a', ownerSubject: 'owner' })).id).toBe(storedDraftWire.id)
+  })
+})
+
+describe('APT-1136: a reported failure of the latest build of an app that runs a release', () => {
+  const repositories = new RegExp(`^${PROJECT}/application-source-repositories$`)
+  const summaries = new RegExp(`^${PROJECT}/component-summaries$`)
+  const runUrl = 'https://github.com/acme/mitsumori/actions/runs/42'
+  const behind = buildCopy.sourceBuild.behind
+  const failBuild = () => rewrites.push({ method: 'GET', path: repositories, once: false, body: (wire) => ({
+    ...wire, data: (wire.data as Json[]).map((repository) => repository.id === 'mitsumori-src' ? { ...repository, build: { ...(repository.build as Json), state: 'failed', runUrl } } : repository),
+  }) })
+  const row = () => [...container.querySelectorAll('tbody tr')].find((item) => item.textContent?.includes('見積'))
+  const pill = (scope: ParentNode) => scope.querySelector('[data-status]')
+
+  test('keeps 公開中 in the header and the list, says it in a warning notice with the run link, and is not 問題あり', async () => {
+    failBuild()
+    await renderApp('overview')
+    const header = container.querySelector('header')!
+    expect(pill(header)?.getAttribute('data-status')).toBe('live')
+    expect(pill(header)?.textContent).toBe(copy.status.live)
+    expect(pageText()).not.toContain(buildCopy.sourceBuild.status)
+    const notice = container.querySelector<HTMLElement>('[data-testid="latest-build-failed"]')!
+    expect(notice.textContent).toContain(behind.title)
+    expect(notice.textContent).toContain(behind.detail)
+    expect(notice.querySelector('[role="alert"]')).toBeNull()
+    const link = [...notice.querySelectorAll('a')].find((item) => item.textContent === buildCopy.sourceBuild.run)
+    expect(link?.getAttribute('href')).toBe(runUrl)
+    // Only what is known: the reported failure can be false, so nothing says the app lacks the new changes.
+    expect(notice.textContent).not.toContain('まだアプリに入っていません')
+    // Without an extracted cause there is no AI repair entry (as in 0.5.9, which had no notice at all for this data).
+    expect(notice.textContent).not.toContain('AI に直させる')
+    // 「詳しい人向け」 carries the same fact as its one place outside the notice.
+    await click(button(copy.app.overview.advanced.toggle))
+    expect(container.querySelector('[data-testid="advanced-latest-build"]')?.textContent).toContain(behind.latestFailed)
+    expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
+
+    await act(async () => { root?.unmount() })
+    await renderApp('overview', 'mine')
+    expect(pill(row()!)?.getAttribute('data-status')).toBe('live')
+    expect(row()!.textContent).not.toContain(buildCopy.sourceBuild.status)
+    await act(async () => { root?.unmount() })
+    await renderApp('overview', 'mine-problems')
+    expect(row()).toBeUndefined()
+  })
+
+  test('an extracted cause is shown with 「AI に直させる」 exactly as 0.5.9 offered it for the same stack data', async () => {
+    failBuild()
+    rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/application-stacks$`), once: false, body: (wire) => ({
+      ...wire, data: (wire.data as Json[]).map((stack) => stack.id === 'mitsumori' ? { ...stack, buildFailure: { lines: ["Module not found: './missing'"] } } : stack),
+    }) })
+    await renderApp('overview')
+    const notice = container.querySelector<HTMLElement>('[data-testid="latest-build-failed"]')!
+    expect(notice.querySelector('[data-testid="build-failure-cause"]')?.textContent).toBe(behind.cause("Module not found: './missing'"))
+    expect(buttons(notice).some((item) => item.textContent?.includes('AI に直させる'))).toBe(true)
+    // One notice: the 0.5.9 error notice for the same cause is replaced, not repeated.
+    expect(container.querySelectorAll('[data-testid="build-failure-cause"]')).toHaveLength(1)
+    expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
+  })
+
+  test('an app with no running release keeps the build failure as its status, without the secondary notice', async () => {
+    failBuild()
+    rewrites.push({ method: 'GET', path: summaries, once: false, body: (wire) => ({
+      ...wire, items: (wire.items as Json[]).map((item) => item.id === 'mitsumori-web' ? { ...item, statusKey: 'Provisioning', reasonKey: 'DeliveryProgressing' } : item),
+    }) })
+    await renderApp('overview')
+    const header = container.querySelector('header')!
+    expect(pill(header)?.getAttribute('data-status')).toBe('failed')
+    expect(pill(header)?.textContent).toBe(buildCopy.sourceBuild.status)
+    expect(container.querySelector('[data-testid="status-text"]')?.textContent).toBe(buildCopy.sourceBuild.status)
+    expect(container.querySelector('[data-testid="latest-build-failed"]')).toBeNull()
+
+    await act(async () => { root?.unmount() })
+    await renderApp('overview', 'mine-problems')
+    expect(pill(row()!)?.getAttribute('data-status')).toBe('failed')
+    expect(row()!.textContent).toContain(buildCopy.sourceBuild.status)
   })
 })
 

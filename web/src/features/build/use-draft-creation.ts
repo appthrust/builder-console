@@ -30,6 +30,7 @@ import { isOneOf, knownValue, type BuildDraft, type BuildExecutionStep, type Cre
 import type { RepositoryDestination } from '../../model/contracts/catalog'
 import { pickCreateEnvironment, summarizeCreationPlan } from '../../model/create'
 import { sourceRepositoryFor } from '../app/platform'
+import { deriveAppView } from '../../model/app'
 import { useAppViews } from '../app/use-app-views'
 import { bindCreatedConsoleApp, ConsoleAppCreationError } from './bind-created-console-app'
 import { text } from './copy'
@@ -204,7 +205,11 @@ export function useDraftCreation({ projectId, draft, tab, hasPending, now }: Dra
   const preparationClock = useRef<{ activity?: string; since: string }>({ since: new Date(now).toISOString() })
   const nextPreparation = preparationInput ? appPreparationProgress(preparationInput, now) : undefined
   if (nextPreparation?.currentActivity !== preparationClock.current.activity) preparationClock.current = { activity: nextPreparation?.currentActivity, since: new Date(now).toISOString() }
-  const appProgress = preparationInput ? appPreparationProgress(preparationInput, now, preparationClock.current.since) : sourceBuildFailureProgress(sourceRepository?.build)
+  // Before the console app is bound, the created stack's own platform state decides whether a release already runs.
+  const stackPlatform = !preparationInput && draft.createdApplicationStackId
+    ? deriveAppView({ stackId: draft.createdApplicationStackId, createdAt: draft.createdAt }, appViews.input, now).platform
+    : undefined
+  const appProgress = preparationInput ? appPreparationProgress(preparationInput, now, preparationClock.current.since) : sourceBuildFailureProgress(sourceRepository?.build, stackPlatform)
   const generation = draft.creationPlanGenerations.at(-1)
   const execution = draft.creationExecutions.at(-1)
   const needsPublishDefault = Boolean(draft.creationPlan?.applicationStackRequest && !draft.creationPlan.applicationStackRequest.publish?.enabled)
@@ -228,7 +233,7 @@ export function useDraftCreation({ projectId, draft, tab, hasPending, now }: Dra
   const planRejected = isPlanRejected(draft, tab)
   /** The rejected plan may be validated once more on the user's 「もう一度確かめる」. */
   const planRecheck = !draft.creationPlanUnreadable && planRejected && Boolean(tab.rejectedPlan?.recheck)
-  return { app, appViews, appView, appProgress, generation, execution, domain, creationPlan, defaultPending, proposalDraft, published, implementation, implementing, destination, retryDestination, planRejected, planRecheck }
+  return { app, appViews, appView, sourceRepository, appProgress, generation, execution, domain, creationPlan, defaultPending, proposalDraft, published, implementation, implementing, destination, retryDestination, planRejected, planRecheck }
 }
 
 export interface DraftCreationHost {

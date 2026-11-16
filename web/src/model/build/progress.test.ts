@@ -83,9 +83,9 @@ test('screen projection hides technical titles and handles failed tasks and inva
   expect(implementationProgress({ tasks: [taskOf({ ...task, status: 'running' })], currentTaskId: 'one', startedAt: 'invalid' }, start)[0]?.elapsedLabel).toBeUndefined()
 })
 
-test('source build failure survives an older released image and marks the startup rung', () => {
+test('source build failure survives an older released image that no longer serves and marks the startup rung', () => {
   const failedWire = { ...repositoryWire, status: 'ready' as const, build: { state: 'failed' as const, runUrl: 'https://github.com/acme/app/actions/runs/12', headSha: 'new-head' } }
-  const input = { view: view({ everReleased: true, webReady: true }), sourceRepository: sourceRepositoryOf(failedWire), shareSentence: '' }
+  const input = { view: view({ everReleased: true, webReady: false }), sourceRepository: sourceRepositoryOf(failedWire), shareSentence: '' }
   const preparation = appPreparationProgress(input, start)
   const card = buildProgress(preparation, { tasks: [taskOf({ id: 'screen', title: '一覧', status: 'done' })] }, start, true)
   expect(card.steps?.[2]).toMatchObject({ label: '下地を起動', state: 'failed', detail: 'アプリのビルドに失敗しています' })
@@ -95,6 +95,22 @@ test('source build failure survives an older released image and marks the startu
   expect(deriveStage({ execution: executionOf({ ...execution, status: 'succeeded' }), now: start, published: draftPublished({ publishedAt: since, implementationRuns: [] }), appProgress: preparation }).progress).toBe(preparation)
   for (const state of ['healthy', 'running', 'unknown', 'a-state-added-later']) {
     expect(appPreparationProgress({ ...input, sourceRepository: sourceRepositoryOf({ ...failedWire, build: { state } }) }, start)?.buildFailed).not.toBe(true)
+  }
+})
+
+test('a reported build failure of an app that runs a release is no failure card: 公開する and publication are untouched (APT-1136)', () => {
+  const failedWire = { ...repositoryWire, status: 'ready' as const, build: { state: 'failed' as const, runUrl: 'https://github.com/acme/app/actions/runs/12' } }
+  const running = view({ everReleased: true, webReady: true, webReleasePhase: 'Succeeded' })
+  const input = { view: running, sourceRepository: sourceRepositoryOf(failedWire), shareSentence: '' }
+  expect(appPreparationProgress(input, start)).toBeUndefined()
+  expect(sourceBuildFailureProgress(sourceRepositoryOf(failedWire).build, running.platform)).toBeUndefined()
+  const created = { execution: executionOf({ ...execution, status: 'succeeded' }), now: start, appProgress: appPreparationProgress(input, start) }
+  expect(deriveStage({ ...created, published: false, implementation: { phase: 'running', done: false, implemented: true } })).toMatchObject({ build: { phase: 'implementing' }, outcome: { kind: 'implementing' } })
+  expect(deriveStage({ ...created, published: false, implementation: { phase: 'done', done: true, implemented: true } })).toMatchObject({ build: { phase: 'done' }, primary: { action: 'publish', enabled: true }, outcome: { kind: 'built' } })
+  expect(deriveStage({ ...created, published: true })).toMatchObject({ stage: 'publish', primary: { action: 'continue', enabled: true } })
+  // Not serving (not Ready, or the latest release Failed): the failure stays the creation's failure.
+  for (const facts of [{ webReady: false, webReleasePhase: 'Succeeded' as const }, { webReady: true, webReleasePhase: 'Failed' as const }]) {
+    expect(appPreparationProgress({ ...input, view: view(facts) }, start)?.buildFailed).toBe(true)
   }
 })
 

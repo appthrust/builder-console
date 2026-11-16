@@ -253,8 +253,10 @@ test.describe('console-v1 build conversation @app-build-console-conversation', (
     await expect(form.getByTestId('console-publish-saved')).toContainText(c.publish.sync.applied)
 
     // The publish step starts from them.
-    const publish = page.getByRole('button', { name: buildText.primary.publish, exact: true })
+    // The header's 公開する; once the app is built the conversation offers the same action, enabled together with it.
+    const publish = page.getByTestId('build-session').locator('header').getByRole('button', { name: buildText.primary.publish, exact: true })
     await advanceUntil(mock, () => expect(publish).toBeEnabled({ timeout: 2_000 }))
+    await expect(page.getByRole('log', { name: 'AI との会話' }).getByRole('button', { name: buildText.primary.publish, exact: true })).toBeEnabled()
     await page.screenshot({ path: testInfo.outputPath('publish-ready.png'), fullPage: true })
     await publish.click()
     await expect(page.getByRole('heading', { name: '誰に見せますか？', exact: true })).toBeVisible()

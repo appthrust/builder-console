@@ -105,7 +105,7 @@ export function AppPage({ app, tab }: { app: BusinessApp; tab: AppTab }) {
   return (
     <div className="mx-auto w-full max-w-5xl">
       <AppHeader app={app} view={view} projectId={projectId} sharing={access.label} canEdit={canEdit} pendingCount={pendingCount} onShare={() => setShareOpen(true)} onDelete={() => setDeleting(true)} />
-      <BuildFailureNotice failure={view.stack?.buildFailure} projectId={projectId} stackId={app.stackId ?? undefined} title={app.displayName} canEdit={canEdit} />
+      <BuildFailureNotice failure={view.stack?.buildFailure} projectId={projectId} stackId={app.stackId ?? undefined} title={app.displayName} canEdit={canEdit} behind={view.latestBuildFailed ? { runUrl: sourceRepository?.build?.runUrl } : undefined} />
 
       <div className="mt-8">
         <LinkTabs label={text.header.tabsLabel} tabs={tabs} current={current} />

@@ -86,6 +86,22 @@ export const textJa = {
     drafts: '作りかけ',
     back: (label: string) => `${label}へ戻る`,
   },
+  /** What the implementation run means once the app is made (APT-1124): the header word, its progress, the next step. */
+  outcome: {
+    word: { built: 'できました', unchanged: '変更がありません', stopped: '止まっています', interrupted: '再開を待っています' },
+    tasks: (finished: number, total: number) => `作業 ${finished} / ${total}`,
+    current: (title: string) => `いまの作業: ${title}`,
+    elapsed: (label: string) => `経過 ${label}`,
+    /** The run is server-owned: closing or reloading the page does not cancel it (README, implementation runs). */
+    expectation: '全部で 10〜30 分ほどかかります。この画面を閉じても、作業は続きます。',
+    built: 'アプリができました。',
+    publishTo: (audience: string) => `「公開する」を押すと、${audience}に公開されて使えるようになります。`,
+    publish: '「公開する」を押して見せる相手を選ぶと、使えるようになります。',
+    /** console-v1 before the audience is saved: 公開する stays disabled until the settings card above is saved. */
+    publishAfterSettings: '上のカードで公開する名前と誰に見せるかを保存すると、「公開する」を押せるようになります。',
+    unchanged: 'AI の作業は終わりましたが、作業がすべて飛ばされたため、アプリは変わっていません。',
+    unchangedRetry: 'もう一度試すと、飛ばした作業をやり直します。',
+  },
   proposal: {
     title: (name: string) => `提案: ${name}`,
     purposeSeparator: '\u3000',

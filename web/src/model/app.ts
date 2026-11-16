@@ -361,6 +361,16 @@ export function deriveConsoleApps(input: ConsoleAppsInput): ConsoleApp[] {
   )
 }
 
+/**
+ * The web component serves a release: it reports Ready, and its latest release is not known to have Failed. An
+ * unloaded or errored release overview and an in-flight latest release (another version Pending, InProgress,
+ * WaitingPromotion, while the previous one serves) count as running; a Failed latest release does not. `webReady` is
+ * the web component summary's own `Ready` status (`deriveConsoleApp`), never true for a stopped or unstarted one.
+ */
+export function hasRunningRelease(platform: Pick<ConsoleApp, 'facts'>): boolean {
+  return platform.facts.webReady && platform.facts.webReleasePhase !== 'Failed'
+}
+
 /** What every screen shows for a BusinessApp: one of the four status words plus a second line. */
 export interface AppView {
   status: ConsoleStatus
@@ -382,6 +392,11 @@ export interface AppView {
   unreadableStack?: true
   /** A saved creating-draft link points at an unreadable row; completion is unknown. */
   unreadableBuild?: true
+  /**
+   * The source's latest build failed while a release still runs (`hasRunningRelease`) and the status is known: the
+   * app keeps its own status (also 作っています during an AI build), and the app page says it in a notice (APT-1136).
+   */
+  latestBuildFailed?: true
   stack?: AppStack
   platform?: ConsoleApp
 }
@@ -417,6 +432,9 @@ export function draftState(
  * - bound stack missing from the stack list: 停止中 (deleted or not visible);
  * - stack without an observed Application yet: 準備中;
  * - otherwise the PoC rules of `deriveConsoleApp` on the stack's Application.
+ * A failed latest source build is the app's status (ビルドに失敗しています), except that an unknown status stays
+ * unknown, and an app that still runs a release (`hasRunningRelease`, AI build or not) keeps its own status and only
+ * carries `latestBuildFailed`, so it is neither shown nor counted as 問題あり.
  */
 export function deriveAppView(
   app: Pick<BusinessApp, 'stackId' | 'createdAt'>,
@@ -430,14 +448,14 @@ export function deriveAppView(
     ? isOneOf(stack?.sourceKind, 'application-source-repository') ? stack?.sourceRepositoryRefName : undefined
     : draftPlatform?.progress?.sourceRepositoryId
   const buildFailed = sourceId !== undefined && input.sourceRepositories?.some((source) => source.id === sourceId && source.buildFailed)
-  const view = (status: ConsoleStatus, text: string, extra: Partial<AppView> = {}): AppView => ({
+  const view = (status: ConsoleStatus, text: string, extra: Partial<AppView> = {}, running = false): AppView => ({
     status,
     label: copy.status[status],
     text,
     second: text,
     draft: false,
     ...extra,
-    ...(buildFailed ? {
+    ...(buildFailed && status !== 'unknown' ? running ? { latestBuildFailed: true as const } : {
       status: 'failed', label: buildCopy.sourceBuild.status, text: buildCopy.sourceBuild.status, second: buildCopy.sourceBuild.status,
       ...(extra.platform ? { platform: { ...extra.platform, status: 'failed', statusText: buildCopy.sourceBuild.status } } : {}),
     } : {}),
@@ -473,7 +491,7 @@ export function deriveAppView(
         build: { draftId: build.draftId, phase: 'implementing' }, stack,
         platform: released ? platform : { ...platform, status: 'deploying', statusText: text, url: undefined },
         ...(released && platform.url ? { url: platform.url } : {}),
-      })
+      }, hasRunningRelease(platform))
     }
   }
   return view(platform.status, appSecondLine(platform, releases, now), {
@@ -482,7 +500,7 @@ export function deriveAppView(
     ...(build ? { build: { draftId: build.draftId, phase: 'done' as const } } : {}),
     ...(platform.url ? { url: platform.url } : {}),
     ...(platform.help ? { help: platform.help } : {}),
-  })
+  }, hasRunningRelease(platform))
 }
 
 /** Release history of one component, newest first. */

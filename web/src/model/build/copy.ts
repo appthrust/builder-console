@@ -74,6 +74,17 @@ export const textJa = {
     failed: 'アプリのビルドに失敗しています',
     status: 'ビルドに失敗しています',
     run: 'ビルドの実行を見る',
+    /**
+     * A reported failure of the latest build run of an app that runs a release (APT-1136): secondary, never 問題あり.
+     * Only what is known is said: the reported failure can be false (another workflow's run recorded as the build).
+     */
+    behind: {
+      title: '最新のビルドが失敗と記録されています',
+      detail: 'アプリはこれまでどおり動いています。最近の変更がある場合、まだ反映されていない可能性があります。',
+      cause: (lines: string) => `原因: ${lines}`,
+      latest: '最新のビルド',
+      latestFailed: '失敗（アプリは動いています）',
+    },
   },
   failure: {
     forbidden: { title: 'アプリを作る権限がありません', reason: '基盤の担当者に「アプリを作る権限」を依頼してください。' },

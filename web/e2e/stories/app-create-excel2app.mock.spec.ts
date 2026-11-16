@@ -190,12 +190,15 @@ test.describe('Excel ledger to AI build @excel2app', () => {
     expect((await creation.request.response())?.status()).toBe(202)
     // Stack/repository readiness is manual even when draft and task polling auto-advance.
     for (let step = 0; step < 6; step++) await mock.advance()
-    await expect(newTab.getByRole('button', { name: '公開する', exact: true })).toBeEnabled({ timeout: 45_000 })
+    // The header's 公開する; once the app is built the conversation offers the same action, enabled together with it.
+    const publish = newTab.getByTestId('build-session').locator('header').getByRole('button', { name: '公開する', exact: true })
+    await expect(publish).toBeEnabled({ timeout: 45_000 })
+    await expect(newTab.getByRole('log').getByRole('button', { name: '公開する', exact: true })).toBeEnabled()
     await expect(newTab.getByRole('log')).not.toContainText('公開するときのアプリの名前はどれにしますか？')
     await expect(newTab.getByRole('log')).not.toContainText('誰に見せますか？')
     const built = await (await request.get(draftPath)).json()
     expect(built.conversationTurns.some((turn: { userMessage: string }) => isPrepareTurn(turn.userMessage))).toBe(false)
-    await newTab.getByRole('button', { name: '公開する', exact: true }).click()
+    await publish.click()
     await expect(newTab.getByRole('heading', { name: '誰に見せますか？', exact: true })).toBeVisible()
     await expect(newTab.getByRole('radio', { name: /全社/ })).toBeChecked()
     await testInfo.attach('new-tab-publish-preferences', { body: await newTab.screenshot({ fullPage: true }), contentType: 'image/png' })

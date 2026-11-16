@@ -81,3 +81,13 @@ test('structured run reasons win and task-only reasons survive projection', () =
   expect(projectImplementation(draft, { ...run, status: 'failed', error: 'network failed', failureReason: 'RuntimeRestarted', tasks }).failure?.kind).toBe('interrupted')
   expect(projectImplementation(draft, { ...run, status: 'failed', error: 'network failed', tasks }).failure?.kind).toBe('failed')
 })
+
+test('the run clock is projected; its lease only while the run is running, so a pending or finished run is never read as interrupted', () => {
+  const state = projectImplementation(draft, run)
+  expect(state).toMatchObject({ runStartedAt: startedAt, runLeaseExpiresAt: startedAt })
+  for (const status of ['pending', 'succeeded', 'failed'] as const) expect(projectImplementation(draft, { ...run, status })).not.toHaveProperty('runLeaseExpiresAt')
+  expect(model.stageImplementation(state)).toEqual({
+    phase: 'running', done: false, implemented: true, activityTail: run.activityTail,
+    tasks: state.tasks, currentTaskId: 'two', runStartedAt: startedAt, leaseExpiresAt: startedAt,
+  })
+})

@@ -6,6 +6,7 @@ import { classifyBuildFailure } from './failure'
 import type { ProgressCard } from './types'
 import { isProductLanguage } from './wording'
 import { deriveCreateProgress, type ProgressInput } from '../progress'
+import { hasRunningRelease, type ConsoleApp } from '../app'
 
 export function formatElapsed(ms: number): string {
   const seconds = Math.max(0, Math.floor(Number.isFinite(ms) ? ms / 1000 : 0))
@@ -86,9 +87,13 @@ function observeProgress(execution: BuildExecution, now: number): Partial<Progre
   }
 }
 
-/** A source build can fail before the stack or console app binding exists. */
-export function sourceBuildFailureProgress(build: SourceRepository['build']): ProgressCard | undefined {
-  if (!build || !isOneOf(build.state, 'failed')) return undefined
+/**
+ * A source build can fail before the stack or console app binding exists. A failed build is the creation's failure
+ * only while no release runs: once `platform` serves a release (`hasRunningRelease`), a reported failure of the latest
+ * build run (possibly not the app's own build, APT-1136) neither stops the build page nor closes 公開する.
+ */
+export function sourceBuildFailureProgress(build: SourceRepository['build'], platform?: Pick<ConsoleApp, 'facts'>): ProgressCard | undefined {
+  if (!build || !isOneOf(build.state, 'failed') || (platform && hasRunningRelease(platform))) return undefined
   return {
     kind: 'prepare', title: buildCopy.progress.prepare.title, interrupted: false, staged: true, buildFailed: true,
     steps: [
@@ -102,7 +107,7 @@ export function sourceBuildFailureProgress(build: SourceRepository['build']): Pr
 
 /** Preparation ends with the template's startup, not its automatically issued URL. */
 export function appPreparationProgress(input: ProgressInput, now: number, since?: string): ProgressCard | undefined {
-  const failed = sourceBuildFailureProgress(input.sourceRepository?.build)
+  const failed = sourceBuildFailureProgress(input.sourceRepository?.build, input.view.platform)
   if (failed) return failed
   const steps = deriveCreateProgress(input)
   const release = steps.find((step) => step.key === 'release')
