@@ -100,7 +100,8 @@ const atA = (destination: ResolvedRepositoryDestination): SourceBinding => ({ re
  */
 async function resumedAtA(progressFor: (context: { draft: CreateProgress['draft']; destination: ResolvedRepositoryDestination; projectId: string }) => Promise<CreateProgress>, moveTo = 'builtin') {
   const [me, groups] = await Promise.all([gateway.console(meContract, undefined), gateway.console(groupsContract, undefined)])
-  const group = groups[0]!
+  // A new app goes only into a group the caller belongs to.
+  const group = groups.find((candidate) => me.effectiveGroupIds.includes(candidate.id))!
   const destination = await api.repositoryDestination(me.projectId)
   if (destination.kind !== 'resolved') throw new Error('the mock default destination is not resolved')
   const draft = await api.createApp({ displayName: '在庫管理', description: '', tags: [], groupId: group.id, slug: name, share: { scope: 'private', groupIds: [], extraPersonIds: [] } })

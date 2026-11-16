@@ -106,7 +106,7 @@ type appInput struct {
 	OwnerIDs     *[]string           `json:"ownerIds"`
 }
 
-func (s *request) applyApp(input appInput, app *domain.App) error {
+func (s *request) applyApp(input appInput, app *domain.App, creating bool) error {
 	if input.DisplayName != nil {
 		app.DisplayName = strings.TrimSpace(*input.DisplayName)
 	}
@@ -139,7 +139,9 @@ func (s *request) applyApp(input appInput, app *domain.App) error {
 	}
 	if input.GroupID != nil {
 		group, err := s.findGroup(*input.GroupID)
-		if err != nil {
+		// Creation requires the same fresh effective membership as build sessions.
+		// PATCH keeps directory-wide destinations for existing app editors.
+		if err != nil || (creating && !slices.Contains(s.effectiveGroupIDs, group.ID)) {
 			return httpx.Invalid("groupId must be one of your directory groups")
 		}
 		app.Group = domain.AppGroup{ID: group.ID, Name: group.Name, Path: group.Path}
@@ -213,7 +215,7 @@ func (a *API) createApp(s *request) (any, int, error) {
 	if input.GroupID != nil {
 		app.Share.GroupIDs = []string{*input.GroupID}
 	}
-	if err := s.applyApp(input, &app); err != nil {
+	if err := s.applyApp(input, &app, true); err != nil {
 		return nil, 0, err
 	}
 	if app.Share.Scope == "public" && !s.actor.IsConsoleAdmin {
@@ -273,7 +275,7 @@ func (a *API) patchApp(s *request) (any, int, error) {
 		return nil, 0, err
 	}
 	updated := app
-	if err := s.applyApp(input, &updated); err != nil {
+	if err := s.applyApp(input, &updated, false); err != nil {
 		return nil, 0, err
 	}
 	if updated.Share.Scope == "public" && app.Share.Scope != "public" && !s.actor.IsConsoleAdmin {
@@ -328,6 +330,12 @@ func (a *API) bindApp(s *request) (any, int, error) {
 	}
 	if !domain.ValidSlug(input.StackID) || !domain.ValidSlug(input.AppName) {
 		return nil, 0, httpx.Invalid("stackId and appName must be valid DNS labels")
+	}
+	// First binding completes creation in the record's current group, even if
+	// an owner moved the unbound record there using the separate PATCH policy.
+	// Already-bound records retain the store's existing conflict response.
+	if !app.Bound() && !slices.Contains(s.effectiveGroupIDs, app.Group.ID) {
+		return nil, 0, httpx.Invalid("groupId must be one of your directory groups")
 	}
 	if err := s.tx.Bind(app, input.StackID, input.AppName); err != nil {
 		return nil, 0, err

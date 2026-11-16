@@ -38,6 +38,7 @@ func TestLauncherEntriesRelationAndState(t *testing.T) {
 			h := newHarness(t)
 			root := createTestGroup(h, "sales", nil)
 			group := createTestGroup(h, "east", &root.ID)
+			h.setMember(group.ID, h.directory.person("editor").ID, "member")
 			person := h.directory.person(tc.viewer)
 			if tc.member {
 				h.setMember(root.ID, person.ID, "member")
@@ -81,6 +82,7 @@ func TestLauncherEntriesShareGroupDoesNotDetermineRelation(t *testing.T) {
 	h := newHarness(t)
 	ownerGroup := createTestGroup(h, "sales", nil)
 	sharedGroup := createTestGroup(h, "operations", nil)
+	h.setMember(ownerGroup.ID, h.directory.person("editor").ID, "member")
 	h.setMember(sharedGroup.ID, h.directory.person("viewer").ID, "member")
 	app := call[domain.App](h, "editor", "POST", "/apps", map[string]any{
 		"displayName": "Shared Desk", "groupId": ownerGroup.ID,
@@ -96,6 +98,7 @@ func TestLauncherEntriesShareGroupDoesNotDetermineRelation(t *testing.T) {
 func TestLauncherEntriesSearchAndSort(t *testing.T) {
 	h := newHarness(t)
 	group := createTestGroup(h, "sales", nil)
+	h.setMember(group.ID, h.directory.person("editor").ID, "member")
 	for _, tc := range []struct{ name, scope string }{{"Zulu Finance", "company"}, {"Alpha Finance", "private"}, {"Other", "company"}, {"Other Private", "private"}} {
 		app := call[domain.App](h, "editor", "POST", "/apps", map[string]any{
 			"displayName": tc.name, "groupId": group.ID, "share": domain.SharePolicy{Scope: tc.scope},
@@ -123,6 +126,7 @@ func TestLauncherEntriesSearchAndSort(t *testing.T) {
 func TestLauncherEntriesStackCachePerSubjectAndExpiry(t *testing.T) {
 	h := newHarness(t)
 	group := createTestGroup(h, "sales", nil)
+	h.setMember(group.ID, h.directory.person("editor").ID, "member")
 	app := call[domain.App](h, "editor", "POST", "/apps", map[string]any{
 		"displayName": "Shared Desk", "groupId": group.ID, "share": domain.SharePolicy{Scope: "company"},
 	}, 201)

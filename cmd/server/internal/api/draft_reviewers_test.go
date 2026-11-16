@@ -21,6 +21,7 @@ func TestDraftReviewerSubjects(t *testing.T) {
 func TestDraftReviewersProxy(t *testing.T) {
 	h := newHarness(t)
 	group := createTestGroup(h, "sales", nil)
+	h.setMember(group.ID, h.directory.person("editor").ID, "member")
 	app := call[domain.App](h, "editor", "POST", "/apps", map[string]any{"displayName": "Quotes", "groupId": group.ID}, 201)
 	call[domain.App](h, "editor", "POST", "/apps/"+app.ID+"/bind", map[string]string{"stackId": "quotes", "appName": "quotes"}, 200)
 	var current *API

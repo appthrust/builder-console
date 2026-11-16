@@ -3,7 +3,7 @@
 import { isOneOf, knownValue, type BuildTurn } from '../../model/contracts/build'
 import type { Capability, ColumnKind, ExcelAnalysis, ReadingSheet, SheetRole, UiDesign, WorkbookEntry, WorkbookList, WorkbookSummary } from '../../model/contracts/excel'
 import { useNavigate } from '@tanstack/react-router'
-import { ArrowRight, Calculator, CalendarClock, Check, CircleDashed, ClipboardList, Database, Download, Eye, FileSpreadsheet, GitBranch, ListChecks, Loader2, Pencil, PieChart, RotateCcw, Search, Sparkles, Table2, Upload } from 'lucide-react'
+import { ArrowRight, Calculator, CalendarClock, Check, CircleDashed, ClipboardList, Database, Download, Eye, FileSpreadsheet, GitBranch, ListChecks, Loader2, Pencil, PieChart, RotateCcw, Search, Sparkles, Table2, Upload, Users } from 'lucide-react'
 import type { OpenValue } from '../../api/boundary'
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { aiPolicyCopy, aiPolicyExplanation } from '../../copy/ai-policy'
@@ -16,8 +16,9 @@ import { importedRowCount } from '../../model/build/questions'
 import { parseSpec } from '../../model/build/spec'
 import { paths } from '../../routes/paths'
 import { useShell } from '../../shell/use-shell'
-import { Button, Card, CardBody, cn, CopyButton, Field, focusHeading, LinkButton, Markdown, Notice, PageHeader, RadioCards, Stepper, TextArea, TextInput, useDocumentTitle, useUnsavedChangesGuard } from '../../ui'
+import { Button, Card, CardBody, cn, CopyButton, EmptyState, Field, focusHeading, LinkButton, Markdown, Notice, PageHeader, RadioCards, Stepper, TextArea, TextInput, useDocumentTitle, useUnsavedChangesGuard } from '../../ui'
 import { ResourceBoundary, type ResourceQuery } from '../../ui/resource-boundary'
+import { text as buildText } from '../build/copy'
 import { resolveBuildGroup } from '../build/entry'
 import { UnconfirmedNotice } from '../build/unconfirmed-notice'
 import { filesFromDrop, filesFromList, type CollectedWorkbook } from './collect'
@@ -80,6 +81,7 @@ function labelOf<K extends string>(labels: Record<K, string>, value: OpenValue<K
 }
 
 export function Excel2AppPage({ draftId }: { draftId?: string }) {
+  const { me, groups, currentGroup } = useShell()
   const createdDraftId = useRef<string>(undefined)
   const [route, setRoute] = useState({ draftId, flowKey: 0 })
   if (route.draftId !== draftId) {
@@ -87,7 +89,21 @@ export function Excel2AppPage({ draftId }: { draftId?: string }) {
     createdDraftId.current = undefined
     setRoute({ draftId, flowKey: route.flowKey + (bindingCreatedDraft ? 0 : 1) })
   }
+  // The first upload makes the draft: without a group (the AI build rule) the flow never opens, so none is made.
+  if (!resolveBuildGroup(me, groups, currentGroup)) return <NoGroup />
   return <Excel2AppFlow key={route.flowKey} draftId={draftId} onCreatedDraft={(id) => { createdDraftId.current = id }} />
+}
+
+function NoGroup() {
+  useDocumentTitle(text.pageTitle(1))
+  return (
+    <div className="mx-auto max-w-3xl">
+      <PageHeader title={text.title} lead={text.lead} />
+      <div className="mt-6" data-testid="excel2app-no-group">
+        <EmptyState icon={<Users />} heading="h2" title={buildText.page.noGroup.title} body={buildText.page.noGroup.body} action={<LinkButton href={paths.directory}>{buildText.page.noGroup.directory}</LinkButton>} />
+      </div>
+    </div>
+  )
 }
 
 /** Binding this flow's new draft to the URL must not discard upload or admission errors. */

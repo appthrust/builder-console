@@ -14,6 +14,8 @@
 // (default role Viewer) for requester/approver stories; reset restores Yamada.
 // `POST /api/console/__mock/role {role}` switches role and caller: Viewer uses
 // Tanaka (who cannot open the private keihi app); Admin/Editor use Yamada.
+// `POST /api/console/__mock/leave-groups {personId?}` removes every direct membership of the person (default the
+// caller), who then belongs to no group: no creation entry opens and `POST /apps` refuses every group, like the server.
 // `POST /api/console/__mock/comments {state: 'empty' | 'many' | 'quota'}` replaces
 // all comments: empty clears them, many seeds 120 on a-mitsumori (100 returned),
 // quota seeds 200 there by the current caller so their next POST returns 429.
@@ -622,6 +624,13 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
     state.teamSlug = input.teamSlug ?? state.teamSlug
     return json({ notMember: state.notMember, teamSlug: state.teamSlug })
   }
+  if (head === '__mock' && id === 'leave-groups' && method === 'POST') {
+    const input = await body<{ personId?: string }>(request).catch(() => ({ personId: undefined }))
+    const personId = input.personId ?? state.callerId
+    if (!state.people.some((entry) => entry.id === personId)) return notFound()
+    for (const rows of state.memberships.values()) rows.delete(personId)
+    return json({ personId, effectiveGroupIds: [...personGroups(personId).keys()] })
+  }
   // Old console drafts (stackId null): the abandoned 作りかけ row.
   if (head === '__mock' && id === 'app-draft' && method === 'POST') {
     const slug = 'draft-stopped'
@@ -666,8 +675,8 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
   if (head === 'me' && method === 'GET') return json(me())
   // The same-origin Directory proxy; the Directory does not gate reads on Project membership.
   if (head === 'directory') return directoryRoutes(request, url, segments.slice(1))
-  // NEW-APP conversation sessions (`/api/console/v1/build-sessions*`, ./mock-build-sessions): the caller's own.
-  if (head === 'v1' && id === 'build-sessions') return buildSessionRoutes(request, url, { owner: state.callerId, member: !state.notMember })
+  // NEW-APP conversation sessions (`/api/console/v1/build-sessions*`, ./mock-build-sessions): the caller's own, in the caller's groups.
+  if (head === 'v1' && id === 'build-sessions') return buildSessionRoutes(request, url, { owner: state.callerId, member: !state.notMember, groupIds: [...personGroups(state.callerId).keys()] })
   const needsRoles = head === 'resolve' || head === 'apps' || head === 'admin' || (head === 'access-requests' && !id && method === 'GET')
   if (state.notMember && needsRoles) {
     return fail(403, 'not_project_member', state.teamSlug
@@ -772,16 +781,18 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
           description?: string
           icon?: string
           tags?: string[]
-          groupId: string
+          groupId?: string | null
           slug?: string
           share?: SharePolicy
         }>(request)
-        if (!input.displayName?.trim() || !state.groups.some((g) => g.id === input.groupId)) {
-          return fail(400, 'invalid_request', 'displayName and an existing groupId are required')
-        }
+        // Like the server: a named target (unknown, empty, or a group the caller does not belong to; no Console
+        // administrator exception) is refused as such before the required fields are checked.
+        if (input.groupId != null && !personGroups(state.callerId).has(input.groupId)) return fail(400, 'invalid_request', 'groupId must be one of your directory groups')
+        if (!input.displayName?.trim() || input.groupId == null) return fail(400, 'invalid_request', 'displayName and groupId are required')
+        const groupId = input.groupId
         const slug = input.slug ?? slugify(input.displayName)
         if (!isValidSlug(slug)) return fail(400, 'invalid_request', 'invalid slug')
-        if (state.apps.some((a) => a.groupId === input.groupId && a.slug === slug)) return fail(409, 'slug_taken', `slug ${slug} is taken`)
+        if (state.apps.some((a) => a.groupId === groupId && a.slug === slug)) return fail(409, 'slug_taken', `slug ${slug} is taken`)
         let appName = slug
         for (let n = 2; state.apps.some((a) => a.appName === appName); n++) appName = `${slug}-${n}`
         const now = new Date().toISOString()
@@ -795,12 +806,12 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
           guide: '',
           capabilities: [],
           screenshots: [],
-          groupId: input.groupId,
+          groupId,
           ownerIds: [state.callerId],
           stackId: null,
           // The suggested label until /bind fixes it.
           appName,
-          share: input.share ?? share('group', [input.groupId]),
+          share: input.share ?? share('group', [groupId]),
           createdById: state.callerId,
           createdAt: now,
           updatedAt: now,
@@ -973,8 +984,12 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
     }
     if (sub === 'bind' && method === 'POST') {
       if (!canEdit) return forbidden()
-      if (stored.stackId) return fail(409, 'already_bound', 'already bound')
       const input = await body<{ stackId: string; appName: string }>(request)
+      // Like the server: the first bind completes creation in the record's current group, so the caller must belong to
+      // it now (no Console administrator exception), also after an owner moved the unbound record there. A record
+      // already bound keeps the conflict, whatever the caller's memberships.
+      if (stored.stackId) return fail(409, 'already_bound', 'The app is already bound to a platform stack')
+      if (!personGroups(state.callerId).has(stored.groupId)) return fail(400, 'invalid_request', 'groupId must be one of your directory groups')
       Object.assign(stored, { stackId: input.stackId, appName: input.appName, updatedAt: new Date().toISOString() })
       return json(toApp(stored))
     }

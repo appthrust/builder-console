@@ -79,6 +79,10 @@ export const textEn: typeof textJa = {
   retryBuild: 'Try again',
   inputKept: 'Your input has been kept.',
   customizeWithAi: 'Customize with AI',
+  keptGroup: {
+    title: 'You can’t continue creating this app',
+    body: (group: string) => `This unfinished app belongs to ${group}, and you no longer belong to ${group}. Ask your administrator to add you to ${group}, then reopen this page.`,
+  },
   noBusinessTemplates: 'No business templates yet; build with AI or use your own code.',
   fromImage: 'From a container image',
   prerequisiteSeparator: ', ',

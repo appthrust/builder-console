@@ -104,6 +104,11 @@ export const textJa = {
   retryBuild: 'もう一度試す',
   inputKept: '入力した内容は残っています。',
   customizeWithAi: 'AI でカスタマイズ',
+  /** A resumed creation whose app already exists in a group the caller no longer belongs to: it is not continued (nor moved) here. */
+  keptGroup: {
+    title: 'このアプリの作成は続けられません',
+    body: (group: string) => `作りかけのアプリは「${group}」に属していますが、あなたはもう「${group}」に所属していません。続けるには、管理者にあなたを「${group}」に追加してもらってから、このページを開き直してください。`,
+  },
   noBusinessTemplates: '業務用テンプレートはまだありません。AI と作るか、作ったコードから作れます。',
   fromImage: 'コンテナイメージから',
   prerequisiteSeparator: '・',

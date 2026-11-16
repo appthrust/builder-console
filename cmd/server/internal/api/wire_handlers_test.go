@@ -33,6 +33,7 @@ func TestConsoleHandlerWireContracts(t *testing.T) {
 	get("Settings", "admin", "/admin/platform")
 	validate("Error", call[json.RawMessage](h, "", "GET", "/me", nil, 401))
 	group := createTestGroup(h, "schema", nil)
+	h.setMember(group.ID, h.directory.person("editor").ID, "member")
 	created := validate("App", call[json.RawMessage](h, "editor", "POST", "/apps", map[string]any{"groupId": group.ID, "displayName": "Schema app", "share": map[string]any{"scope": "private"}}, 201))
 	id := created["id"].(string)
 	name := created["appName"].(string)

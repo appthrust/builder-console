@@ -23,7 +23,7 @@ func (s appEntrySource) Entries(ctx context.Context, principal launcher.Principa
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	var entries []launcherentries.Entry
-	err := s.api.withRequest(ctx, principal.Identity, principal.Bearer, false, true, false, func(state *request) error {
+	err := s.api.withRequest(ctx, principal.Identity, principal.Bearer, false, true, false, false, func(state *request) error {
 		urls, err := s.api.stackPublicURLs(ctx, principal.Subject, principal.Bearer)
 		if err != nil {
 			return err
