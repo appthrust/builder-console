@@ -107,9 +107,8 @@ const runFailure = z.union([
   unreadable,
 ])
 
-// The canonical run refines `failure` against the wire status; the shape is reread here so the open status is read
-// first. A `failure` beside another status is never used (only a failed run is classified by it).
-export const runReader: z.ZodType<ImplementationRun> = z.object(ApplicationDraftImplementationRun.shape).extend({
+// A `failure` beside another status is never used (only a failed run is classified by it).
+export const runReader: z.ZodType<ImplementationRun> = ApplicationDraftImplementationRun.extend({
   status: openCanonical(ApplicationDraftImplementationRunStatus),
   step: openCanonical(ApplicationDraftImplementationStep).optional(),
   failureReason: openCanonical(ApplicationDraftImplementationFailureReason).optional(),
