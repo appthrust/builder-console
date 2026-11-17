@@ -23,7 +23,7 @@ export const textEn: typeof textJa = {
   databaseResetFailed: 'Couldn’t start recreating the database. Wait a moment and try again.',
   open: 'Take a look',
   newTab: 'Open in new tab',
-  previewAudience: 'This is a preview before publishing. Only you can see it now; others can’t reach the app until you publish.',
+  previewAudience: 'This is a preview before publishing. It does not appear for other people until you publish.',
   retry: 'Try again',
   retryPending: 'Preparing to resume',
   unmetCriteria: (count: number) => `${count} unmet acceptance criteria`,

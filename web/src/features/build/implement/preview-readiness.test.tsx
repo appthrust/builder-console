@@ -43,7 +43,7 @@ test('missing readiness evidence cannot expose an iframe or an enabled action', 
   expect(render(undefined).match(/disabled=""/g)).toHaveLength(2)
 })
 
-test('the preview says only the builder can see it until the app is published', () => {
+test('the preview says it is a pre-publish check until the app is published', () => {
   const props = { state: { ...state, previewStatus: previewReadiness(200, 4_000) }, onOpenPreview: () => {} }
   expect(renderToStaticMarkup(<ImplementPanel {...props} released={false} />)).toContain(copy.previewAudience)
   expect(renderToStaticMarkup(<ImplementPanel {...props} released />)).not.toContain(copy.previewAudience)
