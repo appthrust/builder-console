@@ -1,5 +1,6 @@
-// APT-1232: a 409 to an implementation start is either another tab's start (read back, never reported) or Platform's
-// typed refusal of this start (said once, never retried).
+// APT-1232: a 409 to an implementation start is either another tab's start (its run shows in the draft read back,
+// never reported) or a refusal of this start: Platform's typed refusal (said once, never retried) or an untyped
+// conflict after which the draft read back shows no new run.
 import { afterEach, beforeEach, expect, spyOn, test, type Mock } from 'bun:test'
 import type { ApplicationDraft } from '@appthrust/api-schema/platform-api'
 import { ORPCError } from '@orpc/client'
@@ -33,6 +34,7 @@ let container: HTMLDivElement
 let client: QueryClient
 let restoreLanguage: () => void
 let created: Mock<typeof buildApi.createImplementationRun>
+let reads: Mock<typeof buildApi.getDraft>
 /** What the tests read from the hook: the start, its request failure, and taking a refusal back. */
 let implementation: { requestFailure?: BuildFailure; startPending(): void; dismissRefusal(): void }
 
@@ -50,6 +52,8 @@ beforeEach(async () => {
   restoreLanguage = preserveLanguage()
   setLanguage('ja')
   created = spyOn(buildApi, 'createImplementationRun')
+  // The draft read back after an untyped conflict: unchanged unless a test says another tab started a run.
+  reads = spyOn(buildApi, 'getDraft').mockResolvedValue(draft)
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   client.setQueryData(buildDraftOptions('p1', draft.id).queryKey, draft)
   container = document.createElement('div')
@@ -63,17 +67,32 @@ afterEach(async () => {
   container.remove()
   client.clear()
   created.mockRestore()
+  reads.mockRestore()
   restoreLanguage()
 })
 
+/** The draft as another tab left it: its run, finished, is the latest. */
+const startedElsewhere = (id: string) => draftOf({ ...wire, implementationRuns: [{ id, status: 'succeeded', startedAt: at, finishedAt: at, devWorkspaceId: 'ws', taskIds: [], tasks: [] }] })
+
 test('another tab\'s start is read back and never reported', async () => {
   const cases: { code?: string; details?: Record<string, unknown> }[] = [{ code: 'conflict' }, { code: 'idempotency_in_progress' }, {}, { code: 'conflict', details: { reason: 'idempotency_in_progress', retryable: true } }]
-  for (const { code, details } of cases) {
+  for (const [index, { code, details }] of cases.entries()) {
     created.mockRejectedValueOnce(conflict(code, 'implementation run is running', details))
+    reads.mockResolvedValueOnce(startedElsewhere(`run-elsewhere-${index}`))
     await startOnce()
+    expect(reads).toHaveBeenCalledTimes(index + 1)
+    expect(client.getQueryData<typeof draft>(buildDraftOptions('p1', draft.id).queryKey)?.implementationRuns.at(-1)?.id).toBe(`run-elsewhere-${index}`)
     expect(implementation.requestFailure).toBeUndefined()
   }
   expect(created).toHaveBeenCalledTimes(4)
+})
+
+test('an untyped conflict after which no other start shows is a refusal of this start, with a reference', async () => {
+  created.mockRejectedValueOnce(conflict('conflict', 'source change proposal is being withdrawn'))
+  await startOnce()
+  expect(reads).toHaveBeenCalledTimes(1)
+  expect(implementation.requestFailure).toMatchObject({ kind: 'failed', reasonCode: 'StartRefused', title: buildCopy.failure.failed.implement, reason: buildCopy.failure.retry, reference: { draftId: draft.id } })
+  expect(created).toHaveBeenCalledTimes(1)
 })
 
 test('a generic conflict whose reason names a refusal is that refusal, never another tab\'s start', async () => {

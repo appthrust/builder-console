@@ -71,10 +71,10 @@ test.describe('App delete @app', () => {
     await expect(page.getByRole('heading', { level: 1, name: app.name, exact: true })).toHaveCount(0)
   })
 
-  // APT-1234: Platform refuses to delete an app whose AI work areas (from its build and its improvement sessions) are
-  // still running (412 `branch_has_active_delivery`, the blockers counted by kind). Only that answer is rewritten in
-  // the browser; once they are gone the same dialog deletes the app.
-  test('a deletion stopped by the app\'s remaining AI work areas says what blocks it and what to do, never the platform\'s message @mock @story', async ({ page, mock }, testInfo) => {
+  // APT-1234: Platform refuses to delete an app that still has work areas (412 `branch_has_active_delivery`, the
+  // blockers counted by kind). Only that answer is rewritten in the browser; once they are gone the same dialog
+  // deletes the app.
+  test('a deletion stopped by the app\'s remaining work areas says what blocks it and what to do, never the platform\'s message @mock @story', async ({ page, mock }, testInfo) => {
     void mock
     const app = seed.apps.keihi
     const stackPath = `/api/v1/projects/${seed.projectId}/application-stacks/${app.slug}`
@@ -97,12 +97,12 @@ test.describe('App delete @app', () => {
     await dialog.getByLabel(`確認のため「${app.name}」と入力してください。`, { exact: true }).fill(app.name)
     const confirm = dialog.getByRole('button', { name: '完全に削除する', exact: true })
 
-    await withExpectedFailures([{ method: 'DELETE', path: stackPath, status: 412, count: 1, reason: 'the app\'s AI work areas are still running' }], async () => {
+    await withExpectedFailures([{ method: 'DELETE', path: stackPath, status: 412, count: 1, reason: 'the app still has work areas' }], async () => {
       await confirm.click()
       const refusal = dialog.getByRole('alert')
-      await expect(refusal).toContainText('このアプリはまだ使われているため、削除できませんでした')
-      await expect(refusal).toContainText('このアプリを AI で作ったときや直したときの作業場所が 2 か所、まだ動いています。')
-      await expect(refusal).toContainText('この画面からは止められません。基盤の担当者に片づけてもらってから、もう一度「完全に削除する」を押してください。')
+      await expect(refusal).toContainText('このアプリにはまだ残っているものがあるため、削除できませんでした')
+      await expect(refusal).toContainText('このアプリの作業場所が 2 か所残っています。')
+      await expect(refusal).toContainText('この画面からは片づけられません。基盤の担当者に片づけてもらってから、もう一度「完全に削除する」を押してください。')
     })
     for (const word of ['application branch', 'delivery consumers', 'DevWorkspace', '操作に失敗しました']) await expect(dialog.getByText(word)).toHaveCount(0)
     expect(deletes).toEqual([412])
@@ -114,5 +114,44 @@ test.describe('App delete @app', () => {
     await confirm.click()
     await expect(page).toHaveURL(`/${app.groupPath}`)
     await expect(page.getByRole('main').getByRole('link', { name: new RegExp(app.name) })).toHaveCount(0)
+  })
+
+  // APT-1234: while Platform only waits for what it is already removing (409 `dependents_deleting`), the deletion
+  // sends the same stack delete again, with the same Idempotency-Key, after the retry time. Closing the dialog stops
+  // it: nothing more is sent and the app stays.
+  test('a deletion waiting for what Platform is removing resends with the same key, and closing the dialog stops it @mock @story', async ({ page, mock }) => {
+    void mock
+    const app = seed.apps.keihi
+    const stackPath = `/api/v1/projects/${seed.projectId}/application-stacks/${app.slug}`
+    const keys: (string | null)[] = []
+    await page.route(`**${stackPath}`, async (route: Route) => {
+      if (route.request().method() !== 'DELETE') return route.continue()
+      keys.push(await route.request().headerValue('idempotency-key'))
+      return route.fulfill({ status: 409, json: { error: { code: 'conflict', message: 'application "keihi" is waiting for dependents to finish deleting: devws-1', details: {
+        reason: 'dependents_deleting', retryAfterSeconds: 2, dependents: [{ kind: 'DevWorkspace', id: 'devws-1', name: app.name }],
+      } } } })
+    })
+
+    await page.goto(`/${app.groupPath}/${app.slug}/-/settings`)
+    await expect(page.getByRole('heading', { level: 1, name: app.name, exact: true })).toBeVisible()
+    await expect(page.getByTestId('env-table').getByRole('row').filter({ hasText: 'APP_TITLE' })).toContainText(app.slug)
+    await page.getByRole('region', { name: '危険な操作', exact: true }).getByRole('button', { name: '削除する', exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: `「${app.name}」を削除しますか？`, exact: true })
+    await dialog.getByLabel(`確認のため「${app.name}」と入力してください。`, { exact: true }).fill(app.name)
+
+    await withExpectedFailures([{ method: 'DELETE', path: stackPath, status: 409, count: 2, reason: 'Platform waits for the app\'s work areas to finish deleting' }], async () => {
+      await dialog.getByRole('button', { name: '完全に削除する', exact: true }).click()
+      await expect(dialog.getByRole('button', { name: '削除しています…', exact: true })).toBeVisible()
+      await expect.poll(() => keys.length, { timeout: 10_000 }).toBe(2)
+      // Still waiting: the dialog can be closed, and closing stops the deletion.
+      await dialog.getByRole('button', { name: 'キャンセル', exact: true }).click()
+      await expect(dialog).toHaveCount(0)
+    })
+    expect(keys[0]).toBeTruthy()
+    expect(keys[1]).toBe(keys[0])
+    // Past the next retry time: nothing more was sent, and the app is still there.
+    await page.waitForTimeout(3_000)
+    expect(keys).toHaveLength(2)
+    await expect(page.getByRole('heading', { level: 1, name: app.name, exact: true })).toBeVisible()
   })
 })

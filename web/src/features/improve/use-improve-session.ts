@@ -9,7 +9,7 @@ import { isOneOf, knownValue, type BuildDraft } from '../../model/contracts/buil
 import { deriveImprove } from '../../model/improve'
 import { useImplementation } from '../build/implement'
 import { proposalKeys, proposalOptions } from '../../api/queries/proposal'
-import { improvementLocked, proposalTerminal, proposalWaiting } from '../proposals/model'
+import { improvementAdmitted, proposalTerminal, proposalWaiting } from '../proposals/model'
 
 /**
  * Turns and runs are server-owned: sending a message only POSTs the turn and
@@ -25,23 +25,35 @@ export function useImproveSession(projectId: string, draft: BuildDraft) {
   const implementation = useImplementation({ projectId, draft, handoff: draft.creationPlan?.implementationHandoff, enabled: !draft.creationPlanUnreadable })
   const proposal = useQuery(proposalOptions(projectId, draft.proposalId))
   const phase = proposal.data?.phase
-  const reviewLocked = !!draft.proposalId && improvementLocked(phase)
-  /** Why the session takes no new change: its proposal awaits review or apply, or is closed. */
-  const review = !draft.proposalId || !phase ? undefined : proposalWaiting(phase) ? 'waiting' as const : proposalTerminal(phase) ? 'closed' as const : undefined
-  // Platform refused a start because of the proposal: read the proposal again, so the page says which holds.
-  const refused = implementation.requestFailure?.reasonCode === 'ProposalRunBlocked'
-  useEffect(() => {
-    if (refused) void queryClient.invalidateQueries({ queryKey: proposalKeys.detail(projectId, draft.proposalId) })
-  }, [refused, queryClient, projectId, draft.proposalId])
-  // Once the proposal moves on, that refusal no longer holds: sent back for changes, the change can be started again.
-  const phaseWord = phase ? knownValue(phase) ?? 'unknown' : undefined
-  const seenPhase = useRef(phaseWord)
+  const reviewLocked = !!draft.proposalId && !improvementAdmitted(phase)
+  /**
+   * Why the session takes no new change: its proposal awaits review or apply, is closed, or could not be applied
+   * (ApplyFailed is not closed: the proposal keeps being read).
+   */
+  const review = !draft.proposalId || !phase ? undefined
+    : proposalWaiting(phase) ? 'waiting' as const
+      : proposalTerminal(phase) ? 'closed' as const
+        : isOneOf(phase, 'ApplyFailed') ? 'applyFailed' as const : undefined
+  // A start Platform refused: read the proposal again, so the page says which holds. The refusal is taken back only
+  // when a read made after it shows the proposal changed and admitting a run again; a read of the same proposal
+  // (still drafting with its submission pending, say) keeps it.
+  const requestFailure = implementation.requestFailure
+  const refusal = requestFailure?.reasonCode === 'ProposalRunBlocked' || requestFailure?.reasonCode === 'StartRefused' ? requestFailure : undefined
+  const proposalMark = proposal.data ? [knownValue(proposal.data.phase) ?? 'unknown', proposal.data.updatedAt, proposal.data.decisions.length].join('|') : undefined
+  const refusedWith = useRef<{ failure: BuildFailure; mark?: string; at: number }>(undefined)
   const { dismissRefusal } = implementation
   useEffect(() => {
-    if (seenPhase.current === phaseWord) return
-    seenPhase.current = phaseWord
-    dismissRefusal()
-  }, [phaseWord, dismissRefusal])
+    if (!refusal || !draft.proposalId) {
+      refusedWith.current = undefined
+      return
+    }
+    if (refusedWith.current?.failure !== refusal) {
+      refusedWith.current = { failure: refusal, mark: proposalMark, at: Date.now() }
+      void queryClient.invalidateQueries({ queryKey: proposalKeys.detail(projectId, draft.proposalId) })
+      return
+    }
+    if (proposal.dataUpdatedAt > refusedWith.current.at && proposalMark !== refusedWith.current.mark && improvementAdmitted(phase)) dismissRefusal()
+  })
   const applied = isOneOf(phase, 'Applied')
   // The controller applies first; release correlation updates the private draft later.
   useQuery({

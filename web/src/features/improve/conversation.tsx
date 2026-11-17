@@ -26,8 +26,8 @@ export interface ImproveConversationProps {
   appUrl?: string
   locked: boolean
   starting: boolean
-  /** The session's proposal awaits review or apply, or is closed: no change can be started, the change card says why. */
-  review?: 'waiting' | 'closed'
+  /** Why Platform starts no run under the session's proposal: no change can be started, the change card says why. */
+  review?: ProposalHold
   outcome?: ReactNode
   sendFailure?: BuildFailure
   startFailure?: BuildFailure
@@ -159,14 +159,19 @@ function FailureNotice({ failure, onRetry, onConfirm }: { failure: BuildFailure;
   </Notice>
 }
 
+/** Why no run starts under the proposal: it awaits review or apply, is closed, or could not be applied. */
+export type ProposalHold = 'waiting' | 'closed' | 'applyFailed'
+
+const HOLD_COPY = { waiting: 'proposalPending', closed: 'proposalClosed', applyFailed: 'proposalApplyFailed' } as const satisfies Record<ProposalHold, string>
+
 /**
- * The change the next run will make, with 「この内容で直す」 attached where it is read. While the proposal awaits review
- * or is closed, Platform starts no run: the card says why and what the user can do instead of offering the start.
- * A start Platform refused is said once, without a retry.
+ * The change the next run will make, with 「この内容で直す」 attached where it is read. While Platform starts no run
+ * under the proposal, the card says why and what the user can do instead of offering the start. A start Platform
+ * refused is said once, without a retry.
  */
-function ProposalCard({ tasks, starting, disabled, review, failure, onStart, onConfirm }: { tasks: ImproveTask[]; starting: boolean; disabled: boolean; review?: 'waiting' | 'closed'; failure?: BuildFailure; onStart(): void; onConfirm(): void }) {
+function ProposalCard({ tasks, starting, disabled, review, failure, onStart, onConfirm }: { tasks: ImproveTask[]; starting: boolean; disabled: boolean; review?: ProposalHold; failure?: BuildFailure; onStart(): void; onConfirm(): void }) {
   const readable = tasks.filter((task) => isProductLanguage(task.title))
-  const held = review ? buildCopy.failure.run[review === 'waiting' ? 'proposalPending' : 'proposalClosed'] : undefined
+  const held = review ? buildCopy.failure.run[HOLD_COPY[review]] : undefined
   return <section aria-label={text.proposal.label} data-testid="improve-proposal" className="mr-4 max-w-[70ch] rounded-lg border border-line bg-white px-4 py-3 text-sm leading-relaxed text-stone-900">
     <p className="text-xs font-medium text-stone-500">{text.proposal.label}</p>
     <p className="mt-1 break-words">{text.proposal.lead}</p>

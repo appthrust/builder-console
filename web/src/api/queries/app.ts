@@ -18,7 +18,7 @@ import {
   rollbackComponentContract,
   updateComponentConfigContract,
 } from '../contracts/platform/app'
-import { apiGateway, type ApiGateway } from '../gateway'
+import { apiGateway, type ApiGateway, type PlatformCallOptions } from '../gateway'
 import { keys, POLL_INTERVAL_MS } from './shared'
 
 async function listAllComponentSummaries(projectId: string, signal?: AbortSignal): Promise<ComponentSummary[]> {
@@ -118,12 +118,13 @@ export function updateEnvVars(scope: ComponentScope, variables: EnvVariable[]): 
   return apiGateway.platform(updateComponentConfigContract, { params: scope, body: { variables } })
 }
 
-export function deleteApplicationStack(projectId: string, id: string): Promise<DeletionAccepted> {
-  return apiGateway.platform(deleteApplicationStackContract, { params: { projectId, id } })
+/** A stack delete; a caller retrying the same deletion sends the same `idempotencyKey`, and `signal` cancels it. */
+export function deleteApplicationStack(projectId: string, id: string, options?: PlatformCallOptions): Promise<DeletionAccepted> {
+  return apiGateway.platform(deleteApplicationStackContract, { params: { projectId, id } }, options)
 }
 
-export function deleteApplicationSourceRepository(projectId: string, id: string): Promise<DeletionAccepted> {
-  return apiGateway.platform(deleteApplicationSourceRepositoryContract, { params: { projectId, id } })
+export function deleteApplicationSourceRepository(projectId: string, id: string, options?: PlatformCallOptions): Promise<DeletionAccepted> {
+  return apiGateway.platform(deleteApplicationSourceRepositoryContract, { params: { projectId, id } }, options)
 }
 
 export function isLogsForbidden(error: unknown): boolean {

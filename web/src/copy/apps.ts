@@ -297,18 +297,18 @@ export const apps = {
         repository ? `GitHub の置き場（${repository}）は消さずに残ります。` : 'GitHub の置き場は消さずに残ります。',
       deleteSourceBusy: 'アプリは止めましたが、置き場とのつながりをまだ外せていません。少し待ってから、もう一度「完全に削除する」を押してください。',
       /**
-       * Platform refused the deletion: something of the app is still running (`inUse`; the AI work areas of its build
-       * and improvement sessions are named and counted, nothing in the console removes them) or is still being removed
-       * (`waiting`, after the console waited for it). Never Platform's own message.
+       * Platform refused the deletion: something of the app is still left (`inUse`; its work areas are named and
+       * counted, whatever made them and whether or not they run, and nothing in the console removes them) or is
+       * still being removed (`waiting`, after the console waited for it). Never Platform's own message.
        */
       deleteRefused: {
-        inUse: 'このアプリはまだ使われているため、削除できませんでした',
-        workAreas: (count: number) => `このアプリを AI で作ったときや直したときの作業場所が ${count} か所、まだ動いています。`,
-        workAreasNext: 'この画面からは止められません。基盤の担当者に片づけてもらってから、もう一度「完全に削除する」を押してください。',
-        others: 'このアプリにつながっている、ほかの動いているものがまだ残っています。',
+        inUse: 'このアプリにはまだ残っているものがあるため、削除できませんでした',
+        workAreas: (count: number) => `このアプリの作業場所が ${count} か所残っています。`,
+        workAreasNext: 'この画面からは片づけられません。基盤の担当者に片づけてもらってから、もう一度「完全に削除する」を押してください。',
+        others: 'このアプリにつながっている、ほかのものがまだ残っています。',
         othersNext: '少し待ってから、もう一度「完全に削除する」を押してください。続くときは基盤の担当者に相談してください。',
         waiting: '削除の準備がまだ終わっていません',
-        waitingWorkAreas: (count: number) => `このアプリの AI の作業場所 ${count} か所を片づけています。`,
+        waitingWorkAreas: (count: number) => `このアプリの作業場所 ${count} か所を片づけています。`,
         waitingOthers: 'このアプリにつながっているものを片づけています。',
         waitingNext: '少し待ってから、もう一度「完全に削除する」を押してください。',
         failed: '削除できませんでした',

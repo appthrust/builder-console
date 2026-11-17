@@ -710,6 +710,24 @@ test.each(['stack', 'build'] as const)('delete and discard hooks refuse an unrea
   expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
 })
 
+// APT-1234: a deletion waiting for what Platform is still removing stops when its page goes away.
+test('leaving the page while the deletion waits sends no further delete', async () => {
+  rewrites.push({ method: 'DELETE', path: STACK, once: false, body: () => Response.json({ error: {
+    code: 'conflict', message: 'application "mitsumori" is waiting for dependents to finish deleting',
+    details: { reason: 'dependents_deleting', retryAfterSeconds: 1, dependents: [{ kind: 'DevWorkspace', id: 'devws-1', name: '見積作成' }] },
+  } }, { status: 409 }) })
+  await renderApp('overview', 'deletion-probe')
+  await click(button('Attempt delete'))
+  await settle()
+  expect(count('DELETE', STACK)).toBe(1)
+  await act(async () => { root!.unmount() })
+  root = undefined
+  // Past the retry time: an orphaned wait would have sent the delete again by now.
+  await Bun.sleep(1_500)
+  expect(count('DELETE', STACK)).toBe(1)
+  expect(requests.filter((item) => item.method === 'DELETE' && !STACK.test(item.path))).toEqual([])
+})
+
 test.each(['improve', 'repair'] as const)('an unreadable draft row does not block a new %s', async (entry) => {
   await mockFetch('/api/v1/__mock/codex', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ available: true }) })
   rewrites.push({ method: 'GET', path: new RegExp(`^${PROJECT}/application-drafts$`), once: false, body: () => ({ data: [{ ...storedDraftWire, id: 'unreadable-row', createdAt: 'not-a-date' }] }) })

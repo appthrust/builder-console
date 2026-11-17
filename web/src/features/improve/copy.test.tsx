@@ -84,7 +84,7 @@ test.each(['ja', 'en'] as const)('a refused start is said once with no retry, an
   expect(refused).not.toContain(retryButton)
   expect(refused).not.toContain('source change proposal')
   expect(refused).toMatch(new RegExp(`<button[^>]*disabled=""[^>]*>[^<]*${text.proposal.apply}</button>`))
-  for (const [review, held] of [['waiting', buildCopy.failure.run.proposalPending], ['closed', buildCopy.failure.run.proposalClosed]] as const) {
+  for (const [review, held] of [['waiting', buildCopy.failure.run.proposalPending], ['closed', buildCopy.failure.run.proposalClosed], ['applyFailed', buildCopy.failure.run.proposalApplyFailed]] as const) {
     const html = render(draft, undefined, { review, locked: true })
     expect(html).toContain(held.title)
     expect(html).toContain(held.reason)

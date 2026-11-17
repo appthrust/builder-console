@@ -41,6 +41,16 @@ export function startConflictFailure(code: string | undefined, text: string, ref
 }
 
 /**
+ * A 409 to an implementation start without Platform's reason, after which the draft read back shows no new run: it
+ * was not another tab's start but a refusal of this one (platform-api answers a plain `conflict` for a proposal being
+ * withdrawn or not matching its draft, and for a draft that changed while the start was admitted). Said once; the
+ * start may be tried again, and the page's next reads say whether the proposal still admits it.
+ */
+export function startRefusedFailure(text: string, reference: NonNullable<BuildFailure['reference']>): BuildFailure {
+  return { kind: 'failed', reasonCode: 'StartRefused', title: buildCopy.failure.failed.implement, reason: buildCopy.failure.retry, raw: text, reference }
+}
+
+/**
  * Platform's repository destination stopped the creation before anything was made: it moved
  * (or the plan was bound to the current one, and the user approves again), it is not set, or the
  * request did not match it. Fixed words only: never the server's reason or message. Only a mismatch

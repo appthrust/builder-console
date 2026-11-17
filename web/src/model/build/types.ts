@@ -120,8 +120,9 @@ export interface BuildFailure {
   /**
    * `PublishURLConflict`: another publish holds the URL name. `ProposalRunBlocked`: Platform refused an improvement
    * run because its proposal awaits review or apply, or is closed (failure.ts `startConflictFailure`).
+   * `StartRefused`: Platform refused a start without a reason and no other start was made (`startRefusedFailure`).
    */
-  reasonCode?: 'PublishURLConflict' | 'ProposalRunBlocked'
+  reasonCode?: 'PublishURLConflict' | 'ProposalRunBlocked' | 'StartRefused'
   raw?: string
   /** Support correlation only; diagnostics stay in the advanced disclosure. */
   reference?: { draftId: string; executionId?: string; at: string }
