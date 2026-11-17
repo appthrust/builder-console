@@ -67,6 +67,7 @@ export function ImplementPanel({ state, preparation, released, previewNotice, pr
             </Button> : <Button tone="ghost" size="sm" disabled>{copy.newTab}</Button>}
           </div>
         )} />
+        {released ? null : <p className="border-t border-stone-100 px-4 py-2 text-xs leading-relaxed text-stone-600">{copy.previewAudience}</p>}
         {previewNotice ? <p role="note" className="border-t border-amber-100 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-900">{previewNotice}</p> : null}
         {previewDatabase ? <PreviewDatabaseLine control={previewDatabase} /> : null}
         {previewReady ? (

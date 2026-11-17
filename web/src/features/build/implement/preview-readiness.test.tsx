@@ -43,6 +43,12 @@ test('missing readiness evidence cannot expose an iframe or an enabled action', 
   expect(render(undefined).match(/disabled=""/g)).toHaveLength(2)
 })
 
+test('the preview says only the builder can see it until the app is published', () => {
+  const props = { state: { ...state, previewStatus: previewReadiness(200, 4_000) }, onOpenPreview: () => {} }
+  expect(renderToStaticMarkup(<ImplementPanel {...props} released={false} />)).toContain(copy.previewAudience)
+  expect(renderToStaticMarkup(<ImplementPanel {...props} released />)).not.toContain(copy.previewAudience)
+})
+
 test('only 2xx and 3xx responses are ready; network and gateway failures keep preparing', () => {
   for (const status of [undefined, 0, 199, 400, 401, 404, 502, 503, 504]) {
     expect(previewReadiness(status, 4_000)).toBe('preparing')

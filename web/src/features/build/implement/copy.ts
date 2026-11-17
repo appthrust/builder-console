@@ -26,6 +26,8 @@ export const textJa = {
   databaseResetFailed: '作り直しを始められませんでした。少し待ってから、もう一度お試しください。',
   open: '見てみる',
   newTab: '新しいタブで開く',
+  /** Verified on appthrust.ink (APT-1124): the workspace preview admits only its owner, and before publishing the app URL sends others to request access. */
+  previewAudience: '公開する前の確認用です。いまは作っているあなただけが見られます。ほかの人には、公開するまで届きません。',
   retry: 'もう一度試す',
   retryPending: '再開の準備をしています',
   unmetCriteria: (count: number) => `満たせなかった条件 ${count} 件`,
