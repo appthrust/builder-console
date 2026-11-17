@@ -1,5 +1,5 @@
 import type { BuildFailure } from '../../../model/build'
-import { classifyBuildFailure } from '../../../model/build/failure'
+import { classifyRunFailure } from '../../../model/build/failure'
 import { isOneOf, knownValue, type BuildDraft, type ImplementationHandoff, type ImplementationRun, type ImplementationTask, type RunStep } from '../../../model/contracts/build'
 import type { OpenValue } from '../../../api/boundary'
 import type { PreviewDatabaseStatus } from './runtime'
@@ -80,6 +80,6 @@ export function projectImplementation(draft: Pick<BuildDraft, 'id' | 'updatedAt'
     ...(isOneOf(run.status, 'running') && run.runLeaseExpiresAt ? { runLeaseExpiresAt: run.runLeaseExpiresAt } : {}),
     step: run.step,
     activityTail: run.activityTail,
-    ...(stopped ? { failure: classifyBuildFailure(run.error || task?.error || (isOneOf(run.status, 'cancelled') ? text.implement.cancelled : text.implement.failed), undefined, 'implement', { draftId: draft.id, executionId: run.id, at: run.finishedAt ?? task?.finishedAt ?? draft.updatedAt }, undefined, undefined, run.failureReason ?? task?.failureReason) } : {}),
+    ...(stopped ? { failure: classifyRunFailure(run, task, isOneOf(run.status, 'cancelled') ? text.implement.cancelled : text.implement.failed, { draftId: draft.id, executionId: run.id, at: run.finishedAt ?? task?.finishedAt ?? draft.updatedAt }) } : {}),
   }
 }

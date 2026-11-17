@@ -22,7 +22,7 @@ const turn: ApplicationDraftConversationTurn = {
 }
 const draft: ApplicationDraft = {
   id: 'draft-1', projectId: 'project-1', title: '見積', intent: '見積を作る', phase: 'specifying', specMarkdown: '', architectureMarkdown: '',
-  creationExecutions: [], ownerUserId: 'user-1', createdAt: '2026-10-08T00:00:00Z', updatedAt: '2026-10-08T00:01:10Z',
+  creationPlanGenerations: [], conversationTurns: [], creationExecutions: [], implementationRuns: [], createdSourceRepositories: [], ownerUserId: 'user-1', createdAt: '2026-10-08T00:00:00Z', updatedAt: '2026-10-08T00:01:10Z',
 }
 
 describe('conversation history', () => {

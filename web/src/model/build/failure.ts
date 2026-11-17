@@ -1,5 +1,5 @@
 import type { OpenValue } from '../../api/boundary'
-import type { ImplementationFailureReason } from '../contracts/build'
+import { isOneOf, type ImplementationFailureReason, type ImplementationRun, type ImplementationTask, type RunFailure } from '../contracts/build'
 import { aiPolicyCopy, aiPolicyExplanation } from '../../copy/ai-policy'
 import { buildCopy } from './copy'
 import type { BuildFailure } from './types'
@@ -102,7 +102,7 @@ export function classifyBuildFailure(text: string, status: number | undefined, c
   const copy = buildCopy.failure
   // Admission reasons take precedence over generic status, runtime and provider errors.
   const policy = aiPolicyExplanation(details?.reason, details?.policy)
-    ?? aiPolicyExplanation(text.match(/ai_(?:policy_|model_|approval_policy_)[a-z_]*/i)?.[0]?.toLowerCase(), details?.policy)
+    ?? aiPolicyExplanation(policyCode(text), details?.policy)
   if (policy) return { kind: 'policy', title: aiPolicyCopy.title, reason: policy, raw: text }
   // A provider cause is more specific than the runtime's generic TaskFailed/stream reason.
   if (context !== 'prepare' && context !== 'publish' && isAIQuotaExhausted(text)) return { kind: 'quota', ...copy.quota, raw: text }
@@ -166,6 +166,101 @@ export function classifyBuildFailure(text: string, status: number | undefined, c
     return { kind: 'platform', ...copy.platform, raw: text, ...(reference ? { reference } : {}) }
   }
   return { kind: 'failed', title: copy.failed[context], reason: copy.retry, raw: text }
+}
+
+/** The AI policy reason code a legacy diagnostic names, if any. */
+function policyCode(text: string): string | undefined {
+  return text.match(/ai_(?:policy_|model_|approval_policy_)[a-z_]*/i)?.[0]?.toLowerCase()
+}
+
+/**
+ * A stopped implementation run. With Platform's `failure` (APT-1158) its decision is used; without it (an older
+ * Platform, an unreadable `failure`, a cancelled run) the run reads as before, from `failureReason` and the text.
+ */
+export function classifyRunFailure(run: Pick<ImplementationRun, 'status' | 'error' | 'failure' | 'failureReason'>, task: Pick<ImplementationTask, 'error' | 'failureReason'> | undefined, fallback: string, reference: NonNullable<BuildFailure['reference']>): BuildFailure {
+  const text = run.error || task?.error || fallback
+  if (run.failure && isOneOf(run.status, 'failed')) return decidedRunFailure(run.failure, text, reference)
+  return classifyBuildFailure(text, undefined, 'implement', reference, undefined, undefined, run.failureReason ?? task?.failureReason)
+}
+
+/**
+ * `newRun: false`: Platform's run admission refuses every new run while this holds (a pending or closed proposal:
+ * `admitImprovementImplementation` answers 409), so no retry, skip or change is offered. `skip: false`: skipping
+ * cannot help (the next task meets the same exhausted quota), as before APT-1158.
+ */
+type Refinement = Pick<BuildFailure, 'kind' | 'title' | 'reason'> & { newRun?: false, skip?: false }
+
+/**
+ * The wording for a reason this console knows, only when Platform's `retryable` is the one written for it. Never adds
+ * an action: a new run of the same tasks is offered only when `retryable` says so, and is taken away with skip and a
+ * change where Platform refuses any new run; skip alone is taken away for an exhausted quota.
+ */
+function refinement(reason: RunFailure['reason'], retryable: boolean, text: string): Refinement | undefined {
+  const copy = buildCopy.failure
+  const known = reason.kind === 'known' ? reason.value : undefined
+  if (retryable) switch (known) {
+    case 'StreamInterrupted': case 'RuntimeRestarted': return { kind: 'interrupted', ...copy.resumable }
+    case 'RuntimeUnavailable': return { kind: 'unavailable', ...copy.unavailable }
+    case 'TaskTimedOut': return { kind: 'failed', ...copy.run.timedOut }
+    case 'ProviderQuotaExhausted': return { kind: 'quota', ...copy.quota, skip: false }
+    case 'ProposalPending': return { kind: 'failed', ...copy.run.proposalPending, newRun: false }
+    default: return undefined
+  }
+  switch (known) {
+    case 'InputRequired': return { kind: 'blocked', ...copy.run.inputRequired }
+    case 'PolicyDenied': return {
+      kind: 'policy', title: aiPolicyCopy.title,
+      reason: aiPolicyExplanation(policyCode(text)) ?? aiPolicyCopy.policy() + aiPolicyCopy.unknown + aiPolicyCopy.contact,
+    }
+    case 'AccessDenied': return { kind: 'blocked', ...copy.run.accessDenied }
+    case 'ConfigurationMissing': case 'ConfigurationInvalid': return { kind: 'blocked', ...copy.run.configuration }
+    case 'ProposalClosed': return { kind: 'blocked', ...copy.run.proposalClosed, newRun: false }
+    default: return undefined
+  }
+}
+
+/**
+ * `retryable` decides whether a new run of the same tasks is offered, unless Platform refuses every new run; an unknown
+ * reason gets the generic wording for it. A run that would stop the same way names who acts, with its support
+ * reference; where Platform still admits a new run the screen adds the way on (`failureText`).
+ */
+function decidedRunFailure(failure: RunFailure, text: string, reference: NonNullable<BuildFailure['reference']>): BuildFailure {
+  const copy = buildCopy.failure
+  const { newRun = true, skip = true, ...shown } = refinement(failure.reason, failure.retryable, text)
+    ?? (failure.retryable ? { kind: 'failed' as const, title: copy.failed.implement, reason: copy.retry } : { kind: 'blocked' as const, title: copy.failed.implement, reason: copy.run.blocked })
+  return {
+    ...shown,
+    ...(failure.retryable ? {} : { reference }),
+    offers: { retry: failure.retryable && newRun, skip: newRun && skip, change: newRun },
+    raw: text,
+  }
+}
+
+/**
+ * A failure's sentence as one screen shows it. A run that cannot be tried again as it is ends with the way on, naming
+ * only what that screen does: `skip`, it shows 「この作業を飛ばす」 for the stopped task; `change`, a reply typed in its
+ * conversation starts a run with that change. Neither is said where Platform's decision does not offer it.
+ */
+export function failureText(failure: BuildFailure, screen: { skip: boolean; change: boolean }): string {
+  const offers = failure.offers
+  if (!offers || offers.retry) return failure.reason
+  const then = buildCopy.failure.run.then
+  const skip = screen.skip && offers.skip
+  const change = screen.change && offers.change
+  return failure.reason + (change && skip ? then.changeOrSkip : change ? then.change : skip ? then.skip : '')
+}
+
+/**
+ * Whether a stopped run offers a new run of the same tasks, a skip of its stopped task, and a run with a change
+ * instruction: Platform's decision, else by `kind` as before (no change while a failure is shown).
+ */
+export function failureOffers(failure: BuildFailure): NonNullable<BuildFailure['offers']> {
+  if (failure.offers) return failure.offers
+  return {
+    retry: failure.kind !== 'policy' && failure.kind !== 'unconfirmed',
+    skip: failure.kind !== 'policy' && failure.kind !== 'quota' && failure.kind !== 'unconfirmed',
+    change: false,
+  }
 }
 
 /** Use the failure's recorded time, never the render clock, in the copyable reference. */

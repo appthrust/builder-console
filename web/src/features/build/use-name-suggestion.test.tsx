@@ -11,7 +11,7 @@ import { useNameSuggestion } from './use-name-suggestion'
 const draft: ApplicationDraft = {
   id: 'draft-name', projectId: 'project-name', title: 'Contacts', intent: 'Contacts', phase: 'planned',
   ownerUserId: 'owner', specMarkdown: '', architectureMarkdown: '', createdAt: '2026-10-27T00:00:00Z', updatedAt: '2026-10-27T00:00:00Z',
-  creationExecutions: [],
+  creationPlanGenerations: [], conversationTurns: [], creationExecutions: [], implementationRuns: [], createdSourceRepositories: [],
   // A plan the Platform could answer: the contract rejects an empty markdown or representation and a stack request without its hand-off.
   creationPlan: { summary: 'Contacts', markdown: '# Contacts', representation: ['ApplicationStack'], toolPlan: [], applicationStackRequest: {
     templateId: 'web', web: { componentName: 'web' }, database: { componentName: 'db' }, connection: { connectionName: 'db' },

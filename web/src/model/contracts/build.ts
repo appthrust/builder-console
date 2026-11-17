@@ -19,6 +19,7 @@ import type {
   ApplicationDraftCreationPlanGeneration as CanonicalGeneration,
   ApplicationDraftCreationPlanGenerationStatus,
   ApplicationDraftCreationPlanValidation,
+  ApplicationDraftImplementationFailure as CanonicalRunFailure,
   ApplicationDraftImplementationFailureReason,
   ApplicationDraftImplementationRun as CanonicalRun,
   ApplicationDraftImplementationRunStatus,
@@ -61,10 +62,31 @@ export type BuildExecution = Omit<CanonicalExecution, 'status' | 'steps' | 'appr
   approvalUnreadable?: true
 }
 export type ImplementationTask = Omit<CanonicalTask, 'status' | 'failureReason'> & { status: OpenValue<TaskStatus>; failureReason?: OpenValue<ImplementationFailureReason> }
-export type ImplementationRun = Omit<CanonicalRun, 'status' | 'step' | 'failureReason' | 'tasks'> & {
+
+/**
+ * The run failure reasons this console knows (Platform's documented values, APT-1158). Platform's set grows: any other
+ * reason is unknown and follows `retryable` with the generic wording.
+ */
+export const RUN_FAILURE_REASONS = [
+  'StreamInterrupted', 'RuntimeRestarted', 'TaskFailed', 'TaskCancelled', 'InputRequired', 'RuntimeUnavailable', 'TaskTimedOut',
+  'Internal', 'WorkspaceMismatch', 'WorkspaceBranchDiverged', 'ProposalClosed', 'ProposalPending', 'ProposalInvalid', 'ProposalUnavailable',
+  'ProviderQuotaExhausted', 'VerificationLimitsExceeded', 'TodosTooLarge', 'TodosInvalid', 'ConfigurationMissing', 'ConfigurationInvalid',
+  'SourceRepositoryMissing', 'PolicyDenied', 'AccessDenied', 'PushFailed', 'PersistenceFailed', 'ArtifactsUnavailable', 'ArtifactsInvalid',
+] as const
+export type RunFailureReason = (typeof RUN_FAILURE_REASONS)[number]
+/** Platform's decision for a failed run: why it stopped (an open value) and whether an unchanged new run can make progress. */
+export type RunFailure = Omit<CanonicalRunFailure, 'reason'> & { reason: OpenValue<RunFailureReason> }
+
+/**
+ * `failure` is Platform's decision for a failed run; an older Platform does not send it (only `failureReason`).
+ * `failureUnreadable`: Platform sent one this console could not read; the run reads as if it had none.
+ */
+export type ImplementationRun = Omit<CanonicalRun, 'status' | 'step' | 'failureReason' | 'failure' | 'tasks'> & {
   status: OpenValue<RunStatus>
   step?: OpenValue<RunStep>
   failureReason?: OpenValue<ImplementationFailureReason>
+  failure?: RunFailure
+  failureUnreadable?: true
   tasks: ImplementationTask[]
 }
 export type CreatedSourceRepository = ApplicationDraftCreatedSourceRepository

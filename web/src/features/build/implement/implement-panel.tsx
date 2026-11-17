@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type JSX } from 'react'
 import { buildProgress } from '../../../model/build/progress'
 import { buildCopy } from '../../../model/build/copy'
-import { buildFailureReference } from '../../../model/build/failure'
+import { buildFailureReference, failureOffers, failureText } from '../../../model/build/failure'
 import { isOneOf } from '../../../model/contracts/build'
 import type { ProgressCard } from '../../../model/build/types'
 import { Button, Card, CardBody, CardHeader, CopyButton, Notice } from '../../../ui'
@@ -11,10 +11,15 @@ import { implemented, type ImplementationState } from './state'
 import { text } from '../copy'
 
 
-export function ImplementPanel({ state, preparation, released, previewNotice, previewDatabase, onOpenPreview, onRetry, onSkipTask, onConfirm }: {
+export function ImplementPanel({ state, preparation, released, published, changeByReply, previewNotice, previewDatabase, onOpenPreview, onRetry, onSkipTask, onConfirm }: {
   state: ImplementationState
   preparation?: ProgressCard
+  /** The run's release is live (the progress ladder's last step); not publication. */
   released: boolean
+  /** The draft has been published at least once (`draft.publishedAt`); access granted then is not taken back, so the preview is no longer a check before publishing. */
+  published: boolean
+  /** A reply typed in this page's conversation starts a run with that change (the build page's session does). */
+  changeByReply: boolean
   /** The 「データベースなし」 notice, for workspaces without their own preview database. */
   previewNotice?: string
   previewDatabase?: PreviewDatabaseControl
@@ -36,6 +41,9 @@ export function ImplementPanel({ state, preparation, released, previewNotice, pr
   }, [ticking])
   const failedTask = state.tasks.find((task) => task.id === state.currentTaskId && isOneOf(task.status, 'failed'))
   const reference = state.failure?.reference ? buildFailureReference(state.failure.reference) : undefined
+  const offers = state.failure ? failureOffers(state.failure) : undefined
+  // A run that fails before any task started has no task to skip: the sentence then leaves the skip out.
+  const skip = offers?.skip && failedTask && onSkipTask ? () => onSkipTask(failedTask.id) : undefined
   const nothingImplemented = state.phase === 'done' && !implemented(state)
   const progress = buildProgress(preparation, state, now, released)
   const previewReady = Boolean(state.previewUrl) && state.previewStatus === 'ready'
@@ -66,6 +74,7 @@ export function ImplementPanel({ state, preparation, released, previewNotice, pr
             </Button> : <Button tone="ghost" size="sm" disabled>{copy.newTab}</Button>}
           </div>
         )} />
+        {published ? null : <p className="border-t border-stone-100 px-4 py-2 text-xs leading-relaxed text-stone-600">{copy.previewAudience}</p>}
         {previewNotice ? <p role="note" className="border-t border-amber-100 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-900">{previewNotice}</p> : null}
         {previewDatabase ? <PreviewDatabaseLine control={previewDatabase} /> : null}
         {previewReady ? (
@@ -112,12 +121,12 @@ export function ImplementPanel({ state, preparation, released, previewNotice, pr
         // A write whose answer could not be read may have happened: the draft is read back instead of offering to send it again.
         <Notice tone={state.failure.kind === 'unconfirmed' ? 'warning' : 'error'} title={state.failure.title} actions={(
           <>
-            {onRetry && state.failure.kind !== 'policy' && state.failure.kind !== 'unconfirmed' ? <Button size="sm" loading={state.retryPending} disabled={state.retryPending} onClick={onRetry}>{state.retryPending ? copy.retryPending : copy.retry}</Button> : null}
-            {state.failure.kind !== 'policy' && state.failure.kind !== 'quota' && state.failure.kind !== 'unconfirmed' && failedTask && onSkipTask ? <Button size="sm" tone="ghost" disabled={state.retryPending} onClick={() => onSkipTask(failedTask.id)}>{copy.skip}</Button> : null}
+            {onRetry && offers?.retry ? <Button size="sm" loading={state.retryPending} disabled={state.retryPending} onClick={onRetry}>{state.retryPending ? copy.retryPending : copy.retry}</Button> : null}
+            {skip ? <Button size="sm" tone="ghost" disabled={state.retryPending} onClick={skip}>{copy.skip}</Button> : null}
             {state.failure.kind === 'unconfirmed' && onConfirm ? <Button size="sm" onClick={onConfirm}>{buildCopy.failure.confirm}</Button> : null}
           </>
         )}>
-          <p>{state.failure.reason}</p>
+          <p>{failureText(state.failure, { skip: Boolean(skip), change: changeByReply })}</p>
           {reference ? <div className="mt-3 flex flex-wrap items-center gap-2"><span className="min-w-0 break-all text-xs">{reference}</span><CopyButton value={reference} label={buildCopy.failure.copyReference} /></div> : null}
         </Notice>
       ) : nothingImplemented && onRetry ? (

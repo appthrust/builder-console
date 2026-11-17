@@ -82,6 +82,15 @@ test('structured run reasons win and task-only reasons survive projection', () =
   expect(projectImplementation(draft, { ...run, status: 'failed', error: 'network failed', tasks }).failure?.kind).toBe('failed')
 })
 
+test('Platform\'s failure decision wins over failureReason and the text; an unreadable one reads as an older Platform', () => {
+  const failed = { ...run, status: 'failed' as const, error: 'network failed', failureReason: 'RuntimeRestarted' as const }
+  expect(projectImplementation(draft, { ...failed, failure: { reason: 'ConfigurationMissing', retryable: false } }).failure).toMatchObject({ kind: 'blocked', offers: { retry: false, skip: true, change: true }, reference: { draftId: draft.id, executionId: run.id } })
+  expect(projectImplementation(draft, { ...failed, failure: { reason: 'ProposalClosed', retryable: false } }).failure).toMatchObject({ kind: 'blocked', offers: { retry: false, skip: false, change: false } })
+  expect(projectImplementation(draft, { ...failed, failure: { reason: 'TaskStalled', retryable: true } }).failure).toMatchObject({ kind: 'failed', offers: { retry: true, skip: true, change: true } })
+  expect(projectImplementation(draft, { ...failed, failure: { reason: 42 } }).failure).toEqual(projectImplementation(draft, failed).failure)
+  expect(projectImplementation(draft, failed).failure?.kind).toBe('interrupted')
+})
+
 test('the run clock is projected; its lease only while the run is running, so a pending or finished run is never read as interrupted', () => {
   const state = projectImplementation(draft, run)
   expect(state).toMatchObject({ runStartedAt: startedAt, runLeaseExpiresAt: startedAt })

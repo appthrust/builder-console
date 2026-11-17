@@ -239,7 +239,8 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
     ...(planEnd || outcomeTurn ? { conversationEnd: <>{planEnd}{outcomeTurn}</> } : {}),
     ...(started ? {
       // The failure is one page notice with its retry; the pane does not repeat it (a failed preparation's card says the same).
-      artifact: <ArtifactPane draft={draft} spec={spec} proposal={proposal} stage={result.stage} progress={failure?.context === 'prepare' ? undefined : result.progress} implementation={implementation.state}
+      // A reply here never starts a change run of the stopped tasks (only useBuildSession sends those).
+      artifact: <ArtifactPane draft={draft} spec={spec} proposal={proposal} stage={result.stage} progress={failure?.context === 'prepare' ? undefined : result.progress} implementation={implementation.state} changeByReply={false}
         url={url} shareText={shareText} previewDatabaseReset={implementation.previewDatabaseReset} onOpenPreview={onOpenArtifact} onRetry={implementation.retry} onSkipTask={implementation.skipTask} onConfirm={implementation.confirm}
         onCollapse={() => setArtifactCollapsed(true)}
         databaseChanges={<DatabaseChanges projectId={projectId} databaseId={!appReadOnly && app && canEditApp(app, me) ? appView?.stack?.databaseComponentId : undefined} />}

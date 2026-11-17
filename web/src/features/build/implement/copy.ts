@@ -26,6 +26,12 @@ export const textJa = {
   databaseResetFailed: '作り直しを始められませんでした。少し待ってから、もう一度お試しください。',
   open: '見てみる',
   newTab: '新しいタブで開く',
+  /**
+   * Verified on appthrust.ink (APT-1124) for the screen path only: the workspace preview admits only its owner, and
+   * before publishing the app URL sends others to request access. Members with Cluster Access Gateway access to the
+   * Project namespace are outside this claim, so the wording speaks only of other people's screens.
+   */
+  previewAudience: '公開する前の確認用です。公開するまで、ほかの人の画面には出ません。',
   retry: 'もう一度試す',
   retryPending: '再開の準備をしています',
   unmetCriteria: (count: number) => `満たせなかった条件 ${count} 件`,

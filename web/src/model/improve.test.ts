@@ -33,7 +33,7 @@ const run = (id: string, minute: number, status: ApplicationDraftImplementationR
 })
 const draft: ApplicationDraft = {
   id: 'draft-1', projectId: 'project-1', kind: 'improvement', title: '見積作成', intent: '一覧に絞り込みを足したい', phase: 'created',
-  specMarkdown: '一覧に絞り込みを足したい', architectureMarkdown: '', creationPlanGenerations: [], creationExecutions: [],
+  specMarkdown: '一覧に絞り込みを足したい', architectureMarkdown: '', creationPlanGenerations: [], conversationTurns: [], creationExecutions: [], implementationRuns: [], createdSourceRepositories: [],
   createdApplicationId: 'mitsumori', createdApplicationStackId: 'mitsumori', ownerUserId: 'user-1', createdAt: at(0), updatedAt: at(0),
 }
 

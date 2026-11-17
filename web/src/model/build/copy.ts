@@ -113,6 +113,27 @@ export const textJa = {
     copyReference: '問い合わせ番号をコピー',
     /** The task stream dropped (tab closed, sleep, sign-in expired): nothing is lost, the rerun continues. */
     resumable: { title: 'AI の作業が途中で止まりました', reason: 'この画面を離れていた間に止まったかもしれません。もう一度試すと、できたところの続きから進めます。' },
+    /**
+     * A stopped implementation run, worded from Platform's decision (APT-1158). Never names the reason. A run that an
+     * unchanged retry cannot fix says who acts and what changes; where Platform still admits a new run, the screen
+     * adds the way on it actually offers (`then`, chosen by `failureText`).
+     */
+    run: {
+      blocked: 'このまま試しても同じところで止まります。下の問い合わせ番号を基盤の担当者に伝えて、原因を直してもらってください。',
+      then: {
+        changeOrSkip: 'そのあと、直してほしいことを会話で伝えるか、この作業を飛ばしてください。',
+        change: 'そのあと、直してほしいことを会話で伝えてください。',
+        skip: 'そのあと、この作業を飛ばしてください。',
+      },
+      timedOut: { title: '作業に時間がかかりすぎて止まりました', reason: 'できたところまでは残っています。もう一度試すと、止まった作業からやり直します。' },
+      inputRequired: { title: 'AI が確認を求めて止まりました', reason: 'この画面からは答えられません。下の問い合わせ番号を基盤の担当者に伝えて、確認してもらってください。' },
+      accessDenied: { title: '作業を続ける権限がありません', reason: '下の問い合わせ番号を基盤の担当者に伝えて、権限を直してもらってください。' },
+      configuration: { title: '基盤の設定の問題で止まりました', reason: 'あなたの操作の問題ではありません。下の問い合わせ番号を基盤の担当者に伝えて、設定を直してもらってください。' },
+      /** Only the owner's 「やり直してもらう」 reopens a proposal; once applied or declined it is closed. */
+      proposalPending: { title: '提案の確認を待っています', reason: '所有者が提案を確認しているあいだは、作業を進められません。やり直しを求められたら、そこから続けられます。' },
+      /** A closed proposal stays closed; the user starts a new one from the app's 「AIで直す」 (improve/entry.tsx). */
+      proposalClosed: { title: 'この提案は締め切られています', reason: '反映・見送り・取り下げ・期限切れのどれかで終わっていて、この提案では続けられません。続けて直すときは、アプリの画面の「AIで直す」から始めてください。' },
+    },
     nameTaken: '置き場の名前がすでに使われています',
     urlNameTaken: 'URL の名前が別のアプリで使われています',
     suggestName: (name: string) => `「${name}」に変えて、もう一度作りますか？`,

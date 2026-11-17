@@ -9,7 +9,7 @@ const isDraftBusy = readFirst(draftOf, model.isDraftBusy)
 const at = '2026-10-08T00:00:00Z'
 const draft: ApplicationDraft = {
   id: 'draft-1', projectId: 'pj', title: '見積', intent: '見積を作る', phase: 'planned', specMarkdown: '', architectureMarkdown: '',
-  creationExecutions: [], ownerUserId: 'u1', createdAt: at, updatedAt: at,
+  creationPlanGenerations: [], conversationTurns: [], creationExecutions: [], implementationRuns: [], createdSourceRepositories: [], ownerUserId: 'u1', createdAt: at, updatedAt: at,
 }
 const execution = (status: ApplicationDraftCreationExecution['status'], steps: ApplicationDraftCreationExecution['steps']): ApplicationDraftCreationExecution =>
   ({ id: 'exec-1', status, attempt: 1, startedAt: at, steps })

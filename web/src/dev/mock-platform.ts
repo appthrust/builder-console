@@ -63,6 +63,10 @@
 //   its repair pass (repairAttempts: 1); subsequent tasks report every criterion met.
 //   `{interruptSecondTask: true}` makes the next accepted run fail its second selected task
 //   with failureReason StreamInterrupted once; retry preserves completed tasks and resumes there.
+//   A failed run carries `failure {reason, retryable}` as current Platform does (StreamInterrupted, TaskFailed or
+//   ProviderQuotaExhausted, all retryable). `{failure: {reason, retryable}}` makes failed runs carry that decision
+//   instead (with `failureReason` only for Platform's seven frozen legacy values); `{failure: 'legacy'}` omits it, as
+//   an older Platform does; `{failure: null}` restores the default.
 // - `POST /api/v1/__mock/data {mode: 'ok'|'forbidden'|'suspended'|'unsupported'|'empty'|'subject-unbound'|'not-persisted'}`
 //   switches the データ tab's database reads (403 / 412 database_suspended / 412 database_data_unsupported / no tables /
 //   412 database_access_membership_unbound with membershipReason SubjectUnbound or NotPersisted); fixture in ./mock-database-data.ts.
@@ -82,6 +86,8 @@ import {
   type ApplicationBranchComponentConfigEntry,
   type ApplicationDraft,
   type ApplicationDraftConversationTurn,
+  type ApplicationDraftImplementationFailure,
+  ApplicationDraftImplementationFailureReason,
   type ApplicationDraftImplementationRun,
   type ApplicationDraftImplementationTask,
   type ApplicationDraftCreationPlan,
@@ -1043,11 +1049,15 @@ function advanceImplementation(draft: ApplicationDraft): boolean {
       state.interruptedRuns.delete(run.id)
       task.status = 'failed'
       task.error = state.aiQuotaExhausted ? AI_QUOTA_ERROR : interrupted ? 'AI task stream interrupted' : (state.implementationRun.error || 'Implementation task failed')
-      task.failureReason = interrupted ? 'StreamInterrupted' : 'TaskFailed'
+      const decided = state.implementationRun.failure
+      // Platform freezes `failureReason` at its seven legacy values and omits it for any other reason.
+      const legacy = decided === 'legacy' || decided === undefined ? (interrupted ? 'StreamInterrupted' : 'TaskFailed') : ApplicationDraftImplementationFailureReason.safeParse(decided.reason).data
+      if (legacy) task.failureReason = legacy
       task.finishedAt = now
       run.status = 'failed'
       run.error = task.error
-      run.failureReason = task.failureReason
+      if (task.failureReason) run.failureReason = task.failureReason
+      if (decided !== 'legacy') run.failure = decided ?? { reason: state.aiQuotaExhausted ? 'ProviderQuotaExhausted' : interrupted ? 'StreamInterrupted' : 'TaskFailed', retryable: true }
       run.finishedAt = now
     } else run.step = 'pushing'
   } else {
@@ -1215,7 +1225,7 @@ function seedPlatform() {
     improvementSteps: new Map<string, number>(),
     planGeneration: { outcome: 'succeeded' as 'succeeded' | 'failed', error: '', autoAdvance: false, priorGenerations: 0, publish: true },
     prepare: { stall: undefined as 'building' | 'starting' | undefined },
-    implementationRun: { outcome: 'succeeded' as 'succeeded' | 'failed', error: '', autoAdvance: false, unmetCriterion: false, interruptSecondTask: false },
+    implementationRun: { outcome: 'succeeded' as 'succeeded' | 'failed', error: '', autoAdvance: false, unmetCriterion: false, interruptSecondTask: false, failure: undefined as ApplicationDraftImplementationFailure | 'legacy' | undefined },
     interruptedRuns: new Map<string, string>(),
     generationOutcomes: new Map<string, { outcome: 'succeeded' | 'failed'; error: string; publish: boolean }>(),
     /** One-shot 409s for the next stack create (of `appName`, or any). */
@@ -1889,7 +1899,11 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
     return json(state.prepare)
   }],
   ['POST', /^\/api\/v1\/__mock\/implementation-run$/, async (_, request) => {
-    const body = await request.json() as { outcome?: 'succeeded' | 'failed'; error?: string; autoAdvance?: boolean; unmetCriterion?: boolean; interruptSecondTask?: boolean }
+    const body = await request.json() as { outcome?: 'succeeded' | 'failed'; error?: string; autoAdvance?: boolean; unmetCriterion?: boolean; interruptSecondTask?: boolean; failure?: ApplicationDraftImplementationFailure | 'legacy' | null }
+    if (body.failure !== undefined && body.failure !== null && body.failure !== 'legacy' && (typeof body.failure.reason !== 'string' || !body.failure.reason || typeof body.failure.retryable !== 'boolean')) {
+      return error(400, 'invalid_argument', "'failure' must be {reason, retryable}, 'legacy' or null")
+    }
+    if (body.failure !== undefined) state.implementationRun.failure = body.failure ?? undefined
     if (body.outcome) state.implementationRun.outcome = body.outcome
     if (body.error !== undefined) state.implementationRun.error = body.error
     if (body.autoAdvance !== undefined) state.implementationRun.autoAdvance = body.autoAdvance
@@ -2093,6 +2107,8 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
         creationPlanGenerations: [],
         conversationTurns: [],
         creationExecutions: [],
+        implementationRuns: [],
+        createdSourceRepositories: [],
         ownerUserId: mockSubject(),
         createdAt: now,
         updatedAt: now,

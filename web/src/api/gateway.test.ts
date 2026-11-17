@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test'
 import { ORPCError } from '@orpc/client'
 import { QueryClient, QueryObserver } from '@tanstack/react-query'
-import { isResponseContractError, ResponseContractError, type ContractFailureReport } from './boundary'
+import { decodeResponse, isResponseContractError, ResponseContractError, type ContractFailureReport } from './boundary'
 import { ConsoleApiError, isConsoleError } from './console'
 import { listCommentsContract, postCommentContract, removeCommentContract } from './contracts/console/comments'
 import { getApplicationDraftContract } from './contracts/platform/build'
@@ -10,13 +10,15 @@ import { buildDraftOptions } from './queries/build'
 import { retryQuery, retryReadQuery } from './queries/shared'
 import { isSessionExpiredError, sessionExpiryStore } from './session-expiry'
 import { createTestGateway } from './testing/gateway'
-import { assertWireContractCases } from './testing/wire-contract-cases'
+import { assertWireContractCases, type WireContractCase } from './testing/wire-contract-cases'
+import type { BuildDraft } from '../model/contracts/build'
 
 const SECRET = 'SENTINEL-c0ffee-secret-payload'
 const at = '2026-11-13T00:00:00Z'
 /** A draft as Platform marshals it before any execution: `creationExecutions` omitted (APT-748). */
 const wireDraft = { id: 'draft-1', projectId: 'project-1', title: '見積', intent: '見積を作る', phase: 'planned', specMarkdown: '', architectureMarkdown: '', ownerUserId: 'owner-1', createdAt: at, updatedAt: at }
 const execution = { id: 'exec-1', attempt: 1, status: 'running', startedAt: at, steps: [{ id: 'step-1', tool: 'appthrust.applicationStack.create', status: 'running' }] }
+const failedRun = { id: 'run-1', status: 'failed', startedAt: at, devWorkspaceId: 'ws-1', taskIds: [], tasks: [], failureReason: 'TaskFailed' }
 
 const draftJson = (body: unknown, status = 200) => () => Response.json(body, { status })
 
@@ -34,6 +36,13 @@ describe('Platform reference vertical: ApplicationDraft read', () => {
       ]),
       { name: 'APT-748: a run without tasks cannot be guessed', variant: 'absent', path: '/implementationRuns', wire: { ...wireDraft, implementationRuns: [{ id: 'run-1', status: 'running', startedAt: at, devWorkspaceId: 'ws-1', taskIds: [] }] }, expect: { accept: false, issues: [{ path: '/implementationRuns/*/tasks', code: 'missing' }] } },
       { name: 'APT-748: a verification without criteria is broken', variant: 'absent', path: '/implementationRuns', wire: { ...wireDraft, implementationRuns: [{ id: 'run-1', status: 'running', startedAt: at, devWorkspaceId: 'ws-1', taskIds: ['t'], tasks: [{ id: 't', title: '一覧', status: 'done', verification: { reportedAt: at, repairAttempts: 0 } }] }] }, expect: { accept: false, issues: [{ path: '/implementationRuns/*/tasks/*/verification/criteria', code: 'missing' }] } },
+      { name: 'APT-1158: an older Platform sends no failure; failureReason stays', variant: 'absent', path: '/implementationRuns', wire: { ...wireDraft, implementationRuns: [failedRun] }, expect: { accept: true, check: (draft) => { expect(draft.implementationRuns[0]).not.toHaveProperty('failure'); expect(draft.implementationRuns[0]).not.toHaveProperty('failureUnreadable'); expect(draft.implementationRuns[0]?.failureReason).toEqual({ kind: 'known', value: 'TaskFailed' }) } } },
+      { name: 'APT-1158: a known reason and retryable are read', variant: 'present', path: '/implementationRuns', wire: { ...wireDraft, implementationRuns: [{ ...failedRun, failure: { reason: 'AccessDenied', retryable: false } }] }, expect: { accept: true, check: (draft) => expect(draft.implementationRuns[0]?.failure).toEqual({ reason: { kind: 'known', value: 'AccessDenied' }, retryable: false }) } },
+      { name: 'APT-1158: a reason this console does not know is the explicit unknown variant', variant: 'unknown', path: '/implementationRuns', wire: { ...wireDraft, implementationRuns: [{ ...failedRun, failure: { reason: SECRET, retryable: true } }] }, expect: { accept: true, check: (draft) => expect(draft.implementationRuns[0]?.failure).toEqual({ reason: { kind: 'unknown' }, retryable: true }) } },
+      ...[{ reason: SECRET }, { reason: 7, retryable: true }, { reason: '', retryable: true }, SECRET, null].map((failure): WireContractCase<BuildDraft> => ({
+        name: 'APT-1158: an unreadable failure is dropped and marked; the draft is kept', variant: 'unknown', path: '/implementationRuns', wire: { ...wireDraft, implementationRuns: [{ ...failedRun, failure }] },
+        expect: { accept: true, check: (draft) => { expect(draft.implementationRuns[0]).not.toHaveProperty('failure'); expect(draft.implementationRuns[0]?.failureUnreadable).toBe(true); expect(JSON.stringify(draft)).not.toContain(SECRET) } },
+      })),
       { name: 'unknown field is dropped', variant: 'unknown', path: '/', wire: { ...wireDraft, reviewers: [{ email: SECRET }] }, expect: { accept: true, check: (draft) => expect(draft).not.toHaveProperty('reviewers') } },
       { name: 'an unknown phase is the explicit unknown variant (the value is not kept)', variant: 'unknown', path: '/phase', wire: { ...wireDraft, phase: SECRET }, expect: { accept: true, check: (draft) => expect(draft.phase).toEqual({ kind: 'unknown' }) } },
       { name: 'an unknown execution status is the explicit unknown variant', variant: 'unknown', path: '/creationExecutions', wire: { ...wireDraft, creationExecutions: [{ ...execution, status: SECRET }] }, expect: { accept: true, check: (draft) => expect(draft.creationExecutions[0]?.status).toEqual({ kind: 'unknown' }) } },
@@ -41,6 +50,8 @@ describe('Platform reference vertical: ApplicationDraft read', () => {
       { name: 'required id absent', variant: 'absent', path: '/id', wire: { ...wireDraft, id: undefined }, expect: { accept: false, issues: [{ path: '/id', code: 'missing' }] } },
       { name: 'required title broken', variant: 'unknown', path: '/title', wire: { ...wireDraft, title: { text: SECRET } }, expect: { accept: false, issues: [{ path: '/title', code: 'invalid_type' }] } },
     ])
+    // The unreadable failure is reported as a recovery, never as a failed read.
+    expect(decodeResponse(getApplicationDraftContract, { ...wireDraft, implementationRuns: [{ ...failedRun, failure: { reason: SECRET } }] })).toMatchObject({ ok: true, recovered: [{ path: '/implementationRuns/*/failure', code: 'invalid_value' }] })
   })
 
   test('the gateway returns the domain draft through the real OpenAPILink', async () => {

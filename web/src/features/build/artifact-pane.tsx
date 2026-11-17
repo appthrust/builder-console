@@ -83,13 +83,15 @@ export function PublishCard({ url, shareText, published = false }: { url: string
   </CardBody></Card></section>
 }
 
-export function ArtifactPane({ draft, spec, proposal, stage, progress, implementation, failure, url, shareText, shareStep, databaseChanges, previewDatabaseReset, onOpenPreview, onRetry, onSkipTask, onConfirm, onCollapse }: {
+export function ArtifactPane({ draft, spec, proposal, stage, progress, implementation, changeByReply, failure, url, shareText, shareStep, databaseChanges, previewDatabaseReset, onOpenPreview, onRetry, onSkipTask, onConfirm, onCollapse }: {
   draft: BuildDraft
   spec: BuildSpec
   proposal?: BuildProposal
   stage: BuildStage
   progress?: Progress
   implementation: ImplementationState
+  /** A reply typed in the page's conversation starts a run with that change (useBuildSession `changeByReply`). */
+  changeByReply: boolean
   failure?: BuildFailure
   url?: string
   shareText: string
@@ -140,7 +142,7 @@ export function ArtifactPane({ draft, spec, proposal, stage, progress, implement
     </Notice> : null}
     {shareStep}
     {stage === 'publish' && url ? <PublishCard url={url} shareText={shareText} published /> : null}
-    {built ? <ImplementPanel state={implementation} preparation={progress} released={Boolean(url)} previewNotice={previewNotice} previewDatabase={previewDatabase} onOpenPreview={onOpenPreview} onRetry={onRetry} onSkipTask={onSkipTask} onConfirm={onConfirm} /> : null}
+    {built ? <ImplementPanel state={implementation} preparation={progress} released={Boolean(url)} published={Boolean(draft.publishedAt)} changeByReply={changeByReply} previewNotice={previewNotice} previewDatabase={previewDatabase} onOpenPreview={onOpenPreview} onRetry={onRetry} onSkipTask={onSkipTask} onConfirm={onConfirm} /> : null}
     {built ? databaseChanges : null}
     {stage === 'build' && url ? <PublishCard url={url} shareText={shareText} /> : null}
     {built && !url ? <p className="text-xs text-stone-500">{text.artifact.waitingForApp}</p> : null}
