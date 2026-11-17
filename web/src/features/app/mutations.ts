@@ -1,7 +1,7 @@
 import { ORPCError } from '@orpc/client'
 import { useMutation, useQueryClient, type Query, type QueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
-import { useEffect, useRef } from 'react'
+import { useRef } from 'react'
 import { deleteApplicationSourceRepository, deleteApplicationStack } from '../../api/queries/app'
 import type { IndependentRows } from '../../api/boundary'
 import { keys } from '../../api/queries/shared'
@@ -153,18 +153,12 @@ export interface AppDeletion {
   stackDeleted?: boolean
 }
 
-/** How one deletion reaches Platform and the console; every Platform call takes the deletion's `signal`. */
 export interface AppDeletionDeps {
-  /** The same `idempotencyKey` for every send of one deletion's stack delete (Platform's retry contract). */
-  deleteStack: (projectId: string, id: string, options: { idempotencyKey: string; signal: AbortSignal }) => Promise<unknown>
-  deleteSourceRepository: (projectId: string, id: string, options: { signal: AbortSignal }) => Promise<unknown>
+  deleteStack: (projectId: string, id: string) => Promise<unknown>
+  deleteSourceRepository: (projectId: string, id: string) => Promise<unknown>
   removeApp: (appId: string) => Promise<unknown>
-  /** Resolves after `ms`; rejects as soon as `signal` aborts. */
-  wait?: (ms: number, signal: AbortSignal) => Promise<void>
+  wait?: (ms: number) => Promise<void>
   now?: () => number
-  /** A signal that aborts after `ms` (a send's share of the deletion's time). */
-  timeout?: (ms: number) => AbortSignal
-  newKey?: () => string
 }
 
 /** The deleted stack still references the binding: GitOps has not pruned it within the wait. */
@@ -174,148 +168,58 @@ export class SourceStillReferencedError extends Error {
   }
 }
 
-/**
- * The stack delete was still waiting for what Platform is removing when the deletion's time ran out. `refusal` is
- * Platform's last answer, if one came; nothing more is sent.
- */
-export class DeletionWaitExpiredError extends Error {
-  constructor(readonly refusal?: unknown) {
-    super('the application stack deletion is still waiting for its dependents')
-  }
-}
-
-/** The person closed the deletion (or left its page): nothing more was sent. Not a failure to show. */
-export class DeletionCancelledError extends Error {
-  constructor() {
-    super('the application deletion was cancelled')
-  }
-}
-
 /** GitOps prunes the deleted stack asynchronously; until then the binding answers 409 referenced_by_stack. */
 const SOURCE_RELEASE_WAIT_MS = 120_000
 const SOURCE_RELEASE_POLL_MS = 3_000
 
-/** The whole stack delete, its sends and waits, ends within this; then the deletion says it is still waiting. */
-const STACK_RELEASE_WAIT_MS = 120_000
-const STACK_RELEASE_POLL_MS = 5_000
-
 /**
- * How long to wait before deleting the stack again, when Platform refused it only until something it is already
- * removing is gone: 409 `dependents_deleting` (platform-api writer_application_stack_selection.go
- * `applicationDependentsDeletingError`, with `retryAfterSeconds`) or any refusal marked `retryable`. Otherwise
- * undefined: the refusal stands.
+ * Stack → its source repository binding → console record. The console record
+ * is the index, so it goes last: a running app or a stray binding never loses
+ * the row that lets someone delete it again. 404s count as already deleted.
  */
-function stackDeleteRetryAfterMs(error: unknown): number | undefined {
-  const details = platformErrorEnvelope(error)?.details
-  if (details?.reason !== 'dependents_deleting' && details?.retryable !== true) return undefined
-  const seconds = details.retryAfterSeconds
-  return typeof seconds === 'number' && seconds > 0 ? Math.min(seconds * 1000, 30_000) : STACK_RELEASE_POLL_MS
-}
-
-function abortableWait(ms: number, signal: AbortSignal): Promise<void> {
-  const { promise, resolve, reject } = Promise.withResolvers<void>()
-  const abort = () => {
-    clearTimeout(timer)
-    reject(signal.reason)
-  }
-  const timer = setTimeout(() => {
-    signal.removeEventListener('abort', abort)
-    resolve()
-  }, ms)
-  if (signal.aborted) abort()
-  else signal.addEventListener('abort', abort, { once: true })
-  return promise
-}
-
-/**
- * Stack → its source repository binding → console record, as one operation that `signal` stops: no send and no
- * wait goes on once it aborts. The console record is the index, so it goes last: a running app or a stray binding
- * never loses the row that lets someone delete it again. 404s count as already deleted.
- *
- * The stack delete is sent with one Idempotency-Key for this deletion, again after Platform's retry time while
- * Platform only waits for what it is already removing, and never after STACK_RELEASE_WAIT_MS: each send is cut off
- * at that deadline and no wait reaches past it.
- */
-export async function deleteAppResources(projectId: string, deletion: AppDeletion, deps: AppDeletionDeps, signal: AbortSignal): Promise<void> {
-  const wait = deps.wait ?? abortableWait
+export async function deleteAppResources(projectId: string, deletion: AppDeletion, deps: AppDeletionDeps): Promise<void> {
+  const wait = deps.wait ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
   const now = deps.now ?? Date.now
-  const timeout = deps.timeout ?? ((ms: number) => AbortSignal.timeout(ms))
   if (deletion.stackId && !deletion.stackDeleted) {
-    const deadline = now() + STACK_RELEASE_WAIT_MS
-    const idempotencyKey = deps.newKey?.() ?? crypto.randomUUID()
-    let refusal: unknown
-    for (;;) {
-      signal.throwIfAborted()
-      const remaining = deadline - now()
-      if (remaining <= 0) throw new DeletionWaitExpiredError(refusal)
-      const cutoff = timeout(remaining)
-      try {
-        await deps.deleteStack(projectId, deletion.stackId, { idempotencyKey, signal: AbortSignal.any([signal, cutoff]) })
-        break
-      } catch (error) {
-        signal.throwIfAborted()
-        if (cutoff.aborted) throw new DeletionWaitExpiredError(refusal)
-        if (error instanceof ORPCError && error.status === 404) break
-        const retryAfter = stackDeleteRetryAfterMs(error)
-        if (retryAfter === undefined) throw error
-        refusal = error
-        if (now() + retryAfter >= deadline) throw new DeletionWaitExpiredError(refusal)
-        await wait(retryAfter, signal)
-      }
+    try {
+      await deps.deleteStack(projectId, deletion.stackId)
+    } catch (error) {
+      if (!(error instanceof ORPCError && error.status === 404)) throw error
     }
     deletion.stackDeleted = true
   }
   if (deletion.sourceRepositoryId) {
     const deadline = now() + SOURCE_RELEASE_WAIT_MS
     for (;;) {
-      signal.throwIfAborted()
       try {
-        await deps.deleteSourceRepository(projectId, deletion.sourceRepositoryId, { signal })
+        await deps.deleteSourceRepository(projectId, deletion.sourceRepositoryId)
         break
       } catch (error) {
-        signal.throwIfAborted()
         if (error instanceof ORPCError && error.status === 404) break
         const details = platformErrorEnvelope(error)?.details
         const blockers = details?.reason === 'referenced_by_stack' && Array.isArray(details.stackIds) ? details.stackIds : undefined
         // Another stack using the binding is not ours to wait for.
         if (!blockers || !deletion.stackId || !blockers.every((id) => id === deletion.stackId)) throw error
-        if (now() + SOURCE_RELEASE_POLL_MS >= deadline) throw new SourceStillReferencedError()
-        await wait(SOURCE_RELEASE_POLL_MS, signal)
+        if (now() >= deadline) throw new SourceStillReferencedError()
+        await wait(SOURCE_RELEASE_POLL_MS)
       }
     }
   }
-  signal.throwIfAborted()
   await deps.removeApp(deletion.appId)
 }
 
-/**
- * The app's deletion. One deletion runs at a time: deleting again, `cancel` (the dialog closed) or leaving the page
- * stops the one in flight, which ends as DeletionCancelledError.
- */
 export function useDeleteApp(projectId: string, app: BusinessApp, view: AppView) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const deletion = useRef<AppDeletion>(undefined)
-  const running = useRef<AbortController>(undefined)
-  useEffect(() => () => running.current?.abort(), [])
-  const mutation = useMutation({
+  return useMutation({
     mutationFn: async () => {
       if (view.unreadableStack || view.unreadableBuild) throw new Error(copy.common.loadFailed)
-      running.current?.abort()
-      const controller = new AbortController()
-      running.current = controller
       // A retry after the stack delete was accepted keeps the ids: the stack has left the lists by then.
       if (!deletion.current?.stackDeleted) {
         deletion.current = { appId: app.id, stackId: view.stack?.id, sourceRepositoryId: sourceRepositoryIdFor(view) }
       }
-      try {
-        await deleteAppResources(projectId, deletion.current, { deleteStack: deleteApplicationStack, deleteSourceRepository: deleteApplicationSourceRepository, removeApp }, controller.signal)
-      } catch (error) {
-        if (controller.signal.aborted) throw new DeletionCancelledError()
-        throw error
-      } finally {
-        if (running.current === controller) running.current = undefined
-      }
+      await deleteAppResources(projectId, deletion.current, { deleteStack: deleteApplicationStack, deleteSourceRepository: deleteApplicationSourceRepository, removeApp })
     },
     onSuccess: async () => {
       const deleted = { appId: app.id, applicationId: view.platform?.id, stackId: deletion.current?.stackId, webComponentId: view.platform?.webComponentId }
@@ -330,7 +234,6 @@ export function useDeleteApp(projectId: string, app: BusinessApp, view: AppView)
       ])
     },
   })
-  return { ...mutation, cancel: () => running.current?.abort() }
 }
 
 export interface DeletedApp {

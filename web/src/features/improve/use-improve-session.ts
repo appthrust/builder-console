@@ -35,22 +35,23 @@ export function useImproveSession(projectId: string, draft: BuildDraft) {
       : proposalTerminal(phase) ? 'closed' as const
         : isOneOf(phase, 'ApplyFailed') ? 'applyFailed' as const : undefined
   // A start Platform refused: read the proposal again, so the page says which holds. The refusal is taken back only
-  // when a read made after it shows the proposal changed and admitting a run again; a read of the same proposal
-  // (still drafting with its submission pending, say) keeps it.
+  // when a read made after the start was requested shows the proposal changed since then and admitting a run again;
+  // reads of the same proposal (still drafting with its submission pending, say) keep it. The baseline is the
+  // proposal as read when 「この内容で直す」 was pressed, before the request went out.
   const requestFailure = implementation.requestFailure
   const refusal = requestFailure?.reasonCode === 'ProposalRunBlocked' || requestFailure?.reasonCode === 'StartRefused' ? requestFailure : undefined
   const proposalMark = proposal.data ? [knownValue(proposal.data.phase) ?? 'unknown', proposal.data.updatedAt, proposal.data.decisions.length].join('|') : undefined
+  const requested = useRef<{ mark?: string; at: number }>(undefined)
   const refusedWith = useRef<{ failure: BuildFailure; mark?: string; at: number }>(undefined)
-  const { dismissRefusal } = implementation
+  const { dismissRefusal, startPending } = implementation
   useEffect(() => {
     if (!refusal || !draft.proposalId) {
       refusedWith.current = undefined
       return
     }
     if (refusedWith.current?.failure !== refusal) {
-      refusedWith.current = { failure: refusal, mark: proposalMark, at: Date.now() }
+      refusedWith.current = { failure: refusal, ...(requested.current ?? { mark: proposalMark, at: Date.now() }) }
       void queryClient.invalidateQueries({ queryKey: proposalKeys.detail(projectId, draft.proposalId) })
-      return
     }
     if (proposal.dataUpdatedAt > refusedWith.current.at && proposalMark !== refusedWith.current.mark && improvementAdmitted(phase)) dismissRefusal()
   })
@@ -106,6 +107,11 @@ export function useImproveSession(projectId: string, draft: BuildDraft) {
     reviewLocked,
     review,
     implementation,
+    /** 「この内容で直す」 and a stopped run's retry: notes the proposal as read now, the baseline for a refusal. */
+    start: () => {
+      requested.current = { mark: proposalMark, at: Date.now() }
+      startPending()
+    },
     sending,
     sendFailure: sendFailure?.failure,
     /** Nothing can be sent while a turn or a run is in flight (or in an unknown state), or while a send or start request is out. */

@@ -6,7 +6,6 @@ import { ResponseContractError } from '../../api/boundary'
 import { copy } from '../../copy'
 import { setLanguage } from '../../shell/language'
 import { deletionRefusal } from './delete-dialog'
-import { DeletionWaitExpiredError } from './mutations'
 
 let restoreLanguage: () => void
 beforeEach(() => { restoreLanguage = preserveLanguage() })
@@ -35,7 +34,7 @@ test.each(['ja', 'en'] as const)('remaining work areas are named and counted, wi
   }
 })
 
-test.each(['ja', 'en'] as const)('a wait that outlasted the deletion says what is being cleared and to try again, in %s', (language) => {
+test.each(['ja', 'en'] as const)('a deletion Platform holds while it clears something says what is being cleared and to press again shortly, in %s', (language) => {
   setLanguage(language)
   const words = copy.app.settings.deleteRefused
   const deleting = (dependents: unknown) => platform(409, 'conflict', { reason: 'dependents_deleting', retryAfterSeconds: 5, dependents })
@@ -43,9 +42,6 @@ test.each(['ja', 'en'] as const)('a wait that outlasted the deletion says what i
   expect(deletionRefusal(deleting([{ kind: 'Component', id: 'db', name: 'db' }]))).toEqual({ title: words.waiting, lines: [words.waitingOthers, words.waitingNext] })
   expect(deletionRefusal(platform(409, 'idempotency_in_progress', { reason: 'idempotency_in_progress', retryable: true }))).toEqual({ title: words.waiting, lines: [words.waitingOthers, words.waitingNext] })
   expect(said(deleting([{ kind: 'DevWorkspace', id: 'devws-1', name: '経費精算' }]))).not.toContain('devws-1')
-  // The deletion's own time ran out: Platform's last answer names what is being cleared; without one, the general words.
-  expect(deletionRefusal(new DeletionWaitExpiredError(deleting([{ kind: 'DevWorkspace', id: 'devws-1', name: '経費精算' }])))).toEqual({ title: words.waiting, lines: [words.waitingWorkAreas(1), words.waitingNext] })
-  expect(deletionRefusal(new DeletionWaitExpiredError())).toEqual({ title: words.waiting, lines: [words.waitingOthers, words.waitingNext] })
 })
 
 test('any other Platform refusal says it was not deleted without Platform\'s message; what ActionError owns is left to it', () => {

@@ -123,11 +123,22 @@ export function useImplementation({ projectId, draft, handoff, enabled }: Implem
           setRequestFailure({ draftId: draft.id, failure: refusal })
           return false
         }
-        // No reason given. Another tab's start shows as a new run in the draft read back: observe it, do not create a
-        // second workspace. Without one, Platform refused this start (a proposal being withdrawn or not matching).
-        const latest = await queryClient.fetchQuery({ ...options, staleTime: 0 }).then((read) => read.implementationRuns.at(-1), () => undefined)
+        // No reason given. Another tab's start shows as a new run in a draft read started after this answer (a read
+        // already in flight may predate that start, so it is cancelled, never reused): observe that run, do not create
+        // a second workspace. Without one, Platform refused this start (a proposal being withdrawn or not matching).
+        // A read that fails confirms neither: it is said as unconfirmed, with only the read-back offered.
+        await queryClient.cancelQueries({ queryKey: options.queryKey })
+        let read: BuildDraft
+        try {
+          read = await api.getDraft(projectId, draft.id)
+        } catch {
+          setRequestFailure({ draftId: draft.id, failure: unconfirmedFailure(reference), runBefore: runMark(current) })
+          return false
+        }
+        queryClient.setQueryData<BuildDraft>(options.queryKey, read)
+        const latest = read.implementationRuns.at(-1)
         if (latest && latest.id !== current?.id) return false
-        setRequestFailure({ draftId: draft.id, failure: startRefusedFailure(envelope?.message ?? '', reference), runBefore: runMark(latest ?? current) })
+        setRequestFailure({ draftId: draft.id, failure: startRefusedFailure(envelope?.message ?? '', reference), runBefore: runMark(latest) })
         return false
       }
       const failedRun = queryClient.getQueryData<BuildDraft>(options.queryKey)?.implementationRuns.at(-1) ?? run

@@ -8,7 +8,7 @@ import type { AppView } from '../../model/app'
 import type { BusinessApp } from '../../model/contracts/console'
 import { ConfirmDialog, Notice } from '../../ui'
 import { text } from './copy'
-import { DeletionCancelledError, DeletionWaitExpiredError, SourceStillReferencedError, useDeleteApp } from './mutations'
+import { SourceStillReferencedError, useDeleteApp } from './mutations'
 import { UnconfirmedNotice, useWriteConfirmation } from './notices'
 import { repositoryNameOf, sourceRepositoryIdFor, type SourceRepositoryRef } from './platform'
 
@@ -32,27 +32,21 @@ function entries(value: unknown): Record<string, unknown>[] {
 }
 
 /**
- * A deletion Platform refused, in the user's words:
+ * A deletion Platform refused, in the user's words; one attempt per 「完全に削除する」, the console never waits and
+ * sends again on its own:
  * - 412 `branch_has_active_delivery` (platform-api application_branch.go `applicationBranchActiveDeliveryError`):
  *   what is left, from `activeConsumers` (kind and count); work areas are named and counted, and since nothing here
  *   removes them, the user is told who can;
- * - a deletion whose time ran out while Platform only waited for what it is already removing (409
- *   `dependents_deleting` with its `dependents`, or a `retryable` refusal; DeletionWaitExpiredError): what is being
- *   cleared, and to try again shortly;
+ * - 409 `dependents_deleting` (with its `dependents`) or any refusal marked `retryable`: Platform is still clearing
+ *   something, and the user presses 「完全に削除する」 again shortly;
  * - any other Platform refusal: that the app was not deleted, and what to do.
  * Undefined where ActionError already speaks: sign-in, an unreadable answer, an error that is not Platform's answer.
  */
 export function deletionRefusal(error: unknown): DeletionRefusal | undefined {
-  const words = copy.app.settings.deleteRefused
-  const waiting = (details: Record<string, unknown> | undefined): DeletionRefusal => {
-    const dependents = entries(details?.dependents)
-    const workAreas = dependents.filter((item) => item.kind === WORK_AREA_KIND).length
-    return { title: words.waiting, lines: [workAreas && workAreas === dependents.length ? words.waitingWorkAreas(workAreas) : words.waitingOthers, words.waitingNext] }
-  }
-  if (error instanceof DeletionWaitExpiredError) return waiting(platformErrorEnvelope(error.refusal)?.details)
   if (isResponseContractError(error) || isAccessDenied(error)) return undefined
   const envelope = platformErrorEnvelope(error)
   if (!envelope) return undefined
+  const words = copy.app.settings.deleteRefused
   const details = envelope.details
   if (details?.reason === 'branch_has_active_delivery') {
     const consumers = entries(details.activeConsumers)
@@ -63,7 +57,11 @@ export function deletionRefusal(error: unknown): DeletionRefusal | undefined {
       lines: [...(workAreas ? [words.workAreas(workAreas)] : []), ...(others ? [words.others] : []), workAreas ? words.workAreasNext : words.othersNext],
     }
   }
-  if (details?.reason === 'dependents_deleting' || details?.retryable === true) return waiting(details)
+  if (details?.reason === 'dependents_deleting' || details?.retryable === true) {
+    const dependents = entries(details.dependents)
+    const workAreas = dependents.filter((item) => item.kind === WORK_AREA_KIND).length
+    return { title: words.waiting, lines: [workAreas && workAreas === dependents.length ? words.waitingWorkAreas(workAreas) : words.waitingOthers, words.waitingNext] }
+  }
   return { title: words.failed, lines: [envelope.status === 403 ? copy.errors.forbidden : words.failedNext] }
 }
 
@@ -85,12 +83,10 @@ export function DeleteAppDialog({
 }) {
   const queryClient = useQueryClient()
   const mutation = useDeleteApp(projectId, app, view)
-  // Closing the dialog stopped the deletion: nothing to report.
-  const error = mutation.error instanceof DeletionCancelledError ? null : mutation.error
-  const busy = error instanceof SourceStillReferencedError
-  const refusal = busy ? undefined : deletionRefusal(error)
+  const busy = mutation.error instanceof SourceStillReferencedError
+  const refusal = busy ? undefined : deletionRefusal(mutation.error)
   // A delete whose answer could not be read may have happened: read the app and its resources back before offering it again.
-  const confirmation = useWriteConfirmation([error], mutation.reset, () => Promise.all([
+  const confirmation = useWriteConfirmation([mutation.error], mutation.reset, () => Promise.all([
     queryClient.refetchQueries({ queryKey: consoleKeys.app(app.id) }),
     ...[keys.stacks, keys.applications, keys.sourceRepositories].map((key) => queryClient.refetchQueries({ queryKey: key(projectId) })),
   ]))
@@ -99,8 +95,6 @@ export function DeleteAppDialog({
     <ConfirmDialog
       open={open}
       onOpenChange={(next) => {
-        // Closing stops a deletion still sending or waiting; what it already deleted stays deleted.
-        if (!next) mutation.cancel()
         if (!next && !confirmation.unconfirmed) mutation.reset()
         onOpenChange(next)
       }}
@@ -118,9 +112,8 @@ export function DeleteAppDialog({
       confirmText={app.displayName}
       onConfirm={() => mutation.mutate()}
       pending={mutation.isPending}
-      closableWhilePending
       disabled={confirmation.unconfirmed}
-      error={busy || refusal || confirmation.unconfirmed ? undefined : error ?? undefined}
+      error={busy || refusal || confirmation.unconfirmed ? undefined : mutation.error ?? undefined}
     />
   )
 }

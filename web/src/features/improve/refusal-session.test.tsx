@@ -43,11 +43,11 @@ let proposal: Record<string, unknown>
 let proposalReads: number
 let spies: Mock<(...args: never[]) => unknown>[]
 /** What the tests read from the session. */
-let session: { review?: string; reviewLocked: boolean; requestFailure?: BuildFailure; startPending(): void }
+let session: { review?: string; reviewLocked: boolean; requestFailure?: BuildFailure; start(): void }
 
 function Harness() {
   const value = useImproveSession('p1', draft)
-  session = { review: value.review, reviewLocked: value.reviewLocked, requestFailure: value.implementation.requestFailure, startPending: value.implementation.startPending }
+  session = { review: value.review, reviewLocked: value.reviewLocked, requestFailure: value.implementation.requestFailure, start: value.start }
   return null
 }
 
@@ -96,7 +96,7 @@ afterEach(async () => {
 test('a refusal is kept while reads show the same proposal, and taken back when a later read shows it sent back again', async () => {
   expect(session.reviewLocked).toBe(false)
   const before = proposalReads
-  await act(async () => { session.startPending() })
+  await act(async () => { session.start() })
   await settle()
   expect(session.requestFailure?.reasonCode).toBe('ProposalRunBlocked')
   // The refusal made the session read the proposal again; the same proposal keeps it (its submission is pending, say).
@@ -104,6 +104,22 @@ test('a refusal is kept while reads show the same proposal, and taken back when 
   await nextRead(sentBack(1, '2026-11-17T00:01:00Z'))
   expect(session.requestFailure?.reasonCode).toBe('ProposalRunBlocked')
   // Reviewed and sent back for changes again between two reads: the same phase, but not the same proposal.
+  await nextRead(sentBack(2, '2026-11-17T00:09:00Z'))
+  expect(session.requestFailure).toBeUndefined()
+  expect(session.reviewLocked).toBe(false)
+})
+
+test('the refusal is measured against the proposal as read when the start was requested, not when the refusal arrived', async () => {
+  // The start goes out while the proposal reads as sent back once; its answer comes later.
+  const answer = Promise.withResolvers<never>()
+  spies[0]!.mockImplementationOnce((() => answer.promise) as never)
+  await act(async () => { session.start() })
+  await settle()
+  // Meanwhile the owner reviewed it and sent it back again: Platform refused the start in between.
+  await nextRead(sentBack(2, '2026-11-17T00:09:00Z'))
+  await act(async () => { answer.reject(blocked()) })
+  await settle()
+  // The proposal is no longer the one the start was requested under, and it admits a run: the next read takes the refusal back.
   await nextRead(sentBack(2, '2026-11-17T00:09:00Z'))
   expect(session.requestFailure).toBeUndefined()
   expect(session.reviewLocked).toBe(false)

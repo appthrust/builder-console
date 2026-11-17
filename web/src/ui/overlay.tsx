@@ -81,7 +81,6 @@ export function ConfirmDialog({
   pending = false,
   error,
   disabled = false,
-  closableWhilePending = false,
   returnFocusRef,
 }: {
   open: boolean
@@ -96,15 +95,13 @@ export function ConfirmDialog({
   pending?: boolean
   error?: unknown
   disabled?: boolean
-  /** The pending action stops when the dialog closes (its owner cancels it in `onOpenChange`), so it may be closed. */
-  closableWhilePending?: boolean
   returnFocusRef?: RefObject<HTMLElement | null>
 }) {
   const [typed, setTyped] = useState('')
   const inputId = useId()
   const ready = !disabled && (!confirmText || typed.trim() === confirmText)
   const change = (next: boolean) => {
-    if (pending && !closableWhilePending) return
+    if (pending) return
     if (!next) setTyped('')
     onOpenChange(next)
   }
@@ -116,7 +113,7 @@ export function ConfirmDialog({
       returnFocusRef={returnFocusRef}
       footer={
         <>
-          <Button onClick={() => change(false)} disabled={pending && !closableWhilePending}>
+          <Button onClick={() => change(false)} disabled={pending}>
             {cancelLabel}
           </Button>
           <Button tone={tone} onClick={onConfirm} disabled={!ready} loading={pending}>

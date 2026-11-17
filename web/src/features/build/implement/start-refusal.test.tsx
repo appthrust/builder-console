@@ -95,6 +95,31 @@ test('an untyped conflict after which no other start shows is a refusal of this 
   expect(created).toHaveBeenCalledTimes(1)
 })
 
+test('a draft read already in flight when the conflict comes back is not the read-back: a new read shows the other tab\'s run', async () => {
+  // A poll that started before the start, and answers (without the other tab's run) only after the conflict.
+  const early = Promise.withResolvers<typeof draft>()
+  reads.mockImplementationOnce(() => early.promise)
+  const poll = client.fetchQuery({ ...buildDraftOptions('p1', draft.id), staleTime: 0 }).catch(() => undefined)
+  created.mockRejectedValueOnce(conflict('conflict', 'implementation run is running'))
+  reads.mockResolvedValueOnce(startedElsewhere('run-elsewhere'))
+  await startOnce()
+  await act(async () => { early.resolve(draft) })
+  await act(async () => { await poll })
+  for (let index = 0; index < 5; index++) await act(async () => { await Bun.sleep(0) })
+  expect(reads).toHaveBeenCalledTimes(2)
+  expect(implementation.requestFailure).toBeUndefined()
+  expect(created).toHaveBeenCalledTimes(1)
+})
+
+test('a read-back that fails after an untyped conflict is said as unconfirmed, never as a refusal', async () => {
+  created.mockRejectedValueOnce(conflict('conflict', 'implementation run is running'))
+  reads.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+  await startOnce()
+  expect(implementation.requestFailure).toMatchObject({ kind: 'unconfirmed', ...buildCopy.failure.unconfirmed })
+  expect(implementation.requestFailure?.reasonCode).toBeUndefined()
+  expect(failureOffers(implementation.requestFailure!).retry).toBe(false)
+})
+
 test('a generic conflict whose reason names a refusal is that refusal, never another tab\'s start', async () => {
   created.mockRejectedValueOnce(conflict('conflict', 'source change proposal is awaiting review, applying, or closed', { reason: 'source_change_proposal_run_blocked' }))
   await startOnce()

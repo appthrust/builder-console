@@ -299,7 +299,8 @@ export const apps = {
       /**
        * Platform refused the deletion: something of the app is still left (`inUse`; its work areas are named and
        * counted, whatever made them and whether or not they run, and nothing in the console removes them) or is
-       * still being removed (`waiting`, after the console waited for it). Never Platform's own message.
+       * still being removed (`waiting`: the user presses again shortly; the console does not wait on its own).
+       * Never Platform's own message.
        */
       deleteRefused: {
         inUse: 'このアプリにはまだ残っているものがあるため、削除できませんでした',
