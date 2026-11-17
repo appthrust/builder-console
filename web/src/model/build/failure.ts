@@ -18,6 +18,29 @@ export function unconfirmedFailure(reference?: BuildFailure['reference']): Build
 }
 
 /**
+ * Platform's codes (and `details.reason`s) on a 409 to an implementation start that another request already made or
+ * is making: another tab's start (`conflict` without a reason, "implementation run is running") or the same request
+ * still being processed (`idempotency_in_progress`). An answer without Platform's code is read the same way.
+ */
+const CONCURRENT_START_CODES: Record<string, true> = { conflict: true, idempotency_in_progress: true }
+
+/**
+ * A 409 to an implementation start as the screen tells it. `undefined`: another tab won the start; the draft read
+ * back shows its run. A typed refusal of this start is shown once and never retried; its `details.reason` comes
+ * before the code, so a generic `conflict` that names a refusal is one. `source_change_proposal_run_blocked`
+ * (platform-api application_draft_proposal.go `admitImprovementImplementation`: the improvement's proposal awaits
+ * review or apply, or is closed), as code or reason, is worded as the proposal awaiting review, the page's next read
+ * of the proposal says which; any other typed refusal says the start stopped, with its support reference.
+ */
+export function startConflictFailure(code: string | undefined, text: string, reference: NonNullable<BuildFailure['reference']>, details?: Record<string, unknown>): BuildFailure | undefined {
+  const typed = typeof details?.reason === 'string' && details.reason ? details.reason : code
+  if (typed === undefined || Object.hasOwn(CONCURRENT_START_CODES, typed)) return undefined
+  const offers = { retry: false, skip: false, change: false }
+  if (typed === 'source_change_proposal_run_blocked') return { kind: 'blocked', reasonCode: 'ProposalRunBlocked', ...buildCopy.failure.run.proposalPending, offers, raw: text }
+  return { kind: 'blocked', title: buildCopy.failure.failed.implement, reason: buildCopy.failure.run.blocked, offers, reference, raw: text }
+}
+
+/**
  * Platform's repository destination stopped the creation before anything was made: it moved
  * (or the plan was bound to the current one, and the user approves again), it is not set, or the
  * request did not match it. Fixed words only: never the server's reason or message. Only a mismatch

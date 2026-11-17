@@ -7,7 +7,7 @@ import { isProductLanguage } from '../../model/build/wording'
 import { deriveImprove } from '../../model/improve'
 import { setLanguage } from '../../shell/language'
 import { buildCopy } from '../../model/build/copy'
-import { unconfirmedFailure } from '../../model/build/failure'
+import { startConflictFailure, unconfirmedFailure } from '../../model/build/failure'
 import { text as buildText } from '../build/copy'
 import { implementationCopy } from '../build/implement/copy'
 import { implementationTodoId } from '../build/implement/state'
@@ -59,7 +59,7 @@ const draft: ApplicationDraft = {
   conversationTurns: [{ id: 't1', kind: 'conversation', status: 'succeeded', startedAt: at, finishedAt: at, devWorkspaceId: 'ws', userMessage: '状態で絞り込みたい', assistantMessage: '## 要約\nまとめました。\n## 次の質問\nこの内容で直せます。', suggestedReplies: ['この内容で直して'] }],
 }
 
-function render(wire: ApplicationDraft, appUrl?: string, failures: Pick<ImproveConversationProps, 'sendFailure' | 'startFailure'> = {}) {
+function render(wire: ApplicationDraft, appUrl?: string, failures: Partial<Pick<ImproveConversationProps, 'sendFailure' | 'startFailure' | 'review' | 'locked'>> = {}) {
   const value = draftOf(wire)
   return renderToStaticMarkup(<ImproveConversation draft={value} state={deriveImprove(value)} appUrl={appUrl} locked={deriveImprove(value).busy} starting={false} onSend={() => {}} onRetrySend={() => {}} onStart={() => {}} onConfirmSend={() => {}} onConfirmStart={() => {}} {...failures} />)
 }
@@ -71,6 +71,29 @@ test('an unreadable send or start answer offers only 「最新の状態を確認
   expect(html).not.toContain(`${buildText.conversation.retry}</button>`)
   // The proposal's own start stays closed until the read-back shows what happened.
   expect(html).toMatch(/<button[^>]*disabled=""[^>]*>[^<]*この内容で直す<\/button>/)
+})
+
+// APT-1232: Platform starts no run while the proposal awaits review or is closed.
+test.each(['ja', 'en'] as const)('a refused start is said once with no retry, and a waiting or closed proposal explains instead of offering 「この内容で直す」, in %s', (language) => {
+  setLanguage(language)
+  const apply = `${text.proposal.apply}</button>`
+  const retryButton = `${buildText.conversation.retry}</button>`
+  const refused = render(draft, undefined, { startFailure: startConflictFailure('source_change_proposal_run_blocked', 'source change proposal is awaiting review, applying, or closed', { draftId: draft.id, at }) })
+  expect(refused).toContain(buildCopy.failure.run.proposalPending.title)
+  expect(refused).toContain(buildCopy.failure.run.proposalPending.reason)
+  expect(refused).not.toContain(retryButton)
+  expect(refused).not.toContain('source change proposal')
+  expect(refused).toMatch(new RegExp(`<button[^>]*disabled=""[^>]*>[^<]*${text.proposal.apply}</button>`))
+  for (const [review, held] of [['waiting', buildCopy.failure.run.proposalPending], ['closed', buildCopy.failure.run.proposalClosed]] as const) {
+    const html = render(draft, undefined, { review, locked: true })
+    expect(html).toContain(held.title)
+    expect(html).toContain(held.reason)
+    expect(html).not.toContain(apply)
+    expect(html).not.toContain(retryButton)
+    expect(html).not.toContain('role="alert"')
+  }
+  // While the proposal is open again, the change is offered as before.
+  expect(render(draft)).toContain(apply)
 })
 
 test('the proposal carries 「この内容で直す」 and the reply chips; a finished run shows its version and the app', () => {

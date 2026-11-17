@@ -117,7 +117,11 @@ export interface BuildFailure {
    */
   recheck?: true
   suggestedName?: string
-  reasonCode?: 'PublishURLConflict'
+  /**
+   * `PublishURLConflict`: another publish holds the URL name. `ProposalRunBlocked`: Platform refused an improvement
+   * run because its proposal awaits review or apply, or is closed (failure.ts `startConflictFailure`).
+   */
+  reasonCode?: 'PublishURLConflict' | 'ProposalRunBlocked'
   raw?: string
   /** Support correlation only; diagnostics stay in the advanced disclosure. */
   reference?: { draftId: string; executionId?: string; at: string }

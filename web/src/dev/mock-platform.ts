@@ -2306,7 +2306,8 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
     if (!draft) return error(404, 'not_found', 'application draft not found')
     if (state.role === 'Viewer') return error(403, 'forbidden', 'team role Viewer cannot implement applications')
     const proposal = draft.proposalId ? state.proposals.get(draft.proposalId) : undefined
-    if (proposal && (proposalWaiting(proposal.phase) || proposalTerminal(proposal.phase))) return error(409, 'conflict', 'proposal is awaiting review or is closed')
+    // Like platform-api (application_draft_proposal.go admitImprovementImplementation): its own code, not `conflict`.
+    if (proposal && (proposalWaiting(proposal.phase) || proposalTerminal(proposal.phase))) return error(409, 'source_change_proposal_run_blocked', 'source change proposal is awaiting review, applying, or closed')
     const handoff = draft.creationPlan?.implementationHandoff
     if (draft.phase !== 'created' || !draft.createdApplicationId || !handoff?.tasks.length) return error(412, 'failed_precondition', 'created application and handoff tasks are required')
     const previous = draft.implementationRuns?.at(-1)

@@ -1,4 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query'
+import { isResponseContractError } from '../../api/boundary'
+import { isAccessDenied, platformErrorEnvelope } from '../../api/platform-error'
 import { consoleKeys } from '../../api/queries/console'
 import { keys } from '../../api/queries/shared'
 import { copy } from '../../copy'
@@ -14,6 +16,53 @@ import { repositoryNameOf, sourceRepositoryIdFor, type SourceRepositoryRef } fro
 export function deleteHelpText(view: AppView, sourceRepository: SourceRepositoryRef | undefined): string {
   const help = copy.app.settings.deleteHelp
   return sourceRepositoryIdFor(view) ? help + copy.app.settings.deleteKeepsRepository(repositoryNameOf(sourceRepository)) : help
+}
+
+/** What a refused deletion says: a title and its sentences, never Platform's message. */
+export interface DeletionRefusal {
+  title: string
+  lines: string[]
+}
+
+/** Platform's kind for the AI work areas of an app's build and improvement sessions; other kinds are not named. */
+const WORK_AREA_KIND = 'DevWorkspace'
+
+function entries(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object') : []
+}
+
+/**
+ * A deletion Platform refused, in the user's words:
+ * - 412 `branch_has_active_delivery` (platform-api application_branch.go `applicationBranchActiveDeliveryError`):
+ *   what still runs, from `activeConsumers` (kind and count); AI work areas are named and counted, and since nothing
+ *   here removes them, the user is told who can;
+ * - a refusal that only waits for something already being removed, still holding after the deletion waited for it
+ *   (409 `dependents_deleting` with its `dependents`, or a `retryable` refusal): what is being cleared, and to try
+ *   again shortly;
+ * - any other Platform refusal: that the app was not deleted, and what to do.
+ * Undefined where ActionError already speaks: sign-in, an unreadable answer, an error that is not Platform's answer.
+ */
+export function deletionRefusal(error: unknown): DeletionRefusal | undefined {
+  if (isResponseContractError(error) || isAccessDenied(error)) return undefined
+  const envelope = platformErrorEnvelope(error)
+  if (!envelope) return undefined
+  const words = copy.app.settings.deleteRefused
+  const details = envelope.details
+  if (details?.reason === 'branch_has_active_delivery') {
+    const consumers = entries(details.activeConsumers)
+    const workAreas = consumers.reduce((sum, item) => item.kind === WORK_AREA_KIND && typeof item.count === 'number' && item.count > 0 ? sum + item.count : sum, 0)
+    const others = consumers.length === 0 || consumers.some((item) => item.kind !== WORK_AREA_KIND)
+    return {
+      title: words.inUse,
+      lines: [...(workAreas ? [words.workAreas(workAreas)] : []), ...(others ? [words.others] : []), workAreas ? words.workAreasNext : words.othersNext],
+    }
+  }
+  if (details?.reason === 'dependents_deleting' || details?.retryable === true) {
+    const dependents = entries(details.dependents)
+    const workAreas = dependents.filter((item) => item.kind === WORK_AREA_KIND).length
+    return { title: words.waiting, lines: [workAreas && workAreas === dependents.length ? words.waitingWorkAreas(workAreas) : words.waitingOthers, words.waitingNext] }
+  }
+  return { title: words.failed, lines: [envelope.status === 403 ? copy.errors.forbidden : words.failedNext] }
 }
 
 /** Type-the-name delete confirmation (ux-design §6.5); used by the header menu, the overview and 危険な操作. */
@@ -35,6 +84,7 @@ export function DeleteAppDialog({
   const queryClient = useQueryClient()
   const mutation = useDeleteApp(projectId, app, view)
   const busy = mutation.error instanceof SourceStillReferencedError
+  const refusal = busy ? undefined : deletionRefusal(mutation.error)
   // A delete whose answer could not be read may have happened: read the app and its resources back before offering it again.
   const confirmation = useWriteConfirmation([mutation.error], mutation.reset, () => Promise.all([
     queryClient.refetchQueries({ queryKey: consoleKeys.app(app.id) }),
@@ -53,6 +103,7 @@ export function DeleteAppDialog({
         <div className="space-y-3">
           <p>{deleteHelpText(view, sourceRepository)}</p>
           {busy ? <Notice tone="error">{copy.app.settings.deleteSourceBusy}</Notice> : null}
+          {refusal ? <Notice tone="error" title={refusal.title}>{refusal.lines.map((line) => <p key={line}>{line}</p>)}</Notice> : null}
           {confirmation.unconfirmed ? <UnconfirmedNotice onConfirm={() => void confirmation.confirm()} confirming={confirmation.confirming} /> : null}
         </div>
       }
@@ -62,7 +113,7 @@ export function DeleteAppDialog({
       onConfirm={() => mutation.mutate()}
       pending={mutation.isPending}
       disabled={confirmation.unconfirmed}
-      error={busy || confirmation.unconfirmed ? undefined : mutation.error ?? undefined}
+      error={busy || refusal || confirmation.unconfirmed ? undefined : mutation.error ?? undefined}
     />
   )
 }

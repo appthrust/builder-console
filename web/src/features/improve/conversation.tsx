@@ -26,7 +26,8 @@ export interface ImproveConversationProps {
   appUrl?: string
   locked: boolean
   starting: boolean
-  waitingForReview?: boolean
+  /** The session's proposal awaits review or apply, or is closed: no change can be started, the change card says why. */
+  review?: 'waiting' | 'closed'
   outcome?: ReactNode
   sendFailure?: BuildFailure
   startFailure?: BuildFailure
@@ -43,7 +44,7 @@ function readableActivity(tail: string | undefined): string[] {
   return activityLines(tail).filter(isProductLanguage)
 }
 
-export const ImproveConversation = forwardRef<HTMLTextAreaElement, ImproveConversationProps>(function ImproveConversation({ draft, state, appUrl, locked, waitingForReview, outcome, starting, sendFailure, startFailure, onSend, onRetrySend, onStart, onConfirmSend, onConfirmStart }, input) {
+export const ImproveConversation = forwardRef<HTMLTextAreaElement, ImproveConversationProps>(function ImproveConversation({ draft, state, appUrl, locked, review, outcome, starting, sendFailure, startFailure, onSend, onRetrySend, onStart, onConfirmSend, onConfirmStart }, input) {
   const scroller = useRef<HTMLDivElement>(null)
   const content = useRef<HTMLDivElement>(null)
   const following = useRef(true)
@@ -81,7 +82,7 @@ export const ImproveConversation = forwardRef<HTMLTextAreaElement, ImproveConver
     return <div key={turn.id} className="flex flex-col gap-5">
       <UserMessage text={turn.userMessage} />
       {answer?.role === 'assistant' ? <AssistantMessage message={answer} active={answerable && turn === lastAnswer} /> : null}
-      {turn.id === state.proposalTurnId ? <ProposalCard tasks={state.proposal} starting={starting} disabled={locked} failure={startFailure} onStart={onStart} onConfirm={onConfirmStart} /> : null}
+      {turn.id === state.proposalTurnId ? <ProposalCard tasks={state.proposal} starting={starting} disabled={locked} review={review} failure={startFailure} onStart={onStart} onConfirm={onConfirmStart} /> : null}
       {isOneOf(turn.status, 'failed') ? <FailureNotice failure={classifyBuildFailure(turn.error ?? '', undefined, 'turn', { draftId: draft.id, at: turn.finishedAt ?? turn.startedAt })} onRetry={turn === lastTurn && !locked ? () => submit(turn.userMessage) : undefined} /> : null}
       {turn.status.kind === 'unknown' ? <UnsupportedNotice /> : null}
       {isOneOf(turn.status, 'pending', 'running') ? <AiTurn>
@@ -132,7 +133,7 @@ export const ImproveConversation = forwardRef<HTMLTextAreaElement, ImproveConver
       </div>
     </div>
     <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pb-4 sm:px-6">
-      <Composer ref={input} chips={chips} disabled={locked} placeholder={waitingForReview ? proposalText.waiting : text.conversation.placeholder} onSubmit={submit} onChip={submit} />
+      <Composer ref={input} chips={chips} disabled={locked} placeholder={review === 'waiting' ? proposalText.waiting : text.conversation.placeholder} onSubmit={submit} onChip={submit} />
     </div>
   </section>
 })
@@ -158,16 +159,23 @@ function FailureNotice({ failure, onRetry, onConfirm }: { failure: BuildFailure;
   </Notice>
 }
 
-/** The change the next run will make, with 「この内容で直す」 attached where it is read. */
-function ProposalCard({ tasks, starting, disabled, failure, onStart, onConfirm }: { tasks: ImproveTask[]; starting: boolean; disabled: boolean; failure?: BuildFailure; onStart(): void; onConfirm(): void }) {
+/**
+ * The change the next run will make, with 「この内容で直す」 attached where it is read. While the proposal awaits review
+ * or is closed, Platform starts no run: the card says why and what the user can do instead of offering the start.
+ * A start Platform refused is said once, without a retry.
+ */
+function ProposalCard({ tasks, starting, disabled, review, failure, onStart, onConfirm }: { tasks: ImproveTask[]; starting: boolean; disabled: boolean; review?: 'waiting' | 'closed'; failure?: BuildFailure; onStart(): void; onConfirm(): void }) {
   const readable = tasks.filter((task) => isProductLanguage(task.title))
+  const held = review ? buildCopy.failure.run[review === 'waiting' ? 'proposalPending' : 'proposalClosed'] : undefined
   return <section aria-label={text.proposal.label} data-testid="improve-proposal" className="mr-4 max-w-[70ch] rounded-lg border border-line bg-white px-4 py-3 text-sm leading-relaxed text-stone-900">
     <p className="text-xs font-medium text-stone-500">{text.proposal.label}</p>
     <p className="mt-1 break-words">{text.proposal.lead}</p>
     {readable.length ? <ul className="mt-2 space-y-1.5">{readable.map((task) => <li key={task.id} className="flex gap-2"><Circle aria-hidden className="mt-1.5 size-2.5 shrink-0 text-stone-400" /><span className="min-w-0 break-words">{task.title}{task.detail ? <span className="block text-xs text-stone-500">{task.detail}</span> : null}</span></li>)}</ul> : null}
-    <div className="mt-3 flex flex-wrap items-center gap-2">
-      <Button tone="primary" loading={starting} disabled={disabled || failure?.kind === 'policy' || failure?.kind === 'unconfirmed'} onClick={onStart}>{text.proposal.apply}</Button>
-    </div>
-    {failure ? <div className="mt-3"><FailureNotice failure={failure} onRetry={disabled ? undefined : onStart} onConfirm={onConfirm} /></div> : null}
+    {held ? <Notice tone={review === 'waiting' ? 'info' : 'warning'} title={held.title} className="mt-3">{held.reason}</Notice> : <>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Button tone="primary" loading={starting} disabled={disabled || (!!failure && !failureOffers(failure).retry)} onClick={onStart}>{text.proposal.apply}</Button>
+      </div>
+      {failure ? <div className="mt-3"><FailureNotice failure={failure} onRetry={disabled ? undefined : onStart} onConfirm={onConfirm} /></div> : null}
+    </>}
   </section>
 }

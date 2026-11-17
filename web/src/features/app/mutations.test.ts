@@ -77,6 +77,40 @@ describe('deleteAppResources', () => {
     await deleteAppResources('commerce', progress, retry.value)
     expect(retry.calls).toEqual(['source:keihi-src', 'console:a-keihi'])
   })
+
+  // APT-1234: Platform's typed answers to the stack delete (platform-api application.go / writer_application_stack_selection.go).
+  const dependentsDeleting = (retryAfterSeconds?: number) => new ORPCError('CONFLICT', { status: 409, data: { body: { error: {
+    code: 'conflict', message: 'application "keihi" is waiting for dependents to finish deleting: devws-1',
+    details: { reason: 'dependents_deleting', dependents: [{ kind: 'DevWorkspace', id: 'devws-1', name: '経費精算' }], ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }) },
+  } } } })
+  const activeDelivery = () => new ORPCError('PRECONDITION_FAILED', { status: 412, data: { body: { error: {
+    code: 'failed_precondition', message: 'application branch still has active delivery consumers',
+    details: { reason: 'branch_has_active_delivery', activeConsumers: [{ kind: 'DevWorkspace', count: 2 }] },
+  } } } })
+
+  test('a stack delete waiting for what Platform is already removing is sent again after its retry time, then goes on', async () => {
+    let answers = [() => { throw dependentsDeleting(5) }, () => { throw dependentsDeleting() }, () => ({})]
+    const { value, calls } = deps([], () => { const [next, ...rest] = answers; answers = rest; return next!() })
+    const waits: number[] = []
+    const wait = value.wait!
+    value.wait = async (ms) => { waits.push(ms); await wait(ms) }
+    await deleteAppResources('commerce', deletion(), value)
+    expect(calls).toEqual(['stack:keihi', 'wait', 'stack:keihi', 'wait', 'stack:keihi', 'source:keihi-src', 'console:a-keihi'])
+    expect(waits).toEqual([5_000, 5_000])
+  })
+
+  test('a stack delete still waiting after the bound fails with Platform\'s answer; a running blocker is never waited for', async () => {
+    const waiting = deps([], () => { throw dependentsDeleting(5) })
+    const progress = deletion()
+    await expect(deleteAppResources('commerce', progress, waiting.value)).rejects.toBeInstanceOf(ORPCError)
+    expect(waiting.calls.filter((call) => call === 'wait').length).toBeGreaterThan(0)
+    expect(waiting.calls).not.toContain('source:keihi-src')
+    expect(progress.stackDeleted).toBeUndefined()
+
+    const blocked = deps([], () => { throw activeDelivery() })
+    await expect(deleteAppResources('commerce', deletion(), blocked.value)).rejects.toBeInstanceOf(ORPCError)
+    expect(blocked.calls).toEqual(['stack:keihi'])
+  })
 })
 
 describe('forgetDeletedApp', () => {

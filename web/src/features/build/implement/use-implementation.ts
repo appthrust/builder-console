@@ -6,7 +6,7 @@ import { BUILD_POLL_MS, buildDraftOptions, buildKeys } from '../../../api/querie
 import { POLL_INTERVAL_MS } from '../../../api/queries/shared'
 import { platformErrorEnvelope } from '../../../api/platform-error'
 import { getWorkspace, restartWorkspace } from '../../../api/workspace'
-import { classifyBuildFailure, unconfirmedFailure, type BuildFailure } from '../../../model/build'
+import { classifyBuildFailure, startConflictFailure, unconfirmedFailure, type BuildFailure } from '../../../model/build'
 import { buildCopy } from '../../../model/build/copy'
 import { isBuildPending } from '../../../model/build/progress'
 import { isOneOf, jobState, knownValue, type BuildDraft, type ImplementationHandoff, type ImplementationRun } from '../../../model/contracts/build'
@@ -115,8 +115,11 @@ export function useImplementation({ projectId, draft, handoff, enabled }: Implem
       const envelope = platformErrorEnvelope(error)
       const status = typeof error === 'object' && error !== null && 'status' in error && typeof error.status === 'number' ? error.status : envelope?.status
       if (status === 409) {
-        // Another tab won the start. Observe its run; do not create a second workspace.
+        const refusal = startConflictFailure(envelope?.code, envelope?.message ?? '', reference, envelope?.details)
+        // Another tab won the start: observe its run; do not create a second workspace. A refusal (Platform's typed
+        // reason or code) is said once and never retried; the draft read back shows nothing started.
         await queryClient.invalidateQueries({ queryKey: options.queryKey })
+        if (refusal) setRequestFailure({ draftId: draft.id, failure: refusal })
         return false
       }
       const failedRun = queryClient.getQueryData<BuildDraft>(options.queryKey)?.implementationRuns.at(-1) ?? run
@@ -147,6 +150,8 @@ export function useImplementation({ projectId, draft, handoff, enabled }: Implem
     start: () => { if (projection.phase === 'idle' && !requestFailure) void submit() },
     /** After a write whose answer could not be read: reads the draft back; the notice leaves once it shows what happened. Never resends. */
     confirm: () => { void queryClient.invalidateQueries({ queryKey: buildDraftOptions(projectId, draft.id).queryKey }) },
+    /** Takes back a start Platform refused because of the proposal, once the proposal moved on: the start is offered again. */
+    dismissRefusal: () => setRequestFailure((current) => current?.failure.reasonCode === 'ProposalRunBlocked' ? undefined : current),
     /** Starts every handoff task the latest run has not made, whatever that run's outcome (improvement sessions). */
     startPending: () => { void submit() },
     retry: () => {

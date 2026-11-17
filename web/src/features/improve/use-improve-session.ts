@@ -5,11 +5,11 @@ import * as api from '../../api/build'
 import { buildDraftOptions, buildKeys } from '../../api/queries/build'
 import { platformErrorEnvelope } from '../../api/platform-error'
 import { classifyBuildFailure, unconfirmedFailure, type BuildFailure } from '../../model/build'
-import { isOneOf, type BuildDraft } from '../../model/contracts/build'
+import { isOneOf, knownValue, type BuildDraft } from '../../model/contracts/build'
 import { deriveImprove } from '../../model/improve'
 import { useImplementation } from '../build/implement'
-import { proposalOptions } from '../../api/queries/proposal'
-import { improvementLocked } from '../proposals/model'
+import { proposalKeys, proposalOptions } from '../../api/queries/proposal'
+import { improvementLocked, proposalTerminal, proposalWaiting } from '../proposals/model'
 
 /**
  * Turns and runs are server-owned: sending a message only POSTs the turn and
@@ -26,6 +26,22 @@ export function useImproveSession(projectId: string, draft: BuildDraft) {
   const proposal = useQuery(proposalOptions(projectId, draft.proposalId))
   const phase = proposal.data?.phase
   const reviewLocked = !!draft.proposalId && improvementLocked(phase)
+  /** Why the session takes no new change: its proposal awaits review or apply, or is closed. */
+  const review = !draft.proposalId || !phase ? undefined : proposalWaiting(phase) ? 'waiting' as const : proposalTerminal(phase) ? 'closed' as const : undefined
+  // Platform refused a start because of the proposal: read the proposal again, so the page says which holds.
+  const refused = implementation.requestFailure?.reasonCode === 'ProposalRunBlocked'
+  useEffect(() => {
+    if (refused) void queryClient.invalidateQueries({ queryKey: proposalKeys.detail(projectId, draft.proposalId) })
+  }, [refused, queryClient, projectId, draft.proposalId])
+  // Once the proposal moves on, that refusal no longer holds: sent back for changes, the change can be started again.
+  const phaseWord = phase ? knownValue(phase) ?? 'unknown' : undefined
+  const seenPhase = useRef(phaseWord)
+  const { dismissRefusal } = implementation
+  useEffect(() => {
+    if (seenPhase.current === phaseWord) return
+    seenPhase.current = phaseWord
+    dismissRefusal()
+  }, [phaseWord, dismissRefusal])
   const applied = isOneOf(phase, 'Applied')
   // The controller applies first; release correlation updates the private draft later.
   useQuery({
@@ -76,6 +92,7 @@ export function useImproveSession(projectId: string, draft: BuildDraft) {
     state,
     proposal,
     reviewLocked,
+    review,
     implementation,
     sending,
     sendFailure: sendFailure?.failure,

@@ -172,6 +172,23 @@ export class SourceStillReferencedError extends Error {
 const SOURCE_RELEASE_WAIT_MS = 120_000
 const SOURCE_RELEASE_POLL_MS = 3_000
 
+/** How long the stack delete waits for what Platform is still removing (`dependents_deleting`) before saying so. */
+const STACK_RELEASE_WAIT_MS = 120_000
+const STACK_RELEASE_POLL_MS = 5_000
+
+/**
+ * How long to wait before deleting the stack again, when Platform refused it only until something it is already
+ * removing is gone: 409 `dependents_deleting` (platform-api writer_application_stack_selection.go
+ * `applicationDependentsDeletingError`, with `retryAfterSeconds`) or any refusal marked `retryable`. Otherwise
+ * undefined: the refusal stands.
+ */
+function stackDeleteRetryAfterMs(error: unknown): number | undefined {
+  const details = platformErrorEnvelope(error)?.details
+  if (details?.reason !== 'dependents_deleting' && details?.retryable !== true) return undefined
+  const seconds = details.retryAfterSeconds
+  return typeof seconds === 'number' && seconds > 0 ? Math.min(seconds * 1000, 30_000) : STACK_RELEASE_POLL_MS
+}
+
 /**
  * Stack → its source repository binding → console record. The console record
  * is the index, so it goes last: a running app or a stray binding never loses
@@ -181,10 +198,17 @@ export async function deleteAppResources(projectId: string, deletion: AppDeletio
   const wait = deps.wait ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
   const now = deps.now ?? Date.now
   if (deletion.stackId && !deletion.stackDeleted) {
-    try {
-      await deps.deleteStack(projectId, deletion.stackId)
-    } catch (error) {
-      if (!(error instanceof ORPCError && error.status === 404)) throw error
+    const deadline = now() + STACK_RELEASE_WAIT_MS
+    for (;;) {
+      try {
+        await deps.deleteStack(projectId, deletion.stackId)
+        break
+      } catch (error) {
+        if (error instanceof ORPCError && error.status === 404) break
+        const retryAfter = stackDeleteRetryAfterMs(error)
+        if (retryAfter === undefined || now() + retryAfter > deadline) throw error
+        await wait(retryAfter)
+      }
     }
     deletion.stackDeleted = true
   }
