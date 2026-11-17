@@ -1308,4 +1308,18 @@ describe('APT-1124: what the implementation run means on the build page', () => 
     expect(outcome()).toBeNull()
     expect(notices(buildCopy.failure.failed.implement, '#build-artifact')).toHaveLength(1)
   })
+
+  // A reply on this page goes in as a change run (useBuildSession), so the way on always names the conversation;
+  // the skip only with the failed task its button skips.
+  test.each([['ja', true], ['ja', false], ['en', true], ['en', false]] as const)('a run a retry cannot fix names the ways on this page offers: language=%s stopped at a task=%s', async (language, atTask) => {
+    setLanguage(language)
+    const failure = { reason: 'ConfigurationMissing', retryable: false }
+    await withRun(atTask ? ['done', 'failed', 'pending'] : ['pending', 'pending', 'pending'], { status: 'failed', ...(atTask ? { currentTaskId: 't2' } : {}), error: 'configuration missing', failure, finishedAt: ago(1_000) })
+    const { configuration, then } = buildCopy.failure.run
+    const notice = notices(configuration.title, '#build-artifact')
+    expect(notice).toHaveLength(1)
+    const sentences = [...notice[0]!.querySelectorAll('p')].map((item) => item.textContent)
+    expect(sentences).toContain(configuration.reason + (atTask ? then.changeOrSkip : then.change))
+    expect(actionsOf(configuration.title).map((item) => item.textContent?.trim())).toEqual(atTask ? [implementationCopy.skip] : [])
+  })
 })

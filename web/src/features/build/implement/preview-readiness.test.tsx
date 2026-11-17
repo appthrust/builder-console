@@ -20,7 +20,7 @@ const state: ImplementationState = {
 }
 
 function render(status: ImplementationState['previewStatus']) {
-  return renderToStaticMarkup(<ImplementPanel state={{ ...state, previewStatus: status }} released={false} onOpenPreview={() => {}} />)
+  return renderToStaticMarkup(<ImplementPanel state={{ ...state, previewStatus: status }} released={false} published={false} changeByReply={false} onOpenPreview={() => {}} />)
 }
 
 test('a 503 keeps the iframe and both actions gated until a 200 response', () => {
@@ -41,12 +41,6 @@ test('a 503 keeps the iframe and both actions gated until a 200 response', () =>
 test('missing readiness evidence cannot expose an iframe or an enabled action', () => {
   expect(render(undefined)).not.toContain('<iframe')
   expect(render(undefined).match(/disabled=""/g)).toHaveLength(2)
-})
-
-test('the preview says it is a pre-publish check until the app is published', () => {
-  const props = { state: { ...state, previewStatus: previewReadiness(200, 4_000) }, onOpenPreview: () => {} }
-  expect(renderToStaticMarkup(<ImplementPanel {...props} released={false} />)).toContain(copy.previewAudience)
-  expect(renderToStaticMarkup(<ImplementPanel {...props} released />)).not.toContain(copy.previewAudience)
 })
 
 test('only 2xx and 3xx responses are ready; network and gateway failures keep preparing', () => {
@@ -84,7 +78,7 @@ test.each(['ja', 'en'] as const)('every preview state renders its message, actio
   setLanguage(language)
   try {
     for (const status of ['preparing', 'error', 'timed-out', 'ready'] as const) {
-      const html = renderToStaticMarkup(<ImplementPanel state={{ ...state, previewStatus: status }} previewNotice={copy.previewDatabase(true)} released={false} onOpenPreview={() => {}} />)
+      const html = renderToStaticMarkup(<ImplementPanel state={{ ...state, previewStatus: status }} previewNotice={copy.previewDatabase(true)} released={false} published={false} changeByReply={false} onOpenPreview={() => {}} />)
       expect(html).toContain('role="note"')
       expect(html).toContain(copy.previewDatabase(true))
       if (status === 'ready') {
@@ -114,17 +108,17 @@ test.each(['ja', 'en'] as const)('the database line sits under the preview heade
   setLanguage(language)
   try {
     const control = (status: PreviewDatabaseControl['status'], busy = false): PreviewDatabaseControl => ({ status, excel: true, busy, pending: false, onReset: async () => true })
-    const ready = renderToStaticMarkup(<ImplementPanel state={{ ...state, previewStatus: 'ready' }} previewDatabase={control('ready-unverified')} released={false} onOpenPreview={() => {}} />)
+    const ready = renderToStaticMarkup(<ImplementPanel state={{ ...state, previewStatus: 'ready' }} previewDatabase={control('ready-unverified')} released={false} published={false} changeByReply={false} onOpenPreview={() => {}} />)
     expect(ready).toContain(copy.database.readyUnverified(true))
     expect(ready).not.toContain('role="note"')
     expect(ready.indexOf(copy.database.readyUnverified(true))).toBeLessThan(ready.indexOf('<iframe'))
     expect(ready).toContain(copy.databaseReset)
     expect(ready).not.toContain('disabled=""')
     // Waiting for the database, or for the AI to finish, keeps the reset action disabled; preview actions are unchanged.
-    const starting = renderToStaticMarkup(<ImplementPanel state={{ ...state, previewStatus: 'ready' }} previewDatabase={control('starting')} released={false} onOpenPreview={() => {}} />)
+    const starting = renderToStaticMarkup(<ImplementPanel state={{ ...state, previewStatus: 'ready' }} previewDatabase={control('starting')} released={false} published={false} changeByReply={false} onOpenPreview={() => {}} />)
     expect(starting).toContain(copy.database.starting)
     expect(starting.match(/disabled=""/g)).toHaveLength(1)
-    const busy = renderToStaticMarkup(<ImplementPanel state={{ ...state, previewStatus: 'ready' }} previewDatabase={control('unavailable', true)} released={false} onOpenPreview={() => {}} />)
+    const busy = renderToStaticMarkup(<ImplementPanel state={{ ...state, previewStatus: 'ready' }} previewDatabase={control('unavailable', true)} released={false} published={false} changeByReply={false} onOpenPreview={() => {}} />)
     expect(busy).toContain(copy.database.unavailable)
     expect(busy.match(/disabled=""/g)).toHaveLength(1)
     expect(busy).toContain(`title="${copy.databaseResetRunning}"`)

@@ -76,6 +76,11 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
   const preparing = isBuildPending(execution)
   const conversing = preparing ? isBuildPending(generation) || isBuildPending(turn) : running
   const answers = useMemo(() => prepareAnswers(draft.conversationTurns, draft.publishPreferences, ownerGroupName), [draft.conversationTurns, draft.publishPreferences, ownerGroupName])
+  // A reply after the app is made (outside its 用意する questions) goes in as a change run of its tasks; after a
+  // stopped run, only where Platform's decision admits one. Otherwise the reply waits.
+  const stopped = implementation.state.failure
+  const changeByReply = Boolean(draft.createdApplicationStackId && app?.stackId) && !preparing && !answers.open
+    && implementation.state.tasks.length > 0 && !(stopped && !failureOffers(stopped).change)
 
   function patch(next: Partial<BuildSession> | ((current: BuildSession) => BuildSession)) {
     store.setState((current) => typeof next === 'function' ? next(current) : { ...current, ...next })
@@ -179,9 +184,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
     // 用意する questions are answered in the conversation, even when the app was made before the answer.
     const asking = preparing || answers.open || isPrepareTurn(pending.text)
     if (draft.createdApplicationStackId && !asking) {
-      // A stopped run takes a change instruction only where Platform's decision admits one; otherwise the reply waits.
-      const stopped = implementation.state.failure
-      if (!app?.stackId || !implementation.state.tasks.length || implementation.pending || (stopped && !failureOffers(stopped).change)) return
+      if (!changeByReply || implementation.pending) return
       void perform('implement', async () => {
         if (await implementation.requestChange(pending.text)) {
           patch((current) => ({ ...current, pending: current.pending.filter((message) => message.at !== pending.at) }))
@@ -224,7 +227,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
         throw error
       }
     })
-  }, [session.pending, session.messages, conversing, preparing, answers.open, busy, failure, result.unsupported, now, implementation.pending, implementation.state.failure])
+  }, [session.pending, session.messages, conversing, preparing, answers.open, busy, failure, result.unsupported, now, implementation.pending, changeByReply])
 
   async function generate() {
     const previousGenerationId = draftRef.current.creationPlanGenerations.at(-1)?.id
@@ -345,6 +348,8 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
   }
   return {
     session, spec, app, implementation, failure, busy, result, proposal, domain, planBlocksStart,
+    /** A reply typed now starts a run with that change (the stopped run's notice names it only then). */
+    changeByReply,
     /** The created app's source repository (its build run link for the running-app build notice). */
     sourceRepository: creation.sourceRepository,
     messages: [initialMessage, ...messages],

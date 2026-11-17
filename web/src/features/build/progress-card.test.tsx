@@ -29,11 +29,11 @@ test('legacy preparation keeps its generic steps and hint', () => {
 
 test('the merged build renders one ladder, and a ready preview starts with the first task', () => {
   const state = { phase: 'idle' as const, tasks: [taskOf({ id: 'one', title: '顧客一覧', status: 'pending' })], previewUrl: '/preview', previewStatus: 'ready' as const }
-  const pending = renderToStaticMarkup(<ImplementPanel state={state} released={false} onOpenPreview={() => {}} />)
+  const pending = renderToStaticMarkup(<ImplementPanel state={state} released={false} published={false} changeByReply={false} onOpenPreview={() => {}} />)
   expect(pending.match(/<ol /g)).toHaveLength(1)
   expect(pending).toContain('アプリを作っています')
   expect(pending).not.toContain('<iframe')
-  const running = renderToStaticMarkup(<ImplementPanel state={{ ...state, phase: 'running', currentTaskId: 'one', step: runOf({ id: 'r', status: 'running', startedAt: '2026-10-27T00:00:00Z', devWorkspaceId: 'ws', taskIds: [], tasks: [], step: 'working' }).step, activityTail: '画面を作っています\n', tasks: [taskOf({ id: 'one', title: '顧客一覧', status: 'running' })] }} released={false} onOpenPreview={() => {}} />)
+  const running = renderToStaticMarkup(<ImplementPanel state={{ ...state, phase: 'running', currentTaskId: 'one', step: runOf({ id: 'r', status: 'running', startedAt: '2026-10-27T00:00:00Z', devWorkspaceId: 'ws', taskIds: [], tasks: [], step: 'working' }).step, activityTail: '画面を作っています\n', tasks: [taskOf({ id: 'one', title: '顧客一覧', status: 'running' })] }} released={false} published={false} changeByReply={false} onOpenPreview={() => {}} />)
   expect(running).toContain('<iframe')
   expect(running.indexOf('<iframe')).toBeLessThan(running.indexOf('<ol'))
   expect(running.match(/<ol /g)).toHaveLength(1)
@@ -56,7 +56,7 @@ test('failed source builds render a cross and product wording, not an endless ac
   const html = renderToStaticMarkup(<ImplementPanel
     state={{ phase: 'done', tasks: [taskOf({ id: 'one', title: '一覧', status: 'done' })] }}
     preparation={{ kind: 'prepare', title: buildCopy.progress.prepare.title, interrupted: false, buildFailed: true, buildUrl: 'https://github.com/acme/app/actions/runs/12', steps: [{ label: '下地を起動', state: 'failed', detail: 'アプリのビルドに失敗しています' }] }}
-    released={false} onOpenPreview={() => {}}
+    released={false} published={false} changeByReply={false} onOpenPreview={() => {}}
   />)
   expect(html).toContain('aria-label="失敗"')
   expect(html).toContain('✖')
@@ -73,7 +73,7 @@ test('only unmet verification criteria appear under their task, including repair
       criteria: [{ criterion: '件数が見える', met: true }, { criterion: '担当者別の金額が見える', met: false, note: '集計カードをまだ表示できません' }],
     } })],
   }
-  const render = (value: ImplementationState) => renderToStaticMarkup(<ImplementPanel state={value} released={false} onOpenPreview={() => {}} />)
+  const render = (value: ImplementationState) => renderToStaticMarkup(<ImplementPanel state={value} released={false} published={false} changeByReply={false} onOpenPreview={() => {}} />)
   const html = render(state)
   expect(html).toContain(implementationCopy.unmetCriteria(1))
   expect(html).toContain('担当者別の金額が見える')
@@ -87,7 +87,7 @@ test('a retry waiting for its inputs or response is visibly pending and disabled
   const html = renderToStaticMarkup(<ImplementPanel state={{
     phase: 'failed', tasks: [taskOf({ id: 'one', title: '一覧', status: 'failed' })], retryPending: true,
     failure: { kind: 'interrupted', ...buildCopy.failure.resumable },
-  }} released={false} onOpenPreview={() => {}} onRetry={() => {}} />)
+  }} released={false} published={false} changeByReply={false} onOpenPreview={() => {}} onRetry={() => {}} />)
   const container = document.createElement('div')
   container.innerHTML = html
   const retry = [...container.querySelectorAll('button')].find((button) => button.textContent?.includes(implementationCopy.retryPending))

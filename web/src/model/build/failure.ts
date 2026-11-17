@@ -184,16 +184,16 @@ export function classifyRunFailure(run: Pick<ImplementationRun, 'status' | 'erro
 }
 
 /**
- * `newRun: false`: Platform's run admission refuses every new run while this holds, so neither skip nor a change is
- * offered. `skip: false`: skipping cannot help (the next task meets the same exhausted quota), as before APT-1158.
+ * `newRun: false`: Platform's run admission refuses every new run while this holds (a pending or closed proposal:
+ * `admitImprovementImplementation` answers 409), so no retry, skip or change is offered. `skip: false`: skipping
+ * cannot help (the next task meets the same exhausted quota), as before APT-1158.
  */
 type Refinement = Pick<BuildFailure, 'kind' | 'title' | 'reason'> & { newRun?: false, skip?: false }
 
 /**
  * The wording for a reason this console knows, only when Platform's `retryable` is the one written for it. Never adds
- * an action: a new run of the same tasks is offered exactly when `retryable` says so. Skip and a change are taken away
- * where Platform refuses any new run (a pending or closed proposal: `admitImprovementImplementation`); skip alone is
- * taken away for an exhausted quota.
+ * an action: a new run of the same tasks is offered only when `retryable` says so, and is taken away with skip and a
+ * change where Platform refuses any new run; skip alone is taken away for an exhausted quota.
  */
 function refinement(reason: RunFailure['reason'], retryable: boolean, text: string): Refinement | undefined {
   const copy = buildCopy.failure
@@ -220,9 +220,9 @@ function refinement(reason: RunFailure['reason'], retryable: boolean, text: stri
 }
 
 /**
- * `retryable` decides whether a new run of the same tasks is offered; an unknown reason gets the generic wording for
- * it. A run that would stop the same way names who acts (with its support reference) and, where Platform still admits
- * a new run, the way on: what to change, or skip the task.
+ * `retryable` decides whether a new run of the same tasks is offered, unless Platform refuses every new run; an unknown
+ * reason gets the generic wording for it. A run that would stop the same way names who acts, with its support
+ * reference; where Platform still admits a new run the screen adds the way on (`failureText`).
  */
 function decidedRunFailure(failure: RunFailure, text: string, reference: NonNullable<BuildFailure['reference']>): BuildFailure {
   const copy = buildCopy.failure
@@ -230,10 +230,24 @@ function decidedRunFailure(failure: RunFailure, text: string, reference: NonNull
     ?? (failure.retryable ? { kind: 'failed' as const, title: copy.failed.implement, reason: copy.retry } : { kind: 'blocked' as const, title: copy.failed.implement, reason: copy.run.blocked })
   return {
     ...shown,
-    ...(failure.retryable ? {} : { reason: newRun ? shown.reason + copy.run.then : shown.reason, reference }),
-    offers: { retry: failure.retryable, skip: newRun && skip, change: newRun },
+    ...(failure.retryable ? {} : { reference }),
+    offers: { retry: failure.retryable && newRun, skip: newRun && skip, change: newRun },
     raw: text,
   }
+}
+
+/**
+ * A failure's sentence as one screen shows it. A run that cannot be tried again as it is ends with the way on, naming
+ * only what that screen does: `skip`, it shows 「この作業を飛ばす」 for the stopped task; `change`, a reply typed in its
+ * conversation starts a run with that change. Neither is said where Platform's decision does not offer it.
+ */
+export function failureText(failure: BuildFailure, screen: { skip: boolean; change: boolean }): string {
+  const offers = failure.offers
+  if (!offers || offers.retry) return failure.reason
+  const then = buildCopy.failure.run.then
+  const skip = screen.skip && offers.skip
+  const change = screen.change && offers.change
+  return failure.reason + (change && skip ? then.changeOrSkip : change ? then.change : skip ? then.skip : '')
 }
 
 /**

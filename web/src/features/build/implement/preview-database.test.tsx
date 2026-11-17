@@ -40,7 +40,7 @@ function Harness() {
   const implementation = useImplementation({ projectId: 'p1', draft: draftOf(draft), enabled: true })
   reset = implementation.previewDatabaseReset
   return <ArtifactPane draft={draftOf(draft)} spec={{ users: [], screens: [], records: [], rules: [] }} stage="build"
-    implementation={implementation.state} shareText="" previewDatabaseReset={implementation.previewDatabaseReset}
+    implementation={implementation.state} changeByReply={false} shareText="" previewDatabaseReset={implementation.previewDatabaseReset}
     onOpenPreview={() => {}} onRetry={implementation.retry} onSkipTask={() => {}} onCollapse={() => {}} />
 }
 

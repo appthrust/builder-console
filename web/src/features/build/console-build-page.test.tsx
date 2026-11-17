@@ -877,4 +877,18 @@ describe('APT-1124: what the implementation run means on the console-v1 build pa
     expect(header(failed.page).textContent).not.toContain(text.header.stateWord.build)
     expect(outcome(failed.page)).toBeNull()
   })
+
+  // A reply on this page never starts a change run (useConsoleDraftStages), so the way on names only the skip, and
+  // only with the failed task its button skips; without one, nothing follows the reason.
+  test.each([['ja', true], ['ja', false], ['en', true], ['en', false]] as const)('a run a retry cannot fix names the ways on this page offers: language=%s stopped at a task=%s', async (language, atTask) => {
+    setLanguage(language)
+    const failure = { reason: 'ConfigurationMissing', retryable: false }
+    const { page } = await withRun(atTask ? ['done', 'failed'] : ['pending', 'pending'], { status: 'failed', ...(atTask ? { currentTaskId: 't2' } : {}), error: 'configuration missing', failure, finishedAt: ago(1_000) })
+    const { configuration, then } = buildCopy.failure.run
+    const sentences = [...specPane(page).querySelectorAll('p')].map((item) => item.textContent)
+    expect(sentences).toContain(configuration.reason + (atTask ? then.skip : ''))
+    for (const way of [then.changeOrSkip, then.change]) expect(specPane(page).textContent).not.toContain(way.trim())
+    if (!atTask) expect(specPane(page).textContent).not.toContain(then.skip.trim())
+    expect(buttons(specPane(page), implementationCopy.skip)).toHaveLength(atTask ? 1 : 0)
+  })
 })

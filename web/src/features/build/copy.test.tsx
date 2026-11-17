@@ -7,7 +7,9 @@ import { isPlatformNotFound } from '../../api/platform-error'
 import { draftOf, runOf, taskOf } from '../../api/testing/build-domain'
 import { buildCopy } from '../../model/build/copy'
 import { buildFailureReference, classifyBuildFailure, destinationFailure } from '../../model/build/failure'
+import { deriveStage, draftPublished } from '../../model/build/stage'
 import type { BuildProposal, BuildSpec } from '../../model/build/types'
+import type { BuildDraft } from '../../model/contracts/build'
 import { preserveLanguage } from '../../../test/language'
 import { setLanguage } from '../../shell/language'
 import { ArtifactPane, ProgressCard, PublishCard, SpecCard } from './artifact-pane'
@@ -170,7 +172,7 @@ test('English progress and preview expose translated accessible labels', () => {
   expect(progress).toContain('aria-label="In progress"')
   const preview = renderToStaticMarkup(<ImplementPanel
     state={{ phase: 'running', tasks: [taskOf({ id: 'one', title: 'Contacts', status: 'running' })], previewUrl: '/preview', previewStatus: 'ready', currentTaskId: 'one', step: { kind: 'known', value: 'working' } }}
-    released={false} onOpenPreview={() => {}}
+    released={false} published={false} changeByReply={false} onOpenPreview={() => {}}
   />)
   expect(preview).toContain('title="App preview"')
   expect(preview).toContain('Open in new tab')
@@ -196,7 +198,7 @@ test.each(['ja', 'en'] as const)('platform failure has a copyable support refere
   />)
   const artifact = renderToStaticMarkup(<ArtifactPane
     draft={draftOf(draft)} spec={{ users: [], screens: [], records: [], rules: [] }} stage="decide"
-    implementation={{ phase: 'idle', tasks: [] }} failure={failure} shareText=""
+    implementation={{ phase: 'idle', tasks: [] }} changeByReply={false} failure={failure} shareText=""
     previewDatabaseReset={noReset} onOpenPreview={() => {}} onRetry={() => {}} onSkipTask={() => {}} onCollapse={() => {}}
   />)
   for (const html of [conversation, artifact]) {
@@ -213,7 +215,7 @@ test.each(['ja', 'en'] as const)('platform failure has a copyable support refere
   const progress = { kind: 'prepare' as const, title: failure.title, hint: failure.reason, interrupted: false, steps: [{ label: '最初の版', state: 'failed' as const, detail: failure.reason }] }
   const progressed = renderToStaticMarkup(<ArtifactPane
     draft={draftOf(draft)} spec={{ users: [], screens: [], records: [], rules: [] }} stage="decide" progress={progress}
-    implementation={{ phase: 'idle', tasks: [] }} failure={failure} shareText=""
+    implementation={{ phase: 'idle', tasks: [] }} changeByReply={false} failure={failure} shareText=""
     previewDatabaseReset={noReset} onOpenPreview={() => {}} onRetry={() => {}} onSkipTask={() => {}} onCollapse={() => {}}
   />)
   // The artifact tab stays informative below md, without duplicating the conversation's actions.
@@ -228,7 +230,7 @@ test.each(['ja', 'en'] as const)('platform failure has a copyable support refere
   expect(alertSection).not.toContain('hidden')
   const built = renderToStaticMarkup(<ArtifactPane
     draft={draftOf(draft)} spec={{ users: [], screens: [], records: [], rules: [] }} stage="build" progress={progress}
-    implementation={{ phase: 'failed', tasks: [], failure }} failure={failure} shareText=""
+    implementation={{ phase: 'failed', tasks: [], failure }} changeByReply={false} failure={failure} shareText=""
     previewDatabaseReset={noReset} onOpenPreview={() => {}} onRetry={() => {}} onSkipTask={() => {}} onCollapse={() => {}}
   />)
   expect(built.match(/role="alert"/g)).toHaveLength(1)
@@ -264,7 +266,7 @@ test.each(['ja', 'en'] as const)('implementation platform failures render the fa
     id: 'impl-123', status: 'failed', startedAt: at, finishedAt: at, devWorkspaceId: 'ws-1', taskIds: [], tasks: [],
     error: 'gitops: policy rejected: deployment preflight failed',
   }))
-  const html = renderToStaticMarkup(<ImplementPanel state={state} released={false} onOpenPreview={() => {}} onRetry={() => {}} />)
+  const html = renderToStaticMarkup(<ImplementPanel state={state} released={false} published={false} changeByReply={false} onOpenPreview={() => {}} onRetry={() => {}} />)
   expect(html).toContain(buildCopy.failure.platform.title)
   expect(html).toContain(buildCopy.failure.platform.reason)
   expect(html).toContain(buildCopy.failure.reference('draft-ae97efbc / impl-123 09:09'))
@@ -282,7 +284,7 @@ test.each(['ja', 'en'] as const)('implementation account exhaustion offers retry
     taskIds: ['task-1'], currentTaskId: 'task-1', failureReason: 'TaskFailed', error,
     tasks: [{ id: 'task-1', title: '一覧を作る', status: 'failed', failureReason: 'TaskFailed', error }],
   }))
-  const html = renderToStaticMarkup(<ImplementPanel state={state} released={false} onOpenPreview={() => {}} onRetry={() => {}} onSkipTask={() => {}} />)
+  const html = renderToStaticMarkup(<ImplementPanel state={state} released={false} published={false} changeByReply={false} onOpenPreview={() => {}} onRetry={() => {}} onSkipTask={() => {}} />)
   expect(html).toContain(buildCopy.failure.quota.title)
   expect(html).toContain(buildCopy.failure.quota.reason)
   expect(html).toContain(implementationCopy.retry)
@@ -293,11 +295,56 @@ test.each(['ja', 'en'] as const)('implementation account exhaustion offers retry
 test('implementation policy failure directs the user to an administrator without retry or skipping', () => {
   const failure = classifyBuildFailure('runtime unavailable', 412, 'implement', undefined, undefined, undefined, undefined, { reason: 'ai_approval_policy_denied', policy: 'default' })
   const state: ImplementationState = { phase: 'failed', tasks: [], failure }
-  const html = renderToStaticMarkup(<ImplementPanel state={state} released={false} onOpenPreview={() => {}} onRetry={() => {}} onSkipTask={() => {}} />)
+  const html = renderToStaticMarkup(<ImplementPanel state={state} released={false} published={false} changeByReply={false} onOpenPreview={() => {}} onRetry={() => {}} onSkipTask={() => {}} />)
   expect(html).toContain(failure.title)
   expect(html).toContain(failure.reason)
   expect(html).not.toContain(implementationCopy.retry)
   expect(html).not.toContain(implementationCopy.skip)
+})
+
+test.each(['ja', 'en'] as const)('a run a retry cannot fix names only the ways on the panel offers: the skip it shows, a change its page sends, in %s', (language) => {
+  setLanguage(language)
+  const at = '2026-10-27T00:00:00Z'
+  const failed = { id: 'impl-blocked', status: 'failed', startedAt: at, finishedAt: at, devWorkspaceId: 'ws-1', taskIds: ['task-1'], error: 'access denied', failure: { reason: 'AccessDenied', retryable: false } }
+  const skipButton = new RegExp(`<button\\b[^>]*>(?:(?!</button>)[\\s\\S])*${implementationCopy.skip}</button>`)
+  const { reason } = buildCopy.failure.run.accessDenied
+  const then = buildCopy.failure.run.then
+  // A failed task can be skipped; a run stopped before any task started has none to skip.
+  const stoppedAtTask = { ...failed, currentTaskId: 'task-1', tasks: [{ id: 'task-1', title: '一覧を作る', status: 'failed' }] }
+  const stoppedBeforeTask = { ...failed, tasks: [{ id: 'task-1', title: '一覧を作る', status: 'pending' }] }
+  for (const [run, changeByReply, skip, sentence] of [
+    [stoppedAtTask, true, true, reason + then.changeOrSkip],
+    [stoppedAtTask, false, true, reason + then.skip],
+    [stoppedBeforeTask, true, false, reason + then.change],
+    [stoppedBeforeTask, false, false, reason],
+  ] as const) {
+    const html = renderToStaticMarkup(<ImplementPanel state={projectImplementation({ id: 'draft-blocked', updatedAt: at }, runOf(run))} released={false} published={false} changeByReply={changeByReply} onOpenPreview={() => {}} onRetry={() => {}} onSkipTask={() => {}} />)
+    expect(html.match(skipButton) !== null).toBe(skip)
+    expect(html).toContain(`<p>${sentence}</p>`)
+  }
+})
+
+test.each(['ja', 'en'] as const)('the preview is called a check before publishing exactly until the draft is published, whether or not its release is live, in %s', (language) => {
+  setLanguage(language)
+  const now = Date.parse('2026-10-28T00:00:00Z')
+  const url = 'https://inspections.example.test'
+  // The stage comes from the draft's own publication, as on the page (use-draft-creation `published`).
+  const render = (draft: BuildDraft, live?: string) => renderToStaticMarkup(<ArtifactPane draft={draft} spec={{ users: [], screens: [], records: [], rules: [] }}
+    stage={deriveStage({ draft, published: draftPublished(draft), now }).stage} url={live}
+    implementation={{ phase: 'done', tasks: [taskOf({ id: 'list', title: '点検一覧', status: 'done' })], previewUrl: '/preview', previewStatus: 'ready' }} changeByReply={false}
+    shareText="" previewDatabaseReset={noReset} onOpenPreview={() => {}} onRetry={() => {}} onSkipTask={() => {}} onCollapse={() => {}}
+  />)
+  const unpublished = draftOf(previewDraft(false, false))
+  const published = { ...unpublished, publishedAt: '2026-10-27T01:00:00Z' }
+  // Not published: before the run's release is live, and after (the header still offers 公開する).
+  expect(render(unpublished)).toContain(implementationCopy.previewAudience)
+  expect(render(unpublished, url)).toContain(implementationCopy.previewAudience)
+  // Published: with the app's address, and while the app views are still loading (no address yet).
+  expect(render(published, url)).not.toContain(implementationCopy.previewAudience)
+  expect(render(published)).not.toContain(implementationCopy.previewAudience)
+  // A run started after publication makes a version that is not published yet.
+  const later = runOf({ id: 'impl-later', status: 'succeeded', startedAt: '2026-10-27T02:00:00Z', finishedAt: '2026-10-27T02:10:00Z', devWorkspaceId: 'ws-1', taskIds: [], tasks: [] })
+  expect(render({ ...published, implementationRuns: [later] }, url)).toContain(implementationCopy.previewAudience)
 })
 
 test('preparation audience chips use the owner group vocabulary instead of historical department labels', () => {
@@ -333,7 +380,7 @@ function previewDraft(excel: boolean, database: boolean): ApplicationDraft {
 
 function renderPreview(draft: ApplicationDraft, stage: 'build' | 'publish', implementation: Partial<ImplementationState>, reset = noReset) {
   return renderToStaticMarkup(<ArtifactPane draft={draftOf(draft)} spec={{ users: [], screens: [], records: [], rules: [] }}
-    stage={stage} implementation={{ phase: 'done', tasks: [taskOf({ id: 'list', title: '点検一覧', status: 'done' })], previewUrl: '/preview', previewStatus: 'ready', ...implementation }}
+    stage={stage} implementation={{ phase: 'done', tasks: [taskOf({ id: 'list', title: '点検一覧', status: 'done' })], previewUrl: '/preview', previewStatus: 'ready', ...implementation }} changeByReply={false}
     shareText="" previewDatabaseReset={reset} onOpenPreview={() => {}} onRetry={() => {}} onSkipTask={() => {}} onCollapse={() => {}}
   />)
 }

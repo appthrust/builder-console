@@ -106,7 +106,8 @@ export interface BuildFailure {
   /**
    * A stopped implementation run that carries Platform's decision (`failure`): whether a new run of the same tasks
    * (`retry`), a run that skips the stopped task (`skip`) and a run with a change instruction typed in the conversation
-   * (`change`) are offered. Absent: decided by `kind` (`failureOffers`).
+   * (`change`) are offered. Absent: decided by `kind` (`failureOffers`). Without a retry, `reason` gets the way on that
+   * only the screen can word (`failureText`: whether it shows the skip and turns a reply into a change run).
    */
   offers?: { retry: boolean; skip: boolean; change: boolean }
   /**

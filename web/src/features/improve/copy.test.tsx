@@ -9,6 +9,7 @@ import { setLanguage } from '../../shell/language'
 import { buildCopy } from '../../model/build/copy'
 import { unconfirmedFailure } from '../../model/build/failure'
 import { text as buildText } from '../build/copy'
+import { implementationCopy } from '../build/implement/copy'
 import { implementationTodoId } from '../build/implement/state'
 import { ImproveConversation, type ImproveConversationProps } from './conversation'
 import { improveStateWord, text, textJa } from './copy'
@@ -93,4 +94,28 @@ test('improvement failures honor run and task reasons before diagnostic wording'
   expect(failed).not.toContain(buildCopy.failure.resumable.reason)
   const interrupted = render({ ...draft, implementationRuns: [{ ...run, failureReason: 'StreamInterrupted' }] })
   expect(interrupted).toContain(buildCopy.failure.resumable.reason)
+})
+
+test.each(['ja', 'en'] as const)('a stopped run names no way on this page lacks: no skip, and a reply here is a new turn, not a change run, in %s', (language) => {
+  setLanguage(language)
+  const id = implementationTodoId(tasks[0]!.title, 0)
+  const stopped = (failure: { reason: 'WorkspaceBranchDiverged' | 'ProposalPending'; retryable: boolean }, atTask: boolean): ApplicationDraft => ({ ...draft, implementationRuns: [{
+    id: 'r1', status: 'failed', startedAt: at, finishedAt: at, devWorkspaceId: 'ws', taskIds: [id], error: 'stopped', failure,
+    ...(atTask ? { currentTaskId: id } : {}), tasks: [{ id, title: tasks[0]!.title, status: atTask ? 'failed' : 'pending' }],
+  }] })
+  const retryButton = `${buildText.conversation.retry}</button>`
+  const ways = Object.values(buildCopy.failure.run.then)
+  // Stopped at a task or before any task started: the same plain reason, with nothing after it.
+  for (const atTask of [true, false]) {
+    const blocked = render(stopped({ reason: 'WorkspaceBranchDiverged', retryable: false }, atTask))
+    expect(blocked).toContain(buildCopy.failure.run.blocked)
+    for (const way of ways) expect(blocked).not.toContain(way.trim())
+    expect(blocked).not.toContain(implementationCopy.skip)
+    expect(blocked).not.toContain(retryButton)
+  }
+  // A pending proposal admits no run at all: no retry either, and nothing promised after an apply or decline.
+  const pending = render(stopped({ reason: 'ProposalPending', retryable: true }, true))
+  expect(pending).toContain(buildCopy.failure.run.proposalPending.reason)
+  for (const way of ways) expect(pending).not.toContain(way.trim())
+  expect(pending).not.toContain(retryButton)
 })
