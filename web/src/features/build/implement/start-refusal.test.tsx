@@ -35,8 +35,8 @@ let client: QueryClient
 let restoreLanguage: () => void
 let created: Mock<typeof buildApi.createImplementationRun>
 let reads: Mock<typeof buildApi.getDraft>
-/** What the tests read from the hook: the start, its request failure, and taking a refusal back. */
-let implementation: { requestFailure?: BuildFailure; startPending(): void; dismissRefusal(): void }
+/** What the tests read from the hook: the start, its request failure, confirming it, and taking a refusal back. */
+let implementation: { requestFailure?: BuildFailure; startPending(): void; confirm(): void; dismissRefusal(): void }
 
 function Harness() {
   implementation = useImplementation({ projectId: 'p1', draft, handoff: draft.creationPlan?.implementationHandoff, enabled: true })
@@ -118,6 +118,33 @@ test('a read-back that fails after an untyped conflict is said as unconfirmed, n
   expect(implementation.requestFailure).toMatchObject({ kind: 'unconfirmed', ...buildCopy.failure.unconfirmed })
   expect(implementation.requestFailure?.reasonCode).toBeUndefined()
   expect(failureOffers(implementation.requestFailure!).retry).toBe(false)
+})
+
+test('confirming a plain conflict whose read-back failed reads again and decides it: no new run is a refusal, a new run is observed', async () => {
+  const confirmOnce = async () => {
+    await act(async () => { implementation.confirm() })
+    for (let index = 0; index < 5; index++) await act(async () => { await Bun.sleep(0) })
+  }
+  created.mockRejectedValueOnce(conflict('conflict', 'source change proposal is being withdrawn'))
+  reads.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+  await startOnce()
+  expect(implementation.requestFailure?.kind).toBe('unconfirmed')
+  // The read now answers, without another start: Platform refused this one.
+  reads.mockResolvedValueOnce(draft)
+  await confirmOnce()
+  expect(implementation.requestFailure).toMatchObject({ kind: 'failed', reasonCode: 'StartRefused', title: buildCopy.failure.failed.implement })
+
+  // Again, and this time the read shows another tab's run: it is observed, nothing is reported.
+  created.mockRejectedValueOnce(conflict('conflict', 'implementation run is running'))
+  reads.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+  await startOnce()
+  expect(implementation.requestFailure?.kind).toBe('unconfirmed')
+  reads.mockResolvedValueOnce(startedElsewhere('run-elsewhere'))
+  await confirmOnce()
+  expect(implementation.requestFailure).toBeUndefined()
+  // Confirming never sends the start again.
+  expect(created).toHaveBeenCalledTimes(2)
+  expect(reads).toHaveBeenCalledTimes(4)
 })
 
 test('a generic conflict whose reason names a refusal is that refusal, never another tab\'s start', async () => {

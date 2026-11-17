@@ -38,12 +38,23 @@ export interface PreviewDatabaseReset {
 /** The latest run as far as an unconfirmed write is concerned: which run, and its state. */
 const runMark = (run: ImplementationRun | undefined) => run ? `${run.id}/${knownValue(run.status) ?? 'unknown'}` : ''
 
+/**
+ * A start Platform answered with a 409 without a reason, still to be decided by a draft read: the latest run before
+ * the start, Platform's text and the reference. Unlike a 2xx answer that could not be read, the start was not made
+ * by this request; a read decides whether another tab's start made a run.
+ */
+interface PlainConflict {
+  runBefore?: ImplementationRun
+  text: string
+  reference: NonNullable<BuildFailure['reference']>
+}
+
 /** Mutations only submit intent. Draft polling owns progress, even when no build tab is open. */
 export function useImplementation({ projectId, draft, handoff, enabled }: ImplementationInput) {
   const queryClient = useQueryClient()
   const lock = useRef(false)
   const [pending, setPending] = useState(false)
-  const [requestFailure, setRequestFailure] = useState<{ draftId: string; failure: BuildFailure; runBefore?: string }>()
+  const [requestFailure, setRequestFailure] = useState<{ draftId: string; failure: BuildFailure; runBefore?: string; conflict?: PlainConflict }>()
   const run = draft.implementationRuns.at(-1)
   const projection = projectImplementation(draft, run, handoff)
   const workspaceId = run?.devWorkspaceId
@@ -82,6 +93,28 @@ export function useImplementation({ projectId, draft, handoff, enabled }: Implem
     // The restart may have happened even when its answer could not be read: read the workspace back.
     onError: (error) => { if (isResponseContractError(error)) void queryClient.invalidateQueries({ queryKey: workspaceKey }) },
   })
+
+  /**
+   * Decides a plain 409 to a start by a draft read started now (a read already in flight may predate another tab's
+   * start, so it is cancelled, never reused): a new run is another tab's start, observed and not reported; none means
+   * Platform refused this start (a proposal being withdrawn or not matching). A read that fails decides nothing: the
+   * start is said as unconfirmed, and confirming it reads again and decides the same way. Never sends the start again.
+   */
+  async function decideConflict(conflict: PlainConflict) {
+    const queryKey = buildDraftOptions(projectId, draft.id).queryKey
+    await queryClient.cancelQueries({ queryKey })
+    let read: BuildDraft
+    try {
+      read = await api.getDraft(projectId, draft.id)
+    } catch {
+      setRequestFailure({ draftId: draft.id, failure: unconfirmedFailure(conflict.reference), runBefore: runMark(conflict.runBefore), conflict })
+      return
+    }
+    queryClient.setQueryData<BuildDraft>(queryKey, read)
+    const latest = read.implementationRuns.at(-1)
+    if (latest && latest.id !== conflict.runBefore?.id) setRequestFailure(undefined)
+    else setRequestFailure({ draftId: draft.id, failure: startRefusedFailure(conflict.text, conflict.reference), runBefore: runMark(latest) })
+  }
 
   async function submit(payload?: api.ImplementationRunRequest): Promise<boolean> {
     if (!enabled || lock.current || !state.tasks.length) return false
@@ -123,22 +156,8 @@ export function useImplementation({ projectId, draft, handoff, enabled }: Implem
           setRequestFailure({ draftId: draft.id, failure: refusal })
           return false
         }
-        // No reason given. Another tab's start shows as a new run in a draft read started after this answer (a read
-        // already in flight may predate that start, so it is cancelled, never reused): observe that run, do not create
-        // a second workspace. Without one, Platform refused this start (a proposal being withdrawn or not matching).
-        // A read that fails confirms neither: it is said as unconfirmed, with only the read-back offered.
-        await queryClient.cancelQueries({ queryKey: options.queryKey })
-        let read: BuildDraft
-        try {
-          read = await api.getDraft(projectId, draft.id)
-        } catch {
-          setRequestFailure({ draftId: draft.id, failure: unconfirmedFailure(reference), runBefore: runMark(current) })
-          return false
-        }
-        queryClient.setQueryData<BuildDraft>(options.queryKey, read)
-        const latest = read.implementationRuns.at(-1)
-        if (latest && latest.id !== current?.id) return false
-        setRequestFailure({ draftId: draft.id, failure: startRefusedFailure(envelope?.message ?? '', reference), runBefore: runMark(latest) })
+        // No reason given: a draft read decides whether another tab started a run or Platform refused this start.
+        await decideConflict({ runBefore: current, text: envelope?.message ?? '', reference })
         return false
       }
       const failedRun = queryClient.getQueryData<BuildDraft>(options.queryKey)?.implementationRuns.at(-1) ?? run
@@ -167,8 +186,14 @@ export function useImplementation({ projectId, draft, handoff, enabled }: Implem
     requestFailure: failure,
     previewDatabaseReset,
     start: () => { if (projection.phase === 'idle' && !requestFailure) void submit() },
-    /** After a write whose answer could not be read: reads the draft back; the notice leaves once it shows what happened. Never resends. */
-    confirm: () => { void queryClient.invalidateQueries({ queryKey: buildDraftOptions(projectId, draft.id).queryKey }) },
+    /**
+     * After a write whose answer could not be read: reads the draft back; the notice leaves once it shows what
+     * happened. After a plain 409 whose read-back failed: reads the draft again and decides that 409. Never resends.
+     */
+    confirm: () => {
+      if (requestFailure?.conflict) void decideConflict(requestFailure.conflict)
+      else void queryClient.invalidateQueries({ queryKey: buildDraftOptions(projectId, draft.id).queryKey })
+    },
     /** Takes back a start refused because of the proposal, once a fresh read shows it admits a run again. */
     dismissRefusal: () => setRequestFailure((current) => current?.failure.reasonCode === 'ProposalRunBlocked' || current?.failure.reasonCode === 'StartRefused' ? undefined : current),
     /** Starts every handoff task the latest run has not made, whatever that run's outcome (improvement sessions). */
