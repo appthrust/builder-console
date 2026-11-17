@@ -69,6 +69,7 @@ export const textEn: typeof textJa = {
     stageLabels: { ask: 'Discuss', decide: 'Decide', build: 'Build', publish: 'Publish' },
     newApp: 'New app',
     retryPlan: 'The plan couldn’t be created; AI will try again.',
+    planResumed: 'Planning started again after this.',
     missingExecution: 'The server did not return a creation execution',
     operationFailed: 'The operation failed',
     missingAppName: 'The creation plan has no application name',

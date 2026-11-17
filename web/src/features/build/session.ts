@@ -11,7 +11,7 @@ import { textEn } from './copy.en'
 const messageSchema = z.discriminatedUnion('role', [
   z.object({ role: z.literal('user'), text: z.string(), at: z.string() }),
   z.object({ role: z.literal('assistant'), text: z.string(), at: z.string(), summary: z.string().optional(), changed: z.array(z.string()).optional(), question: z.string().optional(), options: z.array(z.string()).optional(), turnId: z.string().optional() }),
-  z.object({ role: z.literal('notice'), tone: z.enum(['info', 'warning', 'error']), title: z.string(), detail: z.string().optional(), at: z.string(), retry: z.enum(['turn', 'plan', 'prepare', 'implement', 'publish', 'confirm', 'recheck']).optional(), reference: z.object({ draftId: z.string(), executionId: z.string().optional(), at: z.iso.datetime() }).optional() }),
+  z.object({ role: z.literal('notice'), tone: z.enum(['info', 'warning', 'error']), title: z.string(), detail: z.string().optional(), at: z.string(), retry: z.enum(['turn', 'plan', 'prepare', 'implement', 'publish', 'confirm', 'recheck']).optional(), reference: z.object({ draftId: z.string(), executionId: z.string().optional(), at: z.iso.datetime() }).optional(), planGenerationId: z.string().optional() }),
 ])
 const sessionSchema = z.object({
   baseIntent: z.string(),
