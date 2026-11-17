@@ -342,9 +342,10 @@ test.each(['ja', 'en'] as const)('the preview is called a check before publishin
   // Published: with the app's address, and while the app views are still loading (no address yet).
   expect(render(published, url)).not.toContain(implementationCopy.previewAudience)
   expect(render(published)).not.toContain(implementationCopy.previewAudience)
-  // A run started after publication makes a version that is not published yet.
+  // A run started after publication: access was granted at publication and is not taken back, so its release can
+  // reach those people once it is live; the line must not claim otherwise.
   const later = runOf({ id: 'impl-later', status: 'succeeded', startedAt: '2026-10-27T02:00:00Z', finishedAt: '2026-10-27T02:10:00Z', devWorkspaceId: 'ws-1', taskIds: [], tasks: [] })
-  expect(render({ ...published, implementationRuns: [later] }, url)).toContain(implementationCopy.previewAudience)
+  expect(render({ ...published, implementationRuns: [later] }, url)).not.toContain(implementationCopy.previewAudience)
 })
 
 test('preparation audience chips use the owner group vocabulary instead of historical department labels', () => {

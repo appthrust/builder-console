@@ -142,7 +142,7 @@ export function ArtifactPane({ draft, spec, proposal, stage, progress, implement
     </Notice> : null}
     {shareStep}
     {stage === 'publish' && url ? <PublishCard url={url} shareText={shareText} published /> : null}
-    {built ? <ImplementPanel state={implementation} preparation={progress} released={Boolean(url)} published={stage === 'publish'} changeByReply={changeByReply} previewNotice={previewNotice} previewDatabase={previewDatabase} onOpenPreview={onOpenPreview} onRetry={onRetry} onSkipTask={onSkipTask} onConfirm={onConfirm} /> : null}
+    {built ? <ImplementPanel state={implementation} preparation={progress} released={Boolean(url)} published={Boolean(draft.publishedAt)} changeByReply={changeByReply} previewNotice={previewNotice} previewDatabase={previewDatabase} onOpenPreview={onOpenPreview} onRetry={onRetry} onSkipTask={onSkipTask} onConfirm={onConfirm} /> : null}
     {built ? databaseChanges : null}
     {stage === 'build' && url ? <PublishCard url={url} shareText={shareText} /> : null}
     {built && !url ? <p className="text-xs text-stone-500">{text.artifact.waitingForApp}</p> : null}

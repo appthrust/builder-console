@@ -782,12 +782,16 @@ non-engineers, with engineering words only under 「詳しい人向け」
   There is no browser-local task state; conversation/UI session storage remains.
   A failed run's notice follows Platform's `failure {reason, retryable}`
   (APT-1158, `model/build/failure.ts#classifyRunFailure`): `retryable` decides
-  whether 「もう一度試す」 is offered. 「この作業を飛ばす」 and a change typed in
-  the conversation (a run with `change`) stay offered unless Platform admits no
-  new run: a pending or closed proposal (`admitImprovementImplementation`). A
+  whether 「もう一度試す」 is offered, except that a pending or closed proposal
+  offers no new run at all (Platform refuses one: `admitImprovementImplementation`),
+  retry included. 「この作業を飛ばす」 and a change typed in the conversation (a
+  run with `change`) stay offered wherever Platform admits a new run. A
   non-retryable run names who acts and what changes, shows its support
-  reference and, where a new run is admitted, says to tell what to change or
-  skip. A reason this console knows only refines the words, and only when
+  reference and then names only what the current screen can do
+  (`failureText(failure, {skip, change})`): change and skip on the build page
+  at a failed task, change only before any task, skip only on the console build
+  page (it sends no change runs), nothing on the improve page. A reason this
+  console knows only refines the words, and only when
   Platform's `retryable` is the one written for it; an unknown reason gets the
   generic sentence for its `retryable`. Without `failure` (an older Platform, an
   unreadable one, a cancelled run) the run reads as before, from `failureReason`
