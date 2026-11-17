@@ -541,8 +541,9 @@ describe('a newer plan generation supersedes a plan failure', () => {
     restore.push(() => generation.mockRestore())
     return generation
   }
+  // A draft read: the intent is the draft's as last written (this tab's plan request writes it before its POST).
   async function poll(next: ApplicationDraft) {
-    await act(async () => { client.setQueryData(queryKey, draftOf(next)) })
+    await act(async () => { client.setQueryData(queryKey, draftOf({ ...next, intent: client.getQueryData<BuildDraft>(queryKey)!.intent })) })
   }
 
   test.each([
@@ -633,6 +634,68 @@ describe('a newer plan generation supersedes a plan failure', () => {
     await poll({ ...draft, conversationTurns: [kickoff, failedTurn], creationPlanGenerations: [newerPlan('succeeded')], phase: 'planned', creationPlan: { summary: '見積を管理する', markdown: '# 見積', representation: ['ApplicationStack'] } })
     expect(build.failure?.title).toBe(buildCopy.failure.unavailable.title)
     expect(retries()).toEqual([expect.objectContaining({ retry: 'turn' })])
+  })
+
+  test('a reply sent after the failure keeps the plan request when the newer plan was made without it', async () => {
+    const generation = spyOn(api, 'createGeneration').mockRejectedValueOnce(unavailable)
+      .mockResolvedValue(generationOf({ id: 'plan-with-reply', status: 'pending', startedAt: '2026-10-26T00:06:00Z', devWorkspaceId: 'workspace-1' }))
+    restore.push(() => generation.mockRestore())
+    await mount(failedDraft)
+    expect(build.failure?.title).toBe(buildCopy.failure.unavailable.title)
+    expect(build.session.planRequested).toBe(true)
+    // The reply runs after the plan another tab made had started; that plan is read while the reply runs.
+    const reply = { ...turn('reply', 'PDF も出したい', 5), status: 'pending' as const }
+    createTurn.mockImplementation(async () => turnOf(reply))
+    await act(async () => { build.send('PDF も出したい') })
+    expect(createTurn).toHaveBeenCalledTimes(1)
+    await poll({ ...supersededBy('succeeded'), conversationTurns: [kickoff, reply] })
+    expect(retries()).toEqual([])
+    expect(build.session.planRequested).toBe(true)
+    // The reply changed the specification after that plan started: the plan is made again with it.
+    await poll({ ...supersededBy('succeeded'), conversationTurns: [kickoff, { ...reply, status: 'succeeded', finishedAt: '2026-10-26T00:05:30Z', specMarkdown: draft.specMarkdown }] })
+    expect(generation).toHaveBeenCalledTimes(2)
+    expect(build.failure).toBeUndefined()
+  })
+
+  test('a refused plan update before building is answered by the same plan made elsewhere: no second plan, the build goes on', async () => {
+    const validate = spyOn(api, 'validatePlan').mockImplementation(() => new Promise(() => {}))
+    restore.push(() => validate.mockRestore())
+    const generation = refuseGeneration(unavailable)
+    const plan = { summary: '見積を管理する', markdown: '# 見積', representation: ['ApplicationStack' as const] }
+    const earlier = { id: 'plan-earlier', status: 'succeeded' as const, startedAt: '2026-10-26T00:01:00Z', finishedAt: '2026-10-26T00:01:30Z', devWorkspaceId: 'workspace-1' }
+    const changed: ApplicationDraft = {
+      ...draft, intent: '見積を作る\n\nPDF も出したい', phase: 'planned', creationPlan: plan, creationPlanGenerations: [earlier],
+      conversationTurns: [kickoff, { ...turn('reply', 'PDF も出したい', 2), specMarkdown: draft.specMarkdown }],
+    }
+    // 「計画を更新して作る」 after the reply: the plan of the earlier intent is made again first.
+    await mount(changed, { ...initial, lastPlannedIntent: '見積を作る', prepareRequested: true })
+    expect(generation).toHaveBeenCalledTimes(1)
+    expect(build.failure?.title).toBe(buildCopy.failure.unavailable.title)
+    const requested = client.getQueryData<BuildDraft>(queryKey)!.intent
+    await poll({ ...changed, creationPlanGenerations: [earlier, { id: 'plan-elsewhere', status: 'succeeded', startedAt: '2026-10-26T00:04:00Z', finishedAt: '2026-10-26T00:04:30Z', devWorkspaceId: 'workspace-1' }] })
+    expect(build.failure).toBeUndefined()
+    expect(retries()).toEqual([])
+    expect(build.session).toMatchObject({ lastPlannedIntent: requested, planRequested: false, prepareRequested: true })
+    expect(generation).toHaveBeenCalledTimes(1)
+    expect(validate).toHaveBeenCalledTimes(1)
+  })
+
+  test('a plan another tab started while this tab\'s request was on its way supersedes the failure of that request', async () => {
+    // The draft written before the POST already holds the other tab's generation; the POST then meets it (409).
+    update.mockImplementation(async (_projectId, _draftId, payload) => {
+      const current = client.getQueryData<BuildDraft>(queryKey)!
+      return { ...current, intent: payload.intent ?? current.intent, creationPlanGenerations: [...current.creationPlanGenerations, generationOf(newerPlan('pending'))] }
+    })
+    const generation = refuseGeneration(new ORPCError('CONFLICT', { status: 409, data: { body: { error: { message: 'plan generation is running' } } } }))
+    await mount(failedDraft)
+    expect(generation).toHaveBeenCalledTimes(1)
+    expect(build.failure).toBeUndefined()
+    expect(retries()).toEqual([])
+    await poll(supersededBy('succeeded'))
+    expect(build.failure).toBeUndefined()
+    expect(retries()).toEqual([])
+    expect(build.session.planRequested).toBe(false)
+    expect(generation).toHaveBeenCalledTimes(1)
   })
 })
 

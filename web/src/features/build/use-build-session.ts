@@ -1,5 +1,5 @@
 import { isResponseContractError } from '../../api/boundary'
-import { isOneOf, type BuildDraft, type BuildExecutionStep } from '../../model/contracts/build'
+import { isOneOf, knownValue, type BuildDraft, type BuildExecutionStep } from '../../model/contracts/build'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCreateStore, useSelector } from '@tanstack/react-store'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -99,7 +99,11 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
   async function receive(next: BuildDraft) {
     await writeDraft(queryClient, projectId, draftRef, next)
   }
-  function fail(error: unknown, context: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish', at = new Date().toISOString(), failedStep?: BuildExecutionStep) {
+  /**
+   * `planTarget`: for a plan failure, the plan generation the failed request was to replace (the latest one when it
+   * started); a newer generation than it supersedes the failure (APT-1207). Without it, the latest one now.
+   */
+  function fail(error: unknown, context: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish', at = new Date().toISOString(), failedStep?: BuildExecutionStep, planTarget?: string) {
     const preparationExecution = context === 'prepare' ? draftRef.current.creationExecutions.at(-1) : undefined
     // Console binding can fail after creation succeeded; keep that execution in the support reference.
     const reference = { draftId: draft.id, at, ...(preparationExecution ? { executionId: preparationExecution.id } : {}) }
@@ -116,7 +120,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
     // A newer plan generation supersedes a plan failure (APT-1207), never a stop no new plan lifts (the AI allowance, a
     // policy, the generation limit, the repository destination) nor a write that may have happened.
     const supersedable = context === 'plan' && !next.destination && !['unconfirmed', 'quota', 'policy', 'limit', 'destination'].includes(next.kind)
-    const planGenerationId = supersedable ? draftRef.current.creationPlanGenerations.at(-1)?.id ?? '' : undefined
+    const planGenerationId = supersedable ? planTarget ?? draftRef.current.creationPlanGenerations.at(-1)?.id ?? '' : undefined
     planFailureGeneration.current = planGenerationId
     setFailure(next)
     patch((current) => {
@@ -252,14 +256,25 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
       return
     }
     if ([latestGeneration, current.conversationTurns.at(-1)].some(isBuildPending)) return
-    const intent = composeBuildIntent(decomposeBuildIntent(session.baseIntent), conversationTurns(current.conversationTurns).map((item) => item.userMessage), true)
-    const updated = current.intent === intent ? current : await api.updateDraft(projectId, draft.id, { intent })
-    await receive(updated)
-    const attemptKey = `build-plan-${draft.id}-${current.conversationTurns.at(-1)?.id ?? 'initial'}-${previousGenerationId ?? 'initial'}`
-    const created = await api.createGeneration(projectId, draft.id, {}, attemptKey)
-    unreadableReplanRequested.current = false
-    patch({ lastPlannedIntent: intent, planRequested: false, reusePlan: false })
-    await receive({ ...draftRef.current, creationPlanGenerations: [...draftRef.current.creationPlanGenerations, created] })
+    const intent = plannedIntent(current)
+    try {
+      const updated = current.intent === intent ? current : await api.updateDraft(projectId, draft.id, { intent })
+      await receive(updated)
+      const attemptKey = `build-plan-${draft.id}-${current.conversationTurns.at(-1)?.id ?? 'initial'}-${previousGenerationId ?? 'initial'}`
+      const created = await api.createGeneration(projectId, draft.id, {}, attemptKey)
+      unreadableReplanRequested.current = false
+      patch({ lastPlannedIntent: intent, planRequested: false, reusePlan: false })
+      await receive({ ...draftRef.current, creationPlanGenerations: [...draftRef.current.creationPlanGenerations, created] })
+    } catch (error) {
+      // The failure belongs to the generation this request was to replace, not to one another tab started meanwhile
+      // (read with the draft written above, say): that newer one supersedes it (APT-1207).
+      if (!isSessionExpiredError(error)) fail(error, 'plan', undefined, undefined, previousGenerationId ?? '')
+    }
+  }
+
+  /** The intent a plan request of this tab sends now (`generate` writes it to the draft before asking for the plan). */
+  function plannedIntent(current: BuildDraft): string {
+    return composeBuildIntent(decomposeBuildIntent(session.baseIntent), conversationTurns(current.conversationTurns).map((item) => item.userMessage), true)
   }
 
   // The plan must be (re)made before the preparation: an accepted kickoff, 用意する on a plan the spec has outgrown, or a
@@ -294,30 +309,39 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
       // An unset repository destination stops every plan alike: trying again waits for the user (after an administrator set it).
       if (context === 'plan' && session.planRetries === 0 && kind !== 'quota' && kind !== 'policy' && kind !== 'destination') {
         patch((current) => ({ ...current, planRetries: 1, planRequested: true, messages: [...current.messages, { role: 'notice', tone: 'info', title: text.session.retryPlan, at: new Date().toISOString() }] }))
-      } else fail(new Error(operation.error ?? text.session.operationFailed), context, operation.finishedAt)
+      } else fail(new Error(operation.error ?? text.session.operationFailed), context, operation.finishedAt, undefined, context === 'plan' ? operation.id : undefined)
     }
   }, [turn, generation])
 
-  // APT-1207: a plan failure is over once the draft's latest plan generation is newer than it and did not fail (another
-  // tab, Platform or the user made it, and it answers this tab's plan request too). Its display goes; its notice stays in
-  // the conversation only as history, without its retry. A reload still finds that notice in the tab's storage.
-  const livePlan = generation && isOneOf(generation.status, 'pending', 'running', 'succeeded') ? generation.id : undefined
+  // APT-1207: a plan failure is over once the draft's latest plan generation is newer than the one the failed request
+  // was to replace and did not fail (another tab, Platform or the user made it). Its display goes at once; its notice
+  // stays in the conversation only as history, without its retry (a reload still finds that notice in the tab's storage).
+  // Whether that plan also answers what this tab asks for is a separate question, settled once it succeeded and no reply
+  // is still on its way: made from the input this tab would send now (`needsPlanRefresh` against `plannedIntent`), it is
+  // recorded as this tab's own plan would be (`generate`), so neither a plan request nor 「計画を更新して作る」 makes it
+  // again and an approval goes on with it. Otherwise the request stays and a plan with the newer input follows. Until it
+  // is settled, the history notice keeps its `planGenerationId`.
+  const livePlan = generation && isOneOf(generation.status, 'pending', 'running', 'succeeded') ? generation : undefined
   useEffect(() => {
-    if (livePlan === undefined) return
-    const superseded = (marker: string | undefined) => marker !== undefined && marker !== livePlan
+    if (!livePlan) return
+    const superseded = (marker: string | undefined) => marker !== undefined && marker !== livePlan.id
     const failureSuperseded = failure !== undefined && superseded(planFailureGeneration.current)
     if (!failureSuperseded && !store.state.messages.some((message) => message.role === 'notice' && superseded(message.planGenerationId))) return
+    const settled = isOneOf(livePlan.status, 'succeeded') && !isBuildPending(turn) && !store.state.pending.length
+    const intent = plannedIntent(draft)
+    const answered = settled && !draft.creationPlanUnreadable && !needsPlanRefresh(draft, intent)
     patch((current) => ({
-      ...current, planRequested: false,
+      ...current,
+      ...(answered ? { lastPlannedIntent: intent, planRequested: false, reusePlan: false } : {}),
       messages: current.messages.map((message): BuildMessage => message.role === 'notice' && superseded(message.planGenerationId)
-        ? { role: 'notice', tone: 'info', title: message.title, detail: text.session.planResumed, at: message.at, ...(message.reference ? { reference: message.reference } : {}) }
+        ? { role: 'notice', tone: 'info', title: message.title, detail: text.session.planResumed, at: message.at, ...(message.reference ? { reference: message.reference } : {}), ...(settled ? {} : { planGenerationId: message.planGenerationId }) }
         : message),
     }))
     if (failureSuperseded) {
       planFailureGeneration.current = undefined
       setFailure(undefined)
     }
-  }, [livePlan, failure])
+  }, [livePlan?.id, knownValue(livePlan?.status), failure, knownValue(turn?.status), session.pending.length])
   // Nothing re-reads a draft whose jobs are all settled (api/queries/build.ts `draftPollInterval`), so after a plan
   // failure a plan made elsewhere was never seen. While a failure a newer plan supersedes is shown, the draft query is
   // read at the normal interval while the page is visible (returning to the page reads it too).

@@ -599,10 +599,15 @@ non-engineers, with engineering words only under 「詳しい人向け」
   suspension); normal focus refetch catches up after resume.
 - A failed plan generation (not an AI allowance, policy or destination stop) is made
   once more on its own; a second failure, or a refused plan request, is shown with
-  「もう一度試す」. Once the draft's latest plan
-  generation is newer than that failure and pending, running or succeeded (another
-  tab, Platform or the user made it), the failure display goes and its notice stays
-  in the conversation only as history, without the retry (APT-1207). While such a
+  「もう一度試す」. Once the draft's latest plan generation is newer than the one the
+  failed request was to replace (the latest when that request started) and pending,
+  running or succeeded (another tab, Platform or the user made it), the failure
+  display goes and its notice stays in the conversation only as history, without the
+  retry (APT-1207). Whether that plan answers what the tab asks for is decided once
+  it succeeded and no reply is still on its way: made from the input the tab would
+  send now (no newer intent or specification change), it is recorded as the tab's own
+  plan, so the request is not sent again and 「計画を更新して作る」 goes on with it;
+  otherwise the request stays and a plan with the newer input follows. While such a
   failure is shown, the draft is read at the normal interval in a visible tab (a
   settled draft is otherwise not polled). AI allowance, policy, generation-limit and
   repository-destination stops, an unreadable write answer, and failures outside the
