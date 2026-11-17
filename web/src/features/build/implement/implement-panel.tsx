@@ -16,7 +16,7 @@ export function ImplementPanel({ state, preparation, released, published, change
   preparation?: ProgressCard
   /** The run's release is live (the progress ladder's last step); not publication. */
   released: boolean
-  /** The draft is published (stage `publish`): the preview is no longer a check before publishing. */
+  /** The draft has been published at least once (`draft.publishedAt`); access granted then is not taken back, so the preview is no longer a check before publishing. */
   published: boolean
   /** A reply typed in this page's conversation starts a run with that change (the build page's session does). */
   changeByReply: boolean
