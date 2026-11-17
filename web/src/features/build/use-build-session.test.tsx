@@ -25,6 +25,8 @@ import * as binding from './bind-created-console-app'
 import { useUnfinished, type UnfinishedItem } from '../discover/drafts'
 import { forgetBuildSession, initialSession, readBuildSession, saveBuildSession, type BuildSession } from './session'
 import { useBuildSession } from './use-build-session'
+import { text } from './copy'
+import { ResponseContractError } from '../../api/boundary'
 
 const me: Me = {
   projectId: 'project-session-test', person: { id: 'person-1', subject: 'owner-1', pending: false, email: 'owner@example.test', displayName: 'Owner', avatarVersion: null },
@@ -517,6 +519,121 @@ test.each(['turn', 'plan'] as const)('a recorded %s policy failure never retries
   await render()
   expect(createTurn).not.toHaveBeenCalled()
   expect(generation).not.toHaveBeenCalled()
+})
+
+// APT-1207: a plan generation that failed during a platform rollout was made again elsewhere (another tab, Platform or
+// the user) and succeeded; this tab kept its own failure on screen until a reload.
+describe('a newer plan generation supersedes a plan failure', () => {
+  const kickoff = turn('kickoff', buildCopy.questions.kickoffReply, 0)
+  const failedPlan = { id: 'plan-failed', status: 'failed' as const, startedAt: at, finishedAt: '2026-10-26T00:01:00Z', devWorkspaceId: 'workspace-1', error: 'Codex workspace runtime is unavailable' }
+  const newerPlan = (status: 'pending' | 'running' | 'succeeded'): NonNullable<ApplicationDraft['creationPlanGenerations']>[number] =>
+    ({ id: 'plan-newer', status, startedAt: '2026-10-26T00:04:00Z', devWorkspaceId: 'workspace-1', ...(status === 'succeeded' ? { finishedAt: '2026-10-26T00:04:30Z' } : {}) })
+  const failedDraft: ApplicationDraft = { ...draft, conversationTurns: [kickoff], creationPlanGenerations: [failedPlan] }
+  const supersededBy = (status: 'pending' | 'running' | 'succeeded'): ApplicationDraft => ({
+    ...failedDraft, creationPlanGenerations: [failedPlan, newerPlan(status)],
+    ...(status === 'succeeded' ? { phase: 'planned', creationPlan: { summary: '見積を管理する', markdown: '# 見積', representation: ['ApplicationStack'] } } : { phase: 'planning' }),
+  })
+  const unavailable = new ORPCError('PRECONDITION_FAILED', { status: 412, data: { body: { error: { code: 'failed_precondition', message: 'plan generation runtime is not available' } } } })
+  const notices = (title: string) => build.session.messages.filter((message) => message.role === 'notice' && message.title === title)
+  const retries = () => build.messages.filter((message) => message.role === 'notice' && message.retry)
+  function refuseGeneration(error: unknown) {
+    const generation = spyOn(api, 'createGeneration').mockRejectedValue(error)
+    restore.push(() => generation.mockRestore())
+    return generation
+  }
+  async function poll(next: ApplicationDraft) {
+    await act(async () => { client.setQueryData(queryKey, draftOf(next)) })
+  }
+
+  test.each([
+    ['refused while the runtime is down (412)', unavailable, buildCopy.failure.unavailable.title],
+    ['lost on the network', new TypeError('Failed to fetch'), buildCopy.failure.failed.plan],
+  ] as const)('the automatic retry %s, then a newer succeeded plan clears the failure and its retry', async (_, error, title) => {
+    const generation = refuseGeneration(error)
+    await mount(failedDraft)
+    expect(generation).toHaveBeenCalledTimes(1)
+    expect(build.session.planRetries).toBe(1)
+    expect(build.failure?.title).toBe(title)
+    expect(notices(title)).toEqual([expect.objectContaining({ tone: 'error', retry: 'plan' })])
+    await poll(supersededBy('succeeded'))
+    expect(build.failure).toBeUndefined()
+    expect(notices(title)).toEqual([expect.objectContaining({ tone: 'info', detail: text.session.planResumed })])
+    expect(notices(title)[0]).not.toHaveProperty('retry')
+    expect(retries()).toEqual([])
+    expect(build.session.planRequested).toBe(false)
+    expect(build.result.primary.action).toBe('prepare')
+    await render()
+    expect(generation).toHaveBeenCalledTimes(1)
+  })
+
+  test.each(['pending', 'running', 'succeeded'] as const)('a generation that failed after the one automatic retry is superseded by a newer %s one', async (status) => {
+    const generation = refuseGeneration(unavailable)
+    await mount(failedDraft, { ...initial, planRetries: 1 })
+    expect(generation).not.toHaveBeenCalled()
+    const title = buildCopy.failure.unavailable.title
+    expect(build.failure?.title).toBe(title)
+    expect(notices(title)).toEqual([expect.objectContaining({ retry: 'plan' })])
+    await poll(supersededBy(status))
+    expect(build.failure).toBeUndefined()
+    expect(retries()).toEqual([])
+    // The newer generation failing as well is reported again, with its retry.
+    if (status !== 'succeeded') {
+      await poll({ ...failedDraft, creationPlanGenerations: [failedPlan, { ...newerPlan(status), status: 'failed', finishedAt: '2026-10-26T00:04:30Z', error: 'Codex workspace runtime is unavailable' }] })
+      expect(build.failure?.title).toBe(title)
+      expect(retries()).toHaveLength(1)
+    }
+    expect(generation).not.toHaveBeenCalled()
+  })
+
+  test('a reload after the newer plan succeeded keeps the old notice only as history', async () => {
+    refuseGeneration(unavailable)
+    await mount(failedDraft, { ...initial, planRetries: 1 })
+    const title = buildCopy.failure.unavailable.title
+    expect(notices(title)).toEqual([expect.objectContaining({ retry: 'plan' })])
+    await act(async () => { root.render(null) })
+    client.setQueryData(queryKey, draftOf(supersededBy('succeeded')))
+    await render()
+    expect(build.failure).toBeUndefined()
+    expect(notices(title)).toEqual([expect.objectContaining({ tone: 'info', detail: text.session.planResumed })])
+    expect(retries()).toEqual([])
+  })
+
+  test('a plan generation the same tab still shows as failed is not superseded', async () => {
+    refuseGeneration(unavailable)
+    await mount(failedDraft, { ...initial, planRetries: 1 })
+    await poll({ ...failedDraft, title: '見積台帳 2' })
+    expect(build.failure?.title).toBe(buildCopy.failure.unavailable.title)
+    expect(retries()).toHaveLength(1)
+  })
+
+  test.each(['quota', 'policy'] as const)('a %s plan failure stays after a newer plan', async (kind) => {
+    const error = kind === 'quota' ? 'You have no credits remaining.' : 'ai_approval_policy_denied'
+    const failed = { ...failedPlan, error }
+    await mount({ ...failedDraft, creationPlanGenerations: [failed] })
+    expect(build.failure?.kind).toBe(kind)
+    const before = build.session.messages
+    await poll({ ...supersededBy('succeeded'), creationPlanGenerations: [failed, newerPlan('succeeded')] })
+    expect(build.failure?.kind).toBe(kind)
+    expect(build.session.messages).toEqual(before)
+  })
+
+  test('an unreadable answer to the plan request stays until the draft is confirmed', async () => {
+    refuseGeneration(new ResponseContractError({ source: 'platform', operationId: 'platformApiCreateApplicationDraftCreationPlanGeneration', method: 'POST', routeTemplate: '/x', issues: [{ path: '/resource', code: 'missing' }] }))
+    await mount(failedDraft)
+    expect(build.failure?.kind).toBe('unconfirmed')
+    await poll(supersededBy('pending'))
+    expect(build.failure?.kind).toBe('unconfirmed')
+    expect(retries()).toEqual([expect.objectContaining({ retry: 'confirm' })])
+  })
+
+  test('a turn failure is not superseded by a newer plan', async () => {
+    const failedTurn = { ...turn('reply', '一覧を作る', 2), status: 'failed' as const, finishedAt: '2026-10-26T00:02:30Z', error: 'Codex workspace runtime is unavailable' }
+    await mount({ ...draft, conversationTurns: [kickoff, failedTurn], creationPlanGenerations: [] })
+    expect(build.failure?.title).toBe(buildCopy.failure.unavailable.title)
+    await poll({ ...draft, conversationTurns: [kickoff, failedTurn], creationPlanGenerations: [newerPlan('succeeded')], phase: 'planned', creationPlan: { summary: '見積を管理する', markdown: '# 見積', representation: ['ApplicationStack'] } })
+    expect(build.failure?.title).toBe(buildCopy.failure.unavailable.title)
+    expect(retries()).toEqual([expect.objectContaining({ retry: 'turn' })])
+  })
 })
 
 test('a turn admission failure retains the policy detail instead of the generic 412 message', async () => {

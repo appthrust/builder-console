@@ -1,10 +1,11 @@
 import { isResponseContractError } from '../../api/boundary'
 import { isOneOf, type BuildDraft, type BuildExecutionStep } from '../../model/contracts/build'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCreateStore, useSelector } from '@tanstack/react-store'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '../../api/build'
 import { buildDraftOptions, readDraft } from '../../api/queries/build'
+import { POLL_INTERVAL_MS } from '../../api/queries/shared'
 import { type Me } from '../../model/contracts/console'
 import { platformErrorEnvelope } from '../../api/platform-error'
 import { isSessionExpiredError, sessionExpiryStore } from '../../api/session-expiry'
@@ -47,6 +48,9 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
   const nameRetries = useRef(0)
   const lock = useRef(false)
   const retryContext = useRef<'turn' | 'plan' | 'prepare' | 'implement' | 'publish'>('turn')
+  // The shown failure is a plan failure a newer plan generation supersedes: the draft's latest generation when it was
+  // reported (`''`: none yet). Undefined for any other failure (`fail`).
+  const planFailureGeneration = useRef<string>(undefined)
   const observedFailures = useRef(new Set<string>())
   const blockedUntil = useRef(0)
   // A 412 from the AI gate is usually the platform rolling out (the API pod restarts, the
@@ -109,6 +113,11 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
       ? { ...classified, reason: planRecheck ? buildCopy.failure.limitRecheck : buildCopy.failure.limitRejected }
       : classified
     retryContext.current = context
+    // A newer plan generation supersedes a plan failure (APT-1207), never a stop no new plan lifts (the AI allowance, a
+    // policy, the generation limit, the repository destination) nor a write that may have happened.
+    const supersedable = context === 'plan' && !next.destination && !['unconfirmed', 'quota', 'policy', 'limit', 'destination'].includes(next.kind)
+    const planGenerationId = supersedable ? draftRef.current.creationPlanGenerations.at(-1)?.id ?? '' : undefined
+    planFailureGeneration.current = planGenerationId
     setFailure(next)
     patch((current) => {
       // The same failure repeated (retry, reload) stays one notice.
@@ -122,7 +131,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
       const limited = context === 'plan' && next.kind === 'limit'
       const calm = unconfirmed || next.destination === 'changed' || next.destination === 'blocked' || next.kind === 'plan' || limited
       const retry = unconfirmed ? 'confirm' as const : context === 'prepare' && draftRef.current.creationPlanUnreadable ? undefined : next.recheck ? 'recheck' as const : next.kind === 'plan' ? 'plan' as const : next.kind !== 'policy' && !limited ? context : undefined
-      return { ...current, ...(next.kind === 'quota' || next.kind === 'policy' || limited ? { planRequested: false } : {}), messages: [...messages, { role: 'notice', tone: calm ? 'warning' : 'error', title: next.title, detail: next.reason, ...(retry ? { retry } : {}), at, ...(next.reference ? { reference: next.reference } : {}) }] }
+      return { ...current, ...(next.kind === 'quota' || next.kind === 'policy' || limited ? { planRequested: false } : {}), messages: [...messages, { role: 'notice', tone: calm ? 'warning' : 'error', title: next.title, detail: next.reason, ...(retry ? { retry } : {}), at, ...(next.reference ? { reference: next.reference } : {}), ...(planGenerationId !== undefined ? { planGenerationId } : {}) }] }
     })
   }
   async function perform(context: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish', action: () => Promise<void>) {
@@ -288,6 +297,31 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
       } else fail(new Error(operation.error ?? text.session.operationFailed), context, operation.finishedAt)
     }
   }, [turn, generation])
+
+  // APT-1207: a plan failure is over once the draft's latest plan generation is newer than it and did not fail (another
+  // tab, Platform or the user made it, and it answers this tab's plan request too). Its display goes; its notice stays in
+  // the conversation only as history, without its retry. A reload still finds that notice in the tab's storage.
+  const livePlan = generation && isOneOf(generation.status, 'pending', 'running', 'succeeded') ? generation.id : undefined
+  useEffect(() => {
+    if (livePlan === undefined) return
+    const superseded = (marker: string | undefined) => marker !== undefined && marker !== livePlan
+    const failureSuperseded = failure !== undefined && superseded(planFailureGeneration.current)
+    if (!failureSuperseded && !store.state.messages.some((message) => message.role === 'notice' && superseded(message.planGenerationId))) return
+    patch((current) => ({
+      ...current, planRequested: false,
+      messages: current.messages.map((message): BuildMessage => message.role === 'notice' && superseded(message.planGenerationId)
+        ? { role: 'notice', tone: 'info', title: message.title, detail: text.session.planResumed, at: message.at, ...(message.reference ? { reference: message.reference } : {}) }
+        : message),
+    }))
+    if (failureSuperseded) {
+      planFailureGeneration.current = undefined
+      setFailure(undefined)
+    }
+  }, [livePlan, failure])
+  // Nothing re-reads a draft whose jobs are all settled (api/queries/build.ts `draftPollInterval`), so after a plan
+  // failure a plan made elsewhere was never seen. While a failure a newer plan supersedes is shown, the draft query is
+  // read at the normal interval while the page is visible (returning to the page reads it too).
+  useQuery({ ...buildDraftOptions(projectId, draft.id), enabled: failure !== undefined && planFailureGeneration.current !== undefined, refetchInterval: POLL_INTERVAL_MS, refetchIntervalInBackground: false })
 
   // Draft preferences are authoritative across tabs. During implementation only the
   // preferences/title are writable; specification alignment waits for its lock.

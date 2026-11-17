@@ -597,6 +597,16 @@ non-engineers, with engineering words only under 「詳しい人向け」
   turn and prior generation; an already accepted/current plan is not recreated.
   Active draft polling continues while the tab is hidden (subject to browser
   suspension); normal focus refetch catches up after resume.
+- A failed plan generation (not an AI allowance, policy or destination stop) is made
+  once more on its own; a second failure, or a refused plan request, is shown with
+  「もう一度試す」. Once the draft's latest plan
+  generation is newer than that failure and pending, running or succeeded (another
+  tab, Platform or the user made it), the failure display goes and its notice stays
+  in the conversation only as history, without the retry (APT-1207). While such a
+  failure is shown, the draft is read at the normal interval in a visible tab (a
+  settled draft is otherwise not polled). AI allowance, policy, generation-limit and
+  repository-destination stops, an unreadable write answer, and failures outside the
+  plan are not superseded.
 - A source repository kept from a failed create attempt is reused only when
   its origin (URL name, entry, picked repository, template) matches the retry,
   and the confirm step shows it where it is (「作成済みの置き場」: the

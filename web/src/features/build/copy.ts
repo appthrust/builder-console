@@ -76,6 +76,8 @@ export const textJa = {
     stageLabels: { ask: '聞く', decide: '決める', build: '作る', publish: '公開' } satisfies Record<BuildStage, string>,
     newApp: '新しいアプリ',
     retryPlan: '計画を作れませんでした。もう一度考えます。',
+    /** Under a plan failure a newer plan generation superseded (APT-1207): the notice stays as history only. */
+    planResumed: 'このあと、計画づくりをもう一度始めました。',
     missingExecution: 'The server did not return a creation execution',
     operationFailed: 'The operation failed',
     missingAppName: 'The creation plan has no application name',

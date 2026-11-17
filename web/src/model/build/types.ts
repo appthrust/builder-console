@@ -58,8 +58,10 @@ export type BuildMessage =
    * `retry: 'confirm'` re-reads the draft after a write whose answer could not be read; it never resends that write.
    * `retry: 'recheck'`: Platform's validation rejected the plan for a cause that may lie outside it; the notice offers
    * 「もう一度確かめる」 (the same plan validated once more) and 「計画を作り直す」.
+   * `planGenerationId`: a plan failure a newer plan generation supersedes (APT-1207); the draft's latest plan generation
+   * when it was reported (`''`: none yet). Once a newer one is pending, running or succeeded the notice stays as history only.
    */
-  | { role: 'notice'; tone: 'info' | 'warning' | 'error'; title: string; detail?: string; at: string; retry?: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish' | 'confirm' | 'recheck'; reference?: BuildFailure['reference'] }
+  | { role: 'notice'; tone: 'info' | 'warning' | 'error'; title: string; detail?: string; at: string; retry?: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish' | 'confirm' | 'recheck'; reference?: BuildFailure['reference']; planGenerationId?: string }
 export interface ProgressCard {
   kind: 'workspace' | 'turn' | 'plan' | 'prepare' | 'implement' | 'publish'
   title: string
