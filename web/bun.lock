@@ -5,7 +5,7 @@
     "": {
       "name": "@appthrust/builder-console",
       "dependencies": {
-        "@appthrust/api-schema": "^0.1.5",
+        "@appthrust/api-schema": "^0.1.7",
         "@appthrust/app-launcher": "^0.1.5",
         "@appthrust/platform-dashboard-i18n": "^0.1.5",
         "@orpc/client": "^1.13.13",
@@ -39,7 +39,7 @@
     },
   },
   "packages": {
-    "@appthrust/api-schema": ["@appthrust/api-schema@0.1.5", "https://npm.pkg.github.com/download/@appthrust/api-schema/0.1.5/e5da25bca7e64e75312a81310d26100be186ec5a", { "dependencies": { "@orpc/contract": "^1.13.13", "@orpc/openapi": "^1.13.13", "@orpc/server": "^1.13.13", "@orpc/zod": "^1.13.13", "zod": "^4.3.6" } }, "sha512-I9eBgRrkCU2bteWmfqLAERbQyfbFxCSaJZ4nneoTtKXi7FzBjfEZu1JlQcL00TNoSItuGJu9bgSg1Nug4KvdVw=="],
+    "@appthrust/api-schema": ["@appthrust/api-schema@0.1.7", "https://npm.pkg.github.com/download/@appthrust/api-schema/0.1.7/494cb49cd505d7b5b09c595ea9a81c4a18013adb", { "dependencies": { "@orpc/contract": "^1.13.13", "@orpc/openapi": "^1.13.13", "@orpc/server": "^1.13.13", "@orpc/zod": "^1.13.13", "zod": "^4.3.6" } }, "sha512-zzN8arDaBYTdfprpQkQGDIJpzNb3+xhib6YUa+SmLbETNQz/7OaC5FOLugmuJjfqfhJ3ytygaVYNRZy/ua8+Xg=="],
 
     "@appthrust/app-launcher": ["@appthrust/app-launcher@0.1.5", "https://npm.pkg.github.com/download/@appthrust/app-launcher/0.1.5/cd4111ef52949489dad41c9f20fc588fd443bd13", { "dependencies": { "@appthrust/platform-dashboard-i18n": "0.1.3", "@tanstack/react-query": "^5.90.21", "lucide-react": "^0.563.0", "radix-ui": "^1.4.3", "zod": "^4.3.6" }, "peerDependencies": { "react": "^19.2.4" } }, "sha512-guI3Gm0ZDm+JSq2C31CtRo4zGbzAZ4ljbTkoSJWNkZS41GL2iEH7nOU/bD58V/e2W3twNnDEJizWP3ZaKexWyA=="],
 
