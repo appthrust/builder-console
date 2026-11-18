@@ -29,7 +29,7 @@ export interface ComposerProps {
   onChip(value: string, label: string): void
 }
 
-export const MAX_LENGTH = 4000
+const MAX_LENGTH = 4000
 const MIN_ROWS = 3
 const MAX_ROWS = 8
 

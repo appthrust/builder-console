@@ -193,11 +193,11 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
       return
     }
     void perform('turn', async () => {
-      // The persisted opening is shared by fresh and resumed tabs. Preparation answers do not change the plan.
+      // Preparation answers do not change the plan.
       if (!asking) {
         const current = draftRef.current
         const replies = conversationTurns(current.conversationTurns).map((item) => item.userMessage)
-        const intent = await composeBuildIntent(current.intent, [...replies, pending.text])
+        const intent = await composeBuildIntent(current.intent, [...replies, pending.text], false, store.state.baseIntent)
         await receive(await api.updateDraft(projectId, draft.id, { intent }))
       }
       try {
@@ -245,7 +245,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
       return
     }
     if ([latestGeneration, current.conversationTurns.at(-1)].some(isBuildPending)) return
-    const intent = await composeBuildIntent(current.intent, conversationTurns(current.conversationTurns).map((item) => item.userMessage), true)
+    const intent = await composeBuildIntent(current.intent, conversationTurns(current.conversationTurns).map((item) => item.userMessage), true, store.state.baseIntent)
     const updated = current.intent === intent ? current : await api.updateDraft(projectId, draft.id, { intent })
     await receive(updated)
     const attemptKey = `build-plan-${draft.id}-${current.conversationTurns.at(-1)?.id ?? 'initial'}-${previousGenerationId ?? 'initial'}`

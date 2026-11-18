@@ -15,8 +15,6 @@ import {
 } from '../../model/create'
 import { businessTemplateById } from './templates'
 
-export const INTENT_MAX = 8000
-
 export interface CreateValues {
   /** Step 0 choice; the image entry is chosen from 詳しい人向け. */
   entry: Exclude<CreateEntry, 'ai'> | undefined

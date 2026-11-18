@@ -2,6 +2,10 @@ import type { textJa } from './copy'
 
 export const textEn: typeof textJa = {
   intent: { reply: '### Follow-up', publish: 'Publish: yes', omitted: (count) => `(${count} earlier follow-up${count === 1 ? '' : 's'} omitted)` },
+  inputBytes: {
+    remaining: (bytes) => `${bytes} ${bytes === 1 ? 'byte' : 'bytes'} remaining`,
+    over: (bytes) => `Shorten your request. It is ${bytes} ${bytes === 1 ? 'byte' : 'bytes'} over the limit.`,
+  },
   unreadablePlan: { title: 'The saved plan could not be read', detail: 'This console cannot show the contents of the plan saved on the platform.' },
   questions: {
     firstTurn: 'Ask me one question at a time about the decisions needed to build this app.',
@@ -99,6 +103,7 @@ export const textEn: typeof textJa = {
     failed: { turn: 'AI could not process your request', plan: 'Could not create plan', implement: 'Building your app stopped', publish: 'Could not save the published state' },
     retry: 'Your requirements and plan are saved; try again, or contact your administrator if work keeps stopping.',
     platform: { title: 'A platform problem stopped app creation', reason: 'This is not a problem with your input or actions. Your requirements and plan are still saved. Wait a little and try again, or share the support reference below with your administrator.' },
+    requestRejected: { title: 'The request was not accepted', reason: 'Share the support reference below with your administrator.' },
     reference: (value: string) => `Support reference: ${value}`,
     copyReference: 'Copy support reference',
     resumable: { title: 'AI work was interrupted', reason: 'Work may have stopped while you were away; try again to continue from where it left off.' },

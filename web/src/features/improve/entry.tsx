@@ -11,7 +11,8 @@ import { copy } from '../../copy'
 import { improvementFor } from '../../model/improve'
 import { paths } from '../../routes/paths'
 import { ActionError, Button, Dialog, Field, Notice, TextArea } from '../../ui'
-import { MAX_LENGTH } from '../build/composer'
+import { buildCopy } from '../../model/build/copy'
+import { remainingIntentBytes } from '../../model/build/questions'
 import { text } from './copy'
 import { UnconfirmedNotice } from '../build/unconfirmed-notice'
 import { proposalOptions } from '../../api/queries/proposal'
@@ -57,9 +58,18 @@ export function ImproveButton({ app, stackId, projectId, initialMessage, actionL
     if (made) { setOpen(false); await navigate({ href: paths.improve(made.id) }) }
   }
   const trimmed = intent.trim()
-  const ready = trimmed.length > 0 && trimmed.length <= MAX_LENGTH && !start.isPending
+  const remaining = remainingIntentBytes(trimmed)
+  const ready = trimmed.length > 0 && remaining >= 0 && !start.isPending
   const onClick = async () => {
-    if (initialMessage) { start.mutate(initialMessage); return }
+    if (initialMessage) {
+      if (remainingIntentBytes(initialMessage) < 0) {
+        setIntent(initialMessage)
+        setOpen(true)
+      } else {
+        start.mutate(initialMessage)
+      }
+      return
+    }
     const existing = improvementFor(drafts.data?.data, stackId)
     if (existing?.proposalId) {
       try {
@@ -79,7 +89,7 @@ export function ImproveButton({ app, stackId, projectId, initialMessage, actionL
   }
   return <>
     <Button tone="primary" icon={<Sparkles />} onClick={onClick} loading={initialMessage ? start.isPending : drafts.isPending} disabled={unconfirmed} data-testid={initialMessage ? 'repair-build-with-ai' : 'improve-with-ai'}>{actionLabel ?? text.entry.action}</Button>
-    {initialMessage && start.error ? unconfirmed ? <UnconfirmedNotice onConfirm={() => void confirmLatest()} /> : <ActionError error={start.error} /> : null}
+    {initialMessage && !open && start.error ? unconfirmed ? <UnconfirmedNotice onConfirm={() => void confirmLatest()} /> : <ActionError error={start.error} /> : null}
     <Dialog
       open={open}
       onOpenChange={change}
@@ -91,12 +101,12 @@ export function ImproveButton({ app, stackId, projectId, initialMessage, actionL
       </>}
     >
       <form id={`${inputId}-form`} className="space-y-4" onSubmit={(event) => { event.preventDefault(); if (ready && !unconfirmed) start.mutate(trimmed) }}>
-        <Field id={inputId} label={text.entry.label}>
+        <Field id={inputId} label={text.entry.label} hint={buildCopy.inputBytes.remaining(remaining)} error={remaining < 0 ? buildCopy.inputBytes.over(-remaining) : undefined}>
           <TextArea
             id={inputId}
             value={intent}
             rows={4}
-            maxLength={MAX_LENGTH}
+            invalid={remaining < 0}
             placeholder={text.entry.placeholder}
             onChange={(event) => setIntent(event.target.value)}
             onKeyDown={(event) => {

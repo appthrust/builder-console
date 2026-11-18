@@ -3,6 +3,10 @@ import { textEn } from './copy.en'
 
 export const textJa = {
   intent: { reply: '### 追記', publish: '公開: する', omitted: (count: number) => `（以前の追記 ${count} 件を省略）` },
+  inputBytes: {
+    remaining: (bytes: number) => `残り ${bytes} バイト`,
+    over: (bytes: number) => `上限を ${bytes} バイト超えています。内容を短くしてください。`,
+  },
   unreadablePlan: { title: '保存された計画を読めませんでした', detail: '基盤に保存された計画の内容を、このコンソールでは確認できません。' },
   questions: {
     firstTurn: 'このアプリを作るために決めるべきことを、一つずつ質問してください。',
@@ -109,6 +113,7 @@ export const textJa = {
     failed: { turn: 'AI が内容を整理できませんでした', plan: '計画を作れませんでした', implement: 'アプリを作る作業が止まりました', publish: '公開済みの状態を保存できませんでした' },
     retry: '仕様と計画は残っています。もう一度試してください。何度も止まるときは基盤の担当者に確認してください。',
     platform: { title: '基盤の問題で作成が止まりました', reason: 'あなたの入力や操作の問題ではありません。仕様と計画はそのまま残っています。少し待ってもう一度試すか、下の問い合わせ番号を基盤の担当者に伝えてください。' },
+    requestRejected: { title: 'リクエストが受け付けられませんでした', reason: '下の問い合わせ番号を基盤の担当者に伝えてください。' },
     reference: (value: string) => `問い合わせ番号: ${value}`,
     copyReference: '問い合わせ番号をコピー',
     /** The task stream dropped (tab closed, sleep, sign-in expired): nothing is lost, the rerun continues. */

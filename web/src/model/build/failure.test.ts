@@ -34,9 +34,13 @@ test('unrelated invalid requests retain their preparation failure classification
 test.each(['turn', 'plan'] as const)('an invalid intent PATCH before a %s is a Platform request rejection', (context) => {
   const message = "'intent' must be 4000 characters or fewer"
   const reference = { draftId: 'draft-1', at: '2026-11-17T00:00:00Z' }
-  expect(classifyBuildFailure(message, 400, context, reference, 'invalid_argument')).toEqual({
-    kind: 'platform', ...buildCopy.failure.platform, raw: message, reference,
-  })
+  for (const [locale, title, reason] of [
+    ['ja', 'リクエストが受け付けられませんでした', '下の問い合わせ番号を基盤の担当者に伝えてください。'],
+    ['en', 'The request was not accepted', 'Share the support reference below with your administrator.'],
+  ] as const) {
+    setLanguage(locale)
+    expect(classifyBuildFailure(message, 400, context, reference, 'invalid_argument')).toEqual({ kind: 'platform', title, reason, raw: message, reference })
+  }
   expect(classifyBuildFailure("'message' must be shorter", 400, context, reference, 'invalid_argument').kind).toBe('failed')
   expect(classifyBuildFailure(message, undefined, context).kind).toBe('failed')
 })

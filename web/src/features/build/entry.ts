@@ -4,7 +4,8 @@ import { buildSessionsApi, intentKeys, isVersionConflict, mintIdempotencyKey, ty
 import { ConsoleApiError } from '../../api/console'
 import { boundedRetryAfter, buildPollDelay, ERROR_BACKOFF_MS } from '../../api/queries/build-sessions'
 import { membershipRoots, type BuildError, type BuildSession, type Group, type Me } from '../../model/contracts/console'
-import { boundBuildOpening } from '../../model/build/questions'
+import { buildCopy } from '../../model/build/copy'
+import { remainingIntentBytes } from '../../model/build/questions'
 import { findResumableDraft } from '../../model/build/resume'
 import { currentLanguage } from '../../shell/language'
 import { readConsoleStart, saveConsoleStart, type ConsoleStart } from './console-session-state'
@@ -27,6 +28,11 @@ export function resolveBuildGroup(me: Pick<Me, 'effectiveGroupIds'>, groups: rea
   return membershipRoots(me, groups)[0]?.id
 }
 
+function checkOpeningSize(words: string): void {
+  const remaining = remainingIntentBytes(words)
+  if (remaining < 0) throw new Error(buildCopy.inputBytes.over(-remaining))
+}
+
 /**
  * Starts building from `intent` and answers the draft to open (`paths.build(id)`).
  * platform-v1 (the default): resumes the caller's unfinished draft with these exact words, otherwise creates one.
@@ -35,14 +41,21 @@ export function resolveBuildGroup(me: Pick<Me, 'effectiveGroupIds'>, groups: rea
 export async function beginBuild(projectId: string, intent: string, options: { groupId: string; ownerSubject: string; newSessionEngine?: NewSessionEngine }): Promise<{ id: string }> {
   if (!options.groupId) throw new Error(text.page.noGroup.body)
   if (options.newSessionEngine === 'console-v1') return startConsoleBuild(intent, options.groupId)
+  const words = intent.trim()
   const drafts = await listDrafts(projectId)
-  const existing = await findResumableDraft(drafts.data, intent)
+  const existing = await findResumableDraft(drafts.data, words)
   if (existing) {
-    if (!readBuildSession(existing.id)) saveBuildSession(existing.id, initialSession({ projectId, ownerSubject: options.ownerSubject, groupId: options.groupId, baseIntent: existing.intent }))
+    const saved = readBuildSession(existing.id)
+    if (!saved || saved.projectId !== projectId || saved.ownerSubject !== options.ownerSubject) {
+      saveBuildSession(existing.id, initialSession({ projectId, ownerSubject: options.ownerSubject, groupId: options.groupId, baseIntent: words }))
+    } else if (saved.baseIntent !== words) {
+      saveBuildSession(existing.id, { ...saved, baseIntent: words })
+    }
     return existing
   }
-  const draft = await createDraft(projectId, { title: titleFromIntent(intent), intent: await boundBuildOpening(intent.trim()) })
-  saveBuildSession(draft.id, initialSession({ projectId, ownerSubject: options.ownerSubject, groupId: options.groupId, baseIntent: intent.trim() }))
+  checkOpeningSize(words)
+  const draft = await createDraft(projectId, { title: titleFromIntent(words), intent: words })
+  saveBuildSession(draft.id, initialSession({ projectId, ownerSubject: options.ownerSubject, groupId: options.groupId, baseIntent: words }))
   return draft
 }
 
@@ -98,10 +111,11 @@ export async function startConsoleBuild(intent: string, groupId: string, deps: P
   let start: ConsoleStart = saved && saved.intent === words && saved.groupId === groupId
     ? saved
     : { intent: words, groupId, locale: currentLanguage(), key: mintIdempotencyKey() }
+  if (!start.sessionId) checkOpeningSize(words)
   saveConsoleStart(start, storage)
   let session: BuildSession
   try {
-    session = start.sessionId ? await api.get(start.sessionId) : await api.create({ kind: 'new-app', groupId, intent: await boundBuildOpening(words), locale: start.locale }, start.key)
+    session = start.sessionId ? await api.get(start.sessionId) : await api.create({ kind: 'new-app', groupId, intent: words, locale: start.locale }, start.key)
   } catch (error) {
     // The create may have happened; the kept key replays it on the next start. Nothing else is sent.
     if (isResponseContractError(error)) throw new BuildStartError('unconfirmed', start.sessionId ? { sessionId: start.sessionId } : {})

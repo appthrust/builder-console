@@ -132,7 +132,7 @@ export function classifyBuildFailure(text: string, status: number | undefined, c
   if (/(?:generation|conversation.turn).*(?:limit|maximum|at most|20|50)|(?:limit|maximum|reached (?:20|50)).*(?:generation|conversation.turn)/i.test(text)) return { kind: 'limit', ...copy.limit, raw: text }
   // The draft PATCH was rejected before any conversation or plan generation was started.
   if ((context === 'turn' || context === 'plan') && status === 400 && code === 'invalid_argument' && /^['"]intent['"]\s/i.test(text)) {
-    return { kind: 'platform', ...copy.platform, raw: text, ...(reference ? { reference } : {}) }
+    return { kind: 'platform', ...copy.requestRejected, raw: text, ...(reference ? { reference } : {}) }
   }
   // The plan's validation asks no AI: a gateway answer to it is the platform's failure, with its reference (APT-1094).
   if (operation === 'plan.validate' && (status === 502 || status === 503 || status === 504)) return { kind: 'platform', ...copy.platform, raw: text, ...(reference ? { reference } : {}) }

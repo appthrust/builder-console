@@ -12,6 +12,7 @@ import { groupsContract } from '../../api/contracts/console/groups'
 import { meContract } from '../../api/contracts/console/me'
 import { consoleKeys } from '../../api/queries/console'
 import { createTestGateway } from '../../api/testing/gateway'
+import { copy } from '../../copy'
 import { consoleRoutes } from '../../dev/mock-console'
 import { platformRoutes } from '../../dev/mock-platform'
 import type { BusinessApp } from '../../model/contracts/console'
@@ -119,6 +120,29 @@ const buttons = (label: string) => [...container.querySelectorAll('button')].fil
 /** Writes to Console app records (create, change, bind): none may follow from a blocked resume. */
 const appWrites = () => requests.filter((item) => item.method !== 'GET' && item.path.startsWith('/api/console/apps'))
 const savedGroupId = () => readCreateSession()?.values.groupId
+
+test.each(['ja', 'en'] as const)('an oversized URL opening stays editable with a byte count and cannot start a build (%s)', async (language) => {
+  setLanguage(language)
+  const exact = '庫'.repeat(1332) + '😀'
+  const oversized = exact + '字'
+  await open(`/new?intent=${encodeURIComponent(oversized)}`, ['g-team-a'])
+  const input = container.querySelector<HTMLTextAreaElement>('#create-start-intent')!
+  const [build] = buttons(copy.create.start.build)
+  expect(input.value).toBe(oversized)
+  expect(input.getAttribute('aria-invalid')).toBe('true')
+  expect(container.querySelector('#create-start-intent-error')?.textContent).toContain(language === 'ja' ? '3 バイト超えています' : '3 bytes over the limit')
+  expect(build!.disabled).toBe(true)
+  await act(async () => { build!.click() })
+  expect(requests.filter((item) => item.method === 'POST' && /\/(?:application-drafts|build-sessions)$/.test(item.path))).toEqual([])
+  expect(container.querySelector('#build-start-failure')).toBeNull()
+
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')!.set!.call(input, exact)
+    input.dispatchEvent(new window.Event('input', { bubbles: true }) as unknown as Event)
+  })
+  expect(container.querySelector('#create-start-intent-hint')?.textContent).toBe(language === 'ja' ? '残り 0 バイト' : '0 bytes remaining')
+  expect(build!.disabled).toBe(false)
+})
 
 test('a saved session whose app is kept in a group the caller left is held, never moved to the group they belong to now', async () => {
   const draft = await keptApp('g-team-a')
