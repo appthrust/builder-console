@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { emptySpec, parseSpec, serializeSpec } from './spec'
-import { composeBuildIntent, decomposeBuildIntent } from './questions'
+import { boundBuildOpening, composeBuildIntent, decomposeBuildIntent, sameBuildOpening } from './questions'
 import type { BuildSpec } from './types'
 
 import { preserveLanguage } from '../../../test/language'
@@ -99,6 +99,34 @@ describe('build intent', () => {
       expect(await composeBuildIntent(base, [...replies], true)).toBe(result)
       expect(await composeBuildIntent(result, replies, true)).toBe(result)
     } finally { restore() }
+  })
+  test('a large reply is shortened before the opening; the next short reply keeps the whole opening', async () => {
+    const opening = '在庫'.repeat(600)
+    const large = '配送'.repeat(1000)
+    const first = await composeBuildIntent(opening, [large])
+    expect(decomposeBuildIntent(first)).toBe(opening)
+    expect(first).toMatch(/配送.*…$/u)
+    const next = await composeBuildIntent(first, [large, '棚卸も'], true)
+    expect(decomposeBuildIntent(next)).toBe(opening)
+    expect(next).toBe(await composeBuildIntent(opening, [large, '棚卸も'], true))
+    expect(next.endsWith('棚卸も\n\n公開: する')).toBe(true)
+    for (const intent of [first, next]) expect(new TextEncoder().encode(intent).length).toBeLessThanOrEqual(4000)
+  })
+  test('only a matching tab original restores a legacy clipped opening, keeping the saved envelope language', async () => {
+    const opening = '在庫'.repeat(600)
+    const large = '倉庫'.repeat(1500)
+    const clipped = await boundBuildOpening(opening, 1941)
+    const stored = `${clipped}\n\n### Follow-up\n\n${large.slice(0, 500)}…`
+    for (const publish of [false, true]) {
+      const restored = await composeBuildIntent(stored, [large, 'CSV'], publish, opening)
+      expect(decomposeBuildIntent(restored)).toBe(opening)
+      expect(restored).toContain('### Follow-up\n\nCSV')
+      expect(await composeBuildIntent(restored, [large, 'CSV'], publish)).toBe(restored)
+      const other = await composeBuildIntent(stored, [large, 'CSV'], publish, opening + '別')
+      expect(decomposeBuildIntent(other)).toBe(decomposeBuildIntent(clipped))
+      expect(await sameBuildOpening(other, opening)).toBe(true)
+      expect(await sameBuildOpening(other, opening + '別')).toBe(false)
+    }
   })
   test('even a full opening cannot crowd out the newest message or the publication decision', async () => {
     const opening = 'a'.repeat(4000)

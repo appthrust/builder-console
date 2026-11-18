@@ -50,6 +50,10 @@ const utf8 = new TextEncoder()
 const bytes = (value: string) => utf8.encode(value).length
 const openingStamp = /…\n<!-- opening:([0-9a-f]{32}) -->$/
 
+export function remainingIntentBytes(value: string): number {
+  return INTENT_BYTES - bytes(value)
+}
+
 function prefix(value: string, budget: number): string {
   // encodeInto stops before the first code point that would not fit.
   const { read } = utf8.encodeInto(value, new Uint8Array(budget))
@@ -69,8 +73,8 @@ export async function boundBuildOpening(opening: string, budget = INTENT_BYTES):
   return prefix(existing ? opening.slice(0, existing.index) : opening, budget - bytes(stamp)) + stamp
 }
 
-/** A compact plan input, not the transcript: conversationTurns retains every complete message. */
-export async function composeBuildIntent(intent: string, replies: readonly string[], publish?: boolean): Promise<string> {
+/** The planner reads the draft intent and spec, not the turns. Keep the opening; the full reply goes to the spec-producing turn. */
+export async function composeBuildIntent(intent: string, replies: readonly string[], publish = false, baseIntent?: string): Promise<string> {
   let opening = openingEnvelope(intent)
   const messages = replies.map((reply) => reply.trim()).filter(Boolean)
   // Persisted headings (including legacy English drafts) and the automatic first turn travel with
@@ -78,6 +82,8 @@ export async function composeBuildIntent(intent: string, replies: readonly strin
   const metadata = intent.trim().slice(opening.length).trimStart()
   const copy = metadata.startsWith(`${textEn.intent.reply}\n\n`) || metadata === textEn.intent.publish
     || (!metadata && messages[0] === textEn.questions.firstTurn) ? textEn.intent : textJa.intent
+  // An older PATCH may already have clipped the opening. Restore the tab's original only if its digest matches.
+  if (baseIntent && openingStamp.test(opening) && await sameBuildOpening(opening, baseIntent)) opening = baseIntent
   const heading = `\n\n${copy.reply}\n\n`
   const footer = publish ? `\n\n${copy.publish}` : ''
   const budget = INTENT_BYTES - bytes(footer)
@@ -88,15 +94,19 @@ export async function composeBuildIntent(intent: string, replies: readonly strin
   const omitted = (count: number) => count ? heading + copy.omitted(count) : ''
   const repliesBytes = sizes.reduce((total, size) => total + size, 0)
   let first = 0
-  if (bytes(opening) + repliesBytes > budget) {
-    // Reserve the newest follow-up and its omission notice before spending bytes on older replies.
-    // If even opening + newest cannot fit, a short one stays whole; two large ones share the space.
+  let openingBytes = bytes(opening)
+  if (openingBytes + repliesBytes > budget) {
+    // Keep the opening whole whenever even an abbreviated newest reply fits. Only when the
+    // envelope itself forces us to clip the opening, reserve a short excerpt rather than an ellipsis alone.
     const olderBytes = repliesBytes - sizes[latest]!
     const available = budget - Math.min(olderBytes, bytes(omitted(latest))) - headingBytes
     const newest = messages[latest]!
     const newestBytes = sizes[latest]! - headingBytes
-    opening = await boundBuildOpening(opening, Math.max(available - newestBytes, Math.floor(available / 2)))
-    const openingBytes = bytes(opening)
+    if (openingBytes + Math.min(newestBytes, bytes('…')) > available) {
+      const excerptBytes = 64
+      opening = await boundBuildOpening(opening, available - Math.min(newestBytes, excerptBytes))
+      openingBytes = bytes(opening)
+    }
     const room = available - openingBytes
     if (newestBytes > room) messages[latest] = prefix(newest, room - bytes('…')) + '…'
     let remaining = budget - openingBytes - headingBytes - bytes(messages[latest]!)

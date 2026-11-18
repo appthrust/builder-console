@@ -17,8 +17,10 @@ export function BuildFailureNotice({ failure, projectId, stackId, title, canEdit
   canEdit: boolean
   behind?: { runUrl?: string }
 }) {
-  const repair = canEdit && stackId && failure
-    ? <ImproveButton app={{ displayName: title }} projectId={projectId} stackId={stackId} initialMessage={failure.lines.join('\n')} actionLabel="AI に直させる" />
+  const cause = failure?.lines.join('\n')
+  // Pass the full cause: the improvement entry opens it for editing if it cannot be sent in one click.
+  const repair = canEdit && stackId && cause
+    ? <ImproveButton app={{ displayName: title }} projectId={projectId} stackId={stackId} initialMessage={cause} actionLabel="AI に直させる" />
     : null
   if (behind) {
     const runUrl = behind.runUrl && /^https?:\/\//i.test(behind.runUrl) ? behind.runUrl : undefined
@@ -28,12 +30,12 @@ export function BuildFailureNotice({ failure, projectId, stackId, title, canEdit
       {repair}
     </> : undefined}>
       <p>{copy.detail}</p>
-      {failure ? <p className="mt-1 whitespace-pre-wrap break-words" data-testid="build-failure-cause">{copy.cause(failure.lines.join('\n'))}</p> : null}
+      {cause ? <p className="mt-1 whitespace-pre-wrap break-words" data-testid="build-failure-cause">{copy.cause(cause)}</p> : null}
     </Notice></div>
   }
   if (!failure) return null
   return <Notice tone="error">
-    <p className="whitespace-pre-wrap break-words" data-testid="build-failure-cause">ビルドが失敗しました。原因: {failure.lines.join('\n')}</p>
+    <p className="whitespace-pre-wrap break-words" data-testid="build-failure-cause">ビルドが失敗しました。原因: {cause}</p>
     {repair ? <div className="mt-3">{repair}</div> : null}
   </Notice>
 }

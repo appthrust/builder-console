@@ -23,6 +23,7 @@ import {
   templateUsableFor,
   type CreateEntry,
 } from '../../model/create'
+import { remainingIntentBytes } from '../../model/build/questions'
 import { shareSentence } from '../../model/share'
 import { paths } from '../../routes/paths'
 import { useShell } from '../../shell/use-shell'
@@ -513,7 +514,14 @@ function CreateWizard({ defaultGroupPath, search, draft }: { defaultGroupPath?: 
 
   const buildRequest = useRef<{ intent: string } | undefined>(undefined)
   const startBuild = async (intent: string) => {
-    if (startingBuild || !aiGroupId || !entryReady('ai') || !intent.trim()) return
+    const opening = intent.trim()
+    if (startingBuild || !aiGroupId || !entryReady('ai') || !opening) return
+    if (remainingIntentBytes(opening) < 0) {
+      // URL seeds already populate the field on first load; a reload must not replace the user's edits.
+      if (intent !== search.intent) form.setFieldValue('intent', intent)
+      setBuildError(undefined)
+      return
+    }
     buildRequest.current = { intent }
     setStartingBuild(true)
     setBuildError(undefined)

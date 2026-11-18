@@ -1,6 +1,8 @@
 // Step 0: describe the job, choose a business template, or publish existing work.
 import type { CreationTools, TemplateSummary } from '../../../model/contracts/catalog'
 import { isOneOf } from '../../../model/contracts/build'
+import { buildCopy } from '../../../model/build/copy'
+import { remainingIntentBytes } from '../../../model/build/questions'
 import { useStore } from '@tanstack/react-form'
 import { ArrowRight, Check, FileSpreadsheet, FolderGit2, Settings, Sparkles } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
@@ -10,7 +12,7 @@ import { DEFAULT_TEMPLATE_ID, templateUsableFor, type CreateEntry } from '../../
 import { Button, Disclosure, Field, HrefLink, LinkButton, LoadFailed, Notice, Select, Skeleton, TextArea, TextInput } from '../../../ui'
 import { text } from '../copy'
 import { paths } from '../../../routes/paths'
-import { firstError, INTENT_MAX, startSchema, type CreateFormApi } from '../form'
+import { firstError, startSchema, type CreateFormApi } from '../form'
 import { joinBusinessTemplates, type BusinessTemplate } from '../templates'
 
 export type EntryBlocks = Record<CreateEntry, string | undefined>
@@ -47,6 +49,8 @@ export function StartStep({ form, disabled, loading, catalogFailed, onRetryCatal
   onUseImage: () => void
 }) {
   const values = useStore(form.store, (state) => state.values)
+  const opening = values.intent.trim()
+  const remaining = remainingIntentBytes(opening)
   const [framework, setFramework] = useState(DEFAULT_TEMPLATE_ID)
   const ready = (entry: CreateEntry) => !disabled && !loading && !catalogFailed && !stale && !blocked[entry]
   const templates = joinBusinessTemplates(catalog)
@@ -73,12 +77,12 @@ export function StartStep({ form, disabled, loading, catalogFailed, onRetryCatal
       <div className="space-y-3">
         <form.Field name="intent">
           {(field) => (
-            <Field id="create-start-intent" label={copy.create.start.intent}>
-              <TextArea id="create-start-intent" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} maxLength={INTENT_MAX} rows={3} placeholder={copy.create.intent.placeholder} />
+            <Field id="create-start-intent" label={copy.create.start.intent} hint={buildCopy.inputBytes.remaining(remaining)} error={remaining < 0 ? buildCopy.inputBytes.over(-remaining) : undefined}>
+              <TextArea id="create-start-intent" value={field.state.value} onChange={(event) => field.handleChange(event.target.value)} invalid={remaining < 0} rows={3} placeholder={copy.create.intent.placeholder} />
             </Field>
           )}
         </form.Field>
-        {showAi ? <Button onClick={onBuild} tone="primary" loading={startingBuild} disabled={!codexAvailable || Boolean(policyExplanation) || !ready('ai') || !values.intent.trim()} icon={<Sparkles className="size-4" />}>{copy.create.start.build}</Button> : null}
+        {showAi ? <Button onClick={onBuild} tone="primary" loading={startingBuild} disabled={!codexAvailable || Boolean(policyExplanation) || !ready('ai') || !opening || remaining < 0} icon={<Sparkles className="size-4" />}>{copy.create.start.build}</Button> : null}
         {/* The destination and group notices stand once, above, not again under this button. */}
         {showAi && (policyExplanation || (blocked.ai && !shownOnce(blocked.ai))) && !loading ? <p className="text-sm text-stone-500">{policyExplanation ?? blocked.ai}</p> : null}
       </div>

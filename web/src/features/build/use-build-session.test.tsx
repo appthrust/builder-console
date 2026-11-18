@@ -16,7 +16,7 @@ import { keys } from '../../api/queries/shared'
 import { sessionExpiryStore } from '../../api/session-expiry'
 import { buildCopy } from '../../model/build/copy'
 import { shareScopeLabel } from '../../model/access'
-import { composeBuildIntent } from '../../model/build/questions'
+import { boundBuildOpening, composeBuildIntent, decomposeBuildIntent } from '../../model/build/questions'
 import { parseSpec, serializeSpec } from '../../model/build/spec'
 import type { BuildFailure, BuildMessage, BuildPrimary, BuildStage } from '../../model/build/types'
 import * as appViews from '../app/use-app-views'
@@ -180,9 +180,32 @@ describe('kickoff to plan handoff', () => {
     }))
     await mount({ ...draft, conversationTurns: [turn('opening', buildCopy.questions.firstTurn, 0)] })
     await act(async () => { build.send('一覧を作る') })
-    expect(build.failure).toMatchObject({ kind: 'platform', title: buildCopy.failure.platform.title, reference: { draftId: draft.id } })
+    expect(build.failure).toMatchObject({ kind: 'platform', ...buildCopy.failure.requestRejected, reference: { draftId: draft.id } })
     expect(build.session.pending.map((item) => item.text)).toEqual(['一覧を作る'])
     expect(createTurn).not.toHaveBeenCalled()
+  })
+
+  test('a long turn receives the full reply while the following kickoff plans with the complete opening', async () => {
+    const opening = '在庫'.repeat(600)
+    const message = '倉庫'.repeat(1500)
+    const generation = mockGeneration()
+    const firstTurn = buildCopy.questions.firstTurn
+    const stored = `${await boundBuildOpening(opening, 1941)}\n\n### 追記\n\n${firstTurn}`
+    createTurn.mockImplementation(async (_project, _draftId, { message }) => turnOf(turn(message === buildCopy.questions.kickoffReply ? 'kickoff' : 'large', message, 2)))
+    await mount({ ...draft, intent: stored, conversationTurns: [turn('opening', firstTurn, 0)] }, { ...initial, baseIntent: opening })
+    await act(async () => { build.send(message) })
+    expect(createTurn).toHaveBeenCalledWith(me.projectId, draft.id, { message })
+    await act(async () => { build.send(buildCopy.questions.kickoffReply) })
+    const intents = update.mock.calls.map(([, , patch]) => patch.intent!)
+    expect(intents).toHaveLength(3)
+    for (const intent of intents) {
+      expect(decomposeBuildIntent(intent)).toBe(opening)
+      expect(new TextEncoder().encode(intent).length).toBeLessThanOrEqual(4000)
+    }
+    expect(intents[0]).not.toContain(message)
+    expect(intents[2]).toContain(buildCopy.questions.kickoffReply)
+    expect(build.session.lastPlannedIntent).toBe(intents[2])
+    expect(generation).toHaveBeenCalledTimes(1)
   })
 
   test.each([3954, 4000, 4050])('a fresh tab can send a kickoff and plan from a %i-byte draft with 14 replies', async (storedBytes) => {

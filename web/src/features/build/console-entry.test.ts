@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test'
 import { createBuildSessionsApi, type BuildSessionsApi } from '../../api/build-sessions'
 import { getDraft } from '../../api/build'
+import { buildCopy } from '../../model/build/copy'
 import { createConsoleMockFetch, resetMocks, type ConsoleMockFetch } from '../../api/testing/console-mock-fetch'
 import { createTestGateway } from '../../api/testing/gateway'
 import { readConsoleStart } from './console-session-state'
@@ -55,17 +56,20 @@ test('a console-v1 start creates one server session, follows advance to its draf
   expect(readConsoleStart(storage)).toBeUndefined()
 })
 
-test('a console-v1 start sends a byte-bounded opening but keeps the original words for replay', async () => {
-  const opening = '来客受付'.repeat(400)
+test('a console-v1 start replays the complete 4000-byte opening and never sends an oversized one', async () => {
+  const opening = '受'.repeat(1332) + '😀'
   const create = spyOn(api, 'create')
   restore.push(() => create.mockRestore())
+  await expect(startConsoleBuild(opening + '字', 'g-team-a', deps())).rejects.toThrow(buildCopy.inputBytes.over(3))
+  expect(readConsoleStart(storage)).toBeUndefined()
+  expect(create).not.toHaveBeenCalled()
   mock.rewrites.push({ method: 'POST', path: CREATE, once: true, body: (wire) => ({ ...wire, id: 'SENTINEL' }) })
   await expect(startConsoleBuild(opening, 'g-team-a', deps())).rejects.toBeInstanceOf(BuildStartError)
   expect(readConsoleStart(storage)?.intent).toBe(opening)
   await startConsoleBuild(opening, 'g-team-a', deps())
   expect(create.mock.calls).toHaveLength(2)
   const [payload, key] = create.mock.calls[0]!
-  expect(new TextEncoder().encode(payload.intent).length).toBeLessThanOrEqual(4000)
+  expect(payload.intent).toBe(opening)
   expect(create.mock.calls[1]).toEqual([payload, key])
   expect(await sessions()).toHaveLength(1)
 })
@@ -167,12 +171,14 @@ describe('the new-session engine (server flag) at beginBuild', () => {
     expect(mock.requests.filter((item) => item.path.startsWith('/api/console/v1/'))).toEqual([])
     expect((await api.resolve(draft.id)).engine).toBe('platform-v1')
   })
-  test('an oversized original creates one bounded Platform draft and resumes it by its complete words', async () => {
-    const opening = '在庫管理'.repeat(400)
+  test('Platform rejects an oversized opening locally and resumes an exact 4000-byte opening without truncation', async () => {
+    const opening = '庫'.repeat(1332) + '😀'
     const options = { groupId: 'g-team-a', ownerSubject: 'sub-yamada' }
+    await expect(beginBuild('commerce', opening + '字', options)).rejects.toThrow(buildCopy.inputBytes.over(3))
+    expect(mock.count('POST', /\/application-drafts$/)).toBe(0)
     const { id } = await beginBuild('commerce', opening, options)
     const stored = (await getDraft('commerce', id)).intent
-    expect(new TextEncoder().encode(stored).length).toBeLessThanOrEqual(4000)
+    expect(stored).toBe(opening)
     expect((await beginBuild('commerce', opening, options)).id).toBe(id)
     expect(mock.count('POST', /\/application-drafts$/)).toBe(1)
   })
