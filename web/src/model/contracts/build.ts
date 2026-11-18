@@ -52,8 +52,9 @@ export type WorkspacePhase = DevWorkspacePhase
 export type ConditionStatus = CanonicalCondition['status']
 export type PreviewDatabaseEngine = DevWorkspacePreviewDatabaseEngine
 
-export type BuildTurn = Omit<CanonicalTurn, 'kind' | 'status' | 'excelProgress' | 'uiDesign'> & { kind: OpenValue<TurnKind>; status: OpenValue<TurnStatus>; excelProgress?: ExcelProgress; uiDesign?: UiDesign }
-export type BuildGeneration = Omit<CanonicalGeneration, 'status' | 'stage'> & { status: OpenValue<GenerationStatus>; stage?: OpenValue<GenerationStage> }
+/** `replacedDevWorkspaceId`: the retired workspace this turn or plan generation replaced (APT-1264), on that record only. */
+export type BuildTurn = Omit<CanonicalTurn, 'kind' | 'status' | 'excelProgress' | 'uiDesign'> & { kind: OpenValue<TurnKind>; status: OpenValue<TurnStatus>; excelProgress?: ExcelProgress; uiDesign?: UiDesign; replacedDevWorkspaceId?: string }
+export type BuildGeneration = Omit<CanonicalGeneration, 'status' | 'stage'> & { status: OpenValue<GenerationStatus>; stage?: OpenValue<GenerationStage>; replacedDevWorkspaceId?: string }
 export type BuildExecutionStep = Omit<CanonicalStep, 'status' | 'phase'> & { status: OpenValue<ExecutionStepStatus>; phase?: OpenValue<ExecutionStepPhase> }
 export type BuildExecution = Omit<CanonicalExecution, 'status' | 'steps' | 'approval'> & {
   status: OpenValue<ExecutionStatus>

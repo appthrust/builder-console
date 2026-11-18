@@ -157,6 +157,26 @@ function proposalMessage(draft: BuildDraft, lastPlannedIntent?: string, destinat
   return { role: 'assistant', text: proposal.lead ?? proposal.name, proposal, at, turnId: `proposal:${generation?.id ?? draft.id}` }
 }
 
+/**
+ * The notice that the workspace was recreated (APT-1264), on the turn or plan generation Platform marked as the switch
+ * from a retired workspace (`replacedDevWorkspaceId`). Information only: no retry, no reference. It is derived from
+ * those records, so every read and reload shows it once, at the switch, and never beside later messages; a retired
+ * workspace named by more than one record is announced at the first.
+ */
+export function workspaceRecreatedNotices(draft: BuildDraft): BuildMessage[] {
+  const switches = [...draft.conversationTurns, ...draft.creationPlanGenerations]
+    .filter((record) => record.replacedDevWorkspaceId)
+    .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt))
+  const announced = new Set<string>()
+  const notices: BuildMessage[] = []
+  for (const { replacedDevWorkspaceId: replaced, startedAt } of switches) {
+    if (!replaced || announced.has(replaced)) continue
+    announced.add(replaced)
+    notices.push({ role: 'notice', tone: 'info', title: buildCopy.workspaceRecreated, at: startedAt })
+  }
+  return notices
+}
+
 export function messagesFromDraft(draft: BuildDraft, extra: BuildMessage[], options: { lastPlannedIntent?: string; preparationDone?: boolean; destination?: ShownDestination } = {}): BuildMessage[] {
   const messages: BuildMessage[] = []
   if (draft.creationPlanUnreadable) messages.push({
@@ -178,6 +198,8 @@ export function messagesFromDraft(draft: BuildDraft, extra: BuildMessage[], opti
     // A reply in a state this console does not know reads as that, never as an answer or a failure.
     if (turn.status.kind === 'unknown' || isOneOf(turn.status, 'succeeded', 'failed')) messages.push(assistantMessage(turn, draft.id))
   }
+  // At the switch's start: after the request that caused it (a stable sort keeps it below that request), before its answer.
+  messages.push(...workspaceRecreatedNotices(draft))
   const proposal = proposalMessage(draft, options.lastPlannedIntent, options.destination)
   if (proposal) messages.push(proposal)
   for (const message of extra) {

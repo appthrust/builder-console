@@ -10,7 +10,10 @@ const messagesFromDraft = readFirst(draftOf, model.messagesFromDraft)
 const planProposal = readFirst(draftOf, model.planProposal)
 const prepareAnswers = readEachFirst(turnOf, questions.prepareAnswers)
 const { replyOptions } = questions
-import { buildCopy } from './copy'
+import { buildCopy, textJa } from './copy'
+import { textEn } from './copy.en'
+import { preserveLanguage } from '../../../test/language'
+import { setLanguage } from '../../shell/language'
 import { buildFailureReference, classifyBuildFailure } from './failure'
 import { serializeSpec } from './spec'
 import type { BuildMessage } from './types'
@@ -120,6 +123,63 @@ describe('conversation history', () => {
     expect(replyOptions(messagesFromDraft({ ...draft, conversationTurns: [analysis, init] }, []))).toEqual([buildCopy.questions.kickoffReply])
     // Nothing is done until an Excel turn succeeded.
     expect(messagesFromDraft({ ...draft, conversationTurns: [{ ...analysis, status: 'failed' }] }, [])).toEqual([])
+  })
+})
+
+describe('recreated workspace notice (APT-1264)', () => {
+  const recreated = { role: 'notice', tone: 'info', title: textJa.workspaceRecreated, at: '2026-10-08T00:02:00Z' } satisfies BuildMessage
+  const earlier = { ...turn, devWorkspaceId: 'ws-old' }
+  const switched = { ...turn, id: 'turn-2', startedAt: '2026-10-08T00:02:00Z', finishedAt: '2026-10-08T00:02:10Z', userMessage: '入れる', replacedDevWorkspaceId: 'ws-old' }
+  const later = { ...turn, id: 'turn-3', startedAt: '2026-10-08T00:03:00Z', finishedAt: '2026-10-08T00:03:10Z', userMessage: 'ありがとう' }
+  const generation = { id: 'gen-1', status: 'succeeded', startedAt: '2026-10-08T00:04:00Z', finishedAt: '2026-10-08T00:04:30Z', devWorkspaceId: 'ws-1' }
+
+  test('appears once, on the turn that replaced the workspace: below its request, above its answer', () => {
+    const messages = messagesFromDraft({ ...draft, conversationTurns: [later, switched, earlier], creationPlanGenerations: [generation] }, [])
+    expect(messages.map((message) => message.role === 'notice' ? message.title : message.role)).toEqual(['user', 'assistant', 'user', textJa.workspaceRecreated, 'assistant', 'user', 'assistant'])
+    expect(messages.filter((message) => message.role === 'notice')).toEqual([recreated])
+  })
+  test('is information only: no retry and no reference', () => {
+    const [notice] = messagesFromDraft({ ...draft, conversationTurns: [switched] }, []).filter((message) => message.role === 'notice')
+    expect(notice).toEqual(recreated)
+    expect(notice).not.toHaveProperty('retry')
+    expect(notice).not.toHaveProperty('reference')
+  })
+  test('stays one notice on every read and reload, also while the replacing turn runs', () => {
+    const read = { ...draft, conversationTurns: [earlier, switched, later] }
+    const first = messagesFromDraft(read, [])
+    // A reload hands the earlier transcript back as local messages: the derived notice is not added twice.
+    expect(messagesFromDraft(read, first).filter((message) => message.role === 'notice')).toEqual([recreated])
+    const running = messagesFromDraft({ ...draft, conversationTurns: [earlier, { ...switched, status: 'running', finishedAt: undefined }] }, [])
+    expect(running.slice(-2)).toEqual([{ role: 'user', text: switched.userMessage, at: switched.startedAt }, recreated])
+  })
+  test('appears on a plan generation that replaced the workspace, at its start', () => {
+    const replacing = { ...generation, replacedDevWorkspaceId: 'ws-old' }
+    const messages = messagesFromDraft({ ...draft, conversationTurns: [earlier], creationPlanGenerations: [replacing] }, [])
+    expect(messages.filter((message) => message.role === 'notice')).toEqual([{ ...recreated, at: replacing.startedAt }])
+    expect(messages.at(-1)).toEqual({ ...recreated, at: replacing.startedAt })
+  })
+  test('a retired workspace named by more than one record is announced at the first; another retirement is announced again', () => {
+    const replacing = { ...generation, replacedDevWorkspaceId: 'ws-old' }
+    expect(model.workspaceRecreatedNotices(draftOf({ ...draft, conversationTurns: [switched], creationPlanGenerations: [replacing] }))).toEqual([recreated])
+    const again = { ...later, replacedDevWorkspaceId: 'ws-1' }
+    expect(model.workspaceRecreatedNotices(draftOf({ ...draft, conversationTurns: [again, switched] })).map((notice) => notice.at)).toEqual([switched.startedAt, again.startedAt])
+  })
+  test('nothing is shown without the field (an older Platform) or for an empty one', () => {
+    expect(messagesFromDraft({ ...draft, conversationTurns: [earlier, later], creationPlanGenerations: [generation] }, []).some((message) => message.role === 'notice')).toBe(false)
+    expect(model.workspaceRecreatedNotices(draftOf({ ...draft, conversationTurns: [{ ...switched, replacedDevWorkspaceId: '' }] }))).toEqual([])
+  })
+  test('the copy is calm and exact in Japanese and English, switched at use time', () => {
+    expect(textJa.workspaceRecreated).toBe('作業環境を作り直しました。会話と計画は引き継いでいます')
+    expect(textEn.workspaceRecreated).toBe('Your workspace was recreated. The conversation and plan are kept.')
+    const restore = preserveLanguage()
+    try {
+      setLanguage('en')
+      expect(messagesFromDraft({ ...draft, conversationTurns: [switched] }, []).find((message) => message.role === 'notice')).toEqual({ ...recreated, title: textEn.workspaceRecreated })
+      setLanguage('ja')
+      expect(buildCopy.workspaceRecreated).toBe(textJa.workspaceRecreated)
+    } finally {
+      restore()
+    }
   })
 })
 
