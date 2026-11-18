@@ -149,8 +149,8 @@ export function UserMessage({ text }: { text: string }) {
 }
 
 /**
- * The workspace was recreated (APT-1264), where a conversation keeps its own records (improve, Excel → app, console-v1
- * plan requests): information only, the same as the build conversation's derived notice (messages.ts#workspaceRecreatedNotice).
+ * The workspace was recreated (APT-1264), where a conversation keeps its own records (improve, Excel → app):
+ * information only, the same as the build conversation's derived notice (messages.ts#workspaceRecreatedNotice).
  */
 export function WorkspaceRecreatedNotice({ className }: { className?: string }) {
   return <Notice tone="info" title={buildCopy.workspaceRecreated} className={className} />

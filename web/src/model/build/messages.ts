@@ -178,7 +178,7 @@ export function recreatingRecords<T extends WorkspaceSwitch>(records: readonly T
 }
 
 /** The notice that the workspace was recreated, at the switch's start. Information only: no retry, no reference. */
-export function workspaceRecreatedNotice(at: string): BuildMessage {
+function workspaceRecreatedNotice(at: string): BuildMessage {
   return { role: 'notice', kind: 'workspace-recreated', tone: 'info', title: buildCopy.workspaceRecreated, at }
 }
 
