@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -10,10 +11,11 @@ import (
 
 	"github.com/appthrust/appserver-go/appserver/httpx"
 	"github.com/appthrust/appserver-go/appserver/link"
+	"github.com/appthrust/appserver-go/appserver/requestlog"
 )
 
 func (a *API) directoryProxy() http.Handler {
-	proxy := &httputil.ReverseProxy{
+	proxy := WithProxyOutcomes(&httputil.ReverseProxy{
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.Out.Host = r.Out.URL.Host
 			r.Out.URL.Path = "/api/directory/v1/" + strings.TrimPrefix(r.In.URL.Path, "/api/console/directory/")
@@ -32,10 +34,13 @@ func (a *API) directoryProxy() http.Handler {
 			}
 			return nil
 		},
-		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, _ error) {
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			if !errors.Is(err, link.ErrUnavailable) {
+				requestlog.SetOutcome(r, "upstream_error", "directory_proxy_failed")
+			}
 			httpx.WriteError(w, directoryError(link.ErrUnavailable), "console")
 		},
-	}
+	})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") == "" {
 			httpx.WriteError(w, httpx.Fail(401, "unauthenticated", "A valid bearer token is required"), "console")
@@ -63,5 +68,37 @@ func (a *API) directoryProxy() http.Handler {
 		r = r.Clone(ctx)
 		r.URL.Scheme, r.URL.Host = upstream.Scheme, upstream.Host
 		proxy.ServeHTTP(w, r)
+	})
+}
+
+type upstreamStatusTransport struct{ next http.RoundTripper }
+
+func (t upstreamStatusTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	next := t.next
+	if next == nil {
+		next = http.DefaultTransport
+	}
+	resp, err := next.RoundTrip(r)
+	if err == nil && resp.StatusCode >= 400 {
+		requestlog.SetOutcome(r, "upstream_error", "upstream_http_status")
+	}
+	return resp, err
+}
+
+// WithProxyOutcomes records upstream rejections without inspecting their bodies.
+// Configure the proxy before serving requests.
+func WithProxyOutcomes(proxy *httputil.ReverseProxy) http.Handler {
+	proxy.Transport = upstreamStatusTransport{next: proxy.Transport}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// ReverseProxy aborts a partial stream by panicking with http.ErrAbortHandler
+		// instead of calling ErrorHandler. Do not intercept or change the panic.
+		complete := false
+		defer func() {
+			if !complete {
+				requestlog.SetOutcome(r, "aborted", "proxy_response_aborted")
+			}
+		}()
+		proxy.ServeHTTP(w, r)
+		complete = true
 	})
 }

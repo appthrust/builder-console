@@ -181,12 +181,37 @@ func TestUnauthenticated(t *testing.T) {
 func TestUpstreamUnavailable(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	upstream.Close()
+	h := testHandler(t, upstream.URL)
+	output, err := os.CreateTemp(t.TempDir(), "request-log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer output.Close()
+	// Wrap binds stderr when the production server is constructed.
+	stderr := os.Stderr
+	os.Stderr = output
+	server := newServer(":0", h)
+	os.Stderr = stderr
 	w := httptest.NewRecorder()
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/projects?private=query-canary", nil)
 	r.Header.Set("Authorization", "Bearer x")
-	testHandler(t, upstream.URL).ServeHTTP(w, r)
+	server.Handler.ServeHTTP(w, r)
 	if w.Code != 502 || strings.TrimSpace(w.Body.String()) != `{"error":"upstream_unavailable"}` {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body)
+	}
+	line, err := os.ReadFile(output.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entry struct {
+		Service, Outcome, Reason string
+		Status                   int
+	}
+	if err := json.Unmarshal(line, &entry); err != nil || bytes.Count(line, []byte{'\n'}) != 1 {
+		t.Fatalf("expected one JSON log line: %q", line)
+	}
+	if entry.Service != "builder-console" || entry.Status != 502 || entry.Outcome != "upstream_error" || entry.Reason != "platform_proxy_failed" || bytes.Contains(line, []byte("query-canary")) {
+		t.Fatalf("unexpected request log: %s", line)
 	}
 }
 
