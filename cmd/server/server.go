@@ -9,6 +9,7 @@ import (
 	"github.com/appthrust/appserver-go/appserver/platformclient"
 	"github.com/appthrust/appserver-go/appserver/platformenv"
 	"github.com/appthrust/appserver-go/appserver/releaseidentity"
+	"github.com/appthrust/appserver-go/appserver/requestlog"
 	"github.com/appthrust/builder-console/cmd/server/internal/api"
 	"net/http"
 	"net/http/httputil"
@@ -40,7 +41,7 @@ func newHandler(staticDir, upstreamURL, projectID string, console http.Handler, 
 		return nil, err
 	}
 	catalog := launcher.NewCatalog(platformclient.New(upstreamURL, projectID, platformclient.WithHTTPClient(authenticator.HTTPClient())), "builder-console")
-	proxy := &httputil.ReverseProxy{
+	proxy := api.WithProxyOutcomes(&httputil.ReverseProxy{
 		Rewrite: func(r *httputil.ProxyRequest) {
 			// Only replace the origin: /api paths and query strings stay intact.
 			r.Out.URL.Scheme = upstream.Scheme
@@ -55,10 +56,11 @@ func newHandler(staticDir, upstreamURL, projectID string, console http.Handler, 
 		},
 		// Flush every AI runtime NDJSON event, not only event-stream responses.
 		FlushInterval: -1,
-		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, _ error) {
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, _ error) {
+			requestlog.SetOutcome(r, "upstream_error", "platform_proxy_failed")
 			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "upstream_unavailable"})
 		},
-	}
+	})
 	// The Dashboard shares the Platform API origin; its
 	// Team settings page is where the データ tab sends membership gaps.
 	config := struct {
@@ -82,7 +84,8 @@ func newHandler(staticDir, upstreamURL, projectID string, console http.Handler, 
 		writeJSON(w, http.StatusOK, response)
 	})
 	mux.Handle("GET /launcher", launcher.NewHandler(catalog, authenticator.Authenticate))
-	mux.Handle("GET /releasez", releaseidentity.NewHandler("BUILDER_CONSOLE", func(w http.ResponseWriter, _ *http.Request) {
+	mux.Handle("GET /releasez", releaseidentity.NewHandler("BUILDER_CONSOLE", func(w http.ResponseWriter, r *http.Request) {
+		requestlog.SetOutcome(r, "unavailable", "release_identity_unavailable")
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = w.Write([]byte("UI release status unavailable\n"))

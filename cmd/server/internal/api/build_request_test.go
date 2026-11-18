@@ -40,7 +40,7 @@ func TestBuildRequestScalarAndCanonicalNumberContract(t *testing.T) {
 
 func TestBuildPackedPromptLimitReturns413(t *testing.T) {
 	w := httptest.NewRecorder()
-	writeBuildError(w, prompts.ErrInputTooLarge)
+	writeBuildError(w, httptest.NewRequest("POST", "/", nil), prompts.ErrInputTooLarge)
 	require.Equal(t, 413, w.Code)
 	require.Equal(t, "no-store", w.Header().Get("Cache-Control"))
 	var body BuildError

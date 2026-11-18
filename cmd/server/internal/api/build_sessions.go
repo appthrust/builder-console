@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/appthrust/appserver-go/appserver/httpx"
+	"github.com/appthrust/appserver-go/appserver/requestlog"
 	"github.com/appthrust/builder-console/cmd/server/internal/buildsession"
 	"github.com/appthrust/builder-console/cmd/server/internal/conversation/prompts"
 	"github.com/appthrust/builder-console/cmd/server/internal/domain"
@@ -107,7 +108,7 @@ func (a *API) registerBuildSessions() {
 		a.mux.HandleFunc(route.pattern, a.routeHandlerMode(false, false, false, true, route.handler))
 	}
 }
-func writeBuildError(w http.ResponseWriter, err error) {
+func writeBuildError(w http.ResponseWriter, r *http.Request, err error) {
 	status := 503
 	body := BuildError{Error: "service_unavailable", Message: "The conversation service is temporarily unavailable"}
 	var upstream *buildsession.Failure
@@ -119,6 +120,8 @@ func writeBuildError(w http.ResponseWriter, err error) {
 		body.Error = "input_too_large"
 		body.Message = "The complete conversation inputs exceed the request limit"
 	case errors.As(err, &upstream):
+		// Failure.Code is normalized by buildsession; never record upstream details.
+		requestlog.SetError(r, &httpx.Error{Status: upstream.Status, Code: upstream.Code})
 		status = upstream.Status
 		body.Error = upstream.Code
 		body.Message = upstream.Message
@@ -153,6 +156,7 @@ func writeBuildError(w http.ResponseWriter, err error) {
 			}
 		}
 	case errors.As(err, &shared):
+		requestlog.SetError(r, shared)
 		status = shared.Status
 		body.Message = shared.Message
 		switch {
@@ -169,6 +173,9 @@ func writeBuildError(w http.ResponseWriter, err error) {
 		default:
 			body.Error = "service_unavailable"
 		}
+	default:
+		// Unknown errors can contain request data or upstream diagnostics.
+		requestlog.SetOutcome(r, "failed", "build_session_unavailable")
 	}
 	if status == http.StatusTooManyRequests || status == http.StatusServiceUnavailable {
 		retryAfter := ""

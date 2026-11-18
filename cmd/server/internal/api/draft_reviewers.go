@@ -12,6 +12,7 @@ import (
 
 	"github.com/appthrust/appserver-go/appserver/httpx"
 	"github.com/appthrust/appserver-go/appserver/identity"
+	"github.com/appthrust/appserver-go/appserver/requestlog"
 	"github.com/appthrust/builder-console/cmd/server/internal/domain"
 )
 
@@ -25,7 +26,7 @@ func WithDraftReviewers(next http.Handler, projectID string, current func() *API
 		}
 		payload, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 		if err != nil {
-			writeDraftError(w, httpx.Invalid("Request body exceeds the size limit"))
+			writeDraftError(w, r, httpx.Invalid("Request body exceeds the size limit"))
 			return
 		}
 		var body map[string]json.RawMessage
@@ -37,7 +38,7 @@ func WithDraftReviewers(next http.Handler, projectID string, current func() *API
 		if kind == "improvement" {
 			a := current()
 			if a == nil {
-				writeDraftError(w, httpx.Fail(503, "console_store_unavailable", "The console database is not available"))
+				writeDraftError(w, r, httpx.Fail(503, "console_store_unavailable", "The console database is not available"))
 				return
 			}
 			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -45,14 +46,14 @@ func WithDraftReviewers(next http.Handler, projectID string, current func() *API
 			claims, bearer, err := a.identity.Authenticate(ctx, r.Header.Get("Authorization"))
 			if err != nil {
 				if errors.Is(err, identity.ErrUnavailable) {
-					writeDraftError(w, httpx.Fail(503, "identity_unavailable", "The identity provider is temporarily unavailable"))
+					writeDraftError(w, r, httpx.Fail(503, "identity_unavailable", "The identity provider is temporarily unavailable"))
 					return
 				}
 				if errors.Is(err, identity.ErrRawKeyNotAccepted) {
-					writeDraftError(w, httpx.Fail(401, "raw_key_not_accepted", "Exchange the access key for an assertion before calling this API"))
+					writeDraftError(w, r, httpx.Fail(401, "raw_key_not_accepted", "Exchange the access key for an assertion before calling this API"))
 					return
 				}
-				writeDraftError(w, httpx.Fail(401, "unauthenticated", "A valid bearer token is required"))
+				writeDraftError(w, r, httpx.Fail(401, "unauthenticated", "A valid bearer token is required"))
 				return
 			}
 			err = a.withRequest(ctx, claims, bearer, false, true, false, false, func(s *request) error {
@@ -74,12 +75,12 @@ func WithDraftReviewers(next http.Handler, projectID string, current func() *API
 				return httpx.NotFound()
 			})
 			if err != nil {
-				writeDraftError(w, directoryError(err))
+				writeDraftError(w, r, directoryError(err))
 				return
 			}
 			payload, err = json.Marshal(body)
 			if err != nil {
-				writeDraftError(w, httpx.Invalid("Invalid draft request"))
+				writeDraftError(w, r, httpx.Invalid("Invalid draft request"))
 				return
 			}
 		}
@@ -104,12 +105,15 @@ func ownerSubjects(owners []domain.Person) []string {
 
 // This middleware is on /api/v1, so errors use the Platform API envelope, not
 // the flat console envelope. The SPA must be able to distinguish prerequisites.
-func writeDraftError(w http.ResponseWriter, err error) {
+func writeDraftError(w http.ResponseWriter, r *http.Request, err error) {
 	var detail *httpx.Error
 	if !errors.As(err, &detail) {
-		log.Printf("console draft request failed: %v", err)
+		if requestlog.ID(r.Context()) == "" {
+			log.Printf("console draft request failed: %v", err)
+		}
 		detail = &httpx.Error{Status: 500, Code: "internal_error", Message: "The console could not complete this request"}
 	}
+	requestlog.SetError(r, detail)
 	type errorDetail struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`

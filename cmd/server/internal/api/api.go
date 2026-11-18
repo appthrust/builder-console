@@ -107,7 +107,7 @@ func Unavailable() http.Handler {
 		err := httpx.Fail(503, "console_store_unavailable", "The console database is not available")
 		if strings.HasPrefix(r.URL.Path, "/api/console/v1/build-sessions") {
 			w.Header().Set("Cache-Control", "no-store")
-			writeBuildError(w, err)
+			writeBuildError(w, r, err)
 			return
 		}
 		httpx.WriteError(w, err, "console")
@@ -118,7 +118,7 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if a.links == nil && strings.HasPrefix(r.URL.Path, "/api/console/") && r.URL.Path != "/api/console/openapi.json" {
 		if strings.HasPrefix(r.URL.Path, "/api/console/v1/build-sessions") {
-			writeBuildError(w, directoryError(link.ErrUnavailable))
+			writeBuildError(w, r, directoryError(link.ErrUnavailable))
 			return
 		}
 		httpx.WriteError(w, directoryError(link.ErrUnavailable), "console")
@@ -155,7 +155,7 @@ func (a *API) routeHandlerMode(mutation, needsRoles, transactional, fresh bool, 
 				if errors.Is(err, identity.ErrUnavailable) {
 					status = http.StatusServiceUnavailable
 				}
-				writeBuildError(w, httpx.Fail(status, "unauthorized", "Authentication is required"))
+				writeBuildError(w, r, httpx.Fail(status, "unauthorized", "Authentication is required"))
 				return
 			}
 			if errors.Is(err, identity.ErrUnavailable) {
@@ -192,11 +192,11 @@ func (a *API) routeHandlerMode(mutation, needsRoles, transactional, fresh bool, 
 		if err != nil {
 			var rejection *domain.BuildRejection
 			if errors.As(err, &rejection) {
-				writeBuildError(w, err)
+				writeBuildError(w, r, err)
 				return
 			}
 			if !transactional {
-				writeBuildError(w, err)
+				writeBuildError(w, r, err)
 				return
 			}
 			httpx.WriteError(w, directoryError(err), "console")
