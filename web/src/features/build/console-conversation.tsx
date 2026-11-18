@@ -15,14 +15,14 @@ import { locale } from '../../shell/language'
 import { Button, cn, Notice } from '../../ui'
 import { Composer } from './composer'
 import type { ConsoleBuildView, ConsoleProgress } from './console-view'
-import { AiTurn, UserMessage } from './conversation-pane'
+import { AiTurn, UserMessage, WorkspaceRecreatedNotice } from './conversation-pane'
 import { text } from './copy'
 import type { ConsoleBuildActions } from './use-console-build-session'
 
 /** Pixels from the bottom that still count as "reading the newest message". */
 const STICK = 96
 
-export function ConsoleConversation({ view, actions, restore, end, closedReason }: {
+export function ConsoleConversation({ view, actions, restore, end, closedReason, recreatedPlanTurns }: {
   view: ConsoleBuildView
   actions: ConsoleBuildActions
   restore?: { text: string; nonce: number }
@@ -30,6 +30,8 @@ export function ConsoleConversation({ view, actions, restore, end, closedReason 
   end?: ReactNode
   /** Why the composer is closed for good (building started). */
   closedReason?: string
+  /** Plan requests whose Platform generation switched from a retired workspace (console-view.ts#recreatedPlanTurnIds). */
+  recreatedPlanTurns?: ReadonlySet<string>
 }) {
   const scroller = useRef<HTMLDivElement>(null)
   const content = useRef<HTMLDivElement>(null)
@@ -66,7 +68,7 @@ export function ConsoleConversation({ view, actions, restore, end, closedReason 
         <div className="mt-auto" />
         {view.turns.map((turn) => turn.kind === 'conversation'
           ? <ConversationTurnItem key={turn.id} turn={turn} view={view} actions={actions} actionable={turn.id === actionable} last={turn.id === last?.id} onChoose={(label) => { following.current = true; actions.send(text.console.candidateMessage(label), 'change') }} />
-          : <PlanTurnItem key={turn.id} turn={turn} view={view} />)}
+          : <PlanTurnItem key={turn.id} turn={turn} view={view} recreated={recreatedPlanTurns?.has(turn.id) ?? false} />)}
         {end}
       </div>
     </div>
@@ -157,11 +159,12 @@ function ReplyBody({ reply, turn, view, actions, actionable, confirming, onChoos
   </div>
 }
 
-function PlanTurnItem({ turn, view }: { turn: PlanTurn; view: ConsoleBuildView }) {
+function PlanTurnItem({ turn, view, recreated }: { turn: PlanTurn; view: ConsoleBuildView; recreated: boolean }) {
   const phase = planPhase(turn)
   const active = view.activeTurn?.id === turn.id
   return <div className="flex flex-col gap-3" data-testid="console-plan-turn">
     <UserMessage text={buildCopy.questions.kickoffReply} />
+    {recreated ? <WorkspaceRecreatedNotice /> : null}
     {phase.kind === 'failed' ? <FailureNotice kind={phase.failure} /> : <AiTurn>
       {phase.kind === 'working' ? active ? <Waiting waiting={phase.waiting} progress={view.progress} /> : null
         : phase.kind === 'handed_off' ? <>

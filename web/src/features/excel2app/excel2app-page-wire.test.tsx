@@ -375,3 +375,49 @@ describe('X5: a 2xx Excel write whose answer cannot be read', () => {
     expect(stepTitle()).toBe(text.preview.title)
   })
 })
+
+describe('APT-1264: a turn that replaced a retired workspace', () => {
+  /** Platform marks the draft's turns of `kind` as the switch from a retired workspace (every read of the draft). */
+  function replaced(kind: 'excel-analysis' | 'ui-design') {
+    rewrites.push({
+      method: 'GET', path: /\/application-drafts\/[^/]+$/, once: false,
+      body: (wire) => Array.isArray(wire.conversationTurns)
+        ? { ...wire, conversationTurns: (wire.conversationTurns as Json[]).map((turn) => turn.kind === kind ? { ...turn, replacedDevWorkspaceId: 'ws-retired' } : turn) }
+        : wire,
+    })
+  }
+  const recreated = () => [...container.querySelectorAll('[role="status"]')].filter((item) => item.querySelector('p')?.textContent === buildCopy.workspaceRecreated)
+  async function reopen(draftId: string) {
+    await act(async () => { root?.unmount() })
+    container.remove()
+    await renderExcel(draftId)
+  }
+
+  test('the analysis step says so once, also after the same draft is opened again', async () => {
+    const draftId = await storedDraft()
+    // Started but not advanced: the analysis runs, so the page opens on its step.
+    await call('POST', `${draftPath(draftId)}/conversation-turns`, { kind: 'excel-analysis', message: '' })
+    replaced('excel-analysis')
+    await renderExcel(draftId)
+    await until(() => Boolean(byTestId('excel2app-workspace-recreated')))
+    expect(recreated()).toHaveLength(1)
+    expect(buttonsIn(byTestId('excel2app-workspace-recreated')!)).toEqual([])
+    await reopen(draftId)
+    await until(() => Boolean(byTestId('excel2app-workspace-recreated')))
+    expect(recreated()).toHaveLength(1)
+  })
+
+  test('the preview chat says so once, at the design turn, also after the same draft is opened again', async () => {
+    const draftId = await storedDraft({ analysed: true, designed: true })
+    replaced('ui-design')
+    await renderExcel(draftId)
+    await until(() => Boolean(byTestId('excel2app-chat-input')))
+    expect(recreated()).toHaveLength(1)
+    expect(container.querySelectorAll('[data-testid="excel2app-chat-message"][data-role="notice"]')).toHaveLength(1)
+    // The analysis turn did not switch: its step has nothing to say.
+    expect(byTestId('excel2app-workspace-recreated')).toBeNull()
+    await reopen(draftId)
+    await until(() => Boolean(byTestId('excel2app-chat-input')))
+    expect(recreated()).toHaveLength(1)
+  })
+})

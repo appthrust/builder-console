@@ -127,19 +127,21 @@ describe('conversation history', () => {
 })
 
 describe('recreated workspace notice (APT-1264)', () => {
-  const recreated = { role: 'notice', tone: 'info', title: textJa.workspaceRecreated, at: '2026-10-08T00:02:00Z' } satisfies BuildMessage
+  const recreated = { role: 'notice', kind: 'workspace-recreated', tone: 'info', title: textJa.workspaceRecreated, at: '2026-10-08T00:02:00Z' } satisfies BuildMessage
   const earlier = { ...turn, devWorkspaceId: 'ws-old' }
   const switched = { ...turn, id: 'turn-2', startedAt: '2026-10-08T00:02:00Z', finishedAt: '2026-10-08T00:02:10Z', userMessage: '入れる', replacedDevWorkspaceId: 'ws-old' }
   const later = { ...turn, id: 'turn-3', startedAt: '2026-10-08T00:03:00Z', finishedAt: '2026-10-08T00:03:10Z', userMessage: 'ありがとう' }
   const generation = { id: 'gen-1', status: 'succeeded', startedAt: '2026-10-08T00:04:00Z', finishedAt: '2026-10-08T00:04:30Z', devWorkspaceId: 'ws-1' }
+  const notices = (wire: unknown) => messagesFromDraft(wire, []).filter((message) => message.role === 'notice')
+  const shape = (messages: BuildMessage[]) => messages.map((message) => message.role === 'notice' ? message.title : message.role)
 
   test('appears once, on the turn that replaced the workspace: below its request, above its answer', () => {
     const messages = messagesFromDraft({ ...draft, conversationTurns: [later, switched, earlier], creationPlanGenerations: [generation] }, [])
-    expect(messages.map((message) => message.role === 'notice' ? message.title : message.role)).toEqual(['user', 'assistant', 'user', textJa.workspaceRecreated, 'assistant', 'user', 'assistant'])
+    expect(shape(messages)).toEqual(['user', 'assistant', 'user', textJa.workspaceRecreated, 'assistant', 'user', 'assistant'])
     expect(messages.filter((message) => message.role === 'notice')).toEqual([recreated])
   })
   test('is information only: no retry and no reference', () => {
-    const [notice] = messagesFromDraft({ ...draft, conversationTurns: [switched] }, []).filter((message) => message.role === 'notice')
+    const [notice] = notices({ ...draft, conversationTurns: [switched] })
     expect(notice).toEqual(recreated)
     expect(notice).not.toHaveProperty('retry')
     expect(notice).not.toHaveProperty('reference')
@@ -152,21 +154,50 @@ describe('recreated workspace notice (APT-1264)', () => {
     const running = messagesFromDraft({ ...draft, conversationTurns: [earlier, { ...switched, status: 'running', finishedAt: undefined }] }, [])
     expect(running.slice(-2)).toEqual([{ role: 'user', text: switched.userMessage, at: switched.startedAt }, recreated])
   })
+  test('sits right below the request, before an answer of the same time (no finishedAt, or finished at its start)', () => {
+    const user = { role: 'user', text: switched.userMessage, at: switched.startedAt } satisfies BuildMessage
+    const failed = messagesFromDraft({ ...draft, conversationTurns: [{ ...switched, status: 'failed', finishedAt: undefined, error: 'codex exited' }] }, [])
+    expect(failed.slice(0, 2)).toEqual([user, recreated])
+    expect(failed[2]).toMatchObject({ role: 'notice', tone: 'error', at: switched.startedAt, retry: 'turn' })
+    const unknown = messagesFromDraft({ ...draft, conversationTurns: [{ ...switched, status: 'future-state', finishedAt: undefined }] }, [])
+    expect(shape(unknown)).toEqual(['user', textJa.workspaceRecreated, buildCopy.unsupported.title])
+    const instant = messagesFromDraft({ ...draft, conversationTurns: [{ ...switched, finishedAt: switched.startedAt }] }, [])
+    expect(shape(instant)).toEqual(['user', textJa.workspaceRecreated, 'assistant'])
+  })
   test('appears on a plan generation that replaced the workspace, at its start', () => {
     const replacing = { ...generation, replacedDevWorkspaceId: 'ws-old' }
     const messages = messagesFromDraft({ ...draft, conversationTurns: [earlier], creationPlanGenerations: [replacing] }, [])
     expect(messages.filter((message) => message.role === 'notice')).toEqual([{ ...recreated, at: replacing.startedAt }])
     expect(messages.at(-1)).toEqual({ ...recreated, at: replacing.startedAt })
   })
+  test('a switch an Excel → app turn made stays after the collapsed Excel line', () => {
+    const analysis = { ...turn, kind: 'excel-analysis' as const, id: 'turn-excel', userMessage: 'この Excel を読み取ってください', startedAt: '2026-10-08T00:00:10Z', finishedAt: '2026-10-08T00:00:40Z' }
+    const design = { ...turn, kind: 'ui-design' as const, id: 'turn-ui-1', userMessage: '__init__', startedAt: '2026-10-08T00:00:50Z', finishedAt: '2026-10-08T00:00:55Z', replacedDevWorkspaceId: 'ws-old' }
+    const messages = messagesFromDraft({ ...draft, conversationTurns: [switched, design, analysis] }, [])
+    // The design turn named ws-old first: the later conversation turn naming it again adds nothing.
+    expect(shape(messages)).toEqual(['assistant', textJa.workspaceRecreated, 'user', 'assistant'])
+    expect(messages[0]).toMatchObject({ turnId: `excel:${draft.id}` })
+    expect(messages[1]).toEqual({ ...recreated, at: design.startedAt })
+  })
   test('a retired workspace named by more than one record is announced at the first; another retirement is announced again', () => {
     const replacing = { ...generation, replacedDevWorkspaceId: 'ws-old' }
-    expect(model.workspaceRecreatedNotices(draftOf({ ...draft, conversationTurns: [switched], creationPlanGenerations: [replacing] }))).toEqual([recreated])
+    expect(notices({ ...draft, conversationTurns: [switched], creationPlanGenerations: [replacing] })).toEqual([recreated])
     const again = { ...later, replacedDevWorkspaceId: 'ws-1' }
-    expect(model.workspaceRecreatedNotices(draftOf({ ...draft, conversationTurns: [again, switched] })).map((notice) => notice.at)).toEqual([switched.startedAt, again.startedAt])
+    expect(notices({ ...draft, conversationTurns: [again, switched] }).map((notice) => notice.at)).toEqual([switched.startedAt, again.startedAt])
+    const read = draftOf({ ...draft, conversationTurns: [again, switched], creationPlanGenerations: [replacing] })
+    expect([...model.recreatingRecords([...read.conversationTurns, ...read.creationPlanGenerations])].map((record) => record.id)).toEqual(['turn-2', 'turn-3'])
   })
   test('nothing is shown without the field (an older Platform) or for an empty one', () => {
-    expect(messagesFromDraft({ ...draft, conversationTurns: [earlier, later], creationPlanGenerations: [generation] }, []).some((message) => message.role === 'notice')).toBe(false)
-    expect(model.workspaceRecreatedNotices(draftOf({ ...draft, conversationTurns: [{ ...switched, replacedDevWorkspaceId: '' }] }))).toEqual([])
+    expect(notices({ ...draft, conversationTurns: [earlier, later], creationPlanGenerations: [generation] })).toEqual([])
+    expect(notices({ ...draft, conversationTurns: [{ ...switched, replacedDevWorkspaceId: '' }] })).toEqual([])
+  })
+  test('decisions read past it: the newest actionable message is the one before it', () => {
+    // A device clock behind the server's sorts the server-timed notice after the local generation-limit notice.
+    const limit = { role: 'notice', tone: 'warning', title: buildCopy.failure.limit.title, detail: buildCopy.failure.limitRejected, at: '2026-10-08T00:01:30Z' } satisfies BuildMessage
+    const messages = messagesFromDraft({ ...draft, conversationTurns: [earlier], creationPlanGenerations: [{ ...generation, replacedDevWorkspaceId: 'ws-old' }] }, [limit])
+    expect(messages.at(-1)).toMatchObject({ kind: 'workspace-recreated' })
+    expect(model.lastActionable(messages)).toEqual(limit)
+    expect(model.lastActionable([{ ...recreated }])).toBeUndefined()
   })
   test('the copy is calm and exact in Japanese and English, switched at use time', () => {
     expect(textJa.workspaceRecreated).toBe('作業環境を作り直しました。会話と計画は引き継いでいます')

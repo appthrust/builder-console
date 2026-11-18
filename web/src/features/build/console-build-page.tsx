@@ -8,7 +8,7 @@
 // platform-v1 page (`build-page.tsx`) shares presentational parts only.
 import { useSelector } from '@tanstack/react-store'
 import { Loader2, PanelRightOpen } from 'lucide-react'
-import { Fragment, useEffect, useState, type ReactNode } from 'react'
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useBuildDraft } from '../../api/queries/build'
 import { copy } from '../../copy'
 import { buildCopy } from '../../model/build/copy'
@@ -23,7 +23,7 @@ import { ActionError, Button, cn, Loading, Notice, ResourceBoundary, focusHeadin
 import { ConsoleConversation, FailureNotice } from './console-conversation'
 import { useConsoleDraftStages, type ConsoleStages } from './console-draft-stages'
 import { ConsoleSpecPane } from './console-spec-pane'
-import type { ConsoleBuildView } from './console-view'
+import { recreatedPlanTurnIds, type ConsoleBuildView } from './console-view'
 import { text } from './copy'
 import { SessionHeader } from './session-header'
 import { UnconfirmedNotice } from './unconfirmed-notice'
@@ -57,10 +57,12 @@ function ConsoleWithDraft({ view, actions, stale, draftId }: { view: ConsoleBuil
 function ConsoleDraftView({ view, actions, stale, draft, me, groups }: { view: ConsoleBuildView; actions: ConsoleBuildActions; stale: ReactNode; draft: BuildDraft; me: Me; groups: Group[] }) {
   const [openArtifact, setOpenArtifact] = useState(0)
   const stages = useConsoleDraftStages({ view, actions, draft, me, groups, onOpenArtifact: () => setOpenArtifact((count) => count + 1) })
-  return <ConsoleLayout view={view} actions={actions} stale={stale} stages={stages} openArtifact={openArtifact} />
+  // A plan request whose Platform generation switched from a retired workspace says so (APT-1264).
+  const recreatedPlanTurns = useMemo(() => recreatedPlanTurnIds(view.turns, draft.creationPlanGenerations), [view.turns, draft.creationPlanGenerations])
+  return <ConsoleLayout view={view} actions={actions} stale={stale} stages={stages} openArtifact={openArtifact} recreatedPlanTurns={recreatedPlanTurns} />
 }
 
-function ConsoleLayout({ view, actions, stale, stages, draftError, openArtifact = 0 }: { view: ConsoleBuildView; actions: ConsoleBuildActions; stale: ReactNode; stages?: ConsoleStages; draftError?: unknown; openArtifact?: number }) {
+function ConsoleLayout({ view, actions, stale, stages, draftError, openArtifact = 0, recreatedPlanTurns }: { view: ConsoleBuildView; actions: ConsoleBuildActions; stale: ReactNode; stages?: ConsoleStages; draftError?: unknown; openArtifact?: number; recreatedPlanTurns?: ReadonlySet<string> }) {
   const { session } = view
   const name = parseSpec(session.specification.markdown).spec.name || text.session.newApp
   useDocumentTitle(text.page.title(name))
@@ -103,7 +105,7 @@ function ConsoleLayout({ view, actions, stale, stages, draftError, openArtifact 
     </div>
     <div className={cn('flex min-h-0 flex-1 md:grid md:grid-rows-[minmax(0,1fr)]', stages?.artifact && artifactCollapsed ? 'md:grid-cols-[minmax(0,1fr)_2.75rem]' : 'md:grid-cols-[minmax(0,1fr)_minmax(18rem,22rem)] lg:grid-cols-[minmax(0,1fr)_26rem] xl:grid-cols-[minmax(0,1fr)_28rem]')}>
       <div id="build-conversation" role="tabpanel" aria-labelledby="build-tab-conversation" className={cn('min-h-0 min-w-0 flex-1 flex-col md:flex md:border-r md:border-line', tab === 'conversation' ? 'flex' : 'hidden')}>
-        <ConsoleConversation view={view} actions={actions} restore={restore} end={stages?.conversationEnd} closedReason={stages?.closed ? text.console.created : undefined} />
+        <ConsoleConversation view={view} actions={actions} restore={restore} end={stages?.conversationEnd} closedReason={stages?.closed ? text.console.created : undefined} recreatedPlanTurns={recreatedPlanTurns} />
       </div>
       <div id="build-artifact" role="tabpanel" aria-labelledby="build-tab-artifact" className={cn('relative min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain', tab === 'artifact' ? 'block' : 'hidden', stages?.artifact && artifactCollapsed ? 'md:hidden' : 'md:block')}>
         {stages?.artifact ?? <ConsoleSpecPane view={view} />}

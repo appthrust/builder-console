@@ -24,6 +24,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { buildKeys, useBuildDraft } from '../../api/queries/build'
 import { useGroups } from '../../api/queries/console'
 import { buildCopy } from '../../model/build/copy'
+import { lastActionable } from '../../model/build/messages'
 import { isBuildPending } from '../../model/build/progress'
 import { paths } from '../../routes/paths'
 import { setArtifactCollapsed, shellStore } from '../../shell/store'
@@ -80,7 +81,8 @@ function Session({ draft, groupId, stale }: { draft: BuildDraft; groupId: string
   const primary = { ...build.result.primary, enabled: build.result.primary.enabled && !build.busy && !sharing && !updatingPlan && (build.result.primary.action !== 'publish' || !appReadOnly) }
   // 決める: the prepare action is attached to the AI's proposal, labelled by what pressing it will do. After the
   // destination moved, the notice right below the proposal carries the same action (once, beside its explanation).
-  const lastMessage = build.messages.at(-1)
+  // A recreated-workspace notice is display only: what follows is decided on the newest message before it.
+  const lastMessage = lastActionable(build.messages)
   const reapproveNotice = lastMessage?.role === 'notice' && lastMessage.retry === 'prepare' && lastMessage.title === buildCopy.failure.destination.changed.title
   // A plan Platform's validation rejected is never approved again. Its actions (「もう一度確かめる」 when the cause may lie
   // outside the plan, 「計画を作り直す」) are on the notice that explains the rejection, or on the proposal when that notice

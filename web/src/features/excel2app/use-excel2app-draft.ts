@@ -10,9 +10,10 @@ import { draftWorkbookGridOptions, draftWorkbooksOptions } from '../../api/queri
 import { isResponseContractError } from '../../api/boundary'
 import { platformErrorEnvelope } from '../../api/platform-error'
 import { useCreationTools } from '../../api/queries/catalog'
+import { buildCopy } from '../../model/build/copy'
 import { classifyBuildFailure } from '../../model/build/failure'
 import type { BuildFailure } from '../../model/build/types'
-import { parseAssistantMessage } from '../../model/build/messages'
+import { parseAssistantMessage, recreatingRecords } from '../../model/build/messages'
 import { isBuildPending } from '../../model/build/progress'
 import { parseSpec, serializeSpec } from '../../model/build/spec'
 import { filesFromList, isWorkbookFile, workbookBudget, type CollectedWorkbook, type WorkbookFileState } from './collect'
@@ -43,9 +44,12 @@ export interface CollectionResult {
   analysisRequested: boolean
 }
 
-/** One bubble of the chat. Failed turns retain their cause for classification by the notice. */
+/**
+ * One bubble of the chat. Failed turns retain their cause for classification by the notice. `notice`: the workspace was
+ * recreated (APT-1264), shown between the turn's instruction and its reply; information only.
+ */
 export interface UiPreviewChatMessage {
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'notice'
   text: string
   pending?: boolean
   failed?: boolean
@@ -123,12 +127,16 @@ export function designStack(turns: BuildTurn[]): UiDesign[] {
   return stack
 }
 
-/** The chat the ui-design turns make: the instruction, then the reply's summary (or its error). */
-export function designMessages(turns: BuildTurn[]): UiPreviewChatMessage[] {
+/**
+ * The chat the ui-design turns make: the instruction, then the reply's summary (or its error). A turn in `recreating`
+ * (messages.ts#recreatingRecords) switched from a retired workspace: it says so once, after its instruction.
+ */
+export function designMessages(turns: BuildTurn[], recreating: ReadonlySet<BuildTurn> = new Set()): UiPreviewChatMessage[] {
   const messages: UiPreviewChatMessage[] = []
   for (const turn of turns) {
     const pending = isBuildPending(turn)
     if (turn.userMessage !== UI_DESIGN_INIT) messages.push({ role: 'user', text: isUndoMessage(turn.userMessage) ? text.preview.undoMessage : turn.userMessage, ...(pending ? { pending: true } : {}) })
+    if (recreating.has(turn)) messages.push({ role: 'notice', text: buildCopy.workspaceRecreated })
     if (isOneOf(turn.status, 'failed')) messages.push({ role: 'assistant', text: turn.error || text.preview.turnFailed, failed: true })
     else if (isOneOf(turn.status, 'succeeded') && turn.assistantMessage) {
       const parts = parseAssistantMessage(turn.assistantMessage)
@@ -255,6 +263,8 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
   const turns = useMemo(() => (draft ? currentTurns(draft) : []), [draft])
   const analysisTurn = turnsOf(turns, 'excel-analysis').at(-1)
   const designTurns = useMemo(() => turnsOf(turns, 'ui-design'), [turns])
+  // Turns that switched from a retired workspace (APT-1264): derived from the draft, so reopening it shows the same ones.
+  const recreating = useMemo(() => recreatingRecords(turns), [turns])
   const latestDesignTurn = designTurns.at(-1)
   // A turn in a state this console does not know may still run: nothing new is sent over it.
   const turnRunning = turns.some((turn) => jobState(turn) !== 'settled')
@@ -662,14 +672,14 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
 
   const messages = useMemo<UiPreviewChatMessage[]>(() => {
     if (usingOffline) return offlineDesign?.messages ?? []
-    const list = designMessages(designTurns)
+    const list = designMessages(designTurns, recreating)
     if (sending && sending !== UI_DESIGN_INIT) list.push({ role: 'user', text: isUndoMessage(sending) ? text.preview.undoMessage : sending, pending: true })
     if (sendProblem) {
       if (sendProblem.instruction !== UI_DESIGN_INIT) list.push({ role: 'user', text: isUndoMessage(sendProblem.instruction) ? text.preview.undoMessage : sendProblem.instruction })
       list.push({ role: 'assistant', text: sendProblem.message, failed: true, failure: sendProblem.failure })
     }
     return list
-  }, [usingOffline, offlineDesign, designTurns, sending, sendProblem])
+  }, [usingOffline, offlineDesign, designTurns, recreating, sending, sendProblem])
 
   const designBusy = usingOffline ? false : Boolean(sending) || isBuildPending(latestDesignTurn)
   const suggestions = usingOffline
@@ -721,6 +731,8 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
     offline: usingOffline,
     analysis: {
       turn: analysisTurn,
+      /** An analysis turn of this membership switched from a retired workspace: the step says so once (APT-1264). */
+      recreated: turnsOf(turns, 'excel-analysis').some((turn) => recreating.has(turn)),
       running: starting || isBuildPending(analysisTurn),
       problem: analysisProblem?.kind ?? (isOneOf(analysisTurn?.status, 'failed') && !draft?.excelAnalysis ? ('failed' as const) : undefined),
       failure: analysisProblem?.failure,
