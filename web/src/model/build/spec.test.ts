@@ -41,14 +41,14 @@ describe('spec front matter', () => {
 })
 
 describe('build intent', () => {
-  test('recovers the user-authored opening after composition and a language switch', () => {
+  test('recovers the user-authored opening after composition and a language switch', async () => {
     const restore = preserveLanguage()
     try {
       for (const language of ['ja', 'en'] as const) {
         setLanguage(language)
         for (const publish of [undefined, false, true]) {
           for (const replies of [[], ['検索も', 'PDF も出す']]) {
-            const intent = composeBuildIntent('見積を作る\n入力はかんたんに', replies, publish)
+            const intent = await composeBuildIntent('見積を作る\n入力はかんたんに', replies, publish)
             setLanguage(language === 'ja' ? 'en' : 'ja')
             expect(decomposeBuildIntent(intent)).toBe('見積を作る\n入力はかんたんに')
             setLanguage(language)
@@ -58,21 +58,58 @@ describe('build intent', () => {
       expect(decomposeBuildIntent('普通の本文に ### 追記 と書く')).toBe('普通の本文に ### 追記 と書く')
     } finally { restore() }
   })
-  test('composes follow-ups in order without a console-authored premises block', () => {
-    expect(composeBuildIntent(' 見積を作る ', [' PDF も出す ', ' ', '検索も'])).toBe('見積を作る\n\n### 追記\n\nPDF も出す\n\n### 追記\n\n検索も')
+  test('keeps the English envelope of a resumed plan independently of the current display language', async () => {
+    const stored = 'Track stock\n\n### Follow-up\n\nCSV\n\nPublish: yes'
+    const replies = ['CSV', 'x'.repeat(3800), 'y'.repeat(3800), 'Use a barcode']
+    const result = await composeBuildIntent(stored, replies, true)
+    expect(result).toContain('(2 earlier follow-ups omitted)')
+    expect(result.endsWith('\n\n### Follow-up\n\nUse a barcode\n\nPublish: yes')).toBe(true)
+    expect(await composeBuildIntent(result, replies, true)).toBe(result)
   })
-  test('publication keeps the explicit marker', () => {
-    expect(composeBuildIntent('見積を作る', [])).not.toContain('公開: する')
-    expect(composeBuildIntent('見積を作る', [], false)).not.toContain('公開: する')
-    expect(composeBuildIntent('見積を作る', [], true)).toBe('見積を作る\n\n公開: する')
+  test('composes follow-ups in order without a console-authored premises block', async () => {
+    expect(await composeBuildIntent(' 見積を作る ', [' PDF も出す ', ' ', '検索も'])).toBe('見積を作る\n\n### 追記\n\nPDF も出す\n\n### 追記\n\n検索も')
   })
-  test('bounds all inputs to 8000 characters, reserving an intact publication marker', () => {
-    for (const publish of [undefined, false, true]) {
-      const result = composeBuildIntent('あ'.repeat(7999) + '😀', ['追記'.repeat(8000)], publish)
-      expect(result.length).toBeLessThanOrEqual(8000)
-      expect(result).not.toMatch(/[\uD800-\uDBFF]$/)
-      if (publish) expect(result.endsWith('\n\n公開: する')).toBe(true)
+  test('publication keeps the explicit marker', async () => {
+    expect(await composeBuildIntent('見積を作る', [])).not.toContain('公開: する')
+    expect(await composeBuildIntent('見積を作る', [], false)).not.toContain('公開: する')
+    expect(await composeBuildIntent('見積を作る', [], true)).toBe('見積を作る\n\n公開: する')
+  })
+  test('keeps an exact 4000-byte Japanese opening and abbreviates an oversized one without splitting a code point', async () => {
+    const exact = '見'.repeat(1332) + '😀'
+    expect(await composeBuildIntent(exact, [])).toBe(exact)
+    const oversized = '😀見'.repeat(600)
+    const result = await composeBuildIntent(oversized, [])
+    const excerpt = decomposeBuildIntent(result)
+    expect(new TextEncoder().encode(result).length).toBeLessThanOrEqual(4000)
+    expect(excerpt).toMatch(/^(?:😀見)+(?:😀)?…$/u)
+    expect(await composeBuildIntent(result, [])).toBe(result)
+  })
+  test('keeps a chronological suffix of complete replies and marks the omitted count deterministically', async () => {
+    const base = '在庫管理'
+    const replies = Array.from({ length: 30 }, (_, i) => `要件${i}: ${'棚卸'.repeat(40)}`)
+    const result = await composeBuildIntent(base, replies, true)
+    const count = Number(/以前の追記 (\d+) 件を省略/.exec(result)?.[1])
+    expect(count).toBeGreaterThan(0)
+    expect(count).toBeLessThan(replies.length - 1)
+    expect(result).toBe([base, `（以前の追記 ${count} 件を省略）`, ...replies.slice(count)].join('\n\n### 追記\n\n') + '\n\n公開: する')
+    expect(new TextEncoder().encode(result).length).toBeLessThanOrEqual(4000)
+    const restore = preserveLanguage()
+    try {
+      setLanguage('en')
+      expect(await composeBuildIntent(base, [...replies], true)).toBe(result)
+      expect(await composeBuildIntent(result, replies, true)).toBe(result)
+    } finally { restore() }
+  })
+  test('even a full opening cannot crowd out the newest message or the publication decision', async () => {
+    const opening = 'a'.repeat(4000)
+    const earlier = '以前の変更'.repeat(300)
+    for (const latest of ['この内容で提案して', '変更点：' + '😀'.repeat(1200)]) {
+      const result = await composeBuildIntent(opening, [earlier, latest], true)
+      expect(result).toContain(latest.length < 100 ? latest : '変更点：😀')
+      expect(result).not.toContain(earlier)
+      expect(result.endsWith('\n\n公開: する')).toBe(true)
+      expect(new TextEncoder().encode(result).length).toBeLessThanOrEqual(4000)
+      expect(await composeBuildIntent(result, [earlier, latest], true)).toBe(result)
     }
-    expect(composeBuildIntent('x'.repeat(8000), [])).toHaveLength(8000)
   })
 })

@@ -193,11 +193,13 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
       return
     }
     void perform('turn', async () => {
-      const currentDraft = draftRef.current
-      const replies = conversationTurns(currentDraft.conversationTurns).map((item) => item.userMessage)
-      const intent = composeBuildIntent(decomposeBuildIntent(session.baseIntent), [...replies, pending.text])
-      // The intent is the plan's input; 用意する answers do not change the plan in use.
-      if (!asking) await receive(await api.updateDraft(projectId, draft.id, { intent }))
+      // The persisted opening is shared by fresh and resumed tabs. Preparation answers do not change the plan.
+      if (!asking) {
+        const current = draftRef.current
+        const replies = conversationTurns(current.conversationTurns).map((item) => item.userMessage)
+        const intent = await composeBuildIntent(current.intent, [...replies, pending.text])
+        await receive(await api.updateDraft(projectId, draft.id, { intent }))
+      }
       try {
         const created = await api.createTurn(projectId, draft.id, { message: pending.text })
         const latest = draftRef.current
@@ -243,7 +245,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
       return
     }
     if ([latestGeneration, current.conversationTurns.at(-1)].some(isBuildPending)) return
-    const intent = composeBuildIntent(decomposeBuildIntent(session.baseIntent), conversationTurns(current.conversationTurns).map((item) => item.userMessage), true)
+    const intent = await composeBuildIntent(current.intent, conversationTurns(current.conversationTurns).map((item) => item.userMessage), true)
     const updated = current.intent === intent ? current : await api.updateDraft(projectId, draft.id, { intent })
     await receive(updated)
     const attemptKey = `build-plan-${draft.id}-${current.conversationTurns.at(-1)?.id ?? 'initial'}-${previousGenerationId ?? 'initial'}`

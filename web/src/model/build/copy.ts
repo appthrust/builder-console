@@ -2,7 +2,7 @@ import { localized } from '../../shell/language'
 import { textEn } from './copy.en'
 
 export const textJa = {
-  intent: { reply: '### 追記', publish: '公開: する' },
+  intent: { reply: '### 追記', publish: '公開: する', omitted: (count: number) => `（以前の追記 ${count} 件を省略）` },
   unreadablePlan: { title: '保存された計画を読めませんでした', detail: '基盤に保存された計画の内容を、このコンソールでは確認できません。' },
   questions: {
     firstTurn: 'このアプリを作るために決めるべきことを、一つずつ質問してください。',
