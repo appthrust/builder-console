@@ -3,10 +3,9 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { buildSessionReader, buildTurnReader } from '../../api/contracts/console/build-sessions'
-import { generationOf } from '../../api/testing/build-domain'
 import { buildCopy } from '../../model/build/copy'
 import type { BuildSession, BuildTurn } from '../../model/contracts/console'
-import { deriveConsoleBuildView, recreatedPlanTurnIds, SLOW_OBSERVATION_MS, type ConsoleViewInput } from './console-view'
+import { deriveConsoleBuildView, SLOW_OBSERVATION_MS, type ConsoleViewInput } from './console-view'
 
 type Fixture = { name: string; raw: string }
 const fixtures = JSON.parse(readFileSync(new URL('../../../../cmd/server/internal/api/testdata/build-conversation.json', import.meta.url), 'utf8')) as Fixture[]
@@ -73,25 +72,5 @@ describe('what may be sent', () => {
     expect(deriveConsoleBuildView(input({ intent: { ...intent, status: 'unconfirmed' } })).write).toEqual({ family: 'publish', status: 'unconfirmed' })
     expect(deriveConsoleBuildView(input({ intent: { ...intent, status: 'pending' } })).write).toEqual({ family: 'publish', status: 'interrupted' })
     expect(deriveConsoleBuildView(input({ intent: { ...intent, status: 'pending' }, sending: true })).write).toEqual({ family: 'publish', status: 'sending' })
-  })
-})
-
-describe('a plan request whose Platform generation replaced a retired workspace (APT-1264)', () => {
-  const generation = (id: string, minute: number, replaced?: string) => generationOf({ id, status: 'succeeded', startedAt: `2026-11-12T00:0${minute}:00Z`, devWorkspaceId: 'ws-new', ...(replaced ? { replacedDevWorkspaceId: replaced } : {}) })
-  const plan = (id: string, generationId?: string) => turn('plan-turn', { id, platformGenerationId: generationId })
-  test('matches the request_plan turn by its platformGenerationId, never a conversation turn', () => {
-    const turns = [turn('turn-explicit-keep'), plan('89c00000-0000-4000-8000-000000000011', 'gen-1'), plan('89c00000-0000-4000-8000-000000000012', 'gen-2')]
-    expect([...recreatedPlanTurnIds(turns, [generation('gen-1', 1), generation('gen-2', 2, 'ws-old')])]).toEqual(['89c00000-0000-4000-8000-000000000012'])
-  })
-  test('nothing without the field, without a generation id, or for a generation this draft does not hold', () => {
-    const turns = [plan('89c00000-0000-4000-8000-000000000011', 'gen-1'), plan('89c00000-0000-4000-8000-000000000012')]
-    expect([...recreatedPlanTurnIds(turns, [generation('gen-1', 1)])]).toEqual([])
-    expect([...recreatedPlanTurnIds(turns, [generation('gen-9', 1, 'ws-old')])]).toEqual([])
-  })
-  test('one per retired workspace, at the first generation that named it; the same on every read', () => {
-    const turns = [plan('89c00000-0000-4000-8000-000000000011', 'gen-1'), plan('89c00000-0000-4000-8000-000000000012', 'gen-2'), plan('89c00000-0000-4000-8000-000000000013', 'gen-3')]
-    const generations = [generation('gen-3', 3, 'ws-2'), generation('gen-2', 2, 'ws-old'), generation('gen-1', 1, 'ws-old')]
-    expect([...recreatedPlanTurnIds(turns, generations)]).toEqual(['89c00000-0000-4000-8000-000000000011', '89c00000-0000-4000-8000-000000000013'])
-    expect(recreatedPlanTurnIds(turns, generations)).toEqual(recreatedPlanTurnIds(turns, generations))
   })
 })

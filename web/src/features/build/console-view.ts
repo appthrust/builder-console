@@ -6,8 +6,6 @@
 // stage and observation time (design §13), never a fabricated activity log.
 import type { OpenValue } from '../../api/boundary'
 import { isObserving, mergeTurn } from '../../api/queries/build-sessions'
-import { recreatingRecords } from '../../model/build/messages'
-import type { BuildGeneration } from '../../model/contracts/build'
 import type { BuildPublishResult, BuildSession, BuildTurn } from '../../model/contracts/console'
 import type { ConsoleWriteFamily, ConsoleWriteIntent } from './console-session-state'
 
@@ -145,21 +143,4 @@ export function deriveConsoleBuildView(input: ConsoleViewInput): ConsoleBuildVie
     ...(input.conflict ? { conflict: input.conflict } : {}),
     ...(publish ? { publish } : {}),
   }
-}
-
-/**
- * The plan requests whose Platform plan generation switched from a retired workspace (APT-1264), by turn id. Matched
- * on the typed `platformGenerationId` only: a conversation turn is never guessed at. One per retired workspace, at the
- * first generation that named it; derived from the draft, so every read shows the same ones.
- */
-export function recreatedPlanTurnIds(turns: readonly BuildTurn[], generations: readonly BuildGeneration[]): Set<string> {
-  const recreating = new Set([...recreatingRecords(generations)].map((generation) => generation.id))
-  const announced = new Set<string>()
-  const ids = new Set<string>()
-  for (const turn of turns) {
-    if (turn.kind !== 'request_plan' || !turn.platformGenerationId || !recreating.has(turn.platformGenerationId) || announced.has(turn.platformGenerationId)) continue
-    announced.add(turn.platformGenerationId)
-    ids.add(turn.id)
-  }
-  return ids
 }
