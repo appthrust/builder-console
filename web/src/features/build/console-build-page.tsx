@@ -9,7 +9,8 @@
 import { useSelector } from '@tanstack/react-store'
 import { Loader2, PanelRightOpen } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { useBuildDraft } from '../../api/queries/build'
+import { useQueryClient } from '@tanstack/react-query'
+import { buildKeys, useBuildDraft } from '../../api/queries/build'
 import { copy } from '../../copy'
 import { buildCopy } from '../../model/build/copy'
 import { failureKind, failureNext, planPhase, type FailureKind } from '../../model/build/replies'
@@ -42,23 +43,39 @@ const STAGE_BY_LIFECYCLE: Record<string, BuildStage> = { initializing: 'ask', sp
 function ConsoleSession({ view, actions, stale }: { view: ConsoleBuildView; actions: ConsoleBuildActions; stale: ReactNode }) {
   const { session } = view
   // From the plan onward the Platform draft carries the plan, the creation and publishing (design §9).
-  const needsDraft = Boolean(session.draftId && (session.plan || (session.lifecycle.kind === 'known' && session.lifecycle.value === 'created')))
-  return needsDraft ? <ConsoleWithDraft view={view} actions={actions} stale={stale} draftId={session.draftId!} /> : <ConsoleLayout view={view} actions={actions} stale={stale} />
+  const stages = Boolean(session.plan || (session.lifecycle.kind === 'known' && session.lifecycle.value === 'created'))
+  // A plan request names its Platform generation before any plan exists, also when that generation fails: the draft is
+  // read to tell whether it switched from a retired workspace (APT-1264). The stages still wait for the plan.
+  const generationNamed = view.turns.some((turn) => turn.kind === 'request_plan' && Boolean(turn.platformGenerationId))
+  return session.draftId && (stages || generationNamed)
+    ? <ConsoleWithDraft view={view} actions={actions} stale={stale} draftId={session.draftId} stages={stages} />
+    : <ConsoleLayout view={view} actions={actions} stale={stale} />
 }
 
-function ConsoleWithDraft({ view, actions, stale, draftId }: { view: ConsoleBuildView; actions: ConsoleBuildActions; stale: ReactNode; draftId: string }) {
+function ConsoleWithDraft({ view, actions, stale, draftId, stages }: { view: ConsoleBuildView; actions: ConsoleBuildActions; stale: ReactNode; draftId: string; stages: boolean }) {
   const { me, groups } = useShell()
+  const client = useQueryClient()
   const query = useBuildDraft(me.projectId, draftId)
-  // Until the draft is read the conversation stays usable; a failed first read is one notice, retried by the query.
-  if (!query.data) return <ConsoleLayout view={view} actions={actions} stale={stale} draftError={query.error} />
-  return <ConsoleDraftView view={view} actions={actions} stale={stale} draft={query.data} me={me} groups={groups} />
+  const draft = query.data
+  // A plan request whose Platform generation switched from a retired workspace says so (APT-1264).
+  const recreatedPlanTurns = useMemo(() => draft ? recreatedPlanTurnIds(view.turns, draft.creationPlanGenerations) : undefined, [view.turns, draft])
+  // A finished draft is not polled. A plan request naming a generation this read does not hold yet (a re-plan with the
+  // page open) reads the draft again, once per observation of that turn, until the read holds it.
+  const unseen = draft
+    ? view.turns.flatMap((turn) => turn.kind === 'request_plan' && turn.platformGenerationId && !draft.creationPlanGenerations.some((generation) => generation.id === turn.platformGenerationId) ? [`${turn.platformGenerationId}@${turn.updatedAt}`] : []).join(' ')
+    : ''
+  useEffect(() => {
+    if (unseen) void client.invalidateQueries({ queryKey: buildKeys.draft(me.projectId, draftId), exact: true })
+  }, [unseen, client, me.projectId, draftId])
+  // Until the draft is read the conversation stays usable; a failed first read for the stages is one notice, retried by the query.
+  if (!draft) return <ConsoleLayout view={view} actions={actions} stale={stale} draftError={stages ? query.error : undefined} />
+  if (!stages) return <ConsoleLayout view={view} actions={actions} stale={stale} recreatedPlanTurns={recreatedPlanTurns} />
+  return <ConsoleDraftView view={view} actions={actions} stale={stale} draft={draft} me={me} groups={groups} recreatedPlanTurns={recreatedPlanTurns} />
 }
 
-function ConsoleDraftView({ view, actions, stale, draft, me, groups }: { view: ConsoleBuildView; actions: ConsoleBuildActions; stale: ReactNode; draft: BuildDraft; me: Me; groups: Group[] }) {
+function ConsoleDraftView({ view, actions, stale, draft, me, groups, recreatedPlanTurns }: { view: ConsoleBuildView; actions: ConsoleBuildActions; stale: ReactNode; draft: BuildDraft; me: Me; groups: Group[]; recreatedPlanTurns?: ReadonlySet<string> }) {
   const [openArtifact, setOpenArtifact] = useState(0)
   const stages = useConsoleDraftStages({ view, actions, draft, me, groups, onOpenArtifact: () => setOpenArtifact((count) => count + 1) })
-  // A plan request whose Platform generation switched from a retired workspace says so (APT-1264).
-  const recreatedPlanTurns = useMemo(() => recreatedPlanTurnIds(view.turns, draft.creationPlanGenerations), [view.turns, draft.creationPlanGenerations])
   return <ConsoleLayout view={view} actions={actions} stale={stale} stages={stages} openArtifact={openArtifact} recreatedPlanTurns={recreatedPlanTurns} />
 }
 

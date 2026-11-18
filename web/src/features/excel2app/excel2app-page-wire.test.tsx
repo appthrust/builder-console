@@ -407,6 +407,38 @@ describe('APT-1264: a turn that replaced a retired workspace', () => {
     expect(recreated()).toHaveLength(1)
   })
 
+  test('an earlier analysis that replaced the workspace and failed says nothing on the analysis shown after it; the shown one that replaced does', async () => {
+    const draftId = await storedDraft()
+    const startAnalysis = async () => ((await call('POST', `${draftPath(draftId)}/conversation-turns`, { kind: 'excel-analysis', message: '' })).resource as Json).id as string
+    const first = await startAnalysis()
+    await call('POST', '/api/v1/__mock/advance')
+    // Started but not advanced: the second analysis (reusing what the first read) runs, so the page opens on its step.
+    const second = await startAnalysis()
+    /** The first analysis failed after replacing a retired workspace; `marked` carries the switch (only it). */
+    const reads = (marked: string) => rewrites.push({
+      method: 'GET', path: new RegExp(`${draftPath(draftId)}$`), once: false,
+      body: (wire) => ({
+        ...Object.fromEntries(Object.entries(wire).filter(([key]) => key !== 'excelAnalysis')),
+        conversationTurns: (wire.conversationTurns as Json[]).map((turn) => ({
+          ...turn,
+          ...(turn.id === first ? { status: 'failed', error: 'codex exited' } : {}),
+          ...(turn.id === marked ? { replacedDevWorkspaceId: 'ws-retired' } : {}),
+        })),
+      }),
+    })
+    reads(first)
+    await renderExcel(draftId)
+    await until(() => stepTitle() === text.analysis.running)
+    await settle(10)
+    expect(byTestId('excel2app-workspace-recreated')).toBeNull()
+    expect(recreated()).toHaveLength(0)
+    rewrites = []
+    reads(second)
+    await reopen(draftId)
+    await until(() => Boolean(byTestId('excel2app-workspace-recreated')))
+    expect(recreated()).toHaveLength(1)
+  })
+
   test('the preview chat says so once, at the design turn, also after the same draft is opened again', async () => {
     const draftId = await storedDraft({ analysed: true, designed: true })
     replaced('ui-design')

@@ -731,8 +731,11 @@ export function useExcel2AppDraft(projectId: string, draftId: string | undefined
     offline: usingOffline,
     analysis: {
       turn: analysisTurn,
-      /** An analysis turn of this membership switched from a retired workspace: the step says so once (APT-1264). */
-      recreated: turnsOf(turns, 'excel-analysis').some((turn) => recreating.has(turn)),
+      /**
+       * The analysis turn this step shows switched from a retired workspace: the step says so once (APT-1264). An
+       * earlier analysis that switched and failed says nothing about the one shown now.
+       */
+      recreated: Boolean(analysisTurn && recreating.has(analysisTurn)),
       running: starting || isBuildPending(analysisTurn),
       problem: analysisProblem?.kind ?? (isOneOf(analysisTurn?.status, 'failed') && !draft?.excelAnalysis ? ('failed' as const) : undefined),
       failure: analysisProblem?.failure,

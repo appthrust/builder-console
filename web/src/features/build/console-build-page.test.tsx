@@ -892,3 +892,80 @@ describe('APT-1124: what the implementation run means on the console-v1 build pa
     expect(buttons(specPane(page), implementationCopy.skip)).toHaveLength(atTask ? 1 : 0)
   })
 })
+
+describe('APT-1264: a plan request whose Platform generation replaced a retired workspace', () => {
+  async function planOutcome(outcome: 'succeeded' | 'failed') {
+    const toggle = new URL('/api/v1/__mock/plan-generation', 'http://mock.test')
+    await platformRoutes(new Request(toggle, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ outcome, error: outcome === 'failed' ? 'codex exited' : '' }) }), toggle)
+  }
+  /** A request_plan sent by the server-side setup, observed to its end; its Platform generation id. */
+  async function requestPlan(sessionId: string) {
+    const session = await api.get(sessionId)
+    await api.createTurn(sessionId, { kind: 'request_plan', specRevision: session.specification.revision }, { key: mintIdempotencyKey(), version: session.version })
+    await finishActive(sessionId)
+    const turn = (await api.allTurns(sessionId)).at(-1)
+    if (turn?.kind !== 'request_plan' || !turn.platformGenerationId) throw new Error('the plan request named no Platform generation')
+    return turn.platformGenerationId
+  }
+  /** The page's reads of the draft carry `replacedDevWorkspaceId` on the generations `marked` picks. */
+  function replaced(draftId: string, marked: (generationId: string) => boolean) {
+    mock.rewrites.push({
+      method: 'GET', path: new RegExp(`/application-drafts/${draftId}$`), once: false,
+      body: (wire) => rewriteDraftWire(wire, draftId, (draft) => ({
+        ...draft,
+        creationPlanGenerations: ((draft.creationPlanGenerations ?? []) as Record<string, unknown>[]).map((generation) => marked(generation.id as string) ? { ...generation, replacedDevWorkspaceId: 'ws-retired' } : generation),
+      })),
+    })
+  }
+  const planTurns = (page: Page) => [...page.container.querySelectorAll('[data-testid="console-plan-turn"]')]
+  const recreatedIn = (scope: Element) => [...scope.querySelectorAll('[role="status"]')].filter((item) => item.querySelector('p')?.textContent === buildCopy.workspaceRecreated)
+
+  test('a first plan that failed after the switch: opened, and opened again, the failure and the notice once each; no plan is offered', async () => {
+    const { draftId, sessionId } = await startSession()
+    await planOutcome('failed')
+    const generation = await requestPlan(sessionId)
+    expect((await api.get(sessionId)).plan).toBeUndefined()
+    replaced(draftId, (id) => id === generation)
+    const opened = async () => {
+      const page = await open(draftId)
+      await settle(30)
+      const turns = planTurns(page)
+      expect(turns).toHaveLength(1)
+      expect(turns[0]!.querySelectorAll('[role="alert"]')).toHaveLength(1)
+      expect(recreatedIn(turns[0]!)).toHaveLength(1)
+      expect(recreatedIn(page.container)).toHaveLength(1)
+      // The stages still wait for a plan: nothing is offered to build from.
+      expect(buttons(page.container, buildCopy.primary.prepare)).toHaveLength(0)
+      expect(page.container.querySelector('[data-testid="build-proposal"]')).toBeNull()
+    }
+    await opened()
+    await opened()
+  })
+
+  test('a re-plan with the page open: only the re-planned request says so, with no re-read of the draft forced by the test', async () => {
+    const { draftId, sessionId } = await startSession()
+    const first = await requestPlan(sessionId)
+    // A spec change accepted after the plan makes it stale: the page offers the re-plan.
+    await say(sessionId, '承認を二段階にして')
+    const session = await api.get(sessionId)
+    await api.resolveTurn(sessionId, session.activeTurnId!, { decision: 'accept_spec' }, { key: mintIdempotencyKey(), version: session.version })
+    replaced(draftId, (id) => id !== first)
+    mock.requests.length = 0
+    const page = await open(draftId)
+    await settle(30)
+    expect(recreatedIn(page.container)).toHaveLength(0)
+    await act(async () => { button(page.container.querySelector('[data-testid="console-plan-stale"]')!, c.plan.replan).click() })
+    await settle()
+    expect(posts(sessionId, '/turns')).toHaveLength(1)
+    await finishActive(sessionId)
+    // The session and its turns reach the page as a poll would; the draft is read again by the page itself.
+    await reread(page)
+    await settle(30)
+    expect((await getDraft('commerce', draftId)).creationPlanGenerations).toHaveLength(2)
+    const turns = planTurns(page)
+    expect(turns).toHaveLength(2)
+    expect(recreatedIn(turns[0]!)).toHaveLength(0)
+    expect(recreatedIn(turns[1]!)).toHaveLength(1)
+    expect(recreatedIn(page.container)).toHaveLength(1)
+  })
+})
