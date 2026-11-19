@@ -126,6 +126,71 @@ describe('conversation history', () => {
   })
 })
 
+describe('superseded turn failure (APT-1365)', () => {
+  const timedOut = { ...turn, id: 'turn-1', status: 'failed' as const, error: 'application draft conversation turn timed out', userMessage: 'test', assistantMessage: undefined, changed: undefined, suggestedReplies: undefined }
+  const resent = { ...turn, id: 'turn-2', userMessage: 'test', startedAt: '2026-10-08T01:00:00Z', finishedAt: '2026-10-08T01:00:30Z' }
+  const collapsed = { role: 'notice', tone: 'info', title: textJa.failure.superseded, at: timedOut.finishedAt ?? timedOut.startedAt } satisfies BuildMessage
+  const roles = (messages: BuildMessage[]) => messages.map((message) => message.role === 'notice' ? `notice:${message.tone}` : message.role)
+
+  test('a failed turn a later turn followed reads as one past line: no retry, not an error, the later turn as it is', () => {
+    const messages = messagesFromDraft({ ...draft, conversationTurns: [resent, timedOut] }, [])
+    expect(roles(messages)).toEqual(['user', 'notice:info', 'user', 'assistant'])
+    expect(messages[0]).toEqual({ role: 'user', text: 'test', at: timedOut.startedAt })
+    expect(messages[1]).toEqual(collapsed)
+    expect(messages[1]).not.toHaveProperty('retry')
+    expect(messages[1]).not.toHaveProperty('detail')
+    expect(messages[1]).not.toHaveProperty('reference')
+    expect(messages.slice(2)).toEqual([{ role: 'user', text: 'test', at: resent.startedAt }, assistantMessage(resent, draft.id)])
+    expect(messages.some((message) => message.role === 'notice' && message.retry)).toBe(false)
+  })
+  test('the last failed turn keeps its error notice with 「もう一度試す」', () => {
+    const messages = messagesFromDraft({ ...draft, conversationTurns: [timedOut] }, [])
+    expect(messages[1]).toMatchObject({ role: 'notice', tone: 'error', title: textJa.failure.timeout.title, detail: textJa.failure.timeout.reason, retry: 'turn' })
+  })
+  test('of failures in a row only the last offers retry', () => {
+    const again = { ...timedOut, id: 'turn-2', startedAt: resent.startedAt, finishedAt: resent.finishedAt }
+    const messages = messagesFromDraft({ ...draft, conversationTurns: [again, timedOut] }, [])
+    const notices = messages.filter((message) => message.role === 'notice')
+    expect(notices).toEqual([collapsed, expect.objectContaining({ tone: 'error', at: again.finishedAt, retry: 'turn' })])
+    expect(notices.filter((message) => message.retry)).toHaveLength(1)
+  })
+  test('a later turn still running or in an unknown state supersedes it too', () => {
+    for (const status of ['running', 'future-state']) {
+      const notices = messagesFromDraft({ ...draft, conversationTurns: [timedOut, { ...resent, status, finishedAt: undefined }] }, []).filter((message) => message.role === 'notice')
+      expect(notices[0]).toEqual(collapsed)
+    }
+  })
+  test('a policy failure followed by a later turn is collapsed alike; as the last turn it stays without retry', () => {
+    const denied = { ...timedOut, error: 'workspace: ai_policy_denied' }
+    expect(classifyBuildFailure(denied.error, undefined, 'turn').kind).toBe('policy')
+    expect(messagesFromDraft({ ...draft, conversationTurns: [denied, resent] }, [])[1]).toEqual(collapsed)
+    const last = messagesFromDraft({ ...draft, conversationTurns: [denied] }, [])[1]
+    expect(last).toMatchObject({ role: 'notice', tone: 'error' })
+    expect(last).not.toHaveProperty('retry')
+  })
+  test('the failure notice this tab kept when it saw the failure is not shown again once superseded', () => {
+    // use-build-session `fail` stores the observed failure at the turn's finish, with the derived notice's title.
+    const kept = assistantMessage(timedOut, draft.id)
+    expect(kept).toMatchObject({ role: 'notice', retry: 'turn' })
+    const read = { ...draft, conversationTurns: [timedOut, resent] }
+    const messages = messagesFromDraft(read, [kept])
+    expect(roles(messages)).toEqual(['user', 'notice:info', 'user', 'assistant'])
+    // A reload hands the transcript back as local messages: nothing is added twice.
+    expect(messagesFromDraft(read, messages)).toEqual(messages)
+  })
+  test('the copy is short and past tense in Japanese and English', () => {
+    expect(textJa.failure.superseded).toBe('この依頼は一度止まりました')
+    expect(textEn.failure.superseded).toBe('This request stopped once')
+    const restore = preserveLanguage()
+    try {
+      setLanguage('en')
+      expect(messagesFromDraft({ ...draft, conversationTurns: [timedOut, resent] }, [])[1]).toEqual({ ...collapsed, title: textEn.failure.superseded })
+    } finally {
+      restore()
+    }
+  })
+})
+
 describe('recreated workspace notice (APT-1264)', () => {
   const recreated = { role: 'notice', kind: 'workspace-recreated', tone: 'info', title: textJa.workspaceRecreated, at: '2026-10-08T00:02:00Z' } satisfies BuildMessage
   const earlier = { ...turn, devWorkspaceId: 'ws-old' }

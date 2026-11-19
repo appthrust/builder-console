@@ -46,6 +46,8 @@
 // - `POST /api/v1/__mock/ai-quota {exhausted: boolean}` makes AI turns, plan generation
 //   and implementation tasks fail with the provider's credits message while exhausted.
 //   Clear it to resume manually; completed work is retained and reset clears the toggle.
+// - `POST /api/v1/__mock/turn-failure {error}` makes the next new-app conversation turn that settles fail with `error`
+//   (once); `{}` clears it. Reset clears it too.
 // - `POST /api/v1/__mock/stack-conflict {appName?, reason?, message?}` makes the next stack create (of
 //   `appName`, or any) answer one 409 with `details.reason` (`delivery_pending` = retryable).
 // - `POST /api/v1/__mock/github-repository {name}` marks `acme/<name>` as existing on GitHub (`uriage` is seeded).
@@ -705,6 +707,15 @@ function failQuotaTurn(draft: ApplicationDraft, turn: ApplicationDraftConversati
   return true
 }
 
+/** `__mock/turn-failure`: the next conversation turn that settles fails with the configured error, once. */
+function failNextTurn(draft: ApplicationDraft, turn: ApplicationDraftConversationTurn, now: string): boolean {
+  if (state.turnFailure === undefined || turn.kind !== 'conversation') return false
+  Object.assign(turn, { status: 'failed', error: state.turnFailure, finishedAt: now })
+  state.turnFailure = undefined
+  draft.updatedAt = now
+  return true
+}
+
 /** Plan generations run three steps; a running creation execution finishes in one. */
 function advanceDraft(draft: ApplicationDraft): boolean {
   let moved = false
@@ -723,7 +734,7 @@ function advanceDraft(draft: ApplicationDraft): boolean {
   }
   for (const turn of draft.conversationTurns ?? []) {
     if (turn.status !== 'pending' && turn.status !== 'running') continue
-    if (failQuotaTurn(draft, turn, now)) { moved = true; continue }
+    if (failQuotaTurn(draft, turn, now) || failNextTurn(draft, turn, now)) { moved = true; continue }
     if (turn.kind === 'excel-analysis' || turn.kind === 'ui-design') {
       answerExcelTurn(draft, turn, now)
       moved = true
@@ -1200,6 +1211,8 @@ function seedPlatform() {
     codexUnavailableReason: undefined as ApplicationDraftCreationToolRegistryResponse['codexUnavailableReason'],
     codexPolicy: undefined as string | undefined,
     aiQuotaExhausted: false,
+    /** `__mock/turn-failure`: the error the next settling conversation turn fails with (once). */
+    turnFailure: undefined as string | undefined,
     rejectNextValidation: false,
     creationPublishConflict: false,
     accessForbidden: false,
@@ -1865,6 +1878,11 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
     const body = await request.json() as { exhausted?: unknown }
     if (typeof body.exhausted === 'boolean') state.aiQuotaExhausted = body.exhausted
     return json({ exhausted: state.aiQuotaExhausted })
+  }],
+  ['POST', /^\/api\/v1\/__mock\/turn-failure$/, async (_, request) => {
+    const body = await request.json() as { error?: unknown }
+    state.turnFailure = typeof body.error === 'string' ? body.error : undefined
+    return json({ error: state.turnFailure ?? null })
   }],
   [
     'POST',
