@@ -97,7 +97,7 @@ export const textEn: typeof textJa = {
     unknownWorkspace: 'We cannot yet confirm whether AI is ready.',
     timeout: { title: 'Taking longer than expected', reason: 'Your conversation is saved; please try again shortly.' },
     busy: { title: 'AI is still working', reason: 'Your changes are saved; work will continue when the previous request finishes.' },
-    superseded: 'This request stopped once',
+    superseded: 'This request was interrupted.',
     failed: { turn: 'AI could not process your request', plan: 'Could not create plan', implement: 'Building your app stopped', publish: 'Could not save the published state' },
     retry: 'Your requirements and plan are saved; try again, or contact your administrator if work keeps stopping.',
     platform: { title: 'A platform problem stopped app creation', reason: 'This is not a problem with your input or actions. Your requirements and plan are still saved. Wait a little and try again, or share the support reference below with your administrator.' },

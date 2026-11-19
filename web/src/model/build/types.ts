@@ -60,8 +60,10 @@ export type BuildMessage =
    * 「もう一度確かめる」 (the same plan validated once more) and 「計画を作り直す」.
    * `kind: 'workspace-recreated'`: display only (messages.ts#workspaceRecreatedNotice); it never stands for the
    * conversation's state, so decisions read past it (messages.ts#lastActionable).
+   * `turnId`: the draft's conversation turn whose failure the tab observed (APT-1365); a failed send, which made no turn,
+   * has none. Notices saved before it existed have none either (messages.ts#withoutStaleTurnFailures).
    */
-  | { role: 'notice'; tone: 'info' | 'warning' | 'error'; title: string; detail?: string; at: string; retry?: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish' | 'confirm' | 'recheck'; reference?: BuildFailure['reference']; kind?: 'workspace-recreated' }
+  | { role: 'notice'; tone: 'info' | 'warning' | 'error'; title: string; detail?: string; at: string; retry?: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish' | 'confirm' | 'recheck'; reference?: BuildFailure['reference']; kind?: 'workspace-recreated'; turnId?: string }
 export interface ProgressCard {
   kind: 'workspace' | 'turn' | 'plan' | 'prepare' | 'implement' | 'publish'
   title: string

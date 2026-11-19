@@ -46,8 +46,8 @@
 // - `POST /api/v1/__mock/ai-quota {exhausted: boolean}` makes AI turns, plan generation
 //   and implementation tasks fail with the provider's credits message while exhausted.
 //   Clear it to resume manually; completed work is retained and reset clears the toggle.
-// - `POST /api/v1/__mock/turn-failure {error}` makes the next new-app conversation turn that settles fail with `error`
-//   (once); `{}` clears it. Reset clears it too.
+// - `POST /api/v1/__mock/turn-failure {error, kind?}` makes the next new-app turn of `kind` (default `conversation`;
+//   `excel-analysis` or `ui-design`) that settles fail with `error` (once); `{}` clears it. Reset clears it too.
 // - `POST /api/v1/__mock/stack-conflict {appName?, reason?, message?}` makes the next stack create (of
 //   `appName`, or any) answer one 409 with `details.reason` (`delivery_pending` = retryable).
 // - `POST /api/v1/__mock/github-repository {name}` marks `acme/<name>` as existing on GitHub (`uriage` is seeded).
@@ -707,10 +707,10 @@ function failQuotaTurn(draft: ApplicationDraft, turn: ApplicationDraftConversati
   return true
 }
 
-/** `__mock/turn-failure`: the next conversation turn that settles fails with the configured error, once. */
+/** `__mock/turn-failure`: the next turn of the configured kind that settles fails with the configured error, once. */
 function failNextTurn(draft: ApplicationDraft, turn: ApplicationDraftConversationTurn, now: string): boolean {
-  if (state.turnFailure === undefined || turn.kind !== 'conversation') return false
-  Object.assign(turn, { status: 'failed', error: state.turnFailure, finishedAt: now })
+  if (state.turnFailure === undefined || (turn.kind ?? 'conversation') !== state.turnFailure.kind) return false
+  Object.assign(turn, { status: 'failed', error: state.turnFailure.error, finishedAt: now })
   state.turnFailure = undefined
   draft.updatedAt = now
   return true
@@ -1211,8 +1211,8 @@ function seedPlatform() {
     codexUnavailableReason: undefined as ApplicationDraftCreationToolRegistryResponse['codexUnavailableReason'],
     codexPolicy: undefined as string | undefined,
     aiQuotaExhausted: false,
-    /** `__mock/turn-failure`: the error the next settling conversation turn fails with (once). */
-    turnFailure: undefined as string | undefined,
+    /** `__mock/turn-failure`: the error the next settling turn of `kind` fails with (once). */
+    turnFailure: undefined as { error: string; kind: NonNullable<ApplicationDraftConversationTurn['kind']> } | undefined,
     rejectNextValidation: false,
     creationPublishConflict: false,
     accessForbidden: false,
@@ -1880,9 +1880,10 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
     return json({ exhausted: state.aiQuotaExhausted })
   }],
   ['POST', /^\/api\/v1\/__mock\/turn-failure$/, async (_, request) => {
-    const body = await request.json() as { error?: unknown }
-    state.turnFailure = typeof body.error === 'string' ? body.error : undefined
-    return json({ error: state.turnFailure ?? null })
+    const body = await request.json() as { error?: unknown; kind?: unknown }
+    const kind = body.kind === 'excel-analysis' || body.kind === 'ui-design' ? body.kind : 'conversation'
+    state.turnFailure = typeof body.error === 'string' ? { error: body.error, kind } : undefined
+    return json(state.turnFailure ?? {})
   }],
   [
     'POST',

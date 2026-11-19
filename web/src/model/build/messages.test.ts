@@ -160,34 +160,87 @@ describe('superseded turn failure (APT-1365)', () => {
       expect(notices[0]).toEqual(collapsed)
     }
   })
-  test('a policy failure followed by a later turn is collapsed alike; as the last turn it stays without retry', () => {
+  test('a superseded policy refusal keeps its reason (it never offered a retry); as the last turn it stays without retry', () => {
     const denied = { ...timedOut, error: 'workspace: ai_policy_denied' }
     expect(classifyBuildFailure(denied.error, undefined, 'turn').kind).toBe('policy')
-    expect(messagesFromDraft({ ...draft, conversationTurns: [denied, resent] }, [])[1]).toEqual(collapsed)
-    const last = messagesFromDraft({ ...draft, conversationTurns: [denied] }, [])[1]
-    expect(last).toMatchObject({ role: 'notice', tone: 'error' })
-    expect(last).not.toHaveProperty('retry')
+    const refusal = assistantMessage(denied, draft.id)
+    expect(refusal).toMatchObject({ role: 'notice', tone: 'error' })
+    expect(refusal).not.toHaveProperty('retry')
+    const messages = messagesFromDraft({ ...draft, conversationTurns: [denied, resent] }, [])
+    expect(messages[1]).toEqual(refusal)
+    expect(roles(messages)).toEqual(['user', 'notice:error', 'user', 'assistant'])
+    // The tab's own notice of that refusal does not add a second one.
+    const kept = { ...refusal, turnId: denied.id } as BuildMessage
+    expect(messagesFromDraft({ ...draft, conversationTurns: [denied, resent] }, [kept]).filter((message) => message.role === 'notice')).toEqual<BuildMessage[]>([refusal])
+    expect(messagesFromDraft({ ...draft, conversationTurns: [denied] }, [])[1]).toEqual(refusal)
   })
-  test('the failure notice this tab kept when it saw the failure is not shown again once superseded', () => {
-    // use-build-session `fail` stores the observed failure at the turn's finish, with the derived notice's title.
-    const kept = assistantMessage(timedOut, draft.id)
-    expect(kept).toMatchObject({ role: 'notice', retry: 'turn' })
-    const read = { ...draft, conversationTurns: [timedOut, resent] }
-    const messages = messagesFromDraft(read, [kept])
+
+  /** The notice use-build-session `fail` saves for an observed turn failure (`turnId`), or for a failed send (none). */
+  const saved = (turnId?: string): BuildMessage => ({
+    role: 'notice', tone: 'error', title: textJa.failure.timeout.title, detail: textJa.failure.timeout.reason, retry: 'turn', at: collapsed.at, ...(turnId ? { turnId } : {}),
+  })
+  const read = { ...draft, conversationTurns: [timedOut, resent] }
+
+  test('the notice this tab saved when it saw that turn fail is not shown once a later turn followed', () => {
+    const messages = messagesFromDraft(read, [saved(timedOut.id)])
     expect(roles(messages)).toEqual(['user', 'notice:info', 'user', 'assistant'])
+    expect(messages[1]).toEqual(collapsed)
     // A reload hands the transcript back as local messages: nothing is added twice.
     expect(messagesFromDraft(read, messages)).toEqual(messages)
   })
-  test('the copy is short and past tense in Japanese and English', () => {
-    expect(textJa.failure.superseded).toBe('この依頼は一度止まりました')
-    expect(textEn.failure.superseded).toBe('This request stopped once')
+  test('a notice of the same title and time that names another turn, or none (a failed send), is still shown', () => {
+    for (const notice of [saved('turn-other'), saved()]) {
+      const messages = messagesFromDraft(read, [notice])
+      expect(messages.filter((message) => message.role === 'notice')).toEqual<BuildMessage[]>([collapsed, notice])
+    }
+  })
+  test('switching the language does not bring back the saved notice of a superseded turn', () => {
     const restore = preserveLanguage()
     try {
       setLanguage('en')
-      expect(messagesFromDraft({ ...draft, conversationTurns: [timedOut, resent] }, [])[1]).toEqual({ ...collapsed, title: textEn.failure.superseded })
+      const messages = messagesFromDraft(read, [saved(timedOut.id)])
+      expect(messages.filter((message) => message.role === 'notice')).toEqual([{ ...collapsed, title: textEn.failure.superseded }])
+      expect(JSON.stringify(messages)).not.toContain(textJa.failure.timeout.title)
     } finally {
       restore()
     }
+  })
+  test('the copy says only that the request was interrupted, in Japanese and English', () => {
+    expect(textJa.failure.superseded).toBe('この依頼は途中で止まりました')
+    expect(textEn.failure.superseded).toBe('This request was interrupted.')
+  })
+
+  const design = { ...turn, kind: 'ui-design' as const, id: 'turn-ui', userMessage: '__init__', status: 'failed' as const, error: 'codex exited', startedAt: '2026-10-08T02:00:00Z', finishedAt: '2026-10-08T02:00:10Z' }
+  test('display and retry read the same turns: the last conversation turn, never an Excel → app turn after it', () => {
+    expect(model.shownConversationTurns([design, resent, timedOut].map(turnOf)).map((item) => item.id)).toEqual([timedOut.id, resent.id])
+    expect(model.shownConversationTurns([design, timedOut].map(turnOf)).at(-1)?.id).toBe(timedOut.id)
+    expect([...model.supersededFailures([design, resent, timedOut].map(turnOf))]).toEqual([timedOut.id])
+    expect([...model.supersededFailures([design, timedOut].map(turnOf))]).toEqual([])
+    // The design turn is not a later conversation turn: the conversation failure stays the one to retry.
+    expect(messagesFromDraft({ ...draft, conversationTurns: [timedOut, design] }, []).filter((message) => message.role === 'notice')).toEqual([expect.objectContaining({ tone: 'error', retry: 'turn' })])
+  })
+
+  const stale = (messages: BuildMessage[], wires: readonly unknown[], pending: boolean) => model.withoutStaleTurnFailures(messages, wires.map(turnOf), pending)
+  const typed: BuildMessage = { role: 'user', text: '担当者も記録したい', at: '2026-10-08T00:01:05Z' }
+  const planNotice: BuildMessage = { role: 'notice', tone: 'error', title: textJa.failure.timeout.title, at: collapsed.at, retry: 'plan' }
+  const pruning: [string, BuildMessage[], unknown[], boolean, BuildMessage[]][] = [
+    ['a notice naming a superseded turn, with a reply pending', [saved(timedOut.id), typed], [timedOut, resent], true, [typed]],
+    ['a notice naming a superseded turn, nothing pending', [saved(timedOut.id)], [timedOut, resent], false, []],
+    ['a notice naming the last failed turn', [typed, saved(timedOut.id)], [timedOut], true, [typed, saved(timedOut.id)]],
+    ['a notice naming the last turn while an Excel → app turn follows', [saved(timedOut.id)], [timedOut, design], false, [saved(timedOut.id)]],
+    ['an old saved notice (no turnId), nothing pending, the last turn not failed', [saved()], [timedOut, resent], false, []],
+    ['an old saved notice, the last turn still running', [saved()], [timedOut, { ...resent, status: 'running', finishedAt: undefined }], false, []],
+    ['an old saved notice, the last turn failed', [saved()], [timedOut], false, [saved()]],
+    ['a failed send (no turnId) keeps its pending reply and notice', [typed, saved()], [timedOut, resent], true, [typed, saved()]],
+    ['a failed send before any turn', [typed, saved()], [], true, [typed, saved()]],
+    ['a notice of another context', [planNotice], [timedOut, resent], false, [planNotice]],
+  ]
+  test.each(pruning)('withoutStaleTurnFailures: %s', (_, messages, wires, pending, expected) => {
+    expect(stale(messages, wires, pending)).toEqual(expected)
+  })
+  test('withoutStaleTurnFailures answers the same list when nothing is stale', () => {
+    const messages = [typed, saved(timedOut.id)]
+    expect(stale(messages, [timedOut], true)).toBe(messages)
   })
 })
 

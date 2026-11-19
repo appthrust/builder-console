@@ -190,6 +190,40 @@ function supersededFailureNotice(at: string): BuildMessage {
   return { role: 'notice', tone: 'info', title: buildCopy.failure.superseded, at }
 }
 
+/** The conversation turns as the conversation shows them, oldest first; `retry('turn')` resends the last one. */
+export function shownConversationTurns(turns: readonly BuildTurn[]): BuildTurn[] {
+  return conversationTurns([...turns].sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt)))
+}
+
+/** Of the shown conversation turns (oldest first), the failed ones a later conversation turn followed. */
+function supersededIds(shown: readonly BuildTurn[]): Set<string> {
+  return new Set(shown.slice(0, -1).filter((turn) => isOneOf(turn.status, 'failed')).map((turn) => turn.id))
+}
+
+/** Failed conversation turns a later conversation turn followed (APT-1365): over, never tried again from their notice. */
+export function supersededFailures(turns: readonly BuildTurn[]): Set<string> {
+  return supersededIds(shownConversationTurns(turns))
+}
+
+/**
+ * The tab's own messages without the turn-failure notices the draft has made stale, so that they neither show nor hold
+ * back a pending reply (use-build-session stops sending while its last message is a notice with `retry: 'turn'`):
+ * - a notice naming a superseded failed turn (`turnId`, set when the tab observed that turn fail) is dropped;
+ * - a notice saved before notices named their turn (no `turnId`) with `retry: 'turn'` is dropped when no reply is pending
+ *   and the last shown conversation turn is not failed. A failed send (HTTP) keeps its reply pending until its retry, so
+ *   without a pending reply such a notice can only be an observed turn failure that is no longer the last turn.
+ * Every other message stays, a failed send's notice included. Answers `messages` itself when nothing is dropped.
+ */
+export function withoutStaleTurnFailures(messages: BuildMessage[], turns: readonly BuildTurn[], pending: boolean): BuildMessage[] {
+  const shown = shownConversationTurns(turns)
+  const superseded = supersededIds(shown)
+  const lastFailed = isOneOf(shown.at(-1)?.status, 'failed')
+  const stale = (message: BuildMessage) => message.role === 'notice' && (message.turnId !== undefined
+    ? superseded.has(message.turnId)
+    : message.retry === 'turn' && !pending && !lastFailed)
+  return messages.some(stale) ? messages.filter((message) => !stale(message)) : messages
+}
+
 /**
  * The newest message the page decides on (re-approval, a rejected plan, the generation limit). A recreated-workspace
  * notice is display only: it is skipped, also when a device clock behind the server's sorts it after a local notice.
@@ -224,20 +258,17 @@ export function messagesFromDraft(draft: BuildDraft, extra: BuildMessage[], opti
   // The collapsed line does not hide a switch Excel → app's turns made.
   for (const turn of excel) messages.push(...recreated(turn))
   const turns = conversationTurns(all)
-  // The failure notices superseded turns would have had: the same notice kept by this tab (a failure it saw) is not shown again.
-  const superseded: BuildMessage[] = []
-  for (const [index, turn] of turns.entries()) {
+  const superseded = supersededIds(turns)
+  for (const turn of turns) {
     messages.push({ role: 'user', text: turn.userMessage, at: turn.startedAt })
     // Right below the request, before its answer, also when the answer carries the same time (no finishedAt).
     messages.push(...recreated(turn))
     // A reply in a state this console does not know reads as that, never as an answer or a failure.
     if (turn.status.kind === 'unknown' || isOneOf(turn.status, 'succeeded', 'failed')) {
       const reply = assistantMessage(turn, draft.id)
-      // Only the last turn's failure can be tried again (use-build-session `retry('turn')` resends the last turn).
-      if (isOneOf(turn.status, 'failed') && index < turns.length - 1) {
-        superseded.push(reply)
-        messages.push(supersededFailureNotice(reply.at))
-      } else messages.push(reply)
+      // Only the last conversation turn's failure can be tried again (use-build-session `retry('turn')` resends it): a
+      // superseded one that offered a retry reads as one past line; one that never did (a policy refusal) keeps its reason.
+      messages.push(superseded.has(turn.id) && reply.role === 'notice' && reply.retry ? supersededFailureNotice(reply.at) : reply)
     }
   }
   // A turn of a kind this console does not know is not shown, but its switch is still told.
@@ -247,14 +278,16 @@ export function messagesFromDraft(draft: BuildDraft, extra: BuildMessage[], opti
   const proposal = proposalMessage(draft, options.lastPlannedIntent, options.destination)
   if (proposal) messages.push(proposal)
   for (const message of extra) {
-    const same = (item: BuildMessage) => {
+    // The tab's notice of a failure it observed is over once a later conversation turn followed that turn.
+    if (message.role === 'notice' && message.turnId !== undefined && superseded.has(message.turnId)) continue
+    const duplicate = messages.some((item) => {
       if (item.role !== message.role) return false
       if (item.role === 'assistant' && message.role === 'assistant' && message.turnId) return item.turnId === message.turnId
       if (item.at !== message.at) return false
       if (item.role === 'notice' && message.role === 'notice') return item.title === message.title
       return 'text' in item && 'text' in message && item.text === message.text
-    }
-    if (!messages.some(same) && !superseded.some(same)) messages.push(message)
+    })
+    if (!duplicate) messages.push(message)
   }
   // Only observed template startup earns the completion line; execution success
   // alone merely proves that the application's resources were created.

@@ -66,4 +66,71 @@ test.describe('build conversation turn retry @build-turn-retry', () => {
     const turns: { status: string }[] = (await (await request.get(`${root}/application-drafts/${draftId}`)).json()).conversationTurns
     expect(turns.map((turn) => turn.status)).toEqual(['failed', 'succeeded'])
   })
+
+  test('a failure this tab saw stops offering a retry once another tab sent the request again; a new reply is sent @mock @story', async ({ page, mock, request }, testInfo) => {
+    await mock.platform('codex', { available: true })
+    const draftId = await draftWithTurns(request, mock, [])
+    const turnsPath = `${root}/application-drafts/${draftId}/conversation-turns`
+    // The request is running when the page opens, and times out while this tab watches it.
+    await mock.platform('turn-failure', { error: TIMED_OUT })
+    expect((await request.post(turnsPath, { data: { message: MESSAGE } })).ok()).toBe(true)
+    await page.goto(`/-/build/${draftId}`)
+    const conversation = page.getByRole('log', { name: 'AI との会話' })
+    await mock.advance()
+    const card = conversation.getByRole('alert').filter({ hasText: buildText.failure.timeout.title })
+    await expect(card.getByRole('button', { name: text.conversation.retry, exact: true })).toBeVisible({ timeout: 20_000 })
+    // The tab keeps the failure it saw (use-build-session `fail`), across a reload too.
+    const saved = () => page.evaluate((key) => sessionStorage.getItem(key) ?? '', `builder-console:build:${draftId}`)
+    expect(await saved()).toContain(buildText.failure.timeout.title)
+
+    // Another tab sends the same request again, and it succeeds; this tab reads the draft again.
+    expect((await request.post(turnsPath, { data: { message: MESSAGE } })).ok()).toBe(true)
+    await mock.advance()
+    await page.reload()
+    await expect(conversation).toContainText('ご希望を仕様に反映しました。', { timeout: 20_000 })
+    await expect(conversation.getByRole('status').filter({ hasText: buildText.failure.superseded })).toHaveCount(1)
+    await expect(conversation.getByRole('alert')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: text.conversation.retry, exact: true })).toHaveCount(0)
+    // The saved notice leaves the tab too, so it can no longer hold back a reply.
+    await expect.poll(saved).not.toContain(buildText.failure.timeout.title)
+    await page.screenshot({ path: testInfo.outputPath('superseded-saved-failure.png'), fullPage: true })
+
+    const reply = '担当者も記録したい'
+    await page.getByLabel('AI に伝えること', { exact: true }).fill(reply)
+    const sent = await captureWrite(page, 'POST', turnsPath, () => page.getByRole('button', { name: '送信', exact: true }).click())
+    expect(sent.body).toEqual({ message: reply })
+  })
+
+  test('a failed screen-design turn after the failed request neither adds a card nor changes what 「もう一度試す」 sends @mock @story', async ({ page, mock, request }) => {
+    await mock.platform('codex', { available: true })
+    await mock.platform('plan-generation', { autoAdvance: true })
+    const draftId = await draftWithTurns(request, mock, [true])
+    const turnsPath = `${root}/application-drafts/${draftId}/conversation-turns`
+    // An Excel → app screen-design turn is recorded after the conversation's request, and fails too.
+    await mock.platform('turn-failure', { error: 'codex exited', kind: 'ui-design' })
+    expect((await request.post(turnsPath, { data: { kind: 'ui-design', message: '__init__' } })).ok()).toBe(true)
+    await mock.advance()
+    const turns: { id: string; kind: string; status: string }[] = (await (await request.get(`${root}/application-drafts/${draftId}`)).json()).conversationTurns
+    expect(turns.map((turn) => [turn.kind, turn.status])).toEqual([['conversation', 'failed'], ['ui-design', 'failed']])
+    const [asked, designed] = turns
+
+    await page.goto(`/-/build/${draftId}`)
+    const conversation = page.getByRole('log', { name: 'AI との会話' })
+    // The tab observes the conversation's failure, by its turn, and not the design turn's.
+    const saved = () => page.evaluate((key) => sessionStorage.getItem(key) ?? '', `builder-console:build:${draftId}`)
+    await expect.poll(saved).toContain(`"turnId":"${asked!.id}"`)
+    expect(await saved()).not.toContain(`"turnId":"${designed!.id}"`)
+    // One card: the conversation's request, retried by its own turn.
+    const card = conversation.getByRole('alert')
+    await expect(card).toHaveCount(1)
+    await expect(card).toContainText(buildText.failure.timeout.title)
+    const retry = card.getByRole('button', { name: text.conversation.retry, exact: true })
+    await expect(retry).toBeVisible()
+    const resent = await captureWrite(page, 'POST', turnsPath, () => retry.click())
+    expect(resent.body).toEqual({ message: MESSAGE })
+    await expect(conversation).toContainText('ご希望を仕様に反映しました。', { timeout: 20_000 })
+    await expect(conversation.getByRole('status').filter({ hasText: buildText.failure.superseded })).toHaveCount(1)
+    await expect(conversation.getByRole('alert')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: text.conversation.retry, exact: true })).toHaveCount(0)
+  })
 })

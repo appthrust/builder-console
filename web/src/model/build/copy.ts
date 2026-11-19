@@ -109,7 +109,7 @@ export const textJa = {
     timeout: { title: '処理に時間がかかっています', reason: '相談した内容は残っています。少し待ってから、もう一度試してください。' },
     busy: { title: 'AI が前の作業を進めています', reason: '内容は残っています。前の作業が終わったら続けます。' },
     /** A failed conversation turn a later turn followed (APT-1365): over, information only, never a retry. */
-    superseded: 'この依頼は一度止まりました',
+    superseded: 'この依頼は途中で止まりました',
     failed: { turn: 'AI が内容を整理できませんでした', plan: '計画を作れませんでした', implement: 'アプリを作る作業が止まりました', publish: '公開済みの状態を保存できませんでした' },
     retry: '仕様と計画は残っています。もう一度試してください。何度も止まるときは基盤の担当者に確認してください。',
     platform: { title: '基盤の問題で作成が止まりました', reason: 'あなたの入力や操作の問題ではありません。仕様と計画はそのまま残っています。少し待ってもう一度試すか、下の問い合わせ番号を基盤の担当者に伝えてください。' },
