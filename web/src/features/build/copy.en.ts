@@ -46,6 +46,7 @@ export const textEn: typeof textJa = {
     labelSeparator: ' · ',
     changed: 'What changed',
     excelReview: 'See the analysis and screens',
+    excelResume: 'Continue in Start from Excel',
   },
   page: {
     title: (name: string) => `${name} — Build with AI`,

@@ -51,17 +51,20 @@ export type BuildMessage =
   /**
    * `text` is the reply as written (markdown); `summary` / `changed` / `question` are its
    * parsed parts (messages.ts#parseAssistantMessage). `link` points back to where the
-   * message's content was made (the collapsed Excel → app line opens its analysis and screens).
+   * message's content was made (the collapsed Excel → app line opens its analysis and screens; with `resume`, the line
+   * saying an Excel → app step stopped sends the user back there to continue it).
    */
-  | { role: 'assistant'; text: string; summary?: string; changed?: string[]; question?: string; options?: string[]; proposal?: BuildProposal; link?: { kind: 'excel2app'; draftId: string }; at: string; turnId?: string }
+  | { role: 'assistant'; text: string; summary?: string; changed?: string[]; question?: string; options?: string[]; proposal?: BuildProposal; link?: { kind: 'excel2app'; draftId: string; resume?: true }; at: string; turnId?: string }
   /**
    * `retry: 'confirm'` re-reads the draft after a write whose answer could not be read; it never resends that write.
    * `retry: 'recheck'`: Platform's validation rejected the plan for a cause that may lie outside it; the notice offers
    * 「もう一度確かめる」 (the same plan validated once more) and 「計画を作り直す」.
    * `kind: 'workspace-recreated'`: display only (messages.ts#workspaceRecreatedNotice); it never stands for the
    * conversation's state, so decisions read past it (messages.ts#lastActionable).
+   * `turnId`: the draft's conversation turn whose failure the tab observed (APT-1365); a failed send, which made no turn,
+   * has none. Notices saved before it existed have none either (messages.ts#withoutStaleTurnFailures).
    */
-  | { role: 'notice'; tone: 'info' | 'warning' | 'error'; title: string; detail?: string; at: string; retry?: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish' | 'confirm' | 'recheck'; reference?: BuildFailure['reference']; kind?: 'workspace-recreated' }
+  | { role: 'notice'; tone: 'info' | 'warning' | 'error'; title: string; detail?: string; at: string; retry?: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish' | 'confirm' | 'recheck'; reference?: BuildFailure['reference']; kind?: 'workspace-recreated'; turnId?: string }
 export interface ProgressCard {
   kind: 'workspace' | 'turn' | 'plan' | 'prepare' | 'implement' | 'publish'
   title: string

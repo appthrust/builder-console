@@ -183,6 +183,48 @@ function workspaceRecreatedNotice(at: string): BuildMessage {
 }
 
 /**
+ * A failed turn a later conversation turn followed (APT-1365): that turn is over, so it reads as one past line. Information
+ * only: no retry (it would resend nothing) and nothing asks the user to try again.
+ */
+function supersededFailureNotice(at: string): BuildMessage {
+  return { role: 'notice', tone: 'info', title: buildCopy.failure.superseded, at }
+}
+
+/** The conversation turns as the conversation shows them, oldest first; `retry('turn')` resends the last one. */
+export function shownConversationTurns(turns: readonly BuildTurn[]): BuildTurn[] {
+  return conversationTurns([...turns].sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt)))
+}
+
+/** Of the shown conversation turns (oldest first), the failed ones a later conversation turn followed. */
+function supersededIds(shown: readonly BuildTurn[]): Set<string> {
+  return new Set(shown.slice(0, -1).filter((turn) => isOneOf(turn.status, 'failed')).map((turn) => turn.id))
+}
+
+/** Failed conversation turns a later conversation turn followed (APT-1365): over, never tried again from their notice. */
+export function supersededFailures(turns: readonly BuildTurn[]): Set<string> {
+  return supersededIds(shownConversationTurns(turns))
+}
+
+/**
+ * The tab's own messages without the turn-failure notices the draft has made stale, so that they neither show nor hold
+ * back a pending reply (use-build-session stops sending while its last message is a notice with `retry: 'turn'`):
+ * - a notice naming a superseded failed turn (`turnId`, set when the tab observed that turn fail) is dropped;
+ * - a notice saved before notices named their turn (no `turnId`) with `retry: 'turn'` is dropped when no reply is pending
+ *   and the last shown conversation turn is not failed. A failed send (HTTP) keeps its reply pending until its retry, so
+ *   without a pending reply such a notice can only be an observed turn failure that is no longer the last turn.
+ * Every other message stays, a failed send's notice included. Answers `messages` itself when nothing is dropped.
+ */
+export function withoutStaleTurnFailures(messages: BuildMessage[], turns: readonly BuildTurn[], pending: boolean): BuildMessage[] {
+  const shown = shownConversationTurns(turns)
+  const superseded = supersededIds(shown)
+  const lastFailed = isOneOf(shown.at(-1)?.status, 'failed')
+  const stale = (message: BuildMessage) => message.role === 'notice' && (message.turnId !== undefined
+    ? superseded.has(message.turnId)
+    : message.retry === 'turn' && !pending && !lastFailed)
+  return messages.some(stale) ? messages.filter((message) => !stale(message)) : messages
+}
+
+/**
  * The newest message the page decides on (re-approval, a rejected plan, the generation limit). A recreated-workspace
  * notice is display only: it is skipped, also when a device clock behind the server's sorts it after a local notice.
  */
@@ -209,19 +251,31 @@ export function messagesFromDraft(draft: BuildDraft, extra: BuildMessage[], opti
   // linked back to Excel → app; 「この内容で提案して」 is offered right away, since the
   // specification is already written.
   const excel = all.filter((turn) => isOneOf(turn.kind, 'excel-analysis', 'ui-design'))
-  if (excel.some((turn) => isOneOf(turn.status, 'succeeded'))) {
+  const latestExcel = excel.at(-1)
+  if (isOneOf(latestExcel?.status, 'failed')) {
+    // The latest Excel → app step stopped: it is continued in Excel → app, which retries each step by its kind; the
+    // build page offers no retry for it and does not call the analysis and screens done.
+    const text = buildCopy.questions.excelStopped
+    messages.push({ role: 'assistant', text, summary: text, at: latestExcel!.finishedAt ?? latestExcel!.startedAt, turnId: `excel:${draft.id}`, link: { kind: 'excel2app', draftId: draft.id, resume: true } })
+  } else if (excel.some((turn) => isOneOf(turn.status, 'succeeded'))) {
     const text = buildCopy.questions.excelReady
     messages.push({ role: 'assistant', text, summary: text, at: excel[0]!.startedAt, turnId: `excel:${draft.id}`, options: [buildCopy.questions.kickoffReply], link: { kind: 'excel2app', draftId: draft.id } })
   }
   // The collapsed line does not hide a switch Excel → app's turns made.
   for (const turn of excel) messages.push(...recreated(turn))
   const turns = conversationTurns(all)
+  const superseded = supersededIds(turns)
   for (const turn of turns) {
     messages.push({ role: 'user', text: turn.userMessage, at: turn.startedAt })
     // Right below the request, before its answer, also when the answer carries the same time (no finishedAt).
     messages.push(...recreated(turn))
     // A reply in a state this console does not know reads as that, never as an answer or a failure.
-    if (turn.status.kind === 'unknown' || isOneOf(turn.status, 'succeeded', 'failed')) messages.push(assistantMessage(turn, draft.id))
+    if (turn.status.kind === 'unknown' || isOneOf(turn.status, 'succeeded', 'failed')) {
+      const reply = assistantMessage(turn, draft.id)
+      // Only the last conversation turn's failure can be tried again (use-build-session `retry('turn')` resends it): a
+      // superseded one that offered a retry reads as one past line; one that never did (a policy refusal) keeps its reason.
+      messages.push(superseded.has(turn.id) && reply.role === 'notice' && reply.retry ? supersededFailureNotice(reply.at) : reply)
+    }
   }
   // A turn of a kind this console does not know is not shown, but its switch is still told.
   for (const turn of all) if (!excel.includes(turn) && !turns.includes(turn)) messages.push(...recreated(turn))
@@ -230,6 +284,8 @@ export function messagesFromDraft(draft: BuildDraft, extra: BuildMessage[], opti
   const proposal = proposalMessage(draft, options.lastPlannedIntent, options.destination)
   if (proposal) messages.push(proposal)
   for (const message of extra) {
+    // The tab's notice of a failure it observed is over once a later conversation turn followed that turn.
+    if (message.role === 'notice' && message.turnId !== undefined && superseded.has(message.turnId)) continue
     const duplicate = messages.some((item) => {
       if (item.role !== message.role) return false
       if (item.role === 'assistant' && message.role === 'assistant' && message.turnId) return item.turnId === message.turnId

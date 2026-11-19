@@ -30,17 +30,18 @@ export function isPrepareTurn(text: string): boolean {
   return text === textJa.questions.prepareTurn || text === textEn.questions.prepareTurn
 }
 
-/** Only successful AI turns count; notices and the derived proposal are not replies. */
+/** Only successful AI turns count; notices, the derived proposal and a stopped Excel → app step are not replies. */
 export function replyOptions(messages: BuildMessage[]): string[] {
   const conversation = messages.filter((message) => message.role !== 'notice' && !(message.role === 'assistant' && message.proposal))
   const latest = conversation.at(-1)
-  if (latest?.role !== 'assistant') return []
+  // A stopped Excel → app step (messages.ts, `link.resume`) is continued in Excel から作る: nothing is answered here.
+  if (latest?.role !== 'assistant' || latest.link?.resume) return []
   const previous = conversation.at(-2)
   const options = latest.options ?? []
   if (previous?.role === 'user' && isKickoffReply(previous.text)) return options
   // 用意する asks two fixed things; 「この内容で提案して」 would restart planning.
   if (conversation.some((message) => message.role === 'user' && isPrepareTurn(message.text))) return options
-  const successful = conversation.filter((message) => message.role === 'assistant' && message.turnId).length
+  const successful = conversation.filter((message) => message.role === 'assistant' && message.turnId && !message.link?.resume).length
   return successful >= 3 && !options.some(isKickoffReply) ? [...options, buildCopy.questions.kickoffReply] : options
 }
 

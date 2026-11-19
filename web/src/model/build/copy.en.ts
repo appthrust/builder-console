@@ -9,6 +9,7 @@ export const textEn: typeof textJa = {
     kickoffReply: 'Propose an app from this',
     prepareTurn: 'While preparing the app, ask me one question at a time about its published name and who can see it.',
     excelReady: 'The Excel analysis and the screen decisions are done',
+    excelStopped: 'Building from Excel stopped partway. Continue in Start from Excel.',
   },
   primary: { prepare: 'Build this app', afterPlan: 'Build when planned', refresh: 'Update plan and build', publish: 'Publish', continue: 'Keep improving' },
   proposal: {
@@ -97,6 +98,7 @@ export const textEn: typeof textJa = {
     unknownWorkspace: 'We cannot yet confirm whether AI is ready.',
     timeout: { title: 'Taking longer than expected', reason: 'Your conversation is saved; please try again shortly.' },
     busy: { title: 'AI is still working', reason: 'Your changes are saved; work will continue when the previous request finishes.' },
+    superseded: 'This request was interrupted.',
     failed: { turn: 'AI could not process your request', plan: 'Could not create plan', implement: 'Building your app stopped', publish: 'Could not save the published state' },
     retry: 'Your requirements and plan are saved; try again, or contact your administrator if work keeps stopping.',
     platform: { title: 'A platform problem stopped app creation', reason: 'This is not a problem with your input or actions. Your requirements and plan are still saved. Wait a little and try again, or share the support reference below with your administrator.' },
