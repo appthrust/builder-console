@@ -8,9 +8,6 @@ export const textJa = {
   home: {
     searching: '探しています…',
     resultsCount: (n: number) => `${n} 件`,
-    groupLead: (name: string) => `${name} と、その下のグループのアプリです。`,
-    sharedLead: '上位のグループから共有されて、あなたも使えるアプリです。',
-    companyLead: '会社の全員が使える、最近できたアプリです。',
   },
   list: {
     ownerSeparator: '、',
@@ -18,7 +15,6 @@ export const textJa = {
     open: '開く ↗',
     copyUrl: 'URL をコピー',
     statusFailed: 'アプリの状態を確認できませんでした。',
-    created: (time: string) => `${time}に追加`,
     resume: '続きから作る',
     check: '状況を確認する',
     discard: '削除',
@@ -51,10 +47,8 @@ export const textJa = {
     createHere: 'このグループにアプリを作る',
   },
   entry: {
-    ofGroup: (name: string) => `${name} のアプリ`,
     wantToUse: '使いたい',
     restricted: (name: string) => `このアプリは ${name} の人向けに公開されています。使いたいときは「使いたい」から申請できます。`,
-    owner: '担当',
     requestUnavailable: '申請先を確認できません。担当者に聞いてみてください。',
   },
   store: {
@@ -64,6 +58,17 @@ export const textJa = {
     trialLead: '紹介の写真や「できること」がまだないアプリです。',
     open: (name: string) => `${name}を開く`,
     want: (name: string) => `${name}を使いたい`,
+  },
+  card: {
+    open: '開く ↗',
+    openLabel: (name: string) => `${name}（新しいタブで開きます）`,
+    details: 'くわしく',
+    detailsLabel: (name: string) => `${name}をくわしく見る`,
+    manage: '管理',
+    manageLabel: (name: string) => `${name}を管理する`,
+    failed: 'いま調子が悪いようです',
+    stopped: 'いまは止まっています',
+    notReady: '準備中です。まだ開けません',
   },
   person: {
     apps: (n: number) => `作ったアプリ（${n} 件）`,

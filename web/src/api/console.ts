@@ -69,6 +69,8 @@ export interface ConsoleRequest {
   /** JSON body; a `FormData` body is sent as multipart (the browser sets the boundary). */
   body?: unknown
   cache?: RequestCache
+  /** Small background writes that must finish even if the page navigates away. */
+  keepalive?: boolean
   /** Request preconditions (`Idempotency-Key`, `If-Match`); never logged. */
   headers?: Readonly<Record<string, string>>
 }
@@ -104,7 +106,7 @@ async function readBody(response: Response): Promise<ConsoleBody> {
 
 export function createConsoleTransport(fetcher: Fetcher = (input, init) => fetch(input, init)): ConsoleTransport {
   return {
-    async send({ method, path, body, cache, headers }) {
+    async send({ method, path, body, cache, headers, keepalive }) {
       assertSessionActive()
       const read = method === 'GET'
       const form = body instanceof FormData
@@ -119,6 +121,7 @@ export function createConsoleTransport(fetcher: Fetcher = (input, init) => fetch
           redirect: 'manual',
           signal: read ? AbortSignal.timeout(READ_TIMEOUT_MS) : undefined,
           ...(cache ? { cache } : {}),
+          ...(keepalive ? { keepalive } : {}),
         })
       } catch {
         // Network failure or read timeout: nothing answered (status 0).

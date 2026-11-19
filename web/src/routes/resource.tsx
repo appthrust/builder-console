@@ -39,7 +39,8 @@ export const resourceRoute = createRoute({
     // A resource kind this console does not know is not guessed as a group, app or entry: the route's fixed failure.
     if (answer.kind === 'unsupported') throw new Error('unsupported resource kind')
     const resolved = answer.value
-    if (resolved.kind === 'entry' && parsed.sub !== null) throw notFound()
+    // A tab URL of an app the caller cannot open shows its entry page, like the intro page does (ux-design §6.5); other subs stay 404.
+    if (resolved.kind === 'entry' && parsed.sub !== null && !Object.hasOwn(APP_TABS, parsed.sub)) throw notFound()
     const currentPath = resolved.currentPath.replace(/^\/+|\/+$/g, '')
     if (currentPath !== parsed.path) {
       queryClient.setQueryData(resolveQuery(`/${currentPath}`).queryKey, answer)

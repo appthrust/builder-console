@@ -72,6 +72,8 @@
         "groupIds": [],
         "extraPersonIds": []
       },
+      "contribution": {"scope": "group"},
+      "permissions": {"use": true, "comment": true, "propose": true, "maintain": true, "data": true},
       "createdBy": {
         "id": "person",
         "email": "person@example.test",
@@ -126,6 +128,8 @@
             "groupIds": [],
             "extraPersonIds": []
           },
+          "contribution": {"scope": "group"},
+          "permissions": {"use": true, "comment": true, "propose": true, "maintain": true, "data": true},
           "createdBy": {
             "id": "person",
             "email": "person@example.test",
@@ -183,7 +187,9 @@
       "stackId": null,
       "createdAt": "2026-11-01T00:00:00Z",
       "updatedAt": "2026-11-01T00:00:00Z",
-      "canOpen": false
+      "canOpen": false,
+      "contribution": {"scope": "group"},
+      "permissions": {"use": true, "comment": true, "propose": true, "maintain": true, "data": true}
     }
   },
   {
@@ -208,7 +214,9 @@
       "stackId": null,
       "createdAt": "0001-01-01T00:00:00Z",
       "updatedAt": "0001-01-01T00:00:00Z",
-      "canOpen": false
+      "canOpen": false,
+      "contribution": {"scope": "group"},
+      "permissions": {"use": false, "comment": false, "propose": false, "maintain": false, "data": false}
     }
   },
   {
@@ -249,7 +257,9 @@
           "stackId": null,
           "createdAt": "2026-11-01T00:00:00Z",
           "updatedAt": "2026-11-01T00:00:00Z",
-          "canOpen": false
+          "canOpen": false,
+          "contribution": {"scope": "group"},
+          "permissions": {"use": true, "comment": true, "propose": true, "maintain": true, "data": true}
         }
       ]
     }
@@ -406,6 +416,7 @@
       "effectiveGroupIds": [],
       "managedGroupIds": [],
       "projectId": "project",
+      "view": "maker",
       "directoryPublicURL": "",
       "migration": {
         "pending": false,
@@ -432,6 +443,7 @@
       "effectiveGroupIds": [],
       "managedGroupIds": [],
       "projectId": "project",
+      "view": "user",
       "platformUnavailable": true,
       "notMember": true,
       "teamSlug": "team",
@@ -630,6 +642,8 @@
           "groupIds": [],
           "extraPersonIds": []
         },
+        "contribution": {"scope": "group"},
+        "permissions": {"use": true, "comment": true, "propose": true, "maintain": true, "data": true},
         "createdBy": {
           "id": "person",
           "email": "person@example.test",
@@ -687,6 +701,16 @@
       },
       "defaultTemplateId": "nextjs-postgres"
     }
+  },
+  {
+    "name": "inbox",
+    "schema": "Inbox",
+    "body": {"items": [{"kind": "feedback", "app": {"id": "app", "path": "group/app", "displayName": "", "icon": ""}, "count": 2, "since": "2026-11-01T00:00:00Z"}]}
+  },
+  {
+    "name": "empty-inbox",
+    "schema": "Inbox",
+    "body": {"items": []}
   },
   {
     "name": "empty-tools",

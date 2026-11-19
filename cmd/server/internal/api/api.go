@@ -37,6 +37,7 @@ type API struct {
 	stackURLs        map[string]cachedStackURLs
 	builds           *buildsession.Service
 	installationID   string
+	authorityStacks  consoleStackReader
 }
 
 type request struct {
@@ -52,6 +53,8 @@ type request struct {
 	bearer              string
 	platformUnavailable bool
 	claims              identity.Identity
+	authorityApps       map[authorityRoute][]domain.App
+	authorityStackCache map[string]buildsession.ConsoleStack
 }
 
 type endpoint func(*request) (any, int, error)
@@ -68,6 +71,7 @@ func New(database *store.Store, auth *identity.Authenticator, upstream *platform
 	a.mux.Handle("GET /launcher/entries", launcher.NewEntriesHandler(appEntrySource{api: a}, a.identity.Authenticate))
 	a.mux.HandleFunc("GET /api/console/openapi.json", a.openAPI)
 	a.route("GET /api/console/me", false, true, a.me)
+	a.route("GET /api/console/inbox", false, true, a.inbox)
 	a.route("GET /api/console/resolve", false, true, a.resolve)
 	a.mux.Handle("/api/console/directory/", a.directoryProxy())
 	a.route("POST /api/console/admin/directory-migrate", true, true, a.migrateDirectory)
@@ -83,6 +87,7 @@ func New(database *store.Store, auth *identity.Authenticator, upstream *platform
 	a.route("DELETE /api/console/apps/{id}", true, true, a.deleteApp)
 	a.route("GET /api/console/apps/{id}/comments", false, true, a.comments)
 	a.route("POST /api/console/apps/{id}/comments", true, true, a.createComment)
+	a.route("POST /api/console/apps/{id}/comments/seen", true, true, a.markCommentsSeen)
 	a.route("DELETE /api/console/apps/{id}/comments/{cid}", true, true, a.deleteComment)
 	a.route("GET /api/console/apps/{id}/screenshots/{sid}", false, true, a.screenshot)
 	a.route("POST /api/console/apps/{id}/screenshots", true, true, a.uploadScreenshot)

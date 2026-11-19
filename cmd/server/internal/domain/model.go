@@ -87,6 +87,18 @@ type SharePolicy struct {
 	ExtraPersonIDs []string `json:"extraPersonIds"`
 }
 
+type ContributionPolicy struct {
+	Scope string `json:"scope"`
+}
+
+type Permissions struct {
+	Use      bool `json:"use"`
+	Comment  bool `json:"comment"`
+	Propose  bool `json:"propose"`
+	Maintain bool `json:"maintain"`
+	Data     bool `json:"data"`
+}
+
 type AppGroup struct {
 	ID   string `json:"id"`
 	Path string `json:"path"`
@@ -117,6 +129,8 @@ type App struct {
 	StackID      *string      `json:"stackId"`
 	AppName      *string      `json:"appName"`
 	Share        SharePolicy  `json:"share"`
+	Contribution ContributionPolicy `json:"contribution"`
+	Permissions  Permissions        `json:"permissions"`
 	CreatedBy    Person       `json:"createdBy"`
 	CreatedAt    time.Time    `json:"createdAt"`
 	UpdatedAt    time.Time    `json:"updatedAt"`
@@ -148,6 +162,8 @@ type DirectoryEntry struct {
 	CreatedAt    time.Time    `json:"createdAt"`
 	UpdatedAt    time.Time    `json:"updatedAt"`
 	CanOpen      bool         `json:"canOpen"`
+	Contribution ContributionPolicy `json:"contribution"`
+	Permissions  Permissions        `json:"permissions"`
 }
 
 func EntryOf(app App, canOpen bool) DirectoryEntry {
@@ -170,6 +186,7 @@ func EntryOf(app App, canOpen bool) DirectoryEntry {
 		ID: app.ID, Path: app.Path(), DisplayName: app.DisplayName, Description: app.Description, Icon: app.Icon,
 		Tags: tags, Capabilities: capabilities, Screenshots: screenshots, Group: app.Group, Owners: owners,
 		AppName: app.AppName, StackID: app.StackID, CreatedAt: app.CreatedAt, UpdatedAt: app.UpdatedAt, CanOpen: canOpen,
+		Contribution: app.Contribution, Permissions: app.Permissions,
 	}
 }
 
@@ -380,6 +397,19 @@ func (a Actor) EditApp(app App) bool {
 	return a.IsConsoleAdmin || app.OwnedBy(a.PersonID) || a.ManageGroup(app.Group.ID)
 }
 
+// Capabilities is the single authority for a caller's relationship to an app.
+// Data stays separate even while its interim policy equals maintain.
+func Capabilities(actor Actor, app App) Permissions {
+	maintain := actor.EditApp(app)
+	use := maintain || actor.Visible(app)
+	inScope := app.Contribution.Scope == "company" ||
+		(app.Contribution.Scope == "group" && actor.GroupRoles[app.Group.ID] != "")
+	return Permissions{
+		Use: use, Comment: use, Propose: maintain || (use && actor.CanCreateApps && inScope),
+		Maintain: maintain, Data: maintain,
+	}
+}
+
 func (a Actor) DeleteComment(app App, c AppComment) bool {
 	return c.Author.ID == a.PersonID || a.EditApp(app)
 }
@@ -421,7 +451,11 @@ func NewActor(personID string, roles Roles, effectiveGroupIDs []string, groups [
 			}
 		}
 	}
-	return Actor{PersonID: personID, Roles: roles, GroupRoles: map[string]string{}, ShareGroupIDs: share}
+	rolesByGroup := make(map[string]string, len(effectiveGroupIDs))
+	for _, id := range effectiveGroupIDs {
+		rolesByGroup[id] = "member"
+	}
+	return Actor{PersonID: personID, Roles: roles, GroupRoles: rolesByGroup, ShareGroupIDs: share}
 }
 
 var slugPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)

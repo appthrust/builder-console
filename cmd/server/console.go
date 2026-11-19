@@ -26,7 +26,7 @@ const storeOpenTimeout = 30 * time.Second
 // Tests shorten it.
 var storeRetryInitial = time.Second
 
-// The database-backed API can appear after HTTP startup. Reviewer enrichment
+// The database-backed API can appear after HTTP startup. Console authority
 // follows that same readiness transition instead of bypassing the pending handler.
 type consoleAPI struct {
 	*pending.Handler
@@ -103,6 +103,7 @@ func consoleHandler(upstreamURL, projectID string) (*consoleAPI, func(), error) 
 		}
 		connected := api.New(database, auth, upstream, links, publicURL)
 		connected.ConfigureBuildSessions(conversations, installationID)
+		connected.ConfigureConsoleAuthority(conversationPlatform)
 		console.current.Store(connected)
 		console.Swap(connected)
 		return database, nil

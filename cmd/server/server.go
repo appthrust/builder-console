@@ -98,7 +98,7 @@ func newHandler(staticDir, upstreamURL, projectID string, console http.Handler, 
 	mux.Handle("/authz", console)
 	mux.Handle("/authz/", console)
 	mux.Handle("GET /launcher/entries", console)
-	platformProxy := api.WithDraftReviewers(proxy, projectID, func() *api.API {
+	platformProxy := api.WithConsoleAuthority(proxy, projectID, func() *api.API {
 		if current, ok := console.(interface{ CurrentAPI() *api.API }); ok {
 			return current.CurrentAPI()
 		}

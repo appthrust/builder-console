@@ -2,18 +2,25 @@
 // and of the slice of the Directory API the console uses: the same-origin proxy
 // `/api/console/directory/*` and the public `/api/directory/v1/*` origin (avatars).
 // `me.directoryPublicURL` is the request origin, so avatars load through Vite's
-// `/api` proxy. Fixtures: a 3-level org, 4 people (+2 realm-only users), 6 apps
+// `/api` proxy. Fixtures: a 3-level org, 5 people (+2 realm-only users), 6 apps
 // bound to the platform mock's seeded stacks, and one redirect for a moved group
 // (`sales/tokyo` → `sales/east`). Authorization mirrors the contract closely
-// enough to exercise the UI; the real rules live in cmd/server.
+// enough to exercise the UI; the real rules live in cmd/server (`domain.Capabilities`
+// is mirrored by `permissionsOf`: every app answer carries the caller's permissions).
+// Personas (`MOCK_ROLE`, or `POST /api/console/__mock/role`): Admin (default) is Yamada, a console admin who owns
+// apps (view maker; inbox: an access request and unread feedback on 経費精算). Viewer and Editor are Kobayashi, a
+// 営業企画部 member who owns and manages nothing (view user); Editor can create apps, so Kobayashi may propose on
+// 引っ越し見積 (own group, scope group) and 勤怠申請 (scope company). 会議室予約 accepts no proposals (scope off).
+// `GET /inbox` derives access requests and unread feedback on apps the caller maintains, like the server;
+// `POST /apps/{id}/comments/seen` (maintainers) marks the thread read. Yamada has already read 見積作成.
 // `POST /api/console/__mock/bare-500 {times?}` makes the next writes answer a
 // bare gateway 500 (no JSON envelope), as during a console rollout.
 // `POST /api/console/__mock/not-member {notMember?, teamSlug?}` denies Project
 // access (default true); /me still answers with the non-member notice metadata.
 // `POST /api/console/__mock/caller {personId, role?}` switches signed-in people
-// (default role Viewer) for requester/approver stories; reset restores Yamada.
-// `POST /api/console/__mock/role {role}` switches role and caller: Viewer uses
-// Tanaka (who cannot open the private keihi app); Admin/Editor use Yamada.
+// (default role Viewer) for requester/approver stories; reset restores the MOCK_ROLE persona.
+// `POST /api/console/__mock/role {role}` switches role and caller: Admin uses Yamada, Viewer and Editor use
+// Kobayashi (who cannot open the private keihi app).
 // `POST /api/console/__mock/leave-groups {personId?}` removes every direct membership of the person (default the
 // caller), who then belongs to no group: no creation entry opens and `POST /apps` refuses every group, like the server.
 // `POST /api/console/__mock/comments {state: 'empty' | 'many' | 'quota'}` replaces
@@ -69,7 +76,11 @@ type Person = z.output<typeof wire.person>
 
 type Role = 'Admin' | 'Editor' | 'Viewer'
 type StoredGroup = Omit<Group, 'path' | 'subgroupCount' | 'memberCount'>
-type StoredApp = Omit<BusinessApp, 'group' | 'owners' | 'createdBy'> & { groupId: string; ownerIds: string[]; createdById: string }
+type StoredApp = Omit<BusinessApp, 'group' | 'owners' | 'createdBy' | 'permissions'> & { groupId: string; ownerIds: string[]; createdById: string }
+type Permissions = z.output<typeof wire.permissions>
+type ContributionScope = z.output<typeof wire.contribution>['scope']
+type InboxItem = z.output<typeof wire.inbox>['items'][number]
+const CONTRIBUTION_SCOPES: readonly ContributionScope[] = ['off', 'group', 'company']
 type StoredComment = { comment: AppComment; deletedAt: string | null; deletedBy: string | null }
 type StoredScreenshotFile = { appId: string; contentType: ScreenshotType; bytes: Uint8Array<ArrayBuffer> }
 type StoredAvatar = { contentType: ScreenshotType; bytes: Uint8Array<ArrayBuffer> }
@@ -122,10 +133,15 @@ const app = (
   stackId: slug,
   appName: slug,
   share: policy,
+  contribution: { scope: 'group' },
   createdById: owner,
   createdAt: at(days),
   updatedAt: at(days + 1),
 })
+
+/** Who a persona signs in as: Admin is Yamada (owns apps); Viewer and Editor are Kobayashi (owns and manages nothing). */
+const callerFor = (role: Role) => (role === 'Admin' ? 'p-yamada' : 'p-kobayashi')
+const ROLES: readonly Role[] = ['Admin', 'Editor', 'Viewer']
 
 function seedConsole() {
   const people: Person[] = [
@@ -133,6 +149,7 @@ function seedConsole() {
     { id: 'p-sato', subject: 'sub-sato', pending: false, email: 'sato@example.com', displayName: '佐藤 花子', avatarVersion: null },
     { id: 'p-suzuki', subject: 'sub-suzuki', pending: false, email: 'suzuki@example.com', displayName: '鈴木 一郎', avatarVersion: null },
     { id: 'p-tanaka', subject: 'sub-tanaka', pending: false, email: 'tanaka@example.com', displayName: '田中 美咲', avatarVersion: null },
+    { id: 'p-kobayashi', subject: 'sub-kobayashi', pending: false, email: 'kobayashi@example.com', displayName: '小林 由紀', avatarVersion: null },
   ]
   const avatarFiles = new Map<string, StoredAvatar>()
   const seedAvatars: Record<string, Rgb> = { 'p-yamada': [13, 148, 136], 'p-sato': [219, 39, 119], 'p-tanaka': [79, 70, 229] }
@@ -165,7 +182,7 @@ function seedConsole() {
   const memberships = new Map<string, Map<string, MemberRole>>([
     ['g-sales', new Map([['p-sato', 'manager']])],
     ['g-team-a', new Map<string, MemberRole>([['p-yamada', 'member'], ['p-suzuki', 'member']])],
-    ['g-planning', new Map([['p-sato', 'member']])],
+    ['g-planning', new Map<string, MemberRole>([['p-sato', 'member'], ['p-kobayashi', 'member']])],
     ['g-soumu', new Map([['p-tanaka', 'manager']])],
   ])
   const apps: StoredApp[] = [
@@ -177,8 +194,12 @@ function seedConsole() {
     app('nippo', '日報', 'g-team-a', 'p-suzuki', share('group', ['g-sales-east']), 5, '毎日の営業報告をまとめます。', '📝', ['営業']),
     app('keihi', '経費精算', 'g-team-a', 'p-yamada', share('private'), 20, '交通費と経費を申請します。', '💴', ['経理']),
     app('hikkoshi', '引っ越し見積', 'g-planning', 'p-sato', share('group', ['g-sales']), 30, '引っ越し案件の概算を出します。', '🚚', ['企画']),
-    { ...app('kintai', '勤怠申請', 'g-soumu', 'p-tanaka', share('company'), 10, '休暇と残業を申請します。', '🕘', ['総務']), capabilities: ['休暇を申請できる', '残業の時間を記録できる', '上長が承認できる'] },
-    app('kaigishitsu', '会議室予約', 'g-soumu', 'p-tanaka', share('public'), 25, '会議室の空きを確認して予約します。', '🏢', ['総務']),
+    {
+      ...app('kintai', '勤怠申請', 'g-soumu', 'p-tanaka', share('company'), 10, '休暇と残業を申請します。', '🕘', ['総務']),
+      capabilities: ['休暇を申請できる', '残業の時間を記録できる', '上長が承認できる'],
+      contribution: { scope: 'company' },
+    },
+    { ...app('kaigishitsu', '会議室予約', 'g-soumu', 'p-tanaka', share('public'), 25, '会議室の空きを確認して予約します。', '🏢', ['総務']), contribution: { scope: 'off' } },
   ]
   const screenshotFiles = new Map<string, StoredScreenshotFile>()
   const seedShots: Record<string, { accent: Rgb; captions: string[] }> = {
@@ -219,9 +240,10 @@ function seedConsole() {
       deletedAt: null, deletedBy: null,
     },
   ]
+  const role = (process.env.MOCK_ROLE as Role | undefined) ?? 'Admin'
   return {
-    callerId: 'p-yamada',
-    role: (process.env.MOCK_ROLE as Role | undefined) ?? 'Admin',
+    callerId: callerFor(role),
+    role,
     platformUnavailable: process.env.MOCK_PLATFORM_UNAVAILABLE === '1',
     notMember: false,
     teamSlug: 'commerce-team',
@@ -238,6 +260,8 @@ function seedConsole() {
     apps,
     accessRequests,
     comments,
+    /** Person id → app id → when they last marked the thread read (`POST /apps/{id}/comments/seen`). */
+    commentsSeen: new Map<string, Map<string, string>>([['p-yamada', new Map([['a-mitsumori', at(38)]])]]),
     /** App id → what `GET /apps/{id}/tools` answers; missing ids have no Tools built-in app. */
     tools: new Map<string, ToolsState>([['a-mitsumori', 'list'], ['a-nippo', 'empty'], ['a-kintai', 'pending'], ['a-kaigishitsu', 'unavailable']]),
     screenshotFiles,
@@ -302,6 +326,22 @@ export const mockOwnerSubjects = (stackId: string): string[] =>
     .flatMap((id) => person(id)?.subject ? [person(id).subject!] : [])
 
 /**
+ * The console's gate in front of `POST application-drafts {kind: 'improvement'}` (server `requireCapability(…, "propose")`):
+ * undefined when the caller may propose to the app on that stack, or when no console app owns it (the Platform answers);
+ * otherwise the 403 the console returns instead of forwarding.
+ */
+export function mockProposalRefusal(stackId: string): { code: 'contribution_not_accepted' | 'forbidden'; message: string } | undefined {
+  const stored = state.apps.find((app) => app.stackId === stackId)
+  if (!stored) return undefined
+  const permissions = permissionsOf(stored)
+  if (permissions.propose) return undefined
+  if (permissions.use && canCreateApps() && stored.contribution.scope === 'off') {
+    return { code: 'contribution_not_accepted', message: 'このアプリは、いま提案を受け付けていません。' }
+  }
+  return { code: 'forbidden', message: 'You do not have permission for this action' }
+}
+
+/**
  * Direct rows plus rows inherited from ancestors (Directory rule): a direct membership always stays a direct
  * row carrying the strongest effective role; otherwise the strongest role wins, then the nearest source.
  */
@@ -333,7 +373,8 @@ function personGroups(personId: string): Map<string, { role: MemberRole; inherit
 
 const isAdmin = () => state.role === 'Admin' && !state.platformUnavailable && !state.notMember
 const canManage = (groupId: string) => isAdmin() || personGroups(state.callerId).get(groupId)?.role === 'manager'
-const canEditApp = (stored: StoredApp) => stored.ownerIds.includes(state.callerId) || canManage(stored.groupId)
+const maintains = (stored: StoredApp) => stored.ownerIds.includes(state.callerId) || canManage(stored.groupId)
+const canCreateApps = () => !state.notMember && !state.platformUnavailable && (state.role === 'Admin' || state.role === 'Editor')
 
 function visible(stored: StoredApp, personId = state.callerId): boolean {
   if ((personId === state.callerId && isAdmin()) || stored.ownerIds.includes(personId) || stored.share.extraPersonIds.includes(personId)) return true
@@ -341,6 +382,37 @@ function visible(stored: StoredApp, personId = state.callerId): boolean {
   if (stored.share.scope === 'private') return false
   const mine = personGroups(personId)
   return stored.share.groupIds.some((groupId) => [...subtree(groupId)].some((id) => mine.has(id)))
+}
+
+/** The caller's authority on one app: the server's `domain.Capabilities` (data equals maintain for now). */
+function permissionsOf(stored: StoredApp): Permissions {
+  const maintain = maintains(stored)
+  const use = maintain || visible(stored)
+  const { scope } = stored.contribution
+  const inScope = scope === 'company' || (scope === 'group' && personGroups(state.callerId).has(stored.groupId))
+  return { use, comment: use, propose: maintain || (use && canCreateApps() && inScope), maintain, data: maintain }
+}
+
+/** `GET /inbox`: pending access requests and others' comments after the caller last read the thread, on apps they maintain. */
+function inbox(): InboxItem[] {
+  const seen = state.commentsSeen.get(state.callerId)
+  const events = [
+    ...state.accessRequests.filter((entry) => entry.status === 'pending').map((entry) => ({ kind: 'accessRequest' as const, appId: entry.appId, at: entry.requestedAt })),
+    ...state.comments
+      .filter(({ comment, deletedAt }) => deletedAt === null && comment.author.id !== state.callerId && comment.createdAt > (seen?.get(comment.appId) ?? ''))
+      .map(({ comment }) => ({ kind: 'feedback' as const, appId: comment.appId, at: comment.createdAt })),
+  ]
+  const items = new Map<string, InboxItem>()
+  for (const event of events) {
+    const stored = state.apps.find((entry) => entry.id === event.appId)
+    if (!stored || !maintains(stored)) continue
+    const key = `${event.kind}/${stored.id}`
+    const item = items.get(key) ?? { kind: event.kind, app: { id: stored.id, path: `${pathOf(stored.groupId)}/${stored.slug}`, displayName: stored.displayName, icon: stored.icon }, count: 0, since: event.at }
+    item.count++
+    if (event.at > item.since) item.since = event.at
+    items.set(key, item)
+  }
+  return [...items.values()].sort((a, b) => a.kind.localeCompare(b.kind) || b.since.localeCompare(a.since) || a.app.id.localeCompare(b.app.id))
 }
 
 function toApp(stored: StoredApp): BusinessApp {
@@ -351,6 +423,7 @@ function toApp(stored: StoredApp): BusinessApp {
     group: { id: owner.id, path: pathOf(owner.id), name: owner.name },
     owners: ownerIds.map(person),
     createdBy: person(createdById),
+    permissions: permissionsOf(stored),
   }
 }
 
@@ -372,6 +445,8 @@ function toEntry(stored: StoredApp): DirectoryEntry {
     createdAt: app.createdAt,
     updatedAt: app.updatedAt,
     canOpen: visible(stored),
+    contribution: app.contribution,
+    permissions: app.permissions,
   }
 }
 
@@ -387,7 +462,9 @@ function me(): Me {
     effectiveGroupIds: [...mine.keys()],
     managedGroupIds: [...mine].filter(([, row]) => row.role === 'manager').map(([groupId]) => groupId),
     isConsoleAdmin: isAdmin(),
-    canCreateApps: !state.notMember && !state.platformUnavailable && (state.role === 'Admin' || state.role === 'Editor'),
+    canCreateApps: canCreateApps(),
+    // Like the server: admins, group managers and owners start from the maker home.
+    view: isAdmin() || [...mine.values()].some((row) => row.role === 'manager') || state.apps.some((entry) => entry.ownerIds.includes(state.callerId)) ? 'maker' : 'user',
     projectId: state.projectId,
     teamSlug: state.teamSlug,
     directoryPublicURL: requestOrigin,
@@ -418,7 +495,7 @@ function appTools(stored: StoredApp): AppTools {
   if (toolsState === 'pending') return { available: false, pending: true }
   if (toolsState === 'unavailable') return { available: true, error: 'tools_unavailable', tools: [] }
   const tools = toolsState === 'list' ? mockTools(stored) : []
-  return me().canCreateApps || isAdmin() ? { available: true, tools, editUrl: `${toolsOrigin()}/edit` } : { available: true, tools }
+  return canCreateApps() || isAdmin() ? { available: true, tools, editUrl: `${toolsOrigin()}/edit` } : { available: true, tools }
 }
 
 // ---------- resolve ----------
@@ -581,16 +658,16 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
   if (head === '__mock' && id === 'caller' && method === 'POST') {
     const input = await body<{ personId: string; role?: Role }>(request)
     if (!state.people.some((entry) => entry.id === input.personId && entry.subject)) return notFound()
-    if (input.role && !['Admin', 'Editor', 'Viewer'].includes(input.role)) return fail(400, 'invalid_request', 'invalid role')
+    if (input.role && !ROLES.includes(input.role)) return fail(400, 'invalid_request', 'invalid role')
     state.callerId = input.personId
     state.role = input.role ?? 'Viewer'
     return json(me())
   }
   if (head === '__mock' && id === 'role' && method === 'POST') {
     const input = await body<{ role: Role }>(request)
-    if (!['Admin', 'Editor', 'Viewer'].includes(input.role)) return fail(400, 'invalid_request', 'invalid role')
+    if (!ROLES.includes(input.role)) return fail(400, 'invalid_request', 'invalid role')
     state.role = input.role
-    state.callerId = input.role === 'Viewer' ? 'p-tanaka' : 'p-yamada'
+    state.callerId = callerFor(input.role)
     return json(me())
   }
   if (head === '__mock' && id === 'comments' && method === 'POST') {
@@ -677,12 +754,13 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
   if (head === 'directory') return directoryRoutes(request, url, segments.slice(1))
   // NEW-APP conversation sessions (`/api/console/v1/build-sessions*`, ./mock-build-sessions): the caller's own, in the caller's groups.
   if (head === 'v1' && id === 'build-sessions') return buildSessionRoutes(request, url, { owner: state.callerId, member: !state.notMember, groupIds: [...personGroups(state.callerId).keys()] })
-  const needsRoles = head === 'resolve' || head === 'apps' || head === 'admin' || (head === 'access-requests' && !id && method === 'GET')
+  const needsRoles = head === 'resolve' || head === 'apps' || head === 'admin' || head === 'inbox' || (head === 'access-requests' && !id && method === 'GET')
   if (state.notMember && needsRoles) {
     return fail(403, 'not_project_member', state.teamSlug
       ? `This Project belongs to Team ${state.teamSlug}`
       : 'This Project belongs to a Team; ask its administrator to add you')
   }
+  if (head === 'inbox' && !id && method === 'GET') return json({ items: inbox() })
   if (head === 'resolve' && method === 'GET') {
     const resolved = resolve(url.searchParams.get('path') ?? '')
     return resolved ? json(resolved) : notFound()
@@ -706,7 +784,7 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
   if (head === 'access-requests') {
     if (!id && method === 'GET') {
       if (url.searchParams.get('status') !== 'pending') return fail(400, 'invalid_request', 'status must be pending')
-      const editable = new Set(state.apps.filter(canEditApp).map((entry) => entry.id))
+      const editable = new Set(state.apps.filter(maintains).map((entry) => entry.id))
       return json(state.accessRequests
         .filter((entry) => entry.status === 'pending' && editable.has(entry.appId))
         .sort((a, b) => a.requestedAt.localeCompare(b.requestedAt)))
@@ -775,7 +853,7 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
         return json({ items: scope === 'directory' ? rows.map(toEntry) : rows.map(toApp) })
       }
       if (method === 'POST') {
-        if (!me().canCreateApps) return forbidden()
+        if (!canCreateApps()) return forbidden()
         const input = await body<{
           displayName: string
           description?: string
@@ -812,6 +890,7 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
           // The suggested label until /bind fixes it.
           appName,
           share: input.share ?? share('group', [groupId]),
+          contribution: { scope: 'group' },
           createdById: state.callerId,
           createdAt: now,
           updatedAt: now,
@@ -853,10 +932,17 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
         state.comments.push({ comment, deletedAt: null, deletedBy: null })
         return json(comment, 201)
       }
+      if (subId === 'seen' && !segments[4] && method === 'POST') {
+        if (!maintains(stored)) return visible(stored) ? forbidden() : notFound()
+        const seen = state.commentsSeen.get(state.callerId) ?? new Map<string, string>()
+        seen.set(stored.id, new Date().toISOString())
+        state.commentsSeen.set(state.callerId, seen)
+        return new Response(null, { status: 204 })
+      }
       if (subId && method === 'DELETE') {
         const entry = state.comments.find((entry) => entry.comment.id === subId && entry.comment.appId === stored.id && entry.deletedAt === null)
         if (!entry) return notFound()
-        if (entry.comment.author.id !== state.callerId && !canEditApp(stored)) return forbidden()
+        if (entry.comment.author.id !== state.callerId && !maintains(stored)) return forbidden()
         entry.deletedAt = new Date().toISOString()
         entry.deletedBy = state.callerId
         return new Response(null, { status: 204 })
@@ -873,7 +959,7 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
           headers: { 'Content-Type': file.contentType, 'Content-Length': String(file.bytes.length), 'Cache-Control': 'private, max-age=86400' },
         })
       }
-      if (!canEditApp(stored)) return visible(stored) ? forbidden() : notFound()
+      if (!maintains(stored)) return visible(stored) ? forbidden() : notFound()
       if (!subId && method === 'POST') {
         const form = await request.formData().catch(() => undefined)
         const file = form?.get('file')
@@ -911,7 +997,7 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
       return undefined
     }
     if (stored && sub === 'access-requests') {
-      if (!canEditApp(stored)) return forbidden()
+      if (!maintains(stored)) return forbidden()
       if (!subId && method === 'GET') {
         const requests = state.accessRequests.filter((entry) => entry.appId === stored.id)
         const pending = requests.filter((entry) => entry.status === 'pending').sort((a, b) => a.requestedAt.localeCompare(b.requestedAt))
@@ -938,11 +1024,16 @@ export async function consoleRoutes(request: Request, url: URL): Promise<Respons
       return undefined
     }
     if (!stored || !visible(stored)) return notFound()
-    const canEdit = canEditApp(stored)
+    const canEdit = maintains(stored)
     if (!sub && method === 'GET') return json(toApp(stored))
     if (!sub && method === 'PATCH') {
       if (!canEdit) return forbidden()
-      const input = await body<Partial<Pick<StoredApp, 'displayName' | 'description' | 'icon' | 'tags' | 'groupId' | 'slug' | 'share' | 'guide' | 'capabilities'>> & { ownerIds?: string[] }>(request)
+      const input = await body<Partial<Pick<StoredApp, 'displayName' | 'description' | 'icon' | 'tags' | 'groupId' | 'slug' | 'share' | 'guide' | 'capabilities' | 'contribution'>> & { ownerIds?: string[] }>(request)
+      if (input.contribution !== undefined) {
+        const scope = CONTRIBUTION_SCOPES.find((known) => known === (input.contribution as { scope?: unknown } | null)?.scope)
+        if (!scope) return fail(400, 'invalid_request', 'contribution.scope must be off, group or company')
+        input.contribution = { scope }
+      }
       if (input.guide !== undefined && (typeof input.guide !== 'string' || [...input.guide].length > 4000)) {
         return fail(400, 'invalid_request', 'guide must be at most 4000 characters')
       }

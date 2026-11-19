@@ -30,6 +30,8 @@
 //   created and bound to that seeded stack (412 without a source repository, e.g. `nippo`). While
 //   read, their turns answer after ~2 s (first a clarifying question, then a 3-task proposal whose
 //   first reply is 「この内容で直して」) and their runs move one step every ~1.5 s.
+//   Like the console gate, a caller without `permissions.propose` on the console app is refused with
+//   403 `contribution_not_accepted` (scope `off`) or `forbidden` before any Platform check.
 //   Completion submits a proposal; only Accept creates a live release and version.
 // Toggles:
 // - `POST /api/v1/__mock/role {role}` switches the caller's Team role (Viewer → create calls answer 403).
@@ -141,7 +143,7 @@ import { buildCopy, textJa as buildTextJa } from '../model/build/copy'
 import { isFirstTurn, isKickoffReply, isPrepareTurn } from '../model/build/questions'
 import { dataModeFailure, findTable, resetDatabaseData, selectRows, state as dataState, type DataMode } from './mock-database-data'
 import { dataWriteRoutes } from './mock-database-rows'
-import { mockOwnerSubjects, mockSubject } from './mock-console'
+import { mockOwnerSubjects, mockProposalRefusal, mockSubject } from './mock-console'
 
 export const MOCK_PROJECT_ID = 'commerce'
 const TEAM_SLUG = 'commerce-team'
@@ -2088,6 +2090,9 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
       if (body.kind !== undefined && body.kind !== 'creation' && !improvement) return error(400, 'invalid_argument', "'kind' must be creation or improvement")
       if (improvement && !body.applicationStackId) return error(400, 'invalid_argument', 'applicationStackId is required for an improvement draft')
       if (!improvement && body.applicationStackId) return error(400, 'invalid_argument', 'applicationStackId is only accepted for an improvement draft')
+      // The console gate (console_authority) answers before the Platform sees an improvement draft.
+      const refusal = improvement ? mockProposalRefusal(body.applicationStackId!) : undefined
+      if (refusal) return error(403, refusal.code, refusal.message)
       // Like platform-api: the target stack must resolve to an application with a source repository.
       const stack = improvement ? state.stacks.get(body.applicationStackId!) : undefined
       if (improvement && !stack) return error(412, 'failed_precondition', 'the application stack has no application')

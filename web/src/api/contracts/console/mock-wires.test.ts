@@ -37,6 +37,7 @@ test('the in-memory Console API emits canonical wires for every supported SPA op
   }
   try {
     await call(contracts.me, undefined)
+    await call(contracts.inbox, undefined)
     await call(contracts.groups, undefined)
     await call(contracts.people, { ids: ['p-yamada'] })
     await call(contracts.person, 'p-yamada')
@@ -58,10 +59,12 @@ test('the in-memory Console API emits canonical wires for every supported SPA op
     await call(contracts.migrateDirectory, undefined)
     const app = await call(contracts.createApp, { displayName: 'Wire parity', groupId: 'g-team-a', slug: 'wire-parity', share: { scope: 'private', groupIds: [], extraPersonIds: [] } })
     await call(contracts.updateApp, { appId: app.id, input: { description: 'Updated' } })
+    await call(contracts.updateApp, { appId: app.id, input: { contribution: { scope: 'off' } } })
     await call(contracts.bindApp, { appId: app.id, stackId: 'wire-parity-stack', appName: app.appName! })
     await call(contracts.comments, app.id)
     const comment = await call(contracts.postComment, { appId: app.id, body: 'Wire comment' })
     await call(contracts.removeComment, { appId: app.id, commentId: comment.id })
+    await call(contracts.markCommentsSeen, app.id)
     const screenshot = await call(contracts.uploadScreenshot, { appId: app.id, file: new File([mockScreenPng([10, 20, 30], 0, 2, 3)], 'screen.png', { type: 'image/png' }) })
     await call(contracts.reorderScreenshots, { appId: app.id, order: [screenshot.id] })
     await call(contracts.removeScreenshot, { appId: app.id, screenshotId: screenshot.id })

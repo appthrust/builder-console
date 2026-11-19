@@ -4,7 +4,7 @@
 import { queryOptions, useQuery, useSuspenseQuery, type QueryClient } from '@tanstack/react-query'
 import { isResponseContractError } from '../boundary'
 import { isConsoleError } from '../console'
-import { listCommentsContract, postCommentContract, removeCommentContract } from '../contracts/console/comments'
+import { listCommentsContract, markCommentsSeenContract, postCommentContract, removeCommentContract } from '../contracts/console/comments'
 import { configContract } from '../contracts/console/config'
 import { groupsContract } from '../contracts/console/groups'
 import { meContract } from '../contracts/console/me'
@@ -19,6 +19,7 @@ import {
   directoryAppsContract,
   directoryEntryContract,
   directoryUsersContract,
+  inboxContract,
   membersContract,
   migrateDirectoryContract,
   myAccessRequestContract,
@@ -34,18 +35,19 @@ import {
   updateAppContract,
   uploadScreenshotContract,
   type AppListInput,
+  type ContributionInput,
   type DirectoryAppsInput,
   type UpdateAppInput,
 } from '../contracts/console/operations'
 import { conversationSettingApi } from '../conversation-setting'
 import { apiGateway } from '../gateway'
 import { isTransientError } from '../platform-error'
-import type { BusinessApp, Person } from '../../model/contracts/console'
+import type { BusinessApp, InboxServerItem, Person } from '../../model/contracts/console'
 import { POLL_INTERVAL_MS, readRetryDelay, retryReadQuery, retryTransient, TRANSIENT_RETRIES } from './shared'
 
 export type AppListParams = AppListInput
 export type DirectoryAppsParams = DirectoryAppsInput
-export type { UpdateAppInput }
+export type { ContributionInput, InboxServerItem, UpdateAppInput }
 
 export const consoleKeys = {
   me: ['console', 'me'] as const,
@@ -67,6 +69,7 @@ export const consoleKeys = {
   directoryUsers: (query: string) => ['console', 'directory', 'users', query] as const,
   platform: ['console', 'admin', 'platform'] as const,
   conversationSetting: ['console', 'admin', 'conversation'] as const,
+  inbox: ['console', 'inbox'] as const,
 }
 
 /** Not-found answers and contract failures are final; a call nothing answered gets the transient retries, anything else two retries. */
@@ -145,6 +148,9 @@ export const pendingAccessRequestsQuery = queryOptions({
   queryFn: () => apiGateway.console(pendingAccessRequestsContract, undefined),
 })
 
+/** Console-held inbox rows (access requests, unread feedback) on apps the caller maintains; `useInbox` adds the Platform-side rows. */
+export const inboxQuery = queryOptions({ queryKey: consoleKeys.inbox, queryFn: (): Promise<InboxServerItem[]> => apiGateway.console(inboxContract, undefined) })
+
 export const appAccessRequestsQuery = (appId: string) =>
   queryOptions({ queryKey: consoleKeys.accessRequestsOfApp(appId), queryFn: () => apiGateway.console(appAccessRequestsContract, appId) })
 
@@ -185,6 +191,8 @@ export function useApps(params: AppListParams, enabled = true) {
 export const postComment = (appId: string, body: string) => apiGateway.console(postCommentContract, { appId, body })
 
 export const removeComment = (appId: string, commentId: string) => apiGateway.console(removeCommentContract, { appId, commentId })
+/** Maintainers only: the thread so far counts as read for the caller's inbox feedback count. */
+export const markCommentsSeen = (appId: string): Promise<void> => apiGateway.console(markCommentsSeenContract, appId)
 
 // Console writes of the app screens. A 2xx answer that breaks its contract
 // rejects with a typed failure: nothing is cached from it, and callers read the

@@ -17,7 +17,6 @@ import (
 	"testing"
 	"time"
 
-	consolecontract "github.com/appthrust/appserver-go/appserver/contract/console"
 	"github.com/appthrust/appserver-go/appserver/identity"
 	"github.com/appthrust/appserver-go/appserver/pgstore/testutil"
 	platform "github.com/appthrust/appserver-go/appserver/platformclient"
@@ -532,7 +531,10 @@ func TestLauncherRejectsInvalidIdentityCA(t *testing.T) {
 }
 
 func TestServedOpenAPIEqualsCommittedContract(t *testing.T) {
-	document := consolecontract.Document
+	document, err := os.ReadFile("internal/api/openapi.json")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		name          string
 		authorization bool
