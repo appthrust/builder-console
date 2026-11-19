@@ -88,6 +88,17 @@ test.describe('Discover navigation @discover', () => {
     await expect(soumu.getByRole('link', { name: /^勤怠申請/ })).toBeVisible()
     await expect(soumu.getByRole('link', { name: /^会議室予約/ })).toBeVisible()
 
+    // Directory → group → app → back to the group.
+    await soumu.getByRole('link', { name: seed.groups.soumu.name, exact: true }).click()
+    await expect(page).toHaveURL(`/${seed.groups.soumu.path}`)
+    await expect(main.getByRole('heading', { name: seed.groups.soumu.name, exact: true, level: 1 })).toBeVisible()
+    await main.getByRole('link', { name: seed.apps.kintai.name, exact: true }).click()
+    await expect(page).toHaveURL(`/${seed.apps.kintai.groupPath}/${seed.apps.kintai.slug}`)
+    await expect(main.getByRole('heading', { name: seed.apps.kintai.name, exact: true, level: 1 })).toBeVisible()
+    await page.goBack()
+    await expect(page).toHaveURL(`/${seed.groups.soumu.path}`)
+    await expect(main.getByRole('heading', { name: seed.groups.soumu.name, exact: true, level: 1 })).toBeVisible()
+
     // Arriving at a group page reveals its ancestors even after manual collapse.
     await nav.getByRole('button', { name: `${seed.groups.salesEast.name} を閉じる`, exact: true }).click()
     await nav.getByRole('button', { name: `${seed.groups.sales.name} を閉じる`, exact: true }).click()
