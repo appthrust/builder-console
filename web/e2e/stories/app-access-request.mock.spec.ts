@@ -6,7 +6,9 @@ test('an owner approves a request as a viewer and pending badges disappear @mock
   const app = seed.apps.keihi
   await mock.console('caller', { personId: seed.me.id })
   await page.goto('/')
-  await expect(page.getByTestId(badge)).toHaveText('1')
+  const pending = page.getByRole('list', { name: '対応待ちの一覧', exact: true })
+    .getByRole('listitem').filter({ has: page.getByRole('link', { name: `${app.name}: 申請を見る`, exact: true }) })
+  await expect(pending).toContainText('利用申請 1 件')
   await page.goto('/mine')
   const row = page.getByRole('row').filter({ hasText: app.name })
   await expect(row.getByTestId(badge)).toHaveText('1')
@@ -39,8 +41,8 @@ test('an owner approves a request as a viewer and pending badges disappear @mock
   await expect(page.getByRole('row').filter({ hasText: app.name })).toBeVisible()
   await expect(page.getByTestId(badge)).toHaveCount(0)
   await page.goto('/')
-  await expect(page.getByRole('link').filter({ hasText: app.name })).toBeVisible()
-  await expect(page.getByTestId(badge)).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: /^使えるアプリ/, level: 2 })).toBeVisible()
+  await expect(pending).toHaveCount(0)
 })
 
 test('a non-owner submits an access request and sees the pending view @mock @story', async ({ page, mock }, testInfo) => {

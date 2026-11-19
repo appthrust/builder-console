@@ -76,6 +76,14 @@ describe('Console gateway transport', () => {
     expect(calls[1]).toMatchObject({ input: '/api/console/apps/x', init: { method: 'DELETE' } })
   })
 
+  test('comment seen writes survive navigation without keeping other requests alive', async () => {
+    const { api, calls } = recorder([new Response(null, { status: 204 }), new Response(null, { status: 204 })])
+    await api(contracts.markCommentsSeen, 'a-keihi')
+    await api(contracts.removeComment, { appId: 'a-keihi', commentId: 'comment' })
+    expect(calls[0]).toMatchObject({ input: '/api/console/apps/a-keihi/comments/seen', init: { method: 'POST', keepalive: true } })
+    expect(calls[1].init.keepalive).toBeUndefined()
+  })
+
   test('surfaces the contract error code', async () => {
     const { api } = recorder([Response.json({ error: 'already_bound', message: 'already bound' }, { status: 409 })])
     const error = await api(contracts.bindApp, { appId: 'a', stackId: 's', appName: 'a' }).catch((caught: unknown) => caught)

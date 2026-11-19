@@ -35,5 +35,5 @@ export const removeCommentContract = consoleEmptyContract({
 /** Maintainers only: everything in the thread so far counts as read for the caller's inbox. */
 export const markCommentsSeenContract = consoleEmptyContract({
   ...operations.markCommentsSeen,
-  request: (appId: string) => ({ method: 'POST', path: `${appComments(appId)}/seen` }),
+  request: (appId: string) => ({ method: 'POST', path: `${appComments(appId)}/seen`, keepalive: true }),
 })
