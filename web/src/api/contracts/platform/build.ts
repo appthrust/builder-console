@@ -67,17 +67,23 @@ export function openCanonical<K extends string>(canonical: { options: readonly K
 
 const DRAFT_OMITS = 'platform-api internal/api/dto_application_draft.go'
 
+// The retired workspace a turn or plan generation replaced (APT-1264): present only on the record that switched to a new
+// workspace. Restated here until the published api-schema carries it; an older Platform never sends it.
+const replacedDevWorkspaceId = z.string().optional()
+
 export const turnReader: z.ZodType<BuildTurn> = ApplicationDraftConversationTurn.extend({
   // A turn without `kind` predates the field and is a conversation turn (canonical default).
   kind: openCanonical(ApplicationDraftConversationTurnKind).default({ kind: 'known', value: 'conversation' }),
   status: openCanonical(ApplicationDraftConversationTurnStatus),
   excelProgress: excelProgressReader.optional(),
   uiDesign: uiDesignReader.optional(),
+  replacedDevWorkspaceId,
 })
 
 export const generationReader: z.ZodType<BuildGeneration> = ApplicationDraftCreationPlanGeneration.extend({
   status: openCanonical(ApplicationDraftCreationPlanGenerationStatus),
   stage: openCanonical(ApplicationDraftCreationPlanGeneration.shape.stage.unwrap()).optional(),
+  replacedDevWorkspaceId,
 })
 
 const stepReader: z.ZodType<BuildExecutionStep> = ApplicationDraftCreationExecutionStep.extend({

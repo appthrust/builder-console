@@ -20,6 +20,7 @@ import { Button, Card, CardBody, cn, CopyButton, EmptyState, Field, focusHeading
 import { ResourceBoundary, type ResourceQuery } from '../../ui/resource-boundary'
 import { text as buildText } from '../build/copy'
 import { resolveBuildGroup } from '../build/entry'
+import { WorkspaceRecreatedNotice } from '../build/conversation-pane'
 import { UnconfirmedNotice } from '../build/unconfirmed-notice'
 import { filesFromDrop, filesFromList, type CollectedWorkbook } from './collect'
 import { text } from './copy'
@@ -274,6 +275,8 @@ function Excel2AppFlow({ draftId, onCreatedDraft }: { draftId?: string; onCreate
           {flow.unconfirmed ? <div className="mb-5" data-testid="excel2app-unconfirmed"><UnconfirmedNotice onConfirm={() => void flow.confirm()} /></div> : null}
 
           {step === 0 && !readOnly ? <PickStep busy={flow.collecting || flow.starting || flow.turnRunning} closed={flow.unconfirmed} error={pickError} files={flow.files} budget={flow.budget} hint={flow.hint} onHint={flow.setHint} onFiles={(files) => void collected(files)} onSample={(grids) => void collected(grids, true)} onRemove={(file) => void remove(file)} onRetry={(file) => void flow.retryFile(file.key)} onStart={() => { setStep(ANALYSIS_STEP); void flow.startAnalysis() }} /> : null}
+          {/* The analysis switched from a retired workspace (APT-1264): told once on its step, above what it read. */}
+          {step === ANALYSIS_STEP && draft && flow.analysis.recreated ? <div className="mb-5" data-testid="excel2app-workspace-recreated"><WorkspaceRecreatedNotice /></div> : null}
           {step === ANALYSIS_STEP && draft ? (
             reading ? (
               <AnalysisStep reading={reading} workbooks={draft.source?.workbooks ?? []} entries={flow.offlineEntries} readings={flow.workbooksQuery} resetKey={draft.id} offline={flow.offline} />

@@ -157,6 +157,43 @@ function proposalMessage(draft: BuildDraft, lastPlannedIntent?: string, destinat
   return { role: 'assistant', text: proposal.lead ?? proposal.name, proposal, at, turnId: `proposal:${generation?.id ?? draft.id}` }
 }
 
+/** A record Platform may mark as the switch from a retired workspace (APT-1264): a conversation turn or a plan generation. */
+interface WorkspaceSwitch { startedAt: string; replacedDevWorkspaceId?: string }
+
+/**
+ * The records that announce a recreated workspace: of those a surface shows, the first (by start) to name each retired
+ * workspace in `replacedDevWorkspaceId`. Derived from the records alone, so every read and reload of the same draft
+ * announces the same ones, once each, and a later record that does not carry the field never repeats it.
+ */
+export function recreatingRecords<T extends WorkspaceSwitch>(records: readonly T[]): Set<T> {
+  const announced = new Set<string>()
+  const recreating = new Set<T>()
+  for (const record of [...records].sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt))) {
+    const replaced = record.replacedDevWorkspaceId
+    if (!replaced || announced.has(replaced)) continue
+    announced.add(replaced)
+    recreating.add(record)
+  }
+  return recreating
+}
+
+/** The notice that the workspace was recreated, at the switch's start. Information only: no retry, no reference. */
+function workspaceRecreatedNotice(at: string): BuildMessage {
+  return { role: 'notice', kind: 'workspace-recreated', tone: 'info', title: buildCopy.workspaceRecreated, at }
+}
+
+/**
+ * The newest message the page decides on (re-approval, a rejected plan, the generation limit). A recreated-workspace
+ * notice is display only: it is skipped, also when a device clock behind the server's sorts it after a local notice.
+ */
+export function lastActionable(messages: readonly BuildMessage[]): BuildMessage | undefined {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]!
+    if (message.role !== 'notice' || message.kind !== 'workspace-recreated') return message
+  }
+  return undefined
+}
+
 export function messagesFromDraft(draft: BuildDraft, extra: BuildMessage[], options: { lastPlannedIntent?: string; preparationDone?: boolean; destination?: ShownDestination } = {}): BuildMessage[] {
   const messages: BuildMessage[] = []
   if (draft.creationPlanUnreadable) messages.push({
@@ -164,6 +201,10 @@ export function messagesFromDraft(draft: BuildDraft, extra: BuildMessage[], opti
     ...(!draft.createdApplicationId && !draft.createdApplicationStackId && !draft.creationExecutions.length ? { retry: 'plan' as const } : {}), at: draft.updatedAt,
   })
   const all = [...draft.conversationTurns].sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt))
+  // A switch from a retired workspace is told once, at the record that made it (stable sort: a notice pushed after a
+  // message of the same time stays below it).
+  const recreating = recreatingRecords<WorkspaceSwitch>([...all, ...draft.creationPlanGenerations])
+  const recreated = (record: WorkspaceSwitch) => recreating.has(record) ? [workspaceRecreatedNotice(record.startedAt)] : []
   // Excel → app's analysis and screen-design turns read as one line before the conversation,
   // linked back to Excel → app; 「この内容で提案して」 is offered right away, since the
   // specification is already written.
@@ -172,12 +213,20 @@ export function messagesFromDraft(draft: BuildDraft, extra: BuildMessage[], opti
     const text = buildCopy.questions.excelReady
     messages.push({ role: 'assistant', text, summary: text, at: excel[0]!.startedAt, turnId: `excel:${draft.id}`, options: [buildCopy.questions.kickoffReply], link: { kind: 'excel2app', draftId: draft.id } })
   }
+  // The collapsed line does not hide a switch Excel → app's turns made.
+  for (const turn of excel) messages.push(...recreated(turn))
   const turns = conversationTurns(all)
   for (const turn of turns) {
     messages.push({ role: 'user', text: turn.userMessage, at: turn.startedAt })
+    // Right below the request, before its answer, also when the answer carries the same time (no finishedAt).
+    messages.push(...recreated(turn))
     // A reply in a state this console does not know reads as that, never as an answer or a failure.
     if (turn.status.kind === 'unknown' || isOneOf(turn.status, 'succeeded', 'failed')) messages.push(assistantMessage(turn, draft.id))
   }
+  // A turn of a kind this console does not know is not shown, but its switch is still told.
+  for (const turn of all) if (!excel.includes(turn) && !turns.includes(turn)) messages.push(...recreated(turn))
+  // Before the plan's proposal, which sits where the generation finished.
+  for (const generation of draft.creationPlanGenerations) messages.push(...recreated(generation))
   const proposal = proposalMessage(draft, options.lastPlannedIntent, options.destination)
   if (proposal) messages.push(proposal)
   for (const message of extra) {

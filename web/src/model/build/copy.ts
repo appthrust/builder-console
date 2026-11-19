@@ -4,6 +4,8 @@ import { textEn } from './copy.en'
 export const textJa = {
   intent: { reply: '### 追記', publish: '公開: する', omitted: (count: number) => `（以前の追記 ${count} 件を省略）` },
   unreadablePlan: { title: '保存された計画を読めませんでした', detail: '基盤に保存された計画の内容を、このコンソールでは確認できません。' },
+  /** A turn or plan generation moved to a new workspace because the old one was retired (APT-1264): information only. */
+  workspaceRecreated: '作業環境を作り直しました。会話と計画は引き継いでいます',
   questions: {
     firstTurn: 'このアプリを作るために決めるべきことを、一つずつ質問してください。',
     kickoffReply: 'この内容で提案して',

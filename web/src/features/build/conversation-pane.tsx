@@ -148,6 +148,14 @@ export function UserMessage({ text }: { text: string }) {
   </article>
 }
 
+/**
+ * The workspace was recreated (APT-1264), where a conversation keeps its own records (improve, Excel → app):
+ * information only, the same as the build conversation's derived notice (messages.ts#workspaceRecreatedNotice).
+ */
+export function WorkspaceRecreatedNotice({ className }: { className?: string }) {
+  return <Notice tone="info" title={buildCopy.workspaceRecreated} className={className} />
+}
+
 /** A failure's support reference, with its copy button. */
 export function FailureReference({ reference }: { reference: NonNullable<BuildFailure['reference']> }) {
   const value = buildFailureReference(reference)

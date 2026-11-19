@@ -58,8 +58,10 @@ export type BuildMessage =
    * `retry: 'confirm'` re-reads the draft after a write whose answer could not be read; it never resends that write.
    * `retry: 'recheck'`: Platform's validation rejected the plan for a cause that may lie outside it; the notice offers
    * 「もう一度確かめる」 (the same plan validated once more) and 「計画を作り直す」.
+   * `kind: 'workspace-recreated'`: display only (messages.ts#workspaceRecreatedNotice); it never stands for the
+   * conversation's state, so decisions read past it (messages.ts#lastActionable).
    */
-  | { role: 'notice'; tone: 'info' | 'warning' | 'error'; title: string; detail?: string; at: string; retry?: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish' | 'confirm' | 'recheck'; reference?: BuildFailure['reference'] }
+  | { role: 'notice'; tone: 'info' | 'warning' | 'error'; title: string; detail?: string; at: string; retry?: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish' | 'confirm' | 'recheck'; reference?: BuildFailure['reference']; kind?: 'workspace-recreated' }
 export interface ProgressCard {
   kind: 'workspace' | 'turn' | 'plan' | 'prepare' | 'implement' | 'publish'
   title: string

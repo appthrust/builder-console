@@ -109,6 +109,21 @@ test('a failed turn renders as a notice with retry on the last message only', ()
   expect(render({ messages: [failed], onRetry: () => {}, busy: true })).not.toContain('excel2app-chat-retry')
 })
 
+test.each(['ja', 'en'] as const)('a recreated workspace is one calm notice between the instruction and its reply, never a bubble or a retry (APT-1264, %s)', (language) => {
+  setLanguage(language)
+  const messages: UiPreviewChatMessage[] = [
+    { role: 'user', text: '一覧をカード表示に' },
+    { role: 'notice', text: buildCopy.workspaceRecreated },
+    { role: 'assistant', text: '一覧をカード表示にしました。' },
+  ]
+  const html = render({ messages, onRetry: () => {} })
+  expect(html.split(buildCopy.workspaceRecreated)).toHaveLength(2)
+  expect(html.split('data-role="notice"')).toHaveLength(2)
+  expect(html.indexOf('data-role="user"')).toBeLessThan(html.indexOf(buildCopy.workspaceRecreated))
+  expect(html.indexOf(buildCopy.workspaceRecreated)).toBeLessThan(html.indexOf('data-role="assistant"'))
+  expect(html).not.toContain('excel2app-chat-retry')
+})
+
 test.each(['ja', 'en'] as const)('quota failure in UI chat explains the account problem and retains manual retry in %s', (language) => {
   setLanguage(language)
   for (const error of [
