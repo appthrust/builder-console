@@ -42,6 +42,8 @@ func consoleWriterFixtures(t *testing.T) []writerFixture {
 	unknown := domain.Person{ID: "removed", Unknown: true}
 	upstreamPerson := directory.Person{ID: person.ID, Subject: &subject, Email: person.Email, DisplayName: person.DisplayName}
 	app := domain.App{ID: "app", Slug: "app", Group: domain.AppGroup{ID: "group", Name: "Group", Path: "group"}, Owners: []domain.Person{person, unknown}, CreatedBy: person, Share: domain.SharePolicy{Scope: "private", GroupIDs: []string{}, ExtraPersonIDs: []string{}}, Tags: []string{}, Capabilities: []string{}, Screenshots: []domain.Screenshot{}, CreatedAt: at, UpdatedAt: at}
+	app.Contribution = domain.ContributionPolicy{Scope: "group"}
+	app.Permissions = domain.Capabilities(domain.Actor{PersonID: person.ID}, app)
 	group := directory.Group{ID: "group", Name: "Group", Slug: "group", Path: "group", CreatedAt: at, UpdatedAt: at}
 	request := domain.AppAccessRequest{ID: "request", AppID: app.ID, Requester: unknown, Status: domain.RequestPending, RequestedAt: at}
 	shot := domain.Screenshot{ID: "screenshot", Width: 2, Height: 3}
@@ -49,7 +51,7 @@ func consoleWriterFixtures(t *testing.T) []writerFixture {
 	fixtures := []writerFixture{
 		{"resolved-person", "Person", person}, {"pending-person", "Person", pending}, {"unknown-person", "UnknownPerson", unknown},
 		{"app", "App", app}, {"app-list", "AppList", appList[domain.App]{Items: []domain.App{app}}}, {"empty-app-list", "AppList", appList[domain.App]{Items: []domain.App{}}},
-		{"directory-entry", "DirectoryEntry", domain.EntryOf(app, false)}, {"empty-entry-collections", "DirectoryEntry", domain.EntryOf(domain.App{ID: "empty", Group: app.Group}, false)},
+		{"directory-entry", "DirectoryEntry", domain.EntryOf(app, false)}, {"empty-entry-collections", "DirectoryEntry", domain.EntryOf(domain.App{ID: "empty", Group: app.Group, Contribution: domain.ContributionPolicy{Scope: "group"}}, false)},
 		{"directory-list", "DirectoryEntryList", appList[domain.DirectoryEntry]{Items: []domain.DirectoryEntry{domain.EntryOf(app, false)}}},
 		{"empty-directory-list", "DirectoryEntryList", appList[domain.DirectoryEntry]{Items: []domain.DirectoryEntry{}}},
 		{"groups", "GroupList", directory.GroupList{Items: []directory.Group{group}}}, {"empty-groups", "GroupList", directory.GroupList{Items: []directory.Group{}}},
@@ -59,8 +61,8 @@ func consoleWriterFixtures(t *testing.T) []writerFixture {
 		{"empty-members", "MembershipList", directory.MembershipList{Items: []directory.Membership{}}},
 		{"directory-users", "DirectoryUserList", map[string]any{"items": []any{map[string]string{"id": "realm-person", "email": "person@example.test", "displayName": "Person"}}}},
 		{"migration", "MigrationResult", migrationResponse(directory.ImportResult{})},
-		{"me", "Me", meResponse{Person: person, ProjectID: "project", EffectiveGroupIDs: []string{}, ManagedGroupIDs: []string{}, Migration: store.MigrationStatus{}}},
-		{"me-degraded", "Me", meResponse{Person: person, ProjectID: "project", EffectiveGroupIDs: []string{}, ManagedGroupIDs: []string{}, PlatformUnavailable: true, NotMember: true, TeamSlug: "team"}},
+		{"me", "Me", meResponse{Person: person, ProjectID: "project", EffectiveGroupIDs: []string{}, ManagedGroupIDs: []string{}, Migration: store.MigrationStatus{}, View: "maker"}},
+		{"me-degraded", "Me", meResponse{Person: person, ProjectID: "project", EffectiveGroupIDs: []string{}, ManagedGroupIDs: []string{}, PlatformUnavailable: true, NotMember: true, TeamSlug: "team", View: "user"}},
 		{"config", "Config", map[string]any{"projectId": "project", "dashboardUrl": "https://dashboard.example.test/dashboard/settings", "newAppConversation": false}},
 		{"comment", "Comment", comment}, {"comments", "CommentList", []domain.AppComment{comment}}, {"empty-comments", "CommentList", []domain.AppComment{}},
 		{"screenshot", "Screenshot", shot}, {"screenshots", "ScreenshotList", []domain.Screenshot{shot}}, {"empty-screenshots", "ScreenshotList", []domain.Screenshot{}},
@@ -79,6 +81,10 @@ func consoleWriterFixtures(t *testing.T) []writerFixture {
 		{"resolved-path", "Resolved", resolution{Kind: "app", ID: app.ID, CurrentPath: "/group/app"}},
 		{"settings", "Settings", platform.Settings{ProjectID: "project", DefaultTemplateID: "nextjs-postgres"}},
 	}
+	fixtures = append(fixtures,
+		writerFixture{"inbox", "Inbox", inboxResponse{Items: []domain.InboxItem{{Kind: "feedback", App: domain.InboxApp{ID: app.ID, Path: app.Path(), DisplayName: app.DisplayName, Icon: app.Icon}, Count: 2, Since: at}}}},
+		writerFixture{"empty-inbox", "Inbox", inboxResponse{Items: []domain.InboxItem{}}},
+	)
 	tools, status, err := (&API{}).toolsForApp(nil, domain.App{})
 	require.NoError(t, err)
 	require.Equal(t, 200, status)

@@ -20,6 +20,7 @@ type meResponse struct {
 	TeamSlug            string                `json:"teamSlug,omitempty"`
 	DirectoryPublicURL  string                `json:"directoryPublicURL"`
 	Migration           store.MigrationStatus `json:"migration"`
+	View               string                `json:"view"`
 }
 
 func (a *API) me(s *request) (any, int, error) {
@@ -35,11 +36,23 @@ func (a *API) me(s *request) (any, int, error) {
 	if effective == nil || s.access.NotMember {
 		effective = []string{}
 	}
+	view := "user"
+	if s.actor.IsConsoleAdmin || len(managed) > 0 {
+		view = "maker"
+	} else {
+		owns, err := s.tx.OwnsAnyApp(s.person.ID)
+		if err != nil {
+			return nil, 0, err
+		}
+		if owns {
+			view = "maker"
+		}
+	}
 	binding, resolveErr := a.links.Resolver().Resolve(s.r.Context(), s.bearer, "directory")
 	if resolveErr != nil {
 		return nil, 0, resolveErr
 	}
-	return meResponse{Person: s.person, Roles: domain.Roles(s.access.Roles), EffectiveGroupIDs: effective, ManagedGroupIDs: managed, ProjectID: a.platform.ProjectID, PlatformUnavailable: s.platformUnavailable, NotMember: s.access.NotMember, DirectoryPublicURL: binding.PublicURL, Migration: migration}, 200, err
+	return meResponse{Person: s.person, Roles: domain.Roles(s.access.Roles), EffectiveGroupIDs: effective, ManagedGroupIDs: managed, ProjectID: a.platform.ProjectID, PlatformUnavailable: s.platformUnavailable, NotMember: s.access.NotMember, DirectoryPublicURL: binding.PublicURL, Migration: migration, View: view}, 200, err
 }
 func (a *API) migrateDirectory(s *request) (any, int, error) {
 	if !s.actor.IsConsoleAdmin {

@@ -11,7 +11,8 @@ const app = businessAppOf({
   id: 'app-1', slug: 'shop', displayName: 'Shop', description: '', icon: '', tags: [], guide: '', capabilities: [], screenshots: [],
   group: { id: 'sales', path: 'sales', name: 'Sales' }, owners: [person],
   stackId: 'shop-stack', appName: 'shop', share: { scope: 'public', groupIds: [], extraPersonIds: [] },
-  createdBy: person, createdAt: '2026-10-08T00:00:00Z', updatedAt: '2026-10-08T00:00:00Z',
+  createdBy: person, createdAt: '2026-10-08T00:00:00Z', updatedAt: '2026-10-08T00:00:00Z', contribution: { scope: 'group' },
+  permissions: { use: true, comment: true, propose: true, maintain: true, data: true },
 })
 const view: AppView = {
   status: 'live', label: '公開中', text: '', second: '', draft: false, url: 'https://shop.example.test/',

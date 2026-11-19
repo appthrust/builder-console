@@ -53,6 +53,12 @@ export interface AppComment {
 }
 /** Counts of console-held people, groups and memberships still to push into the Directory (release N only). */
 export type DirectoryMigration = { pending: boolean; people: number; groups: number; memberships: number }
+/**
+ * The home the caller starts from: `maker` when they are a console admin,
+ * manage a group or own an app; otherwise `user`. The UI may widen `user` to
+ * `maker` (unfinished drafts are a Platform fact), never narrow it.
+ */
+export type ConsoleView = 'user' | 'maker'
 export type Me = {
   person: Person & { subject: string }
   /** Groups the caller belongs to: direct memberships plus their descendants (Directory `/me`). */
@@ -71,6 +77,8 @@ export type Me = {
   /** Public origin of the Directory built-in app (profiles, group management, avatars); empty when not linked. */
   directoryPublicURL: string
   migration: DirectoryMigration
+  /** Unknown wire values read as `user`: an unrecognized view never widens the UI. */
+  view: ConsoleView
 }
 
 /** `GET /config` from cmd/server; `dashboardUrl` is the Dashboard's Team settings page (only an absolute http(s) URL is kept). */
@@ -89,6 +97,15 @@ export interface SharePolicy {
   groupIds: string[]
   extraPersonIds: string[]
 }
+export type ContributionScope = 'off' | 'group' | 'company'
+/** Who may propose improvements to an app: nobody, members of its group, or the whole company. */
+export interface Contribution { scope: ConsoleValue<ContributionScope> }
+/**
+ * The caller's authority on one app, derived by the server. `data` is separate
+ * from `maintain` so the UI never conflates them. Missing permissions grant nothing.
+ */
+export interface AppPermissions { use: boolean; comment: boolean; propose: boolean; maintain: boolean; data: boolean }
+export const NO_APP_PERMISSIONS: AppPermissions = Object.freeze({ use: false, comment: false, propose: false, maintain: false, data: false })
 export interface BusinessApp {
   id: string
   slug: string
@@ -107,6 +124,8 @@ export interface BusinessApp {
   createdBy: PersonRef
   createdAt: string
   updatedAt: string
+  contribution: Contribution
+  permissions: AppPermissions
 }
 export interface DirectoryEntry {
   id: string
@@ -124,6 +143,15 @@ export interface DirectoryEntry {
   createdAt: string
   updatedAt: string
   canOpen: boolean
+  contribution: Contribution
+  permissions: AppPermissions
+}
+/** `GET /api/console/inbox`: console-held work waiting for the caller on apps they maintain (zero counts omitted). */
+export interface InboxServerItem {
+  kind: 'accessRequest' | 'feedback'
+  app: { id: string; path: string; displayName: string; icon: string }
+  count: number
+  since: string
 }
 export interface PersonProfile {
   person: Person

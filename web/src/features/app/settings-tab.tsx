@@ -7,6 +7,7 @@ import { Button, Notice } from '../../ui'
 import { text } from './copy'
 import { deleteHelpText } from './delete-dialog'
 import { webScope, type SourceRepositoryRef } from './platform'
+import { ContributionSection } from './settings/contribution-section'
 import { EnvSection } from './settings/env-section'
 import { GeneralSection } from './settings/general-section'
 import { SettingsCard } from './settings/parts'
@@ -45,6 +46,7 @@ export function SettingsTab({
       <GeneralSection app={app} canEdit={canEdit} />
       <PlacementSection app={app} canEdit={canEdit} />
       <ShareSection access={access} onShare={onShare} />
+      <ContributionSection key={app.id} app={app} canEdit={canEdit} />
       <EnvSection scope={webScope(projectId, view)} canEdit={canEdit} />
       <SettingsCard id="danger" title={copy.app.settings.danger} lead={text.settings.dangerLead} danger>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

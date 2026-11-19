@@ -20,6 +20,7 @@ test('shell state imports without localStorage before page test setup', async ()
     navCollapsed: false,
     artifactCollapsed: false,
     membershipGroupId: null,
+    launchHintDismissed: false,
   })
 })
 
@@ -28,6 +29,7 @@ test.each([false, true])('browser shell choices persist across store imports: sa
     ['builder-console:nav-collapsed', '1'],
     ['builder-console:build-artifact-collapsed', '1'],
     ['builder-console:membership', 'group-1'],
+    ['builder-console:launch-hint-dismissed', '1'],
   ] : [])
   Object.defineProperty(globalThis, 'localStorage', {
     configurable: true,
@@ -37,34 +39,38 @@ test.each([false, true])('browser shell choices persist across store imports: sa
       removeItem: (key: string) => { values.delete(key) },
     },
   })
-  const { shellStore, setNavOpen, setNavCollapsed, setArtifactCollapsed, setMembershipGroup } =
+  const { shellStore, setNavOpen, setNavCollapsed, setArtifactCollapsed, setMembershipGroup, dismissLaunchHint } =
     await import(`./store.ts?storage-saved=${saved}`) as typeof ShellStoreModule
   expect(shellStore.state).toEqual({
     navOpen: false,
     navCollapsed: saved,
     artifactCollapsed: saved,
     membershipGroupId: saved ? 'group-1' : null,
+    launchHintDismissed: saved,
   })
 
   setNavOpen(true)
   setNavCollapsed(true)
   setArtifactCollapsed(true)
   setMembershipGroup('group-2')
+  dismissLaunchHint()
   expect(shellStore.state).toEqual({
     navOpen: true,
     navCollapsed: true,
     artifactCollapsed: true,
     membershipGroupId: 'group-2',
+    launchHintDismissed: true,
   })
   expect(Object.fromEntries(values)).toEqual({
     'builder-console:nav-collapsed': '1',
     'builder-console:build-artifact-collapsed': '1',
     'builder-console:membership': 'group-2',
+    'builder-console:launch-hint-dismissed': '1',
   })
 
   setNavCollapsed(false)
   setArtifactCollapsed(false)
   expect(shellStore.state.navCollapsed).toBe(false)
   expect(shellStore.state.artifactCollapsed).toBe(false)
-  expect(Object.fromEntries(values)).toEqual({ 'builder-console:membership': 'group-2' })
+  expect(Object.fromEntries(values)).toEqual({ 'builder-console:membership': 'group-2', 'builder-console:launch-hint-dismissed': '1' })
 })

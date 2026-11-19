@@ -1,11 +1,11 @@
 import { Check } from 'lucide-react'
 import { screenshotUrl } from '../../api/console'
-import { type DirectoryEntry } from '../../model/contracts/console'
+import { type BusinessApp, type DirectoryEntry } from '../../model/contracts/console'
 import { copy } from '../../copy'
 import type { AppView } from '../../model/app'
 import { resolvedPeople } from '../../model/directory'
 import { paths } from '../../routes/paths'
-import { AppIcon, Avatar, Button, HrefLink, LinkButton, PersonLink, Skeleton, StatusPill } from '../../ui'
+import { AppIcon, Avatar, Button, buttonClasses, cn, HrefLink, LinkButton, PersonLink, Skeleton, StatusPill } from '../../ui'
 import type { AppViews } from '../app'
 import { text } from './copy'
 
@@ -132,6 +132,136 @@ export function AppStoreGridSkeleton({ count = 3 }: { count?: number }) {
             <Skeleton className="h-6 w-28 rounded-full" />
             <Skeleton className="h-8 w-16" />
           </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** How a home card opens its app (role-based-views ux-design §6.4). No `url` → the card cannot open it. */
+export type CardLaunch = {
+  url?: string
+  tone: 'primary' | 'secondary'
+  /** Shown only when something is not as usual; a healthy app says nothing. */
+  note?: 'failed' | 'stopped' | 'notReady'
+  /** Statuses are still loading: the list is shown first, the state lands later. */
+  pending?: true
+}
+
+export function cardLaunch(view: AppView, lookup: Pick<AppViews, 'loading' | 'failed'>): CardLaunch {
+  if (lookup.loading) return { tone: 'primary', pending: true }
+  // An unreadable state claims nothing; the list carries one 「状態を確認できませんでした」 line instead.
+  if (lookup.failed || view.unreadableStack || view.unreadableBuild) return { url: view.url, tone: 'primary' }
+  if (view.status === 'failed') return { url: view.url, tone: 'secondary', note: 'failed' }
+  if (view.status === 'unknown') return { url: view.url, tone: 'secondary', note: 'stopped' }
+  if (!view.url) return { tone: 'primary', note: 'notReady' }
+  return { url: view.url, tone: 'primary' }
+}
+
+const NOTE_TONE: Record<NonNullable<CardLaunch['note']>, string> = {
+  failed: 'bg-busy-soft text-busy-ink ring-amber-200',
+  stopped: 'bg-stone-100 text-stone-600 ring-stone-200',
+  notReady: 'bg-stone-100 text-stone-600 ring-stone-200',
+}
+
+const cardLink = 'relative z-10 inline-flex min-h-10 items-center text-sm text-accent-strong underline underline-offset-2 hover:text-accent md:min-h-8'
+
+/**
+ * Home card (ux-design §6.4, WF-01): icon, name, group and the description's
+ * first line. The whole card opens the app in a new tab; 「開く ↗」 marks that
+ * target and is not a second tab stop. 「くわしく」 leads to the intro page,
+ * 「管理」 (maintainers only) to the same page with tabs. No owner, no version.
+ */
+export function AppLaunchCard({ app, launch, heading = 'h3' }: { app: BusinessApp; launch: CardLaunch; heading?: HeadingLevel }) {
+  const Heading = heading
+  const line = app.description.split('\n')[0].trim() || app.capabilities[0] || ''
+  const appPage = paths.app(app.group.path, app.slug)
+  // Maintainers get tabs on the app page; 「くわしく」 shows them the intro page as users see it (app-page.tsx `?as=user`).
+  const details = app.permissions.maintain ? `${appPage}?as=user` : appPage
+  return (
+    <article
+      className={cn(
+        'relative flex h-full flex-col gap-3 rounded-lg border bg-surface p-4 transition-[border-color,box-shadow]',
+        launch.url ? 'border-line hover:border-stone-300 hover:shadow-md' : 'border-dashed border-stone-300'
+      )}
+    >
+      <div className="flex items-start gap-3">
+        <AppIcon icon={app.icon} name={app.displayName} />
+        <div className="min-w-0 flex-1">
+          <Heading className="text-base font-semibold text-stone-900">
+            {launch.url ? (
+              <a
+                href={launch.url}
+                target="_blank"
+                rel="noreferrer noopener"
+                aria-label={text.card.openLabel(app.displayName)}
+                className="break-words outline-none after:absolute after:inset-0 after:rounded-lg after:content-[''] hover:text-accent-strong focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-accent"
+              >
+                {app.displayName}
+              </a>
+            ) : (
+              <span className="break-words text-stone-600">{app.displayName}</span>
+            )}
+          </Heading>
+          <p className="truncate text-xs text-stone-500">{app.group.name}</p>
+        </div>
+      </div>
+      {line ? <p className="line-clamp-2 break-words text-sm text-stone-600">{line}</p> : null}
+      {launch.note ? (
+        <p>
+          <span className={cn('inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset', NOTE_TONE[launch.note])}>{text.card[launch.note]}</span>
+        </p>
+      ) : null}
+      <div className="mt-auto flex items-center gap-4 pt-1">
+        <span
+          aria-hidden
+          className={cn(
+            buttonClasses(launch.url || launch.pending ? launch.tone : 'secondary', 'md', 'flex-1 sm:flex-none sm:min-w-24'),
+            launch.pending ? 'animate-pulse' : !launch.url && 'opacity-50 shadow-none'
+          )}
+        >
+          {text.card.open}
+        </span>
+        <HrefLink href={details} aria-label={text.card.detailsLabel(app.displayName)} className={cardLink}>
+          {text.card.details}
+        </HrefLink>
+        {app.permissions.maintain ? (
+          <HrefLink href={appPage} aria-label={text.card.manageLabel(app.displayName)} className={cn(cardLink, 'ml-auto')}>
+            {text.card.manage}
+          </HrefLink>
+        ) : null}
+      </div>
+    </article>
+  )
+}
+
+/** One column on phones, two from 768px, three from 1280px; entries keep the caller's order. */
+export function AppLaunchGrid({ apps, lookup, label }: { apps: BusinessApp[]; lookup: AppViews; label?: string }) {
+  return (
+    <ul aria-label={label} className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+      {apps.map((app) => (
+        <li key={app.id} className="min-w-0">
+          <AppLaunchCard app={app} launch={cardLaunch(lookup.viewFor(app), lookup)} />
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+export function AppLaunchGridSkeleton({ count = 6 }: { count?: number }) {
+  return (
+    <div role="status" aria-label={copy.common.loading} className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+      {Array.from({ length: count }, (_, index) => (
+        <div key={index} className="space-y-4 rounded-lg border border-stone-200 bg-white p-4">
+          <div className="flex items-center gap-3">
+            <Skeleton className="size-10 rounded-md" />
+            <div className="flex-1 space-y-1.5">
+              <Skeleton className="h-3.5 w-28" />
+              <Skeleton className="h-3 w-16" />
+            </div>
+          </div>
+          <Skeleton className="h-3 w-3/4" />
+          <Skeleton className="h-9 w-24" />
         </div>
       ))}
     </div>

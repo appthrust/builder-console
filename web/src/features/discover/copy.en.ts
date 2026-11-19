@@ -4,9 +4,6 @@ export const textEn: typeof textJa = {
   home: {
     searching: 'Searching…',
     resultsCount: (n: number) => n === 1 ? '1 result' : `${n} results`,
-    groupLead: (name: string) => `Apps in ${name} and its subgroups.`,
-    sharedLead: 'Apps shared from parent groups that you can use.',
-    companyLead: 'New apps everyone in your company can use.',
   },
   list: {
     ownerSeparator: ', ',
@@ -14,7 +11,6 @@ export const textEn: typeof textJa = {
     open: 'Open ↗',
     copyUrl: 'Copy URL',
     statusFailed: 'Could not check app status.',
-    created: (time: string) => `Added ${time}`,
     resume: 'Continue building',
     check: 'Check status',
     discard: 'Delete',
@@ -47,10 +43,8 @@ export const textEn: typeof textJa = {
     createHere: 'Create an app here',
   },
   entry: {
-    ofGroup: (name: string) => `Apps in ${name}`,
     wantToUse: 'Request access',
     restricted: (name: string) => `This app is shared with people in ${name}. Choose “Request access” if you would like to use it.`,
-    owner: 'Owner',
     requestUnavailable: 'We could not find where to send your request. Ask the owner for help.',
   },
   store: {
@@ -60,6 +54,17 @@ export const textEn: typeof textJa = {
     trialLead: 'These apps do not yet have screenshots or a list of what they can do.',
     open: (name: string) => `Open ${name}`,
     want: (name: string) => `Request access to ${name}`,
+  },
+  card: {
+    open: 'Open ↗',
+    openLabel: (name: string) => `${name} (opens in a new tab)`,
+    details: 'Details',
+    detailsLabel: (name: string) => `Details about ${name}`,
+    manage: 'Manage',
+    manageLabel: (name: string) => `Manage ${name}`,
+    failed: 'Seems to be having trouble',
+    stopped: 'Stopped for now',
+    notReady: 'Getting ready. You can’t open it yet',
   },
   person: {
     apps: (n: number) => `Apps created (${n})`,

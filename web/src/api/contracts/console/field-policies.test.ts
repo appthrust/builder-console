@@ -44,6 +44,8 @@ function optionalSample(schema: Schema): unknown {
   if (schema.anyOf) return optionalSample(schema.anyOf.find((branch) => branch.type !== 'null')!)
   if (schema.type === 'boolean') return true
   if (schema.type === 'number' || schema.type === 'integer') return 1
+  // An optional object observation (App.permissions) is sampled with every required field present.
+  if (schema.type === 'object') return Object.fromEntries((schema.required ?? []).map((key) => [key, optionalSample(schema.properties![key]!)]))
   return 'https://optional.example.test/'
 }
 function changed(root: unknown, path: (string | number)[], key: string, value: unknown, omit = false): unknown {
@@ -81,8 +83,10 @@ for (const [name, operation] of Object.entries(operations)) {
           const safePath = `/${[...path, key].map((part) => typeof part === 'number' ? '*' : part).join('/')}`
           const required = schema.required?.includes(key) ?? false
           const absent = changed(fixture.body, path, key, undefined, true)
-          // Config deliberately drops an unvouched optional navigation URL.
-          const nullAccepted = acceptsNull(child) || (operation.schema === 'Config' && key === 'dashboardUrl')
+          // Config deliberately drops an unvouched optional navigation URL; an app's
+          // permissions fail closed to no grant (tested below) instead of failing the app.
+          const failsClosed = key === 'permissions' && (operation.schema === 'App' || operation.schema === 'AppList' || operation.schema === 'DirectoryEntry' || operation.schema === 'DirectoryEntryList' || operation.schema === 'ApproveAccessRequest')
+          const nullAccepted = acceptsNull(child) || (operation.schema === 'Config' && key === 'dashboardUrl') || failsClosed
           assertWireContractCases(contract, [
             { name: `${fixture.name}: absent`, variant: 'absent', path: safePath, wire: absent, expect: { accept: !required } },
             { name: `${fixture.name}: null`, variant: 'null', path: safePath, wire: changed(fixture.body, path, key, null), expect: { accept: nullAccepted } },
@@ -100,7 +104,7 @@ for (const [name, operation] of Object.entries(operations)) {
               { name: 'broken list element', variant: 'unknown', path: safePath, wire: changed(fixture.body, path, key, [null]), expect: { accept: false } },
             ])
           }
-          if (Object.hasOwn(object, key)) visit(child, object[key], [...path, key])
+          if (Object.hasOwn(object, key) && !failsClosed) visit(child, object[key], [...path, key])
         }
       }
       visit(schemaMap[operation.schema]!, fixture.body)
@@ -113,4 +117,28 @@ test('unknown membership roles, request states and tool errors cannot become kno
   assertWireContractCases(consoleContracts.members, [{ name: 'new role', variant: 'unknown', path: '/items/*/role', wire: { items: [{ groupId: 'group', person: { id: 'person', subject: null, pending: true, email: '', displayName: '', avatarVersion: null }, role: SECRET, inheritedFrom: null }] }, expect: { accept: true, check: (value) => expect(value[0]!.role).toEqual({ kind: 'unknown' }) } }])
   assertWireContractCases(consoleContracts.myAccessRequest, [{ name: 'new state', variant: 'unknown', path: '/state', wire: { exists: true, appName: 'app', state: SECRET }, expect: { accept: true, check: (value) => { expect(value.exists && value.state).toEqual({ kind: 'unknown' }) } } }])
   assertWireContractCases(consoleContracts.tools, [{ name: 'new tool failure', variant: 'unknown', path: '/error', wire: { available: true, tools: [], error: SECRET }, expect: { accept: true, check: (value) => { expect(value.available && value.error).toEqual({ kind: 'unknown' }) } } }])
+})
+
+test('an app\'s permissions fail closed: absent, null, partial, mistyped or unknown-only sets grant nothing, never the app list', () => {
+  const none = { use: false, comment: false, propose: false, maintain: false, data: false }
+  const granted = { use: true, comment: true, propose: false, maintain: false, data: false }
+  const app = fixtures.find((item) => item.schema === 'App')!.body as Record<string, unknown>
+  const entry = fixtures.find((item) => item.schema === 'DirectoryEntry')!.body as Record<string, unknown>
+  const malformed: [string, unknown][] = [
+    ['absent', undefined], ['null', null], ['partial', { use: true, comment: true }], ['mistyped', { ...granted, maintain: 'yes' }],
+    ['unknown-only', { futureGrant: true }], ['not an object', SECRET],
+  ]
+  // The app and its directory entry read permissions the same way; each contract is checked with its own value type.
+  const failsClosed = <D extends { permissions: unknown }>(contract: ResponseContract<D>, body: Record<string, unknown>) => {
+    for (const [name, permissions] of malformed) {
+      const wire = { ...body, permissions }
+      if (permissions === undefined) delete wire.permissions
+      assertWireContractCases(contract, [{ name, variant: 'unknown', path: '/permissions', wire, expect: { accept: true, check: (value) => expect(value.permissions).toEqual(none) } }])
+    }
+    assertWireContractCases(contract, [{ name: 'known set with a future grant', variant: 'present', path: '/permissions', wire: { ...body, permissions: { ...granted, futureGrant: true } }, expect: { accept: true, check: (value) => expect(value.permissions).toEqual(granted) } }])
+  }
+  failsClosed(consoleContracts.app, app)
+  failsClosed(consoleContracts.directoryEntry, entry)
+  // One app's broken grants never drop the list.
+  assertWireContractCases(consoleContracts.apps, [{ name: 'list with an unknown-only set', variant: 'unknown', path: '/items/*/permissions', wire: { items: [{ ...app, permissions: { futureGrant: true } }, { ...app, id: 'other', permissions: granted }] }, expect: { accept: true, check: (value) => expect(value.map((item) => item.permissions)).toEqual([none, granted]) } }])
 })

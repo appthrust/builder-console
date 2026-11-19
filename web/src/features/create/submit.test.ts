@@ -5,7 +5,7 @@ import { describe, expect, test } from 'bun:test'
 import { createCreateApi, type CreateApi } from '../../api/create'
 import { decodeResponse } from '../../api/boundary'
 import { getRepositoryDestinationContract } from '../../api/contracts/platform/catalog'
-import { appOf, definitionOf, resolvedDestinationOf, sourceConnectionOf, templateOf } from '../../api/testing/catalog-domain'
+import { appOf, appWireDefaults, definitionOf, resolvedDestinationOf, sourceConnectionOf, templateOf } from '../../api/testing/catalog-domain'
 import { createTestGateway } from '../../api/testing/gateway'
 import { copy } from '../../copy'
 import { MOCK_PROJECT_ID, platformRoutes } from '../../dev/mock-platform'
@@ -64,7 +64,7 @@ const wireDraft = {
   id: 'app-1', slug: 'mitsumori', displayName: '見積作成', description: '', icon: '', tags: [], guide: '', capabilities: [], screenshots: [],
   group: { id: 'g1', path: 'sales/east', name: '営業1課' }, owners: [person], stackId: null, appName: 'mitsumori',
   share: { scope: 'group', groupIds: ['g1'], extraPersonIds: [] }, createdBy: person,
-  createdAt: '2026-10-06T00:00:00Z', updatedAt: '2026-10-06T00:00:00Z',
+  createdAt: '2026-10-06T00:00:00Z', updatedAt: '2026-10-06T00:00:00Z', ...appWireDefaults,
 }
 const draft = appOf(wireDraft)
 

@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { MoreHorizontal, Trash2 } from 'lucide-react'
-import { useId, useState } from 'react'
+import { useId, useState, type ReactNode } from 'react'
 import { isConsoleError } from '../../api/console'
 import { isUnknownPerson, membershipRoots, type AppComment, type Group, type Me, type PersonRef } from '../../model/contracts/console'
 import { commentsQuery, useGroups, useMe } from '../../api/queries/console'
@@ -42,15 +42,21 @@ export function commentErrorText(error: unknown): string | undefined {
   return undefined
 }
 
-type CommentsProps = { appId: string; owners: readonly PersonRef[]; canDeleteAny: boolean }
+/** The section's heading; the default is 「コメント（N）」, the intro page passes 「担当者に伝える」 (ux-design §6.10). */
+export type CommentsHeading = { title: ReactNode; lead?: ReactNode; actions?: ReactNode }
 
-/** Shared by the guide and the directory entry; never needs the full app or its visibility policy. */
+type CommentsProps = { appId: string; owners: readonly PersonRef[]; canDeleteAny: boolean; heading?: CommentsHeading }
+
+/** Anchor of the comments section (the maintainer's 「利用者の声」 links to it on the guide tab). */
+export const COMMENTS_ANCHOR = 'comments'
+
+/** Shared by the guide, the intro page and the directory entry; never needs the full app or its visibility policy. */
 export function Comments(props: CommentsProps) {
   // Changing apps must discard the previous thread's composer and delete target.
   return <CommentThread key={props.appId} {...props} />
 }
 
-function CommentThread({ appId, owners, canDeleteAny }: CommentsProps) {
+function CommentThread({ appId, owners, canDeleteAny, heading }: CommentsProps) {
   const me = useMe().data
   const groups = useGroups().data
   const comments = useQuery(commentsQuery(appId))
@@ -65,10 +71,10 @@ function CommentThread({ appId, owners, canDeleteAny }: CommentsProps) {
   // An owner the server can no longer resolve is not marked as one.
   const ownerIds = new Set(owners.filter((owner) => !isUnknownPerson(owner)).map((owner) => owner.id))
   const showCounter = input.length > COMMENT_COUNTER_THRESHOLD
-  const title = comments.data ? text.comments.title(comments.data.length) : text.comments.loadingTitle
+  const title = heading?.title ?? (comments.data ? text.comments.title(comments.data.length) : text.comments.loadingTitle)
 
   return (
-    <Section title={title}>
+    <Section id={COMMENTS_ANCHOR} title={title} lead={heading?.lead} actions={heading?.actions}>
       <form className="space-y-3" onSubmit={(event) => {
         event.preventDefault()
         if (!input.canSend || post.isPending) return

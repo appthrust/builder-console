@@ -6,7 +6,7 @@ import { act, useLayoutEffect, useSyncExternalStore } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import * as api from '../../api/build'
 import { draftOf, turnOf, generationOf } from '../../api/testing/build-domain'
-import { appOf } from '../../api/testing/catalog-domain'
+import { appOf, appWireDefaults } from '../../api/testing/catalog-domain'
 import type { BuildDraft } from '../../model/contracts/build'
 import { buildKeys } from '../../api/queries/build'
 import { consoleKeys } from '../../api/queries/console'
@@ -29,7 +29,7 @@ import { useBuildSession } from './use-build-session'
 const me: Me = {
   projectId: 'project-session-test', person: { id: 'person-1', subject: 'owner-1', pending: false, email: 'owner@example.test', displayName: 'Owner', avatarVersion: null },
   effectiveGroupIds: ['sales'], managedGroupIds: [], isConsoleAdmin: false, canCreateApps: true,
-  teamSlug: 'team', directoryPublicURL: '', migration: { pending: false, people: 0, groups: 0, memberships: 0 },
+  teamSlug: 'team', directoryPublicURL: '', migration: { pending: false, people: 0, groups: 0, memberships: 0 }, view: 'user',
 }
 const at = '2026-10-26T00:00:00Z'
 const turn = (id: string, userMessage: string, minute: number): ApplicationDraftConversationTurn => ({
@@ -593,7 +593,7 @@ const publishedDraft: ApplicationDraft = {
 const publishedApp = {
   id: 'app-console', slug: 'ledger', displayName: draft.title, description: '', icon: '', tags: [], guide: '', capabilities: [], screenshots: [],
   group: { id: 'sales', path: 'sales', name: 'Sales' }, owners: [me.person], stackId: 'stack-1', appName: 'app-platform',
-  share: { scope: 'group', groupIds: ['sales'], extraPersonIds: [] }, createdBy: me.person, createdAt: at, updatedAt: at,
+  share: { scope: 'group', groupIds: ['sales'], extraPersonIds: [] }, createdBy: me.person, createdAt: at, updatedAt: at, ...appWireDefaults,
 }
 
 async function mountPublished(current = publishedDraft, session = initial) {

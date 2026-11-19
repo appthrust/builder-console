@@ -2,7 +2,7 @@
 // the network is in memory (wire answers as Platform and the Console send them).
 import { describe, expect, test } from 'bun:test'
 import { createCreateApi } from '../../api/create'
-import { appOf, definitionOf, resolvedDestinationOf, templateOf } from '../../api/testing/catalog-domain'
+import { appOf, appWireDefaults, definitionOf, resolvedDestinationOf, templateOf } from '../../api/testing/catalog-domain'
 import { createTestGateway } from '../../api/testing/gateway'
 import { resolveCreateCatalog } from '../../model/create'
 import { checkNameAvailability, suggestFreeUrlName, type AvailabilityDeps, type AvailabilityRequest } from './availability'
@@ -44,7 +44,7 @@ const person = { id: 'p1', subject: 's', pending: false, email: 'a@example.test'
 const ownDraft = appOf({
   id: 'draft-1', slug: 'mitsumori', displayName: '見積', description: '', icon: '', tags: [], guide: '', capabilities: [], screenshots: [],
   group: { id: 'g1', path: 'sales/east', name: '営業1課' }, owners: [person], createdBy: person, stackId: null, appName: null,
-  share: { scope: 'private', groupIds: [], extraPersonIds: [] }, createdAt: '2026-10-06T00:00:00Z', updatedAt: '2026-10-06T00:00:00Z',
+  share: { scope: 'private', groupIds: [], extraPersonIds: [] }, createdAt: '2026-10-06T00:00:00Z', updatedAt: '2026-10-06T00:00:00Z', ...appWireDefaults,
 })
 
 const json = (body: unknown, status = 200) => Response.json(body, { status })

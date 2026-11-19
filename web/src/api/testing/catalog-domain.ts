@@ -42,6 +42,16 @@ export function resolvedDestinationOf(patch: { revision?: string; registryNamesp
   return read
 }
 
+/**
+ * The app wire fields most fixtures do not care about, for spreading into an
+ * app wire: the default contribution scope and the caller's capabilities as the
+ * app's owner (the creator of a draft maintains it).
+ */
+export const appWireDefaults = {
+  contribution: { scope: 'group' },
+  permissions: { use: true, comment: true, propose: true, maintain: true, data: true },
+} as const
+
 /** A Console app as `GET /api/console/apps/{id}` answers it. */
 export function appOf(wire: unknown): BusinessApp {
   const result = decodeResponse(appContract, wire)

@@ -13,7 +13,6 @@ import { groupsQuery, appQuery, approveAccessRequest, updateApp, writeAppCache }
 import { consoleRoutes } from '../../dev/mock-console'
 import { platformRoutes } from '../../dev/mock-platform'
 import { bindCreatedConsoleApp } from '../../features/build/bind-created-console-app'
-import { canEditApp } from '../../features/app/permissions'
 import { knownValue } from '../../model/contracts/build'
 import type { BusinessApp } from '../../model/contracts/console'
 import { shareSentence } from '../../model/share'
@@ -49,7 +48,7 @@ async function expectOneShape(answered: BusinessApp) {
   // What appQuery's consumers read of it works on the cached value as written.
   expect(knownValue(cached.share.scope)).toBe(knownValue(read.share.scope))
   expect(shareSentence(cached.share, [], cached.group)).toBe(shareSentence(read.share, [], read.group))
-  expect(canEditApp(cached, undefined)).toBe(false)
+  expect(cached.permissions.maintain).toBe(read.permissions.maintain)
 }
 
 describe('the app query cache holds one shape', () => {

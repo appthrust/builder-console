@@ -41,6 +41,7 @@ export const shell = {
     noGroups: 'グループはまだありません。',
     problems: (n: number) => `問題あり ${n}`,
     problemsLabel: (n: number) => `問題ありのアプリが ${n} 件あります`,
+    inboxLabel: (n: number) => `ホーム（あなたの対応待ち ${n} 件）`,
     skip: '本文へ移動',
   },
   topbar: {
@@ -51,10 +52,7 @@ export const shell = {
     switchContext: '所属を切り替える',
     userMenu: 'ユーザーメニュー',
     profile: 'プロフィール',
-    cannotCreateTitle: 'アプリを作る権限がありません',
-    cannotCreateBody: '管理者に「作れる人」への追加を依頼してください。',
     platformUnavailable: 'いまアプリの作成状態を確認できません',
-    platformUnavailableBody: 'しばらくしてからページを再読み込みしてください。',
     notMemberTitle: 'この基盤（Project）のメンバーではありません',
     notMemberBody: (teamSlug?: string) => teamSlug
       ? `この基盤は Team「${teamSlug}」が管理しています。管理者に追加を依頼してください。`
@@ -68,13 +66,25 @@ export const shell = {
     searchClear: '検索をやめる',
     resultsTitle: (q: string) => `「${q}」の検索結果`,
     noResults: '見つかりませんでした。言葉を変えてお試しください。',
-    groupApps: (name: string) => `${name} のアプリ`,
-    seeAll: 'すべて見る →',
-    groupEmpty: 'このグループのアプリはまだありません。',
-    shared: '上位グループから共有されたアプリ',
-    sharedEmpty: '共有されたアプリはありません。',
-    companyNew: '全社の新着',
-    companyEmpty: '全社に公開されたアプリはまだありません。',
+    usable: '使えるアプリ',
+    count: (n: number) => `${n} 件`,
+    filterLabel: '使えるアプリの絞り込み',
+    filterAll: 'すべて',
+    filterOther: 'ほかの部署',
+    filterCompany: '全社',
+    hint: '使いたいアプリを選ぶと、新しいタブで開きます。',
+    hintClose: '案内を閉じる',
+    more: 'もっと見る',
+    directoryPrompt: '探しているアプリがないときは',
+    directoryLink: 'ディレクトリで探す →',
+    emptyTitle: 'まだ使えるアプリがありません',
+    emptyBody: 'ディレクトリから探して「使いたい」を押すと、担当者に申請できます。',
+    emptyAction: 'ディレクトリで探す',
+    noGroupTitle: 'まだグループに所属していません',
+    noGroupBody: '管理者に配置を依頼してください。全社に公開されたアプリは、下から使えます。',
+    noUsableMatch: '使えるアプリには見つかりませんでした。',
+    otherMatches: (n: number) => `会社のほかのアプリに ${n} 件あります。`,
+    otherMatchesLabel: '会社のほかのアプリ',
     noMembership: 'まだどのグループにも所属していません。管理者に配置を依頼してください。',
   },
   mine: {
@@ -155,7 +165,51 @@ export const shell = {
   help: {
     title: 'ヘルプ',
     toc: '目次',
+    /** Article order by view (role-based-views ux-design §6.9); a `#id` outside the list is appended. */
+    order: {
+      user: ['find', 'access', 'ask', 'create'],
+      maker: ['publish', 'share', 'proposals', 'trouble'],
+    },
     articles: [
+      {
+        id: 'find',
+        title: 'アプリを探す・開く',
+        body: [
+          'ホームの「使えるアプリ」に、あなたが使えるアプリが並んでいます。',
+          'カードを押すと、アプリが新しいタブで開きます。',
+          '「くわしく」を押すと、できることや使いかたを読めます。',
+          '名前や用途で探すときは、上の検索を使ってください。',
+        ],
+      },
+      {
+        id: 'access',
+        title: '使いたいアプリが開けないとき',
+        body: [
+          'ホームにないアプリは、ディレクトリで部署からたどれます。',
+          '開けないアプリは「使いたい」を押すと、担当者に申請できます。',
+          '申請が通ると、ホームの「使えるアプリ」に出ます。',
+          '「準備中です。まだ開けません」と出るときは、準備ができるまでお待ちください。',
+        ],
+      },
+      {
+        id: 'ask',
+        title: '困ったとき（担当者に聞く）',
+        body: [
+          'アプリの「くわしく」を開き、「担当者に伝える」に書いてください。',
+          '感想・要望・困りごとを書けます。このアプリを見られる人に見えます。',
+          '急ぐときは「メールで連絡する」から担当者にメールを送れます。',
+          '「いま調子が悪いようです」と出るときは、少し待ってからお試しください。',
+        ],
+      },
+      {
+        id: 'create',
+        title: 'アプリを作りたいとき',
+        body: [
+          'アプリを作れる人には、右上に「＋ 新しいアプリ」が出ます。',
+          'アプリの名前と、誰に見せるかを選ぶだけで作れます。',
+          'ボタンがないときは、管理者に「作れる人」への追加を依頼してください。',
+        ],
+      },
       {
         id: 'publish',
         title: 'アプリを出すまで',
@@ -178,6 +232,17 @@ export const shell = {
           '社外にも: インターネットの誰でも開けます。管理者だけが設定できます。',
           '招待メールは送信されません。招待文とリンクをコピーして相手に送り、招待されたメールアドレスでログインしてもらってください。',
           '招待先のアカウントでログインできる必要があります。使えない場合は基盤の管理者に依頼してください。',
+        ],
+      },
+      {
+        id: 'proposals',
+        title: '提案を受け付ける・提案する',
+        body: [
+          '担当者でない人も、アプリの直しを提案できます。',
+          '提案できるのは、アプリと同じ部署の、アプリを作れる人です。',
+          '提案するときは、アプリのページで「直しを提案する」を押します。',
+          '提案は、担当者が確認して「反映する」を押すまで、アプリに反映されません。',
+          '受け付けるかどうかは、アプリの設定「提案の受け付け」で変えられます。',
         ],
       },
       {

@@ -1,16 +1,33 @@
 import { z } from 'zod'
 import * as wire from './schema/schemas'
 import { openEnum, openUnion, selectVariant } from '../../boundary'
-import type { AccessRequest, AppTools, BusinessApp, CreatedAccessRequest, DirectoryEntry, DirectoryMigrationResult, Membership, MyAccessRequest, PersonProfile, PlatformSettings, Resolved, Screenshot } from '../../../model/contracts/console'
+import type { AccessRequest, AppPermissions, AppTools, BusinessApp, Contribution, CreatedAccessRequest, DirectoryEntry, DirectoryMigrationResult, InboxServerItem, Membership, MyAccessRequest, PersonProfile, PlatformSettings, Resolved, Screenshot } from '../../../model/contracts/console'
+import { NO_APP_PERMISSIONS } from '../../../model/contracts/console'
 import { personReader, personRefReader } from './person'
 
 export const screenshotReader: z.ZodType<Screenshot> = wire.screenshot.strip()
 const shareReader = wire.share.strip().extend({ scope: openEnum(wire.shareScopes) })
 const appGroupReader = wire.appGroup
+const contributionReader: z.ZodType<Contribution> = wire.contribution.strip().extend({ scope: openEnum(wire.contributionScopes) })
+// The caller's grants fail closed without failing the app: a set that is absent,
+// null, partial or not the five known booleans reads as no grant at all (never a
+// partial one); unknown extra keys are dropped. The writer schema stays strict.
+const permissionsReader: z.ZodType<AppPermissions> = z.unknown().optional().transform((value) => {
+  const known = wire.permissions.strip().safeParse(value)
+  return known.success ? known.data : { ...NO_APP_PERMISSIONS }
+})
 export const appReader: z.ZodType<BusinessApp> = wire.app.strip().extend({
   group: appGroupReader, screenshots: z.array(screenshotReader), owners: z.array(personRefReader), createdBy: personRefReader, share: shareReader,
+  contribution: contributionReader, permissions: permissionsReader,
 })
-export const entryReader: z.ZodType<DirectoryEntry> = wire.directoryEntry.strip().extend({ group: appGroupReader, screenshots: z.array(screenshotReader), owners: z.array(personRefReader) })
+export const entryReader: z.ZodType<DirectoryEntry> = wire.directoryEntry.strip().extend({
+  group: appGroupReader, screenshots: z.array(screenshotReader), owners: z.array(personRefReader), contribution: contributionReader, permissions: permissionsReader,
+})
+const inboxItem = wire.inbox.shape.items.element
+// A kind this build cannot render is not work it can route to; drop it rather than miscount.
+export const inboxReader: z.ZodType<InboxServerItem[]> = z.object({
+  items: z.array(inboxItem.strip().extend({ kind: openEnum(wire.inboxKinds), app: inboxItem.shape.app.strip() })),
+}).transform(({ items }) => items.flatMap(({ kind, ...item }) => kind.kind === 'known' ? [{ ...item, kind: kind.value }] : []))
 const memberRole = openEnum(wire.memberRoles)
 export const membershipReader: z.ZodType<Membership> = wire.membership.extend({ person: personReader, role: memberRole })
 export const profileReader: z.ZodType<PersonProfile> = wire.personProfile.extend({

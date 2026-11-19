@@ -361,7 +361,7 @@ describe('directory and comment routes', () => {
 
   test('the console role toggle exposes a private bound entry without changing the caller toggle', async () => {
     expect((await call('POST', `${root}/__mock/role`, { role: 'Viewer' })).body).toMatchObject({
-      person: { id: 'p-tanaka' }, isConsoleAdmin: false, canCreateApps: false,
+      person: { id: 'p-kobayashi' }, isConsoleAdmin: false, canCreateApps: false, view: 'user',
     })
     expect((await call('GET', `${root}/resolve?path=sales/east/team-a/keihi`)).body.kind).toBe('entry')
     await caller('p-yamada', 'Viewer')
@@ -375,7 +375,9 @@ describe('directory and comment routes', () => {
     const members = (await call('GET', `${root}/directory/groups/g-team-a/members`)).body.items as Array<{ person: { id: string }; inheritedFrom: string | null }>
     expect(members.map((member) => [member.person.id, member.inheritedFrom]).sort()).toEqual([['p-sato', 'g-sales'], ['p-suzuki', null], ['p-yamada', null]])
     // A direct membership stays a direct row even when an ancestor grants a stronger role; the role is the strongest.
-    expect((await call('GET', `${root}/directory/groups/g-planning/members`)).body.items).toMatchObject([{ person: { id: 'p-sato' }, role: 'manager', inheritedFrom: null }])
+    expect((await call('GET', `${root}/directory/groups/g-planning/members`)).body.items).toMatchObject([
+      { person: { id: 'p-sato' }, role: 'manager', inheritedFrom: null }, { person: { id: 'p-kobayashi' }, role: 'member', inheritedFrom: null },
+    ])
     expect((await call('GET', `${root}/directory/groups/missing/members`)).status).toBe(404)
     expect((await call('GET', `${root}/directory/people?ids=p-sato,p-missing`)).body.items).toMatchObject([{ id: 'p-sato' }])
     expect((await call('GET', `${root}/directory/people?q=yamada`)).body.items).toMatchObject([{ id: 'p-yamada' }])
@@ -402,10 +404,10 @@ describe('directory and comment routes', () => {
     expect((await call('POST', `${root}/admin/directory-migrate`)).status).toBe(403)
     await call('POST', `${root}/__mock/caller`, { personId: 'p-yamada', role: 'Admin' })
     const pending = (await call('POST', `${root}/__mock/migration`, {})).body
-    expect(pending).toEqual({ pending: true, people: 4, groups: 6, memberships: 5 })
+    expect(pending).toEqual({ pending: true, people: 5, groups: 6, memberships: 6 })
     expect((await call('GET', `${root}/me`)).body.migration).toEqual(pending)
     const result = await call('POST', `${root}/admin/directory-migrate`)
-    expect(result).toEqual({ status: 200, body: { imported: { people: 4, groups: 6, memberships: 5 }, conflicts: [], merged: [] } })
+    expect(result).toEqual({ status: 200, body: { imported: { people: 5, groups: 6, memberships: 6 }, conflicts: [], merged: [] } })
     expect((await call('GET', `${root}/me`)).body.migration.pending).toBe(false)
     expect(await call('POST', `${root}/admin/directory-migrate`)).toEqual(result)
   })
@@ -651,7 +653,7 @@ describe('store routes: screenshots, people and owner filter', () => {
     expect((await call('GET', `${root}/me`)).body.person.avatarVersion).toBe(seeded)
     const people = (await call('GET', `${root}/directory/people`)).body.items as Array<{ id: string; avatarVersion: string | null }>
     expect(Object.fromEntries(people.map((entry) => [entry.id, entry.avatarVersion]))).toEqual({
-      'p-yamada': seeded, 'p-sato': seeded, 'p-suzuki': null, 'p-tanaka': seeded,
+      'p-yamada': seeded, 'p-sato': seeded, 'p-suzuki': null, 'p-tanaka': seeded, 'p-kobayashi': null,
     })
     expect((await call('GET', mitsumori)).body.owners[0].avatarVersion).toBe(seeded)
     const comments = (await call('GET', `${mitsumori}/comments`)).body as Array<{ author: { id: string; avatarVersion: string | null } }>
@@ -808,5 +810,102 @@ describe('creation needs a membership of the target group (like the server)', ()
       expect(await bind(app)).toEqual(alreadyBound)
       expect(await call('POST', '/api/console/apps/a-mitsumori/bind', { stackId: 'other', appName: 'other' })).toEqual(alreadyBound)
     })
+  })
+})
+
+describe('role-based views: personas, permissions, contribution and the inbox (like the server)', () => {
+  const root = '/api/console'
+  const role = (name: string) => call('POST', `${root}/__mock/role`, { role: name })
+  const permissionsOf = async () => Object.fromEntries(((await call('GET', `${root}/apps`)).body.items as Array<{ id: string; permissions: Record<string, boolean> }>).map((app) => [app.id, app.permissions]))
+  const none = { use: false, comment: false, propose: false, maintain: false, data: false }
+  const user = { use: true, comment: true, propose: false, maintain: false, data: false }
+  const maintainer = { use: true, comment: true, propose: true, maintain: true, data: true }
+  beforeEach(async () => { await call('POST', `${root}/__mock/reset`) })
+  afterEach(async () => { await call('POST', `${root}/__mock/reset`) })
+
+  test('the default persona is a maker who maintains every app; group scope is seeded except one company and one off', async () => {
+    expect((await call('GET', `${root}/me`)).body).toMatchObject({ person: { id: 'p-yamada' }, isConsoleAdmin: true, view: 'maker' })
+    const apps = (await call('GET', `${root}/apps`)).body.items as Array<{ id: string; contribution: { scope: string }; permissions: unknown }>
+    expect(Object.fromEntries(apps.map((app) => [app.id, app.contribution.scope]))).toEqual({
+      'a-mitsumori': 'group', 'a-nippo': 'group', 'a-keihi': 'group', 'a-hikkoshi': 'group', 'a-kintai': 'company', 'a-kaigishitsu': 'off',
+    })
+    for (const app of apps) expect(app.permissions).toEqual(maintainer)
+    const entry = (await call('GET', `${root}/apps/a-kaigishitsu/directory-entry`)).body
+    expect(entry).toMatchObject({ contribution: { scope: 'off' }, permissions: maintainer })
+  })
+
+  test('Viewer is a user who can neither maintain nor propose; Editor proposes only where the scope admits them', async () => {
+    expect((await role('Viewer')).body).toMatchObject({ person: { id: 'p-kobayashi' }, canCreateApps: false, view: 'user', managedGroupIds: [] })
+    expect(await permissionsOf()).toEqual({ 'a-hikkoshi': user, 'a-kintai': user, 'a-kaigishitsu': user })
+    expect((await call('GET', `${root}/apps/a-keihi/directory-entry`)).body.permissions).toEqual(none)
+
+    expect((await role('Editor')).body).toMatchObject({ person: { id: 'p-kobayashi' }, canCreateApps: true, view: 'user' })
+    // 引っ越し見積: own group with scope group; 勤怠申請: scope company; 会議室予約: scope off.
+    expect(await permissionsOf()).toEqual({ 'a-hikkoshi': { ...user, propose: true }, 'a-kintai': { ...user, propose: true }, 'a-kaigishitsu': user })
+    expect((await call('PATCH', `${root}/apps/a-hikkoshi`, { contribution: { scope: 'off' } })).status).toBe(403)
+    expect((await call('POST', `${root}/apps/a-hikkoshi/comments/seen`)).status).toBe(403)
+    expect((await call('POST', `${root}/apps/a-keihi/comments/seen`)).status).toBe(404)
+    expect((await call('GET', `${root}/inbox`)).body).toEqual({ items: [] })
+  })
+
+  test('owners and group managers start from the maker view', async () => {
+    await call('POST', `${root}/__mock/caller`, { personId: 'p-suzuki', role: 'Viewer' })
+    expect((await call('GET', `${root}/me`)).body).toMatchObject({ view: 'maker', managedGroupIds: [] })
+    expect((await permissionsOf())['a-nippo']).toEqual(maintainer)
+    await call('POST', `${root}/__mock/caller`, { personId: 'p-kobayashi', role: 'Viewer' })
+    expect((await call('GET', `${root}/me`)).body.view).toBe('user')
+  })
+
+  test('maintainers change the contribution scope through the app PATCH; anything else is refused', async () => {
+    const saved = await call('PATCH', `${root}/apps/a-hikkoshi`, { contribution: { scope: 'company', extra: true } })
+    expect(saved).toMatchObject({ status: 200, body: { contribution: { scope: 'company' } } })
+    expect(saved.body.contribution).toEqual({ scope: 'company' })
+    for (const contribution of [{ scope: 'public' }, {}, null, 'off']) {
+      expect((await call('PATCH', `${root}/apps/a-hikkoshi`, { contribution }))).toEqual({
+        status: 400, body: { error: 'invalid_request', message: 'contribution.scope must be off, group or company' },
+      })
+    }
+    await role('Editor')
+    expect((await permissionsOf())['a-hikkoshi'].propose).toBe(true)
+    await role('Admin')
+    await call('PATCH', `${root}/apps/a-hikkoshi`, { contribution: { scope: 'off' } })
+    await role('Editor')
+    expect((await permissionsOf())['a-hikkoshi'].propose).toBe(false)
+  })
+
+  test('an improvement draft passes the console gate only with propose: scope off is contribution_not_accepted, else forbidden', async () => {
+    const propose = (stackId: string) => call('POST', '/api/v1/projects/commerce/application-drafts', { kind: 'improvement', applicationStackId: stackId, intent: '直したい' })
+    try {
+      await role('Editor')
+      expect(await propose('kaigishitsu')).toEqual({ status: 403, body: { error: { code: 'contribution_not_accepted', message: 'このアプリは、いま提案を受け付けていません。' } } })
+      expect((await propose('hikkoshi')).status).not.toBe(403)
+      await role('Viewer')
+      expect(await propose('hikkoshi')).toMatchObject({ status: 403, body: { error: { code: 'forbidden' } } })
+      // A creation draft is not the console's to gate.
+      expect((await call('POST', '/api/v1/projects/commerce/application-drafts', { intent: '作りたい' })).status).not.toBe(403)
+    } finally {
+      await call('POST', '/api/v1/__mock/reset')
+    }
+  })
+
+  test('the inbox lists pending requests and unread feedback by others; reading the thread and deciding clear them', async () => {
+    const inbox = async () => (await call('GET', `${root}/inbox`)).body.items as Array<{ kind: string; app: { id: string; path: string; displayName: string; icon: string }; count: number; since: string }>
+    expect(await inbox()).toEqual([
+      { kind: 'accessRequest', app: { id: 'a-keihi', path: 'sales/east/team-a/keihi', displayName: '経費精算', icon: '💴' }, count: 1, since: '2026-10-10T09:00:00.000Z' },
+      { kind: 'feedback', app: { id: 'a-keihi', path: 'sales/east/team-a/keihi', displayName: '経費精算', icon: '💴' }, count: 1, since: '2026-10-10T09:00:00.000Z' },
+    ])
+    // A newer comment by someone else on a thread already read counts again; the caller's own never does.
+    await call('POST', `${root}/__mock/caller`, { personId: 'p-suzuki', role: 'Viewer' })
+    expect((await call('POST', `${root}/apps/a-mitsumori/comments`, { body: '検索が速くなりました。' })).status).toBe(201)
+    await call('POST', `${root}/__mock/caller`, { personId: 'p-yamada', role: 'Admin' })
+    expect((await call('POST', `${root}/apps/a-mitsumori/comments`, { body: 'ありがとうございます。' })).status).toBe(201)
+    const feedback = (await inbox()).filter((item) => item.kind === 'feedback')
+    expect(feedback.map((item) => [item.app.id, item.count])).toEqual([['a-mitsumori', 1], ['a-keihi', 1]])
+
+    expect(await call('POST', `${root}/apps/a-mitsumori/comments/seen`)).toEqual({ status: 204, body: undefined })
+    expect(await call('POST', `${root}/apps/a-keihi/comments/seen`)).toEqual({ status: 204, body: undefined })
+    expect((await call('POST', `${root}/apps/a-keihi/access-requests/aar-keihi-suzuki/decline`)).status).toBe(200)
+    expect(await inbox()).toEqual([])
+    expect((await call('POST', `${root}/apps/missing/comments/seen`)).status).toBe(404)
   })
 })

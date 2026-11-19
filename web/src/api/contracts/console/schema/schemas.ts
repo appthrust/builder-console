@@ -14,6 +14,9 @@ export const shareScopes = ['private', 'group', 'company', 'public'] as const
 export const memberRoles = ['member', 'manager'] as const
 export const requestStatuses = ['pending', 'approved', 'declined'] as const
 export const requestStates = ['none', 'granted', 'pending', 'declined'] as const
+export const contributionScopes = ['off', 'group', 'company'] as const
+export const views = ['user', 'maker'] as const
+export const inboxKinds = ['accessRequest', 'feedback'] as const
 
 export const person = z.object({ id, subject: text.nullable(), pending: z.boolean(), email: text, displayName: text, avatarVersion: text.nullable() })
 export const unknownPerson = z.strictObject({ id, displayName: z.literal(''), unknown: z.literal(true) })
@@ -21,10 +24,14 @@ export const personRef = z.union([person.strict(), unknownPerson])
 export const appGroup = z.object({ id, path: text, name: text })
 export const screenshot = z.strictObject({ id, caption: text, width: count, height: count })
 export const share = z.strictObject({ scope: z.enum(shareScopes), groupIds: total(id), extraPersonIds: total(id) })
+export const contribution = z.strictObject({ scope: z.enum(contributionScopes) })
+/** Derived per caller by the server (domain.Capabilities); absent grants nothing. */
+export const permissions = z.strictObject({ use: z.boolean(), comment: z.boolean(), propose: z.boolean(), maintain: z.boolean(), data: z.boolean() })
 export const app = z.strictObject({
   id, slug: text, displayName: text, description: text, icon: text, tags: total(text), guide: text,
   capabilities: total(text), screenshots: total(screenshot), group: appGroup.strict(), owners: total(personRef),
   stackId: text.nullable(), appName: text.nullable(), share, createdBy: personRef, createdAt: text, updatedAt: text,
+  contribution, permissions: observed(permissions),
 })
 export const directoryEntry = app.omit({ slug: true, guide: true, share: true, createdBy: true }).extend({ path: text, canOpen: z.boolean() })
 export const group = z.object({
@@ -44,7 +51,7 @@ export const me = z.strictObject({
   person: person.strict().extend({ subject: id }), effectiveGroupIds: total(id), managedGroupIds: total(id),
   isConsoleAdmin: z.boolean(), canCreateApps: z.boolean(), projectId: id,
   platformUnavailable: observed(z.boolean()), notMember: observed(z.boolean()), teamSlug: observed(text),
-  directoryPublicURL: text, migration: migrationCounts.extend({ pending: z.boolean() }),
+  directoryPublicURL: text, migration: migrationCounts.extend({ pending: z.boolean() }), view: z.enum(views),
 })
 export const config = z.strictObject({ projectId: text.max(63).regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/), dashboardUrl: observed(text), newAppConversation: z.boolean() })
 export const comment = z.strictObject({ id, appId: id, author: personRef, body: text, createdAt: text })
@@ -69,6 +76,10 @@ export const resolved = z.strictObject({ kind: z.enum(['group', 'app', 'entry'])
 export const settings = z.strictObject({
   projectId: id, teamSlug: observed(text.nullable()), github: z.strictObject({ connected: z.boolean(), connectionId: text.nullable() }),
   registry: z.strictObject({ connected: z.boolean(), connectionId: text.nullable() }), defaultTemplateId: text,
+})
+/** Console-held work for the caller on apps they maintain; zero counts are omitted by the writer. */
+export const inbox = z.object({
+  items: total(z.strictObject({ kind: z.enum(inboxKinds), app: z.strictObject({ id, path: text, displayName: text, icon: text }), count, since: text })),
 })
 
 export const conversationModes = ['off', 'allowlist', 'on'] as const
@@ -113,6 +124,6 @@ export const schemas = {
   Me: me, Config: config, Comment: comment, CommentList: total(comment), ScreenshotList: total(screenshot),
   AccessRequestList: total(accessRequest), MyAccessRequest: myAccessRequest, CreateAccessRequest: createAccessRequest,
   ApproveAccessRequest: z.strictObject({ request: accessRequest, app }), DeclineAccessRequest: z.strictObject({ request: accessRequest }),
-  Tools: tools, Resolved: resolved, Settings: settings, Error: error,
+  Tools: tools, Resolved: resolved, Settings: settings, Inbox: inbox, Error: error,
 }
 export type SchemaName = keyof typeof schemas

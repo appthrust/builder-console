@@ -12,6 +12,7 @@ import { deriveCreateProgress, repositoryLabel, showsCreateProgress, type Progre
 import { paths } from '../../routes/paths'
 import { ActionError, Button, Card, CardBody, CardHeader, Disclosure, HrefLink, LinkButton, StatusPill } from '../../ui'
 import { AppAbout, GuideSummary } from './app-about'
+import { IntroGapNotice } from './intro-gap-notice'
 import { text } from './copy'
 import { DatabaseChanges } from './database-changes'
 import { ProgressList } from './progress-list'
@@ -21,6 +22,20 @@ import { OwnerLinks } from './owner-links'
 import { isSourceBuildFailed } from './platform'
 import { ScreenshotStrip } from './screenshots'
 import { ToolsPanel } from './tools-panel'
+import { VoicesPanel } from './voices-panel'
+
+/** 「利用者にはこう見えます →」 (WF-05 ②): the same page drawn as a user sees it (`?as=user`, app-page.tsx). */
+export function UserViewLink({ app }: { app: Pick<BusinessApp, 'group' | 'slug'> }) {
+  return (
+    <HrefLink
+      href={`${paths.app(app.group.path, app.slug)}?as=user`}
+      className="inline-flex min-h-10 items-center text-sm font-medium text-accent-strong underline underline-offset-2 hover:text-accent md:min-h-8"
+      data-testid="user-view-link"
+    >
+      {text.maintainer.userView}
+    </HrefLink>
+  )
+}
 
 export function OverviewTab({
   projectId,
@@ -73,12 +88,23 @@ export function OverviewTab({
   const face = (
     <div className="space-y-8">
       {/* Pictures are served only for bound apps, so a draft has nowhere to show them yet. */}
-      {app.stackId !== null ? <ScreenshotStrip appId={app.id} screenshots={app.screenshots} canEdit={canEdit} /> : null}
+      {app.stackId !== null ? <div id="screenshots" className="scroll-mt-24"><ScreenshotStrip appId={app.id} screenshots={app.screenshots} canEdit={canEdit} /></div> : null}
       <AppAbout description={app.description} capabilities={app.capabilities} tags={app.tags} />
       <GuideSummary guide={app.guide} href={paths.app(app.group.path, app.slug, 'guide')} canEdit={canEdit} />
       <ToolsPanel appId={app.id} />
     </div>
   )
+
+  // A maintainer's additions (ux-design §6.7): what the introduction still lacks, then what users have said.
+  // A bound app only: a draft has no users yet. AI improvement never competes with an unfinished build session.
+  const improvable = !(view.build && view.build.phase !== 'done')
+  const maintainer = canEdit && !creating && app.stackId !== null ? (
+    // Keyed by app: the dismissal and the pinned new count belong to one app's page.
+    <div key={app.id} className="space-y-6">
+      <IntroGapNotice app={app} />
+      <VoicesPanel app={app} projectId={projectId} stackId={improvable ? app.stackId : undefined} />
+    </div>
+  ) : null
 
   const details = (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
@@ -201,7 +227,7 @@ export function OverviewTab({
     </div>
   )
 
-  return <div className="space-y-10">{creating ? <>{details}{face}</> : <>{face}{details}</>}</div>
+  return <div className="space-y-10">{maintainer}{creating ? <>{details}{face}</> : <>{face}{details}</>}</div>
 }
 
 function Row({ label, children }: { label: string; children: ReactNode }) {

@@ -3,21 +3,29 @@ import { ChevronDown } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { copy } from '../../copy'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger, PageHeader, useDocumentTitle } from '../../ui'
+import { useConsoleView } from '../inbox'
 import { text } from './copy'
 
-type ArticleId = (typeof copy.help.articles)[number]['id']
+type Article = (typeof copy.help.articles)[number]
 
-/** Three short articles (ux-design §7.1 ヘルプ). `/help#share` opens 公開範囲とは. */
+/**
+ * Four short articles in the order of the caller's view (role-based-views
+ * ux-design §6.9). A `#id` link to an article of the other view (e.g.
+ * `/help#share`) still opens it, after the four.
+ */
 export function HelpPage() {
   useDocumentTitle(copy.help.title)
+  const view = useConsoleView()
   const hash = useLocation({ select: (location) => location.hash })
-  const [open, setOpen] = useState<Partial<Record<ArticleId, boolean>>>(() => ({
-    [copy.help.articles.some((article) => article.id === hash) ? (hash as ArticleId) : copy.help.articles[0].id]: true,
-  }))
+  const ids = copy.help.order[view]
+  const articles = copy.help.articles
+    .filter((article) => ids.includes(article.id) || article.id === hash)
+    .sort((a, b) => (ids.indexOf(a.id) + 1 || Infinity) - (ids.indexOf(b.id) + 1 || Infinity))
+  const target = articles.find((article) => article.id === hash)
+  const [open, setOpen] = useState<Partial<Record<Article['id'], boolean>>>(() => ({ [target?.id ?? articles[0].id]: true }))
 
   // `#share` arriving while mounted (in-page link) opens that article; scrolling is a DOM effect.
   const [followedHash, setFollowedHash] = useState(hash)
-  const target = copy.help.articles.find((article) => article.id === hash)
   if (followedHash !== hash) {
     setFollowedHash(hash)
     if (target) setOpen((current) => ({ ...current, [target.id]: true }))
@@ -30,7 +38,7 @@ export function HelpPage() {
     <div className="max-w-3xl space-y-6">
       <PageHeader title={copy.help.title} lead={text.help.lead} />
       <div className="space-y-3">
-        {copy.help.articles.map((article, index) => (
+        {articles.map((article, index) => (
           <Collapsible
             key={article.id}
             open={open[article.id] ?? false}

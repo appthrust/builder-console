@@ -18,7 +18,7 @@ const visibleSQL = `$2 OR a.share_scope IN ('company','public') OR $1=ANY(a.shar
 
 const appSelect = `SELECT a.id,a.slug,a.display_name,a.description,a.icon,a.tags,a.guide,a.capabilities,a.stack_id,a.app_name,
 	a.share_scope,a.share_group_ids,a.share_extra_person_ids,a.created_at,a.updated_at,
-	a.group_id,a.created_by,
+	a.group_id,a.created_by,a.contribution_scope,
 	COALESCE((SELECT jsonb_agg(jsonb_build_object('id',o.person_id) ORDER BY o.person_id)
 	FROM app_owners o WHERE o.app_id=a.id),'[]'::jsonb),
 	COALESCE((SELECT jsonb_agg(jsonb_build_object('id',s.id,'caption',s.caption,'width',s.width,'height',s.height) ORDER BY s.position)
@@ -32,7 +32,7 @@ func scanApp(row scanner) (domain.App, error) {
 	var owners, screenshots []byte
 	err := row.Scan(&a.ID, &a.Slug, &a.DisplayName, &a.Description, &a.Icon, pq.Array(&a.Tags), &a.Guide, pq.Array(&a.Capabilities), &a.StackID, &a.AppName,
 		&a.Share.Scope, pq.Array(&a.Share.GroupIDs), pq.Array(&a.Share.ExtraPersonIDs), &a.CreatedAt, &a.UpdatedAt,
-		&a.Group.ID, &a.CreatedBy.ID, &owners, &screenshots)
+		&a.Group.ID, &a.CreatedBy.ID, &a.Contribution.Scope, &owners, &screenshots)
 	if err == nil {
 		err = json.Unmarshal(owners, &a.Owners)
 	}
@@ -56,6 +56,33 @@ func (t *Tx) App(id string) (domain.App, error) {
 	apps := []domain.App{app}
 	err = t.hydrateApps(apps)
 	return apps[0], err
+}
+
+func (t *Tx) AppByStackID(stackID string) (domain.App, error) {
+	var id string
+	if err := t.SQL.QueryRowContext(t.Context, `SELECT id FROM apps WHERE stack_id=$1`, stackID).Scan(&id); err != nil {
+		return domain.App{}, err
+	}
+	return t.App(id)
+}
+
+func (t *Tx) OwnsAnyApp(personID string) (bool, error) {
+	var owns bool
+	err := t.SQL.QueryRowContext(t.Context, `SELECT EXISTS(SELECT 1 FROM app_owners WHERE person_id=$1)`, personID).Scan(&owns)
+	return owns, err
+}
+
+func (t *Tx) MaintainedApps(actor domain.Actor) ([]domain.App, error) {
+	managed := make([]string, 0, len(actor.GroupRoles))
+	for id, role := range actor.GroupRoles {
+		if role == "manager" {
+			managed = append(managed, id)
+		}
+	}
+	apps, err := collectApps(t.SQL.QueryContext(t.Context, appSelect+` WHERE $2 OR a.group_id=ANY($3::text[])
+		OR EXISTS(SELECT 1 FROM app_owners o WHERE o.app_id=a.id AND o.person_id=$1)
+		ORDER BY a.id`, actor.PersonID, actor.IsConsoleAdmin, pq.Array(managed)))
+	return t.filterApps(apps, err, "", "")
 }
 
 func (t *Tx) AppByPath(path string) (domain.App, error) {
@@ -174,9 +201,12 @@ func (t *Tx) SuggestAppName(base string) (string, error) {
 }
 
 func (t *Tx) CreateApp(a domain.App) error {
-	if err := t.Exec(`INSERT INTO apps(id,group_id,slug,display_name,description,icon,tags,app_name,share_scope,share_group_ids,share_extra_person_ids,created_by,guide,capabilities)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,COALESCE($14::text[],'{}'))`, a.ID, a.Group.ID, a.Slug, a.DisplayName, a.Description, a.Icon, pq.Array(a.Tags), a.AppName,
-		a.Share.Scope, pq.Array(a.Share.GroupIDs), pq.Array(a.Share.ExtraPersonIDs), a.CreatedBy.ID, a.Guide, pq.Array(a.Capabilities)); err != nil {
+	if a.Contribution.Scope == "" {
+		a.Contribution.Scope = "group"
+	}
+	if err := t.Exec(`INSERT INTO apps(id,group_id,slug,display_name,description,icon,tags,app_name,share_scope,share_group_ids,share_extra_person_ids,created_by,guide,capabilities,contribution_scope)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,COALESCE($14::text[],'{}'),$15)`, a.ID, a.Group.ID, a.Slug, a.DisplayName, a.Description, a.Icon, pq.Array(a.Tags), a.AppName,
+		a.Share.Scope, pq.Array(a.Share.GroupIDs), pq.Array(a.Share.ExtraPersonIDs), a.CreatedBy.ID, a.Guide, pq.Array(a.Capabilities), a.Contribution.Scope); err != nil {
 		return err
 	}
 	return t.SaveOwners(a.ID, []string{a.CreatedBy.ID})
@@ -189,8 +219,8 @@ func (t *Tx) SaveApp(old, a domain.App) error {
 		}
 	}
 	return t.Exec(`UPDATE apps SET group_id=$2,slug=$3,display_name=$4,description=$5,icon=$6,tags=$7,
-		share_scope=$8,share_group_ids=$9,share_extra_person_ids=$10,guide=$11,capabilities=COALESCE($12::text[],'{}'),updated_at=now() WHERE id=$1`,
-		a.ID, a.Group.ID, a.Slug, a.DisplayName, a.Description, a.Icon, pq.Array(a.Tags), a.Share.Scope, pq.Array(a.Share.GroupIDs), pq.Array(a.Share.ExtraPersonIDs), a.Guide, pq.Array(a.Capabilities))
+		share_scope=$8,share_group_ids=$9,share_extra_person_ids=$10,guide=$11,capabilities=COALESCE($12::text[],'{}'),contribution_scope=$13,updated_at=now() WHERE id=$1`,
+		a.ID, a.Group.ID, a.Slug, a.DisplayName, a.Description, a.Icon, pq.Array(a.Tags), a.Share.Scope, pq.Array(a.Share.GroupIDs), pq.Array(a.Share.ExtraPersonIDs), a.Guide, pq.Array(a.Capabilities), a.Contribution.Scope)
 }
 
 func (t *Tx) SaveOwners(appID string, ids []string) error {

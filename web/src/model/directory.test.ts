@@ -36,6 +36,8 @@ const entry = (id: string, owner: Group, updatedAt: string): DirectoryEntry => (
   createdAt: '2026-10-01T00:00:00Z',
   updatedAt,
   canOpen: false,
+  contribution: { scope: { kind: 'known', value: 'group' } },
+  permissions: { use: true, comment: true, propose: false, maintain: false, data: false },
 })
 
 const shot = (id: string) => ({ id, caption: '', width: 1280, height: 800 })

@@ -8,7 +8,7 @@ const app = businessAppOf({
   id: 'inventory', slug: 'inventory', displayName: '備品棚卸', description: '在庫と発注を確認', icon: '', tags: ['備品'],
   group: { id: 'team-a', path: 'sales/team-a', name: '営業1課' }, owners: [owner], createdBy: owner,
   stackId: null, appName: null, share: { scope: 'company', groupIds: [], extraPersonIds: [] }, createdAt: '', updatedAt: '',
-  guide: '月末に集計してください', capabilities: ['PDF で一覧を出す', '注文書を作る'], screenshots: [],
+  guide: '月末に集計してください', capabilities: ['PDF で一覧を出す', '注文書を作る'], screenshots: [], contribution: { scope: 'group' },
 })
 
 describe('matchesAppSearch', () => {
@@ -40,7 +40,7 @@ const entry: DirectoryEntry = {
   id: app.id, path: `${app.group.path}/${app.slug}`, displayName: app.displayName,
   description: app.description, icon: app.icon, tags: app.tags, capabilities: app.capabilities, screenshots: [],
   group: app.group, owners: app.owners, appName: 'inventory', stackId: 'stack-inventory',
-  createdAt: app.createdAt, updatedAt: app.updatedAt, canOpen: false,
+  createdAt: app.createdAt, updatedAt: app.updatedAt, canOpen: false, contribution: app.contribution, permissions: app.permissions,
 }
 
 describe('matchesDirectoryEntrySearch', () => {
