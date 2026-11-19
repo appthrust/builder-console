@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Sparkles } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { commentsQuery } from '../../api/queries/console'
+import { commentsQuery, useMe } from '../../api/queries/console'
 import { copy, relativeTime } from '../../copy'
 import { isUnknownPerson, type AppComment, type BusinessApp } from '../../model/contracts/console'
 import { paths } from '../../routes/paths'
@@ -21,18 +21,20 @@ const SHOWN = 2
  */
 export function VoicesPanel({ app, projectId, stackId }: { app: BusinessApp; projectId: string; stackId: string | undefined }) {
   const comments = useQuery(commentsQuery(app.id))
+  const { data: me } = useMe()
   const inbox = useInbox()
   const unread = inbox.items.find((item) => item.kind === 'feedback' && item.app.id === app.id)?.count ?? 0
   const { mutate: markSeen } = useMarkCommentsSeen(app.id)
   const [arrival, setArrival] = useState<number>()
   const marked = useRef(false)
-  // Once per mount, after the inbox has answered: pin the new count, then mark the thread seen.
+  // Pin the arrival count, but only mark a loaded thread with unread comments from others.
   useEffect(() => {
-    if (marked.current || !inbox.ready) return
+    if (!inbox.ready) return
+    setArrival((count) => count ?? unread)
+    if (marked.current || unread <= 0 || !comments.data?.some((comment) => comment.author.id !== me.person.id)) return
     marked.current = true
-    setArrival(unread)
     markSeen()
-  }, [inbox.ready, unread, markSeen])
+  }, [inbox.ready, unread, comments.data, me.person.id, markSeen])
   const [fixing, setFixing] = useState<AppComment>()
   const ownerIds = new Set(app.owners.filter((owner) => !isUnknownPerson(owner)).map((owner) => owner.id))
   const newCount = arrival ?? unread
