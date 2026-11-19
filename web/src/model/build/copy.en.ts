@@ -9,6 +9,7 @@ export const textEn: typeof textJa = {
     kickoffReply: 'Propose an app from this',
     prepareTurn: 'While preparing the app, ask me one question at a time about its published name and who can see it.',
     excelReady: 'The Excel analysis and the screen decisions are done',
+    excelStopped: 'Building from Excel stopped partway. Continue in Start from Excel.',
   },
   primary: { prepare: 'Build this app', afterPlan: 'Build when planned', refresh: 'Update plan and build', publish: 'Publish', continue: 'Keep improving' },
   proposal: {

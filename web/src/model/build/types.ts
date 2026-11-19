@@ -51,9 +51,10 @@ export type BuildMessage =
   /**
    * `text` is the reply as written (markdown); `summary` / `changed` / `question` are its
    * parsed parts (messages.ts#parseAssistantMessage). `link` points back to where the
-   * message's content was made (the collapsed Excel → app line opens its analysis and screens).
+   * message's content was made (the collapsed Excel → app line opens its analysis and screens; with `resume`, the line
+   * saying an Excel → app step stopped sends the user back there to continue it).
    */
-  | { role: 'assistant'; text: string; summary?: string; changed?: string[]; question?: string; options?: string[]; proposal?: BuildProposal; link?: { kind: 'excel2app'; draftId: string }; at: string; turnId?: string }
+  | { role: 'assistant'; text: string; summary?: string; changed?: string[]; question?: string; options?: string[]; proposal?: BuildProposal; link?: { kind: 'excel2app'; draftId: string; resume?: true }; at: string; turnId?: string }
   /**
    * `retry: 'confirm'` re-reads the draft after a write whose answer could not be read; it never resends that write.
    * `retry: 'recheck'`: Platform's validation rejected the plan for a cause that may lie outside it; the notice offers

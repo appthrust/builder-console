@@ -121,8 +121,55 @@ describe('conversation history', () => {
     expect(JSON.stringify(messages)).not.toContain('__init__')
     expect(JSON.stringify(messages)).not.toContain('```json')
     expect(replyOptions(messagesFromDraft({ ...draft, conversationTurns: [analysis, init] }, []))).toEqual([buildCopy.questions.kickoffReply])
-    // Nothing is done until an Excel turn succeeded.
-    expect(messagesFromDraft({ ...draft, conversationTurns: [{ ...analysis, status: 'failed' }] }, [])).toEqual([])
+    // Nothing is called done until an Excel turn succeeded; a failed one says where to continue (below).
+    expect(messagesFromDraft({ ...draft, conversationTurns: [{ ...analysis, status: 'running', finishedAt: undefined }] }, [])).toEqual([])
+  })
+  describe('a stopped Excel → app step', () => {
+    const analysis = { ...turn, kind: 'excel-analysis' as const, id: 'turn-excel', userMessage: 'この Excel を読み取ってください', startedAt: '2026-10-08T00:00:10Z', finishedAt: '2026-10-08T00:00:40Z' }
+    const design = { ...turn, kind: 'ui-design' as const, id: 'turn-ui-1', userMessage: '__init__', startedAt: '2026-10-08T00:00:50Z', finishedAt: '2026-10-08T00:00:55Z' }
+    const stopped = (at: string) => {
+      const text = buildCopy.questions.excelStopped
+      return { role: 'assistant', text, summary: text, at, turnId: `excel:${draft.id}`, link: { kind: 'excel2app', draftId: draft.id, resume: true } } satisfies BuildMessage
+    }
+    test('the latest analysis failed: one line that sends the user back to Excel → app, no ready line and no retry', () => {
+      const messages = messagesFromDraft({ ...draft, conversationTurns: [{ ...analysis, status: 'failed', error: 'codex exited' }] }, [])
+      expect(messages).toEqual([stopped(analysis.finishedAt)])
+      expect(replyOptions(messages)).toEqual([])
+      expect(JSON.stringify(messages)).not.toContain(buildCopy.questions.excelReady)
+    })
+    test('the analysis succeeded and the screen design failed after it: the stop line, not the ready line', () => {
+      const messages = messagesFromDraft({ ...draft, conversationTurns: [{ ...design, status: 'failed', error: 'codex exited' }, analysis] }, [])
+      expect(messages).toEqual([stopped(design.finishedAt)])
+      expect(JSON.stringify(messages)).not.toContain('__init__')
+    })
+    test('a failure followed by a succeeded Excel → app step, or both succeeded: the ready line as before', () => {
+      const ready = buildCopy.questions.excelReady
+      const line = { role: 'assistant', text: ready, summary: ready, at: analysis.startedAt, turnId: `excel:${draft.id}`, options: [buildCopy.questions.kickoffReply], link: { kind: 'excel2app', draftId: draft.id } } satisfies BuildMessage
+      expect(messagesFromDraft({ ...draft, conversationTurns: [analysis, design] }, [])).toEqual([line])
+      expect(messagesFromDraft({ ...draft, conversationTurns: [{ ...analysis, status: 'failed', error: 'codex exited' }, { ...analysis, id: 'turn-excel-2', startedAt: '2026-10-08T00:00:45Z', finishedAt: '2026-10-08T00:00:48Z' }, design] }, [])).toEqual([line])
+    })
+    test('the line is in the language in use', () => {
+      const restore = preserveLanguage()
+      try {
+        setLanguage('en')
+        expect(messagesFromDraft({ ...draft, conversationTurns: [{ ...analysis, status: 'failed', error: 'codex exited' }] }, [])).toEqual([{ ...stopped(analysis.finishedAt), text: textEn.questions.excelStopped, summary: textEn.questions.excelStopped }])
+      } finally {
+        restore()
+      }
+    })
+    test('offers no reply chips, and is not counted as a reply toward 「この内容で提案して」', () => {
+      const second = { ...turn, id: 'turn-2', userMessage: '入れる', startedAt: '2026-10-08T00:02:00Z', finishedAt: '2026-10-08T00:02:10Z' }
+      const stoppedLater = { ...design, status: 'failed' as const, error: 'codex exited', startedAt: '2026-10-08T00:03:00Z', finishedAt: '2026-10-08T00:03:10Z' }
+      // Two replies, then the stopped step as the latest line: nothing to answer here, no proposal chip.
+      const afterTwo = messagesFromDraft({ ...draft, conversationTurns: [turn, second, stoppedLater] }, [])
+      expect(afterTwo.at(-1)).toEqual(stopped(stoppedLater.finishedAt))
+      expect(replyOptions(afterTwo)).toEqual([])
+      // One reply before it and one after: two replies, so the proposal chip is not offered yet.
+      const third = { ...second, id: 'turn-3', userMessage: '入れない', startedAt: '2026-10-08T00:04:00Z', finishedAt: '2026-10-08T00:04:10Z' }
+      const around = messagesFromDraft({ ...draft, conversationTurns: [turn, stoppedLater, third] }, [])
+      expect(around.at(-1)).toMatchObject({ role: 'assistant', turnId: third.id })
+      expect(replyOptions(around)).toEqual(turn.suggestedReplies!)
+    })
   })
 })
 

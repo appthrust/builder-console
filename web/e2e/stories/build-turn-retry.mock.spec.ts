@@ -133,4 +133,20 @@ test.describe('build conversation turn retry @build-turn-retry', () => {
     await expect(conversation.getByRole('alert')).toHaveCount(0)
     await expect(page.getByRole('button', { name: text.conversation.retry, exact: true })).toHaveCount(0)
   })
+
+  test('a draft whose Excel → app step stopped says so and links back to Excel から作る, with nothing to retry here @mock @story', async ({ page, mock, request }) => {
+    await mock.platform('codex', { available: true })
+    const draftId = await draftWithTurns(request, mock, [])
+    await mock.platform('turn-failure', { error: 'codex exited', kind: 'ui-design' })
+    expect((await request.post(`${root}/application-drafts/${draftId}/conversation-turns`, { data: { kind: 'ui-design', message: '__init__' } })).ok()).toBe(true)
+    await mock.advance()
+
+    await page.goto(`/-/build/${draftId}`)
+    const conversation = page.getByRole('log', { name: 'AI との会話' })
+    await expect(conversation).toContainText(buildText.questions.excelStopped)
+    await expect(conversation).not.toContainText(buildText.questions.excelReady)
+    await expect(conversation.getByRole('link', { name: text.conversation.excelResume, exact: true })).toHaveAttribute('href', new RegExp(`/-/excel2app\\?draft=${draftId}$`))
+    await expect(conversation.getByRole('alert')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: text.conversation.retry, exact: true })).toHaveCount(0)
+  })
 })

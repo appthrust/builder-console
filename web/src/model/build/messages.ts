@@ -251,7 +251,13 @@ export function messagesFromDraft(draft: BuildDraft, extra: BuildMessage[], opti
   // linked back to Excel → app; 「この内容で提案して」 is offered right away, since the
   // specification is already written.
   const excel = all.filter((turn) => isOneOf(turn.kind, 'excel-analysis', 'ui-design'))
-  if (excel.some((turn) => isOneOf(turn.status, 'succeeded'))) {
+  const latestExcel = excel.at(-1)
+  if (isOneOf(latestExcel?.status, 'failed')) {
+    // The latest Excel → app step stopped: it is continued in Excel → app, which retries each step by its kind; the
+    // build page offers no retry for it and does not call the analysis and screens done.
+    const text = buildCopy.questions.excelStopped
+    messages.push({ role: 'assistant', text, summary: text, at: latestExcel!.finishedAt ?? latestExcel!.startedAt, turnId: `excel:${draft.id}`, link: { kind: 'excel2app', draftId: draft.id, resume: true } })
+  } else if (excel.some((turn) => isOneOf(turn.status, 'succeeded'))) {
     const text = buildCopy.questions.excelReady
     messages.push({ role: 'assistant', text, summary: text, at: excel[0]!.startedAt, turnId: `excel:${draft.id}`, options: [buildCopy.questions.kickoffReply], link: { kind: 'excel2app', draftId: draft.id } })
   }

@@ -12,6 +12,8 @@ export const textJa = {
     prepareTurn: 'アプリを用意している間に、公開するときの名前と、誰に見せるかを一つずつ確認してください。',
     /** The excel2app analysis and screen-design turns, collapsed into one line of the conversation. */
     excelReady: 'Excel の解析と画面の決定は済んでいます',
+    /** The latest of those turns failed: it is continued in Excel から作る, which retries each step by its kind. */
+    excelStopped: 'Excel から作る作業が途中で止まりました。「Excel から作る」で続けてください',
   },
   primary: { prepare: 'この内容で作る', afterPlan: '計画ができたら作る', refresh: '計画を更新して作る', publish: '公開する', continue: '続けて直す' },
   proposal: {
