@@ -1,15 +1,14 @@
-// Left navigation (ux-design §7.1): fixed items, the group tree under
-// 組織のアプリ, the Directory link (groups and people are managed there) and
-// the console admin item. `RailNav` is the folded form: the fixed items as icons
+// Left navigation (ux-design §7.1; role-based-views §6.1): the user view has
+// ホーム / ディレクトリ / ヘルプ only. The maker view adds 自分のアプリ, 作りかけ,
+// the group tree under 組織のアプリ, 組織と人 and the console admin item, with
+// badges from `useInbox`. `RailNav` is the folded form: the fixed items as icons
 // with their names as tooltips, badges reduced to a dot; the group tree needs the full width.
 import { Building2, ChevronRight, CircleHelp, Globe, House, PencilLine, Settings2, UserRound, UsersRound } from 'lucide-react'
 import { useMemo, useState, type ReactNode } from 'react'
 import { buildGroupTree, pathPrefixes, type GroupNode } from '../model/contracts/console'
 import { directoryLinks } from '../api/console'
-import { useApps } from '../api/queries/console'
 import { copy } from '../copy'
-import { useAppViews } from '../features/app/use-app-views'
-import { useUnfinished } from '../features/discover/drafts'
+import { useConsoleView, useInbox } from '../features/inbox'
 import { paths } from '../routes/paths'
 import { cn, Collapsible, CollapsibleContent, CollapsibleTrigger, HrefLink } from '../ui'
 import { useShell } from './use-shell'
@@ -17,13 +16,19 @@ import { useShell } from './use-shell'
 const itemClasses =
   'flex h-10 items-center gap-2.5 rounded-md px-2.5 text-sm whitespace-nowrap text-stone-600 transition-colors md:h-9 hover:bg-stone-100 hover:text-stone-900 data-[status=active]:bg-accent-soft data-[status=active]:font-medium data-[status=active]:text-accent-strong [&>svg]:size-4 [&>svg]:shrink-0 [&>svg]:text-stone-400 data-[status=active]:[&>svg]:text-accent'
 
+/** Nav badge numbers, all read from the one inbox: home = every row, 問題あり, and what 作りかけ lists (drafts, proposals to review). */
+function useNavBadges() {
+  const { items, total } = useInbox()
+  return {
+    inbox: total,
+    problems: items.filter((item) => item.kind === 'problem').length,
+    unfinished: items.filter((item) => item.kind === 'draft' || item.kind === 'proposal').reduce((count, item) => count + item.count, 0),
+  }
+}
 
-/** Number of the caller's own apps whose status is 問題あり (same derivation as the app lists). */
-function useProblemCount(projectId: string): number {
-  const mine = useApps({ scope: 'mine' })
-  const views = useAppViews(projectId)
-  if (views.loading || !mine.data) return 0
-  return mine.data.filter((app) => views.viewFor(app).status === 'failed').length
+function CountBadge({ count }: { count: number }) {
+  if (count === 0) return null
+  return <span aria-hidden className="ml-auto rounded-full bg-stone-100 px-1.5 text-[11px] font-medium tabular-nums text-stone-600">{count}</span>
 }
 
 function ProblemBadge({ count }: { count: number }) {
@@ -44,37 +49,77 @@ const railItemClasses =
   'relative flex size-10 items-center justify-center rounded-md text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-900 data-[status=active]:bg-accent-soft data-[status=active]:text-accent-strong [&>svg]:size-5'
 
 export function RailNav() {
-  const { me } = useShell()
-  const problems = useProblemCount(me.projectId)
-  const unfinished = useUnfinished(me, { poll: false }).items.length
-  const item = (href: string, label: string, icon: ReactNode, dot?: 'bad' | 'count') => (
+  return useConsoleView() === 'user' ? <UserRailNav /> : <MakerRailNav />
+}
+
+function railItem(href: string, label: string, icon: ReactNode, dot?: 'bad' | 'count') {
+  return (
     <HrefLink href={href} aria-label={label} title={label} className={railItemClasses}>
       {icon}
       {dot ? <span aria-hidden className={cn('absolute top-2 right-2 size-1.5 rounded-full', dot === 'bad' ? 'bg-bad' : 'bg-stone-400')} /> : null}
     </HrefLink>
   )
+}
+
+function UserRailNav() {
   return (
     <nav aria-label={copy.nav.label} className="flex flex-col items-center gap-px px-2 py-2">
-      {item(paths.home, copy.nav.home, <House aria-hidden />)}
-      {item(paths.mine(), problems > 0 ? copy.nav.problemsLabel(problems) : copy.nav.mine, <UserRound aria-hidden />, problems > 0 ? 'bad' : undefined)}
-      {item(paths.drafts(), unfinished > 0 ? copy.nav.draftsLabel(unfinished) : copy.nav.drafts, <PencilLine aria-hidden />, unfinished > 0 ? 'count' : undefined)}
-      {item(paths.directory, copy.nav.directory, <Globe aria-hidden />)}
+      {railItem(paths.home, copy.nav.home, <House aria-hidden />)}
+      {railItem(paths.directory, copy.nav.directory, <Globe aria-hidden />)}
+      <hr className="my-2 w-6 border-stone-200" />
+      {railItem(paths.help, copy.nav.help, <CircleHelp aria-hidden />)}
+    </nav>
+  )
+}
+
+function MakerRailNav() {
+  const { me } = useShell()
+  const { inbox, problems, unfinished } = useNavBadges()
+  return (
+    <nav aria-label={copy.nav.label} className="flex flex-col items-center gap-px px-2 py-2">
+      {railItem(paths.home, inbox > 0 ? copy.nav.inboxLabel(inbox) : copy.nav.home, <House aria-hidden />, inbox > 0 ? 'count' : undefined)}
+      {railItem(paths.mine(), problems > 0 ? copy.nav.problemsLabel(problems) : copy.nav.mine, <UserRound aria-hidden />, problems > 0 ? 'bad' : undefined)}
+      {railItem(paths.drafts(), unfinished > 0 ? copy.nav.draftsLabel(unfinished) : copy.nav.drafts, <PencilLine aria-hidden />, unfinished > 0 ? 'count' : undefined)}
+      {railItem(paths.directory, copy.nav.directory, <Globe aria-hidden />)}
       <hr className="my-2 w-6 border-stone-200" />
       {me.directoryPublicURL ? (
         <a href={directoryLinks.groups(me.directoryPublicURL)} target="_blank" rel="noreferrer noopener" aria-label={copy.nav.people} title={copy.nav.people} className={railItemClasses}>
           <UsersRound aria-hidden />
         </a>
       ) : null}
-      {me.isConsoleAdmin ? item(paths.adminPlatform, copy.nav.platform, <Settings2 aria-hidden />) : null}
-      {item(paths.help, copy.nav.help, <CircleHelp aria-hidden />)}
+      {me.isConsoleAdmin ? railItem(paths.adminPlatform, copy.nav.platform, <Settings2 aria-hidden />) : null}
+      {railItem(paths.help, copy.nav.help, <CircleHelp aria-hidden />)}
     </nav>
   )
 }
 
 export function Nav() {
+  return useConsoleView() === 'user' ? <UserNav /> : <MakerNav />
+}
+
+function UserNav() {
+  return (
+    <nav aria-label={copy.nav.label} className="flex flex-col gap-px px-3 py-4">
+      <HrefLink href={paths.home} className={itemClasses}>
+        <House aria-hidden />
+        {copy.nav.home}
+      </HrefLink>
+      <HrefLink href={paths.directory} className={itemClasses}>
+        <Globe aria-hidden />
+        {copy.nav.directory}
+      </HrefLink>
+      <hr className="mx-2.5 my-4 border-stone-200" />
+      <HrefLink href={paths.help} className={itemClasses}>
+        <CircleHelp aria-hidden />
+        {copy.nav.help}
+      </HrefLink>
+    </nav>
+  )
+}
+
+function MakerNav() {
   const { me, groups, homeGroups, pageGroupPath } = useShell()
-  const problems = useProblemCount(me.projectId)
-  const unfinished = useUnfinished(me, { poll: false }).items.length
+  const { inbox, problems, unfinished } = useNavBadges()
   const tree = useMemo(() => buildGroupTree(groups), [groups])
 
   // Open the caller's membership paths by default, plus the page's own path.
@@ -157,9 +202,10 @@ export function Nav() {
 
   return (
     <nav aria-label={copy.nav.label} className="flex flex-col gap-px px-3 py-4">
-      <HrefLink href={paths.home} className={itemClasses}>
+      <HrefLink href={paths.home} className={itemClasses} aria-label={inbox > 0 ? copy.nav.inboxLabel(inbox) : undefined}>
         <House aria-hidden />
         {copy.nav.home}
+        <CountBadge count={inbox} />
       </HrefLink>
       <div className="flex items-center gap-1">
         <HrefLink href={paths.mine()} className={cn(itemClasses, 'min-w-0 flex-1 pr-2')} title={copy.nav.mine}>
@@ -171,7 +217,7 @@ export function Nav() {
       <HrefLink href={paths.drafts()} className={itemClasses} aria-label={unfinished > 0 ? copy.nav.draftsLabel(unfinished) : undefined}>
         <PencilLine aria-hidden />
         {copy.nav.drafts}
-        {unfinished > 0 ? <span aria-hidden className="ml-auto rounded-full bg-stone-100 px-1.5 text-[11px] font-medium tabular-nums text-stone-600">{unfinished}</span> : null}
+        <CountBadge count={unfinished} />
       </HrefLink>
 
       <p className="mt-5 mb-1 flex items-center gap-2.5 px-2.5 text-xs font-medium text-stone-500">

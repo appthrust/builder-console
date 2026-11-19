@@ -1,6 +1,6 @@
-// App cards, compact rows and the sortable app table shared by home, mine,
-// company and group pages. Each page calls `useAppViews(projectId)` once (one
-// project-wide platform read-model load) and passes it down as `lookup`.
+// The sortable app table and status cells shared by mine, group and drafts
+// pages. Each page calls `useAppViews(projectId)` once (one project-wide
+// platform read-model load) and passes it down as `lookup`.
 import {
   createColumnHelper,
   getCoreRowModel,
@@ -17,10 +17,8 @@ import { pendingAccessRequestsQuery } from '../../api/queries/console'
 import { copy, relativeTime } from '../../copy'
 import { paths } from '../../routes/paths'
 import { locale } from '../../shell/language'
-import { useShell } from '../../shell/use-shell'
 import { AppIcon, Button, ConfirmDialog, CopyButton, DataTable, HrefLink, Notice, OpenLink, Skeleton, StatusPill } from '../../ui'
 import { useDiscardDraft } from '../app/mutations'
-import { canEditApp } from '../app/permissions'
 import { PendingBadge } from '../app/pending-badge'
 import type { AppViews } from '../app/use-app-views'
 import { StaleNotice, UnconfirmedNotice, useWriteConfirmation } from '../app/notices'
@@ -72,13 +70,12 @@ export function AppStatus({ app, lookup }: { app: BusinessApp; lookup: AppViews 
 
 /** 作りかけ: carry on, or drop the draft (it has no stack, so nothing else is removed). */
 function UnfinishedActions({ app, view }: { app: BusinessApp; view: AppView }) {
-  const { me } = useShell()
   const [open, setOpen] = useState(false)
   const queryClient = useQueryClient()
   const discard = useDiscardDraft(app, view)
   // A discard whose answer could not be read may have happened: the lists are read back before it is offered again.
   const confirmation = useWriteConfirmation([discard.error], discard.reset, () => queryClient.refetchQueries({ queryKey: ['console', 'apps'] }))
-  if (view.unreadableStack || view.unreadableBuild || !canEditApp(app, me)) return null
+  if (view.unreadableStack || view.unreadableBuild || !app.permissions.maintain) return null
   return (
     <div className="mt-1 flex flex-wrap items-center gap-x-3">
       <HrefLink href={paths.new({ resume: app.id })} className={actionLink}>{text.list.resume}</HrefLink>
@@ -134,54 +131,6 @@ export function StatusLoadNotice({ lookup }: { lookup: AppViews }) {
     >
       {text.list.statusFailed}
     </Notice>
-  )
-}
-
-/** Home-page cards (ux-design §7.2): icon, name, status, 担当者. */
-export function AppCards({ apps, lookup, pendingCounts }: { apps: BusinessApp[]; lookup: AppViews; pendingCounts?: ReadonlyMap<string, number> }) {
-  return (
-    <ul className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      {apps.map((app) => (
-        <li key={app.id} className="flex h-full min-w-0 flex-col gap-3 rounded-lg border border-stone-200 bg-white p-4">
-          <HrefLink href={appHref(app)} className="group flex min-h-10 min-w-0 items-center gap-3 rounded focus-visible:outline-2 focus-visible:outline-accent">
-            <AppIcon icon={app.icon} name={app.displayName} />
-            <span className="min-w-0">
-              <span className="block truncate font-medium text-stone-900 group-hover:text-accent-strong">{app.displayName}</span>
-              <span className="block truncate text-xs text-stone-500">{ownerNames(app)}</span>
-            </span>
-            <PendingBadge count={pendingCounts?.get(app.id) ?? 0} />
-          </HrefLink>
-          <div className="mt-auto"><AppStatus app={app} lookup={lookup} /></div>
-          <AppUrlActions app={app} lookup={lookup} />
-        </li>
-      ))}
-    </ul>
-  )
-}
-
-/** Compact rows: group name, app, status and (optionally) when it was added. */
-export function AppLines({ apps, lookup, showTime = false, pendingCounts }: { apps: BusinessApp[]; lookup: AppViews; showTime?: boolean; pendingCounts?: ReadonlyMap<string, number> }) {
-  return (
-    <ul className="divide-y divide-stone-100 overflow-hidden rounded-lg border border-stone-200 bg-white">
-      {apps.map((app) => {
-        const added = showTime ? relativeTime(app.createdAt) : undefined
-        return (
-          <li key={app.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-sm">
-            <HrefLink href={appHref(app)} className="flex min-h-10 min-w-0 flex-1 basis-48 items-center gap-3 rounded hover:text-accent-strong">
-              <AppIcon icon={app.icon} name={app.displayName} size="sm" />
-              <span className="min-w-0">
-                <span className="block truncate font-medium text-stone-900">{app.displayName}</span>
-                <span className="block truncate text-xs text-stone-500">{app.group.name}</span>
-              </span>
-              <PendingBadge count={pendingCounts?.get(app.id) ?? 0} />
-            </HrefLink>
-            <div className="min-w-0 flex-1 basis-64"><AppStatus app={app} lookup={lookup} /></div>
-            {added ? <span className="w-24 text-xs text-stone-500 sm:text-right">{text.list.created(added)}</span> : null}
-            <AppUrlActions app={app} lookup={lookup} />
-          </li>
-        )
-      })}
-    </ul>
   )
 }
 
@@ -307,26 +256,6 @@ export function AppListSkeleton({ rows = 3 }: { rows?: number }) {
           <div className="flex-1 space-y-1.5">
             <Skeleton className="h-3.5 w-40" />
             <Skeleton className="h-3 w-24" />
-          </div>
-          <Skeleton className="h-5 w-14 rounded-full" />
-        </div>
-      ))}
-    </div>
-  )
-}
-
-/** Placeholder cards for the home group section. */
-export function AppCardsSkeleton({ count = 4 }: { count?: number }) {
-  return (
-    <div role="status" aria-label={copy.common.loading} className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      {Array.from({ length: count }, (_, index) => (
-        <div key={index} className="space-y-4 rounded-lg border border-stone-200 bg-white p-4">
-          <div className="flex items-center gap-3">
-            <Skeleton className="size-10 rounded-md" />
-            <div className="flex-1 space-y-1.5">
-              <Skeleton className="h-3.5 w-24" />
-              <Skeleton className="h-3 w-16" />
-            </div>
           </div>
           <Skeleton className="h-5 w-14 rounded-full" />
         </div>

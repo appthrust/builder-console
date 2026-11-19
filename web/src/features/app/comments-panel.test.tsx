@@ -13,7 +13,7 @@ const at = new Date().toISOString()
 const person = { id: 'p-1', subject: 'sub-1', pending: false, email: 'yamada@example.test', displayName: '山田', avatarVersion: null }
 const me: Me = {
   person, isConsoleAdmin: false, canCreateApps: true, effectiveGroupIds: [], managedGroupIds: [], projectId: 'commerce',
-  directoryPublicURL: '', migration: { pending: false, people: 0, groups: 0, memberships: 0 },
+  directoryPublicURL: '', migration: { pending: false, people: 0, groups: 0, memberships: 0 }, view: 'user',
 }
 const thread = [
   { id: 'c-1', appId: 'app-1', author: person, body: '使ってみました', createdAt: at },

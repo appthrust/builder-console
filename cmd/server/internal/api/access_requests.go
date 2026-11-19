@@ -110,38 +110,13 @@ func (a *API) pendingAccessRequests(s *request) (any, int, error) {
 	if s.r.URL.Query().Get("status") != "pending" {
 		return nil, 0, httpx.Invalid("status must be pending")
 	}
-	// EditApp includes group managers even for private apps they cannot view.
-	// Union owned apps with topmost managed subtrees instead of widening Visible.
-	scope := "mine"
-	if s.actor.IsConsoleAdmin {
-		scope = "all"
-	}
-	apps, err := s.tx.Apps(s.actor, scope, "", "")
+	apps, err := s.tx.MaintainedApps(s.actor)
 	if err != nil {
 		return nil, 0, err
 	}
-	ids := make([]string, 0, len(apps))
-	seen := make(map[string]bool, len(apps))
-	add := func(apps []domain.App) {
-		for _, app := range apps {
-			if !seen[app.ID] && s.actor.EditApp(app) {
-				seen[app.ID] = true
-				ids = append(ids, app.ID)
-			}
-		}
-	}
-	add(apps)
-	if !s.actor.IsConsoleAdmin {
-		for _, group := range s.groups {
-			if !s.actor.ManageGroup(group.ID) || (group.ParentID != nil && s.actor.ManageGroup(*group.ParentID)) {
-				continue
-			}
-			apps, err := s.tx.AppsInSubtree(group.Path)
-			if err != nil {
-				return nil, 0, err
-			}
-			add(apps)
-		}
+	ids := make([]string, len(apps))
+	for i := range apps {
+		ids[i] = apps[i].ID
 	}
 	requests, err := s.tx.PendingAccessRequests(ids)
 	return requests, http.StatusOK, err
@@ -215,7 +190,7 @@ func (a *API) approveAccessRequest(s *request) (any, int, error) {
 	return struct {
 		Request domain.AppAccessRequest `json:"request"`
 		App     domain.App              `json:"app"`
-	}{r, updated}, http.StatusOK, err
+	}{r, s.appForCaller(updated)}, http.StatusOK, err
 }
 
 func (a *API) declineAccessRequest(s *request) (any, int, error) {

@@ -122,12 +122,12 @@ function DeletionProbe() {
 }
 
 /** The app page on the app's query defaults (retry policy included), with polling left to the test. */
-async function renderApp(tab: AppTab, scene: 'app' | 'mine' | 'mine-problems' | 'drafts' | 'deletion-probe' | { improve: string } = 'app') {
+async function renderApp(tab: AppTab, scene: 'app' | 'mine' | 'mine-problems' | 'drafts' | 'deletion-probe' | { improve: string } = 'app', search = '') {
   client = new QueryClient({ defaultOptions: { queries: { ...appQueryClient.getDefaultOptions().queries, retryDelay: 0, refetchInterval: false, refetchOnWindowFocus: false } } })
   await Promise.all([client.fetchQuery(meQuery), client.fetchQuery(groupsQuery), client.fetchQuery(appQuery(APP_ID))])
   const rootRoute = createRootRoute()
   const anyRoute = createRoute({ getParentRoute: () => rootRoute, path: '$', component: () => null })
-  router = createRouter({ routeTree: rootRoute.addChildren([anyRoute]), history: createMemoryHistory({ initialEntries: [`${APP_PATH}/-/${tab}`] }) })
+  router = createRouter({ routeTree: rootRoute.addChildren([anyRoute]), history: createMemoryHistory({ initialEntries: [`${APP_PATH}/-/${tab}${search}`] }) })
   await router.load()
   container = document.createElement('div')
   document.body.append(container)
@@ -140,6 +140,8 @@ async function renderApp(tab: AppTab, scene: 'app' | 'mine' | 'mine-problems' | 
 
 const pageText = () => document.body.textContent ?? ''
 const count = (method: string, path: RegExp) => requests.filter((item) => item.method === method && path.test(item.path)).length
+/** Writes the page made, except opening 概要 marking the app's comments seen (利用者の声), which no scenario here is about. */
+const writes = () => requests.filter((item) => item.method !== 'GET' && !/^\/api\/console\/apps\/[^/]+\/comments\/seen$/.test(item.path))
 const refreshFailed = copy.common.refreshFailed(copy.relative.justNow)
 /** Every value the page holds in its query cache, serialized: nothing from an unreadable answer may be in it. */
 const cachedWire = () => JSON.stringify(client.getQueryCache().getAll().map((query) => query.state.data))
@@ -454,7 +456,7 @@ describe('APT-1109: isolated rows keep the rest of the project readable', () => 
     expect(row('見積').textContent).toContain(text.unsupported.label)
     expect(rows().filter((item) => !item.textContent?.includes('見積')).map((item) => item.textContent)).toEqual(before.filter((value) => !value?.includes('見積')))
     expect(row('見積').textContent).not.toContain(discoverText.list.resume)
-    expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
+    expect(writes()).toEqual([])
     // Without an id only apps lacking their own readable stack become unknown.
     rewrites = [{ method: 'GET', path: stackList, once: false, body: (wire) => ({ ...wire, data: (wire.data as Json[]).map((stack) => stack.id === 'mitsumori' ? { templateId: 'Bad Id!' } : stack) }) }]
     await tick(keys.stacks('commerce'))
@@ -469,7 +471,7 @@ describe('APT-1109: isolated rows keep the rest of the project readable', () => 
     expect(buttons().some((item) => item.textContent?.trim() === text.header.menu && !item.disabled)).toBe(false)
     expect(container.querySelector('[data-testid=\"improve-with-ai\"]')).toBeNull()
     expect(pageText()).not.toContain(discoverText.list.statusFailed)
-    expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
+    expect(writes()).toEqual([])
   })
 
   test('an unreadable plan in the draft list does not change normal app statuses', async () => {
@@ -492,7 +494,7 @@ describe('APT-1109: isolated rows keep the rest of the project readable', () => 
     expect(pageText()).not.toContain(discoverText.list.statusFailed)
     const created = await beginBuild('commerce', 'a different app', { groupId: 'g-team-a', ownerSubject: 'owner' })
     expect(created.id).not.toBe('broken-draft')
-    expect(requests.filter((item) => item.method !== 'GET')).toEqual([{ method: 'POST', path: `${PROJECT}/application-drafts`, status: 201 }])
+    expect(writes()).toEqual([{ method: 'POST', path: `${PROJECT}/application-drafts`, status: 201 }])
     expect(requests.some((item) => item.path.endsWith('/broken-draft'))).toBe(false)
     // An independently readable exact match still resumes as before.
     expect((await beginBuild('commerce', storedDraftWire.intent, { groupId: 'g-team-a', ownerSubject: 'owner' })).id).toBe(storedDraftWire.id)
@@ -530,7 +532,7 @@ describe('APT-1136: a reported failure of the latest build of an app that runs a
     // 「詳しい人向け」 carries the same fact as its one place outside the notice.
     await click(button(copy.app.overview.advanced.toggle))
     expect(container.querySelector('[data-testid="advanced-latest-build"]')?.textContent).toContain(behind.latestFailed)
-    expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
+    expect(writes()).toEqual([])
 
     await act(async () => { root?.unmount() })
     await renderApp('overview', 'mine')
@@ -552,7 +554,7 @@ describe('APT-1136: a reported failure of the latest build of an app that runs a
     expect(buttons(notice).some((item) => item.textContent?.includes('AI に直させる'))).toBe(true)
     // One notice: the 0.5.9 error notice for the same cause is replaced, not repeated.
     expect(container.querySelectorAll('[data-testid="build-failure-cause"]')).toHaveLength(1)
-    expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
+    expect(writes()).toEqual([])
   })
 
   test('an app with no running release keeps the build failure as its status, without the secondary notice', async () => {
@@ -599,7 +601,7 @@ test('an unreadable improvement offers no generation and the app can start a new
   expect(buttons().some((item) => item.textContent?.trim() === buildCopy.failure.plan.replan)).toBe(false)
   expect(container.querySelector<HTMLTextAreaElement>('textarea')?.disabled).toBe(true)
   expect([...container.querySelectorAll('a')].some((link) => link.getAttribute('href') === APP_PATH)).toBe(true)
-  expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
+  expect(writes()).toEqual([])
   await act(async () => { root?.unmount() })
   container.remove()
   client.clear()
@@ -674,7 +676,7 @@ test.each(['platform-v1', 'console-v1'] as const)('an unreadable creating-draft 
   expect(dialog()).not.toBeNull()
   expect([...dialog()!.querySelectorAll<HTMLButtonElement>('[role="radio"]')].every((item) => item.disabled)).toBe(true)
   expect(buttons(dialog()!).some((item) => item.textContent?.trim() === copy.app.settings.save)).toBe(false)
-  expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
+  expect(writes()).toEqual([])
   expect(pageText()).not.toContain(discoverText.list.statusFailed)
   for (const tab of ['settings', 'releases'] as const) {
     await act(async () => { root?.unmount() })
@@ -688,7 +690,7 @@ test.each(['platform-v1', 'console-v1'] as const)('an unreadable creating-draft 
       await click(edit)
     }
     expect(dialog()).toBeNull()
-    expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
+    expect(writes()).toEqual([])
   }
 })
 
@@ -707,7 +709,7 @@ test.each(['stack', 'build'] as const)('delete and discard hooks refuse an unrea
   await click(button('Attempt delete'))
   await click(button('Attempt discard'))
   expect(pageText()).toContain('Both writes refused')
-  expect(requests.filter((item) => item.method !== 'GET')).toEqual([])
+  expect(writes()).toEqual([])
 })
 
 test.each(['improve', 'repair'] as const)('an unreadable draft row does not block a new %s', async (entry) => {
@@ -722,9 +724,63 @@ test.each(['improve', 'repair'] as const)('an unreadable draft row does not bloc
     await act(async () => { type(input, 'Improve this app') })
     await click(button(improveText.entry.submit, dialog()!))
   }
-  expect(requests.filter((item) => item.method !== 'GET')).toEqual([
+  expect(writes()).toEqual([
     { method: 'POST', path: `${PROJECT}/application-drafts`, status: 201 },
     { method: 'POST', path: expect.stringMatching(/\/application-drafts\/[^/]+\/conversation-turns$/), status: 202 },
   ])
   expect(requests.some((item) => item.path.includes('/unreadable-row'))).toBe(false)
+})
+
+describe('role-based views: people who do not maintain the app get the intro page (ux-design §6.5, §6.6)', () => {
+  const USE_ONLY = { use: true, comment: true, propose: false, maintain: false, data: false }
+  const PROPOSER = { ...USE_ONLY, propose: true }
+  const asCaller = (permissions: typeof USE_ONLY) => rewrites.push({ method: 'GET', path: CONSOLE_APP, once: false, body: (wire) => ({ ...wire, permissions }) })
+  const tabs = () => container.querySelector(`nav[aria-label="${text.header.tabsLabel}"]`)
+
+  test.each(['overview', 'settings', 'logs', 'data'] as const)('every tab URL (%s) shows the tab-less intro with 担当者に伝える and no engineering words', async (tab) => {
+    asCaller(USE_ONLY)
+    await renderApp(tab)
+    expect(tabs()).toBeNull()
+    expect(container.querySelector('[data-testid="intro-open"]')!.textContent).toContain(text.intro.open)
+    expect(pageText()).toContain(text.feedback.title)
+    expect(pageText()).toContain(text.feedback.lead)
+    expect(pageText()).not.toContain(sharingCopy.title)
+    expect(pageText()).not.toContain(text.propose.action)
+    for (const word of ['ログ', 'イメージ', 'ポート', text.overview.placement, text.settings.advanced]) expect(pageText()).not.toContain(word)
+    expect(pageText()).not.toMatch(/\bv\d+\b/)
+    // Nothing behind the tabs is read for someone who cannot see them.
+    expect(count('GET', LOGS)).toBe(0)
+    expect(count('GET', ENV)).toBe(0)
+  })
+
+  test('someone who may propose gets 「直しを提案する」; a closed contribution scope refuses in the dialog with the server reason', async () => {
+    asCaller(PROPOSER)
+    rewrites.push({ method: 'POST', path: new RegExp(`^${PROJECT}/application-drafts$`), once: true, body: () => Response.json({ error: { code: 'contribution_not_accepted', message: text.propose.refused } }, { status: 403 }) })
+    await renderApp('overview')
+    expect(tabs()).toBeNull()
+    await click(button(text.propose.action, container))
+    const open = dialog()!
+    expect(open.textContent).toContain(text.propose.title)
+    expect(open.textContent).toMatch(/さんが確認してから反映されます。/)
+    const field = open.querySelector('textarea')!
+    await act(async () => { type(field, '一覧に絞り込みを足したい') })
+    await submit(open.querySelector('form')!)
+    expect(dialog()!.textContent).toContain(text.propose.refused)
+  })
+
+  test('a maintainer previews it with ?as=user under a banner, and 「もとに戻る」 brings the tabs back', async () => {
+    await renderApp('overview', 'app', '?as=user')
+    expect(container.querySelector('[data-testid="user-preview-banner"]')!.textContent).toContain(text.intro.preview)
+    expect(tabs()).toBeNull()
+    // Users delete only their own comments, so the preview does too: moderation stays on the guide tab.
+    const myName = client.getQueryData(meQuery.queryKey)!.person.displayName
+    const rows = [...section('comments').closest('section')!.querySelectorAll('li')]
+    expect(rows.length).toBeGreaterThan(rows.filter((row) => row.textContent?.startsWith(myName)).length)
+    expect(rows.filter((row) => row.querySelector(`button[aria-label="${text.comments.menu}"]`)).length).toBe(rows.filter((row) => row.textContent?.startsWith(myName)).length)
+    await click(button(text.intro.previewExit, container))
+    expect(router.state.location.searchStr).not.toContain('as=user')
+    expect(container.querySelector('[data-testid="user-preview-banner"]')).toBeNull()
+    expect(tabs()).not.toBeNull()
+    expect(container.querySelector('[data-testid="user-view-link"]')!.getAttribute('href')).toContain('?as=user')
+  })
 })

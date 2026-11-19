@@ -13,15 +13,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Public link clients keep their SDK-owned document. The internal canonical
-// writer can be stricter, but must not change any shared field's JSON type.
+// The served document may add Console features while preserving every SDK field.
+// The internal canonical writer must agree with both published contracts.
 func TestPublicAndCanonicalConsoleContractsAgree(t *testing.T) {
-	require.Equal(t, consolecontract.Document, openAPIDocument)
 	var public, canonical map[string]any
 	require.NoError(t, json.Unmarshal(openAPIDocument, &public))
 	require.NoError(t, json.Unmarshal(consoleSPADocument, &canonical))
 	publicSchemas := public["components"].(map[string]any)["schemas"].(map[string]any)
 	canonicalSchemas := canonical["components"].(map[string]any)["schemas"].(map[string]any)
+	var sdk map[string]any
+	require.NoError(t, json.Unmarshal(consolecontract.Document, &sdk))
+	sdkSchemas := sdk["components"].(map[string]any)["schemas"].(map[string]any)
 	compiler := jsonschema.NewCompiler()
 	require.NoError(t, compiler.AddResource("https://console.test/public.json", openAPI30JSONSchema(public)))
 	for _, name := range []string{"App", "AppList"} {
@@ -29,6 +31,11 @@ func TestPublicAndCanonicalConsoleContractsAgree(t *testing.T) {
 		newFields := map[string][]string{}
 		fieldTypes(publicSchemas[name], publicSchemas, "", oldFields)
 		fieldTypes(canonicalSchemas[name], canonicalSchemas, "", newFields)
+		sdkFields := map[string][]string{}
+		fieldTypes(sdkSchemas[name], sdkSchemas, "", sdkFields)
+		for path, kinds := range sdkFields {
+			require.Equal(t, kinds, oldFields[path], "SDK compatibility: "+name+path)
+		}
 		for path, kinds := range oldFields {
 			require.Equal(t, kinds, newFields[path], name+path)
 		}

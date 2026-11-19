@@ -8,22 +8,38 @@ test.describe('Discover navigation @discover', () => {
     const nav = page.getByRole('navigation', { name: 'メインメニュー' })
     const main = page.getByRole('main')
 
+    // Home: every usable app as a card under 「使えるアプリ」, narrowed by membership chips (the draft is not usable yet).
+    const details = (name: string) => `${name}をくわしく見る`
     await page.goto('/')
-    await expect(page.getByRole('heading', { name: `${seed.groups.teamA.name} のアプリ`, exact: true })).toBeVisible()
+    await expect(main.getByRole('heading', { name: /^使えるアプリ/, level: 2 })).toBeVisible()
+    const usable = main.getByRole('list', { name: '使えるアプリ', exact: true })
+    await expect(usable.getByRole('listitem')).toHaveCount(6)
     for (const name of [seed.apps.mitsumori.name, seed.apps.nippo.name, seed.apps.keihi.name, '引っ越し見積', seed.apps.kintai.name, '会議室予約']) {
-      await expect(main.getByRole('link', { name: new RegExp(`^${name}`) })).toBeVisible()
+      await expect(usable.getByRole('link', { name: details(name), exact: true })).toBeVisible()
     }
+    await expect(usable.getByRole('listitem').filter({ hasText: draftName })).toHaveCount(0)
+    const chips = main.getByRole('group', { name: '使えるアプリの絞り込み', exact: true })
+    await chips.getByRole('button', { name: seed.groups.teamA.name, exact: true }).click()
+    await expect(chips.getByRole('button', { name: seed.groups.teamA.name, exact: true })).toHaveAttribute('aria-pressed', 'true')
+    const teamCards = main.getByRole('list', { name: `使えるアプリ: ${seed.groups.teamA.name}`, exact: true })
+    await expect(teamCards.getByRole('listitem')).toHaveCount(3)
+    for (const app of [seed.apps.mitsumori, seed.apps.nippo, seed.apps.keihi]) {
+      await expect(teamCards.getByRole('link', { name: details(app.name), exact: true })).toBeVisible()
+    }
+    await chips.getByRole('button', { name: 'すべて', exact: true }).click()
+    await expect(usable.getByRole('listitem')).toHaveCount(6)
+
     await page.getByRole('searchbox', { name: 'アプリを探す', exact: true }).fill('見積')
     await page.getByRole('button', { name: '探す', exact: true }).click()
     await expect(page).toHaveURL((url) => url.pathname === '/' && url.searchParams.get('q') === '見積')
-    const results = page.getByRole('table', { name: '「見積」の検索結果', exact: true })
-    await expect(results.getByRole('row')).toHaveCount(3)
-    await expect(results.getByRole('link', { name: /^見積作成/ })).toBeVisible()
-    await expect(results.getByRole('link', { name: /^引っ越し見積/ })).toBeVisible()
-    await expect(results.getByRole('link', { name: /^経費精算/ })).toHaveCount(0)
+    const results = main.getByRole('list', { name: '「見積」の検索結果', exact: true })
+    await expect(results.getByRole('listitem')).toHaveCount(2)
+    await expect(results.getByRole('link', { name: details('見積作成'), exact: true })).toBeVisible()
+    await expect(results.getByRole('link', { name: details('引っ越し見積'), exact: true })).toBeVisible()
+    await expect(results.getByRole('link', { name: details('経費精算'), exact: true })).toHaveCount(0)
     await page.reload()
     await expect(page.getByRole('searchbox', { name: 'アプリを探す', exact: true })).toHaveValue('見積')
-    await expect(results.getByRole('row')).toHaveCount(3)
+    await expect(results.getByRole('listitem')).toHaveCount(2)
 
     // 自分のアプリ lists apps that exist; the half-made wizard app is under 作りかけ.
     await nav.getByRole('link', { name: '自分のアプリ', exact: true }).click()
@@ -76,9 +92,12 @@ test.describe('Discover navigation @discover', () => {
     await nav.getByRole('button', { name: `${seed.groups.salesEast.name} を閉じる`, exact: true }).click()
     await nav.getByRole('button', { name: `${seed.groups.sales.name} を閉じる`, exact: true }).click()
     await expect(nav.getByRole('link', { name: seed.groups.teamA.name, exact: true })).not.toBeVisible()
-    await nav.getByRole('link', { name: 'ホーム', exact: true }).click()
-    await page.getByRole('region', { name: `${seed.groups.teamA.name} のアプリ`, exact: true })
-      .getByRole('link', { name: 'すべて見る →', exact: true }).click()
+    // The maker's home link carries the inbox count in its name (「ホーム（あなたの対応待ち N 件）」).
+    await nav.getByRole('link', { name: /^ホーム/ }).click()
+    await expect(page).toHaveURL('/')
+    await main.getByRole('list', { name: '使えるアプリ', exact: true }).getByRole('link', { name: details(seed.apps.mitsumori.name), exact: true }).click()
+    await expect(main.getByRole('heading', { name: seed.apps.mitsumori.name, exact: true, level: 1 })).toBeVisible()
+    await main.getByRole('link', { name: `${seed.groups.teamA.name} のアプリ`, exact: true }).click()
     await expect(page).toHaveURL(`/${seed.groups.teamA.path}`)
     await expect(main.getByRole('heading', { name: seed.groups.teamA.name, exact: true, level: 1 })).toBeVisible()
     await page.getByRole('navigation', { name: 'グループのページ', exact: true }).getByRole('link', { name: 'アプリ', exact: true }).click()

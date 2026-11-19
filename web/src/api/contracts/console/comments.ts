@@ -31,3 +31,9 @@ export const removeCommentContract = consoleEmptyContract({
     path: `${appComments(appId)}/${encodeURIComponent(commentId)}`,
   }),
 })
+
+/** Maintainers only: everything in the thread so far counts as read for the caller's inbox. */
+export const markCommentsSeenContract = consoleEmptyContract({
+  ...operations.markCommentsSeen,
+  request: (appId: string) => ({ method: 'POST', path: `${appComments(appId)}/seen` }),
+})

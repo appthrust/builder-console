@@ -1,21 +1,22 @@
 // Page frame (ux-design §7.1): 240px fixed left nav from md up, foldable to a
 // 56px icon rail (the fold toggle lives in the nav itself; the choice
-// persists), a drawer below 768px, and a top bar with the 所属 switcher, the
-// single primary action (＋ 新しいアプリ) and the user menu. The AI build and
+// persists), a drawer below 768px, and a top bar with the 所属 switcher,
+// ＋ 新しいアプリ (creators only; primary in the maker view, secondary in the
+// user view — role-based-views §6.1) and the user menu. The AI build and
 // improve sessions are workspaces, not pages: they get a viewport-height frame with no
 // page scroll or padding and scroll their own panes (features/build/build-page.tsx).
 import { AppSwitcher } from '@appthrust/app-launcher'
 import { useMatches, useMatchRoute, useRouterState } from '@tanstack/react-router'
 import { useSelector } from '@tanstack/react-store'
 import { Check, ChevronDown, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Settings, UserRound, X } from 'lucide-react'
-import { Dialog as RDialog, Popover } from 'radix-ui'
+import { Dialog as RDialog } from 'radix-ui'
 import { useEffect, type ReactNode } from 'react'
 import { useMe } from '../api/queries/console'
+import { useConsoleView } from '../features/inbox'
 import { copy } from '../copy'
 import { paths } from '../routes/paths'
 import {
   Avatar,
-  buttonClasses,
   cn,
   DropdownMenu,
   DropdownMenuContent,
@@ -216,38 +217,15 @@ function TopBar() {
   )
 }
 
+/** Not a creator: no button; how to become one lives in ヘルプ「アプリを作りたいとき」. */
 function CreateButton({ groupPath }: { groupPath: string | undefined }) {
   const { me } = useShell()
-  if (me.canCreateApps) {
-    return (
-      <LinkButton href={paths.new({ group: groupPath })} tone="primary">
-        {copy.nav.create}
-      </LinkButton>
-    )
-  }
-  // Not a creator: keep the entry visible but explain who to ask (ux-design §7.1).
-  const title = me.platformUnavailable ? copy.topbar.platformUnavailable : copy.topbar.cannotCreateTitle
-  const body = me.platformUnavailable ? copy.topbar.platformUnavailableBody : copy.topbar.cannotCreateBody
+  const view = useConsoleView()
+  if (!me.canCreateApps) return null
   return (
-    <Popover.Root>
-      <Popover.Trigger aria-label={`${copy.nav.create}（${title}）`} className={buttonClasses('secondary', 'md', 'text-stone-500')}>
-        {copy.nav.create}
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content
-          align="end"
-          sideOffset={6}
-          collisionPadding={8}
-          className="z-50 w-72 rounded-lg border border-line bg-white p-4 shadow-lg animate-pop-in"
-        >
-          <p className="text-sm font-medium text-stone-900">{title}</p>
-          <p className="mt-1 text-sm text-stone-600">{body}</p>
-          <HrefLink href="/help" className="mt-3 inline-flex min-h-10 items-center text-sm font-medium text-accent-strong hover:underline md:min-h-0">
-            {copy.nav.help}
-          </HrefLink>
-        </Popover.Content>
-      </Popover.Portal>
-    </Popover.Root>
+    <LinkButton href={paths.new({ group: groupPath })} tone={view === 'maker' ? 'primary' : 'secondary'}>
+      {copy.nav.create}
+    </LinkButton>
   )
 }
 

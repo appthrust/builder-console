@@ -1,6 +1,6 @@
-// App detail (ux-design §7.3): header with the app URL as the hero, then tabs
-// 概要 / つかいかた / データ / 更新履歴 / 設定 / ログ. The route resolves `/<group-path>/<slug>` to the
-// BusinessApp; the platform side is joined by `stackId` (src/model/app.ts).
+// App detail (ux-design §6.5, §6.7): people who maintain the app get the header with the app URL as the hero, then
+// tabs 概要 / つかいかた / データ / 更新履歴 / 設定 / ログ; everyone else gets the tab-less intro page for every tab URL.
+// The route resolves `/<group-path>/<slug>` to the BusinessApp; the platform side is joined by `stackId` (src/model/app.ts).
 import { ExternalLink, Lock, MoreHorizontal, Pencil, Trash2, Users } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
@@ -43,8 +43,8 @@ import { dataText } from './data/copy'
 import { DeleteAppDialog } from './delete-dialog'
 import { GuideTab } from './guide-tab'
 import { LogsTab } from './logs-tab'
-import { OverviewTab } from './overview-tab'
-import { canEditApp } from './permissions'
+import { OverviewTab, UserViewLink } from './overview-tab'
+import { IntroPage, useUserPreview } from './intro-page'
 import { lastUpdate, sourceRepositoryFor } from './platform'
 import { ReleasesTab } from './releases-tab'
 import { SettingsTab } from './settings-tab'
@@ -61,6 +61,14 @@ const TABS: readonly AppTab[] = ['overview', 'guide', 'data', 'releases', 'setti
 
 /** `app` comes from the route's live `appQuery`, so edits made here flow back in. */
 export function AppPage({ app, tab }: { app: BusinessApp; tab: AppTab }) {
+  const preview = useUserPreview()
+  // Not maintaining the app: the intro page for every tab URL (settings, data, logs, …), never a tab (§6.5).
+  if (!app.permissions.maintain) return <IntroPage app={app} />
+  if (preview.active) return <IntroPage app={app} onExitPreview={preview.exit} />
+  return <MaintainerAppPage app={app} tab={tab} />
+}
+
+function MaintainerAppPage({ app, tab }: { app: BusinessApp; tab: AppTab }) {
   useDocumentTitle(app.displayName)
   const me = useMe().data
   const projectId = me.projectId
@@ -75,7 +83,7 @@ export function AppPage({ app, tab }: { app: BusinessApp; tab: AppTab }) {
   const logs = useComponentLogs(projectId, view.platform?.webComponentId, view.platform?.branchId, tab === 'logs')
   const logsForbidden = isLogsForbidden(logs.error)
   const sharing = shareSentence(app.share, groups, app.group)
-  const canEdit = !view.unreadableStack && !view.unreadableBuild && canEditApp(app, me)
+  const canEdit = !view.unreadableStack && !view.unreadableBuild && app.permissions.maintain
   const requests = useQuery({ ...appAccessRequestsQuery(app.id), enabled: canEdit })
   const pendingCount = canEdit ? requests.data?.filter((request) => isOneOf(request.status, 'pending')).length ?? 0 : 0
   // Phase 1: the データ tab exposes every row, so only people who may edit the app see it (design "Authorization and privacy").
@@ -107,8 +115,14 @@ export function AppPage({ app, tab }: { app: BusinessApp; tab: AppTab }) {
       <AppHeader app={app} view={view} projectId={projectId} sharing={access.label} canEdit={canEdit} pendingCount={pendingCount} onShare={() => setShareOpen(true)} onDelete={() => setDeleting(true)} />
       <BuildFailureNotice failure={view.stack?.buildFailure} projectId={projectId} stackId={app.stackId ?? undefined} title={app.displayName} canEdit={canEdit} behind={view.latestBuildFailed ? { runUrl: sourceRepository?.build?.runUrl } : undefined} />
 
-      <div className="mt-8">
-        <LinkTabs label={text.header.tabsLabel} tabs={tabs} current={current} />
+      {/* 「利用者にはこう見えます →」 continues the tab row's rule on wide screens and sits above the tabs on phones. */}
+      <div className="mt-8 flex flex-col-reverse sm:flex-row sm:items-start">
+        <div className="min-w-0 flex-1">
+          <LinkTabs label={text.header.tabsLabel} tabs={tabs} current={current} />
+        </div>
+        <div className="self-end sm:mb-6 sm:flex sm:h-[41px] sm:shrink-0 sm:items-center sm:self-auto sm:border-b sm:border-stone-200 sm:pl-4">
+          <UserViewLink app={app} />
+        </div>
       </div>
 
       <div>

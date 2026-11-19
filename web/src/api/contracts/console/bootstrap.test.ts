@@ -7,12 +7,13 @@ import { assertWireContractCases } from '../../testing/wire-contract-cases'
 import { configContract } from './config'
 import { groupsContract } from './groups'
 import { meContract } from './me'
+import type { ConsoleView } from '../../../model/contracts/console'
 
 const SECRET = 'SENTINEL-bootstrap-9d1e'
 const person = { id: 'p-1', subject: 'sub-1', pending: false, email: 'yamada@example.test', displayName: '山田', avatarVersion: null }
 const me = {
   person, isConsoleAdmin: false, canCreateApps: true, effectiveGroupIds: ['g-1'], managedGroupIds: [], projectId: 'commerce',
-  directoryPublicURL: 'https://directory.example.test', migration: { pending: false, people: 0, groups: 0, memberships: 0 },
+  directoryPublicURL: 'https://directory.example.test', migration: { pending: false, people: 0, groups: 0, memberships: 0 }, view: 'user' as ConsoleView,
 }
 const group = {
   id: 'g-1', parentId: null, name: '営業', slug: 'sales', path: 'sales', description: '', about: '', aboutUpdatedBy: person,

@@ -3,17 +3,18 @@ import { directoryUser } from './schema/schemas'
 import { operations } from './schema/operations'
 import { consoleContract, consoleEmptyContract } from '../define'
 import { personReader } from './person'
-import { accessRequestReader, appReader, createdAccessRequestReader, entryReader, membershipReader, migrationReader, myAccessRequestReader, profileReader, resolvedReader, screenshotReader, settingsReader, toolsReader } from './readers'
+import { accessRequestReader, appReader, createdAccessRequestReader, entryReader, inboxReader, membershipReader, migrationReader, myAccessRequestReader, profileReader, resolvedReader, screenshotReader, settingsReader, toolsReader } from './readers'
 import { meContract } from './me'
 import { configContract } from './config'
 import { groupsContract } from './groups'
-import { listCommentsContract, postCommentContract, removeCommentContract } from './comments'
+import { listCommentsContract, markCommentsSeenContract, postCommentContract, removeCommentContract } from './comments'
 
 export type AppListInput = { scope?: 'mine' | 'company' | 'all'; groupId?: string; q?: string }
 export type DirectoryAppsInput = { groupId?: string; q?: string; ownerId?: string }
 export type ShareInput = { scope: 'private' | 'group' | 'company' | 'public'; groupIds: string[]; extraPersonIds: string[] }
 export type CreateAppInput = { displayName: string; groupId: string; description?: string; icon?: string; tags?: string[]; slug?: string; share?: ShareInput }
-export type UpdateAppInput = Partial<CreateAppInput> & { guide?: string; capabilities?: string[]; ownerIds?: string[] }
+export type ContributionInput = { scope: 'off' | 'group' | 'company' }
+export type UpdateAppInput = Partial<CreateAppInput> & { guide?: string; capabilities?: string[]; ownerIds?: string[]; contribution?: ContributionInput }
 const appPath = (id: string) => `/api/console/apps/${encodeURIComponent(id)}`
 function query(params: Record<string, string | undefined>): string {
   const search = new URLSearchParams()
@@ -55,6 +56,7 @@ export const approveAccessRequestContract = consoleContract({ ...operations.appr
 export const declineAccessRequestContract = consoleContract({ ...operations.declineAccessRequest, reader: z.object({ request: accessRequestReader }), request: ({ appId, requestId }: { appId: string; requestId: string }) => ({ method: 'POST', path: `${appPath(appId)}/access-requests/${encodeURIComponent(requestId)}/decline` }) })
 export const settingsContract = consoleContract({ ...operations.settings, reader: settingsReader, request: () => ({ method: 'GET', path: '/api/console/admin/platform' }) })
 export const migrateDirectoryContract = consoleContract({ ...operations.migrateDirectory, reader: migrationReader, request: () => ({ method: 'POST', path: '/api/console/admin/directory-migrate' }) })
+export const inboxContract = consoleContract({ ...operations.inbox, reader: inboxReader, request: () => ({ method: 'GET', path: '/api/console/inbox' }) })
 
 export const consoleContracts = {
   me: meContract, config: configContract, groups: groupsContract, people: peopleContract, person: personContract,
@@ -62,10 +64,10 @@ export const consoleContracts = {
   resolve: resolveContract, apps: appsContract, app: appContract, appByPath: appByPathContract,
   createApp: createAppContract, updateApp: updateAppContract, bindApp: bindAppContract, removeApp: removeAppContract,
   directoryApps: directoryAppsContract, directoryEntry: directoryEntryContract, tools: toolsContract,
-  comments: listCommentsContract, postComment: postCommentContract, removeComment: removeCommentContract,
+  comments: listCommentsContract, postComment: postCommentContract, removeComment: removeCommentContract, markCommentsSeen: markCommentsSeenContract,
   uploadScreenshot: uploadScreenshotContract, removeScreenshot: removeScreenshotContract, reorderScreenshots: reorderScreenshotsContract,
   myAccessRequest: myAccessRequestContract, createAccessRequest: createAccessRequestContract,
   pendingAccessRequests: pendingAccessRequestsContract, appAccessRequests: appAccessRequestsContract,
   approveAccessRequest: approveAccessRequestContract, declineAccessRequest: declineAccessRequestContract,
-  settings: settingsContract, migrateDirectory: migrateDirectoryContract,
+  settings: settingsContract, migrateDirectory: migrateDirectoryContract, inbox: inboxContract,
 } satisfies Record<keyof typeof operations, unknown>

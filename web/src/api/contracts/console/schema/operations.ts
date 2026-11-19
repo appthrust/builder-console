@@ -35,6 +35,8 @@ export const operations = {
   comments: op({ operationId: 'consoleListAppComments', method: 'GET', routeTemplate: '/api/console/apps/{id}/comments', successStatuses: [200], schema: 'CommentList' }),
   postComment: op({ operationId: 'consolePostAppComment', method: 'POST', routeTemplate: '/api/console/apps/{id}/comments', successStatuses: [201], schema: 'Comment' }),
   removeComment: op({ operationId: 'consoleDeleteAppComment', method: 'DELETE', routeTemplate: '/api/console/apps/{id}/comments/{cid}', successStatuses: [204], schema: null }),
+  markCommentsSeen: op({ operationId: 'consoleMarkCommentsSeen', method: 'POST', routeTemplate: '/api/console/apps/{id}/comments/seen', successStatuses: [204], schema: null }),
+  inbox: op({ operationId: 'consoleGetInbox', method: 'GET', routeTemplate: '/api/console/inbox', successStatuses: [200], schema: 'Inbox' }),
   uploadScreenshot: op({ operationId: 'consoleUploadScreenshot', method: 'POST', routeTemplate: '/api/console/apps/{id}/screenshots', successStatuses: [201], schema: 'Screenshot', multipart: true }),
   removeScreenshot: op({ operationId: 'consoleDeleteScreenshot', method: 'DELETE', routeTemplate: '/api/console/apps/{id}/screenshots/{sid}', successStatuses: [204], schema: null }),
   reorderScreenshots: op({ operationId: 'consoleReorderScreenshots', method: 'PATCH', routeTemplate: '/api/console/apps/{id}/screenshots', successStatuses: [200], schema: 'ScreenshotList' }),

@@ -10,6 +10,7 @@ import {
   consoleKeys,
   createPerson,
   declineAccessRequest,
+  markCommentsSeen,
   postComment,
   removeApp,
   removeComment,
@@ -18,6 +19,7 @@ import {
   searchPeople,
   updateApp,
   uploadScreenshot,
+  type ContributionInput,
   type UpdateAppInput,
   writeAppCache,
 } from '../../api/queries/console'
@@ -50,6 +52,21 @@ export function useUpdateApp(app: BusinessApp) {
       if (updated.group.path !== app.group.path || updated.slug !== app.slug) {
         await navigate({ href: paths.app(updated.group.path, updated.slug, 'settings'), replace: true })
       }
+    },
+  })
+}
+
+/** Who may propose improvements (maintainers only): the same PATCH as every other app field, answered with the app. */
+export const updateContribution = (appId: string, scope: ContributionInput['scope']): Promise<BusinessApp> => updateApp(appId, { contribution: { scope } })
+
+/** `updateContribution` for one app; its answer enters the app cache like any app write. */
+export function useUpdateContribution(app: BusinessApp) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (scope: ContributionInput['scope']) => updateContribution(app.id, scope),
+    onSuccess: async (updated) => {
+      await writeAppCache(queryClient, updated)
+      await queryClient.invalidateQueries({ queryKey: CONSOLE_ROOT })
     },
   })
 }
@@ -89,7 +106,21 @@ export function useRemoveComment(appId: string) {
   return useMutation({
     mutationFn: (commentId: string) => removeComment(appId, commentId),
     onSettled: async () => {
-      await queryClient.invalidateQueries({ queryKey: consoleKeys.comments(appId) })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: consoleKeys.comments(appId) }),
+        queryClient.invalidateQueries({ queryKey: consoleKeys.inbox }),
+      ])
+    },
+  })
+}
+
+/** Maintainers: the thread so far counts as read; the inbox feedback count is read back after any outcome. */
+export function useMarkCommentsSeen(appId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => markCommentsSeen(appId),
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: consoleKeys.inbox })
     },
   })
 }
@@ -126,6 +157,7 @@ export function useApproveAccessRequest(appId: string) {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: consoleKeys.accessRequestsOfApp(appId) }),
         queryClient.invalidateQueries({ queryKey: consoleKeys.accessRequestsPending }),
+        queryClient.invalidateQueries({ queryKey: consoleKeys.inbox }),
       ])
     },
   })
@@ -139,6 +171,7 @@ export function useDeclineAccessRequest(appId: string) {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: consoleKeys.accessRequestsOfApp(appId) }),
         queryClient.invalidateQueries({ queryKey: consoleKeys.accessRequestsPending }),
+        queryClient.invalidateQueries({ queryKey: consoleKeys.inbox }),
       ])
     },
   })
