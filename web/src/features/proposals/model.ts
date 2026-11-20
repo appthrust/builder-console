@@ -13,12 +13,13 @@ export function proposalWaiting(phase: OpenValue<ProposalPhase>): boolean {
 }
 
 /**
- * Whether an improvement session with a proposal may not take new changes:
- * the proposal is not read yet, awaits review or apply, is closed, or is in a
- * phase this console does not know (never read as open for changes).
+ * Whether Platform starts an improvement run under this proposal: only while it is being drafted or was sent back
+ * for changes (platform-api application_draft_proposal.go `admitImprovementImplementation`). Not when it awaits
+ * review or apply, could not be applied (ApplyFailed, which is not closed), is closed, or is in a phase this
+ * console does not know.
  */
-export function improvementLocked(phase: OpenValue<ProposalPhase> | undefined): boolean {
-  return !phase || phase.kind === 'unknown' || proposalWaiting(phase) || proposalTerminal(phase)
+export function improvementAdmitted(phase: OpenValue<ProposalPhase> | undefined): boolean {
+  return isOneOf(phase, 'Drafting', 'ChangesRequested')
 }
 
 /**

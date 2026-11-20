@@ -296,6 +296,25 @@ export const apps = {
       deleteKeepsRepository: (repository?: string) =>
         repository ? `GitHub の置き場（${repository}）は消さずに残ります。` : 'GitHub の置き場は消さずに残ります。',
       deleteSourceBusy: 'アプリは止めましたが、置き場とのつながりをまだ外せていません。少し待ってから、もう一度「完全に削除する」を押してください。',
+      /**
+       * Platform refused the deletion: something of the app is still left (`inUse`; its work areas are named and
+       * counted, whatever made them and whether or not they run, and nothing in the console removes them) or is
+       * still being removed (`waiting`: the user presses again shortly; the console does not wait on its own).
+       * Never Platform's own message.
+       */
+      deleteRefused: {
+        inUse: 'このアプリにはまだ残っているものがあるため、削除できませんでした',
+        workAreas: (count: number) => `このアプリの作業場所が ${count} か所残っています。`,
+        workAreasNext: 'この画面からは片づけられません。基盤の担当者に片づけてもらってから、もう一度「完全に削除する」を押してください。',
+        others: 'このアプリにつながっている、ほかのものがまだ残っています。',
+        othersNext: '少し待ってから、もう一度「完全に削除する」を押してください。続くときは基盤の担当者に相談してください。',
+        waiting: '削除の準備がまだ終わっていません',
+        waitingWorkAreas: (count: number) => `このアプリの作業場所 ${count} か所を片づけています。`,
+        waitingOthers: 'このアプリにつながっているものを片づけています。',
+        waitingNext: '少し待ってから、もう一度「完全に削除する」を押してください。',
+        failed: '削除できませんでした',
+        failedNext: '少し待ってから、もう一度「完全に削除する」を押してください。続くときは基盤の担当者に相談してください。',
+      },
       deleteAction: '削除する',
       deleteConfirm: '完全に削除する',
       deleting: '削除しています…',

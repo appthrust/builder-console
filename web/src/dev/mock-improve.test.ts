@@ -63,7 +63,8 @@ test('question → proposal → run → review, in the application workspace', a
   expect(current.proposalId).toBeDefined()
   const proposalPath = `${project}/source-change-proposals/${current.proposalId}`
   expect((await call('GET', proposalPath)).body.phase).toBe('Proposed')
-  expect((await call('POST', `${path}/implementation-runs`)).status).toBe(409)
+  // Like Platform, a start while the proposal awaits review is refused with its own code (not another tab's `conflict`).
+  expect(await call('POST', `${path}/implementation-runs`)).toMatchObject({ status: 409, body: { error: { code: 'source_change_proposal_run_blocked' } } })
   expect((await call('POST', `${proposalPath}/decisions`, { decision: 'RequestChanges', comment: '今月の分も表示してください' })).status).toBe(200)
 
   // The next request starts over with a question, then a new proposal with new tasks.

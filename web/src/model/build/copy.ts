@@ -139,6 +139,11 @@ export const textJa = {
       proposalPending: { title: '提案の確認を待っています', reason: '所有者が提案を確認しているあいだは、作業を進められません。やり直しを求められたら、そこから続けられます。' },
       /** A closed proposal stays closed; the user starts a new one from the app's 「AIで直す」 (improve/entry.tsx). */
       proposalClosed: { title: 'この提案は締め切られています', reason: '反映・見送り・取り下げ・期限切れのどれかで終わっていて、この提案では続けられません。続けて直すときは、アプリの画面の「AIで直す」から始めてください。' },
+      /**
+       * Accepted, but applying it to the app stopped (ApplyFailed). It is not closed, so 「AIで直す」 opens this session
+       * again, and no run starts under it: someone on the platform side has to look at it.
+       */
+      proposalApplyFailed: { title: '提案をアプリに反映できませんでした', reason: '所有者が反映を決めたあと、アプリへの反映が止まりました。この提案のままでは作業を進められません。基盤の担当者に確認を依頼してください。' },
     },
     nameTaken: '置き場の名前がすでに使われています',
     urlNameTaken: 'URL の名前が別のアプリで使われています',

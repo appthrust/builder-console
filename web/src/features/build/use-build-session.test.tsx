@@ -69,7 +69,7 @@ function implementationFixture() {
   return {
     state: { ...state, previewUrl: undefined, previewStatus: 'preparing' as const, retryPending: false }, pending: false, requestFailure: undefined,
     previewDatabaseReset: { busy: false, pending: false, error: undefined, reset: mock(async () => true) },
-    start: mock(), confirm: mock(), startPending: mock(), retry: mock(), skipTask: mock(), requestChange: mock(async () => true),
+    start: mock(), confirm: mock(), dismissRefusal: mock(), startPending: mock(), retry: mock(), skipTask: mock(), requestChange: mock(async () => true),
   }
 }
 

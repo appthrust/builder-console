@@ -118,6 +118,7 @@ export const textEn: typeof textJa = {
       configuration: { title: 'A platform setting stopped the work', reason: 'This is not a problem with your actions. Share the support reference below with your administrator and ask them to fix the setting.' },
       proposalPending: { title: 'Waiting for the proposal to be reviewed', reason: 'Work cannot continue while the app owner is reviewing the proposal. If they request changes, you can continue from there.' },
       proposalClosed: { title: 'This proposal is closed', reason: 'It has been applied, declined, withdrawn or has expired, so work on it cannot continue. To keep improving the app, start again from “Improve with AI” on the app’s page.' },
+      proposalApplyFailed: { title: 'The proposal could not be applied to the app', reason: 'The owner chose to apply it, but applying it to the app stopped. Work cannot continue on this proposal. Ask your administrator to look into it.' },
     },
     nameTaken: 'Name already in use',
     urlNameTaken: 'This URL name is used by another app',

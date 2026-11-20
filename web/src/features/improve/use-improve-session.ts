@@ -5,11 +5,11 @@ import * as api from '../../api/build'
 import { buildDraftOptions, buildKeys } from '../../api/queries/build'
 import { platformErrorEnvelope } from '../../api/platform-error'
 import { classifyBuildFailure, unconfirmedFailure, type BuildFailure } from '../../model/build'
-import { isOneOf, type BuildDraft } from '../../model/contracts/build'
+import { isOneOf, knownValue, type BuildDraft } from '../../model/contracts/build'
 import { deriveImprove } from '../../model/improve'
 import { useImplementation } from '../build/implement'
-import { proposalOptions } from '../../api/queries/proposal'
-import { improvementLocked } from '../proposals/model'
+import { proposalKeys, proposalOptions } from '../../api/queries/proposal'
+import { improvementAdmitted, proposalTerminal, proposalWaiting } from '../proposals/model'
 
 /**
  * Turns and runs are server-owned: sending a message only POSTs the turn and
@@ -25,7 +25,36 @@ export function useImproveSession(projectId: string, draft: BuildDraft) {
   const implementation = useImplementation({ projectId, draft, handoff: draft.creationPlan?.implementationHandoff, enabled: !draft.creationPlanUnreadable })
   const proposal = useQuery(proposalOptions(projectId, draft.proposalId))
   const phase = proposal.data?.phase
-  const reviewLocked = !!draft.proposalId && improvementLocked(phase)
+  const reviewLocked = !!draft.proposalId && !improvementAdmitted(phase)
+  /**
+   * Why the session takes no new change: its proposal awaits review or apply, is closed, or could not be applied
+   * (ApplyFailed is not closed: the proposal keeps being read).
+   */
+  const review = !draft.proposalId || !phase ? undefined
+    : proposalWaiting(phase) ? 'waiting' as const
+      : proposalTerminal(phase) ? 'closed' as const
+        : isOneOf(phase, 'ApplyFailed') ? 'applyFailed' as const : undefined
+  // A start Platform refused: read the proposal again, so the page says which holds. The refusal is taken back only
+  // when a read made after the start was requested shows the proposal changed since then and admitting a run again;
+  // reads of the same proposal (still drafting with its submission pending, say) keep it. The baseline is the
+  // proposal as read when 「この内容で直す」 was pressed, before the request went out.
+  const requestFailure = implementation.requestFailure
+  const refusal = requestFailure?.reasonCode === 'ProposalRunBlocked' || requestFailure?.reasonCode === 'StartRefused' ? requestFailure : undefined
+  const proposalMark = proposal.data ? [knownValue(proposal.data.phase) ?? 'unknown', proposal.data.updatedAt, proposal.data.decisions.length].join('|') : undefined
+  const requested = useRef<{ mark?: string; at: number }>(undefined)
+  const refusedWith = useRef<{ failure: BuildFailure; mark?: string; at: number }>(undefined)
+  const { dismissRefusal, startPending } = implementation
+  useEffect(() => {
+    if (!refusal || !draft.proposalId) {
+      refusedWith.current = undefined
+      return
+    }
+    if (refusedWith.current?.failure !== refusal) {
+      refusedWith.current = { failure: refusal, ...(requested.current ?? { mark: proposalMark, at: Date.now() }) }
+      void queryClient.invalidateQueries({ queryKey: proposalKeys.detail(projectId, draft.proposalId) })
+    }
+    if (proposal.dataUpdatedAt > refusedWith.current.at && proposalMark !== refusedWith.current.mark && improvementAdmitted(phase)) dismissRefusal()
+  })
   const applied = isOneOf(phase, 'Applied')
   // The controller applies first; release correlation updates the private draft later.
   useQuery({
@@ -76,7 +105,13 @@ export function useImproveSession(projectId: string, draft: BuildDraft) {
     state,
     proposal,
     reviewLocked,
+    review,
     implementation,
+    /** 「この内容で直す」 and a stopped run's retry: notes the proposal as read now, the baseline for a refusal. */
+    start: () => {
+      requested.current = { mark: proposalMark, at: Date.now() }
+      startPending()
+    },
     sending,
     sendFailure: sendFailure?.failure,
     /** Nothing can be sent while a turn or a run is in flight (or in an unknown state), or while a send or start request is out. */
