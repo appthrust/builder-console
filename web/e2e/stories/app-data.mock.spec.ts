@@ -141,7 +141,11 @@ test.describe('App data @app-data', () => {
     })
     await page.goto(`${dataUrl}?table=public.products`)
     const products = page.getByRole('table', { name: '商品の行' })
-    await expect(products.getByRole('row')).toHaveCount(13)
+    // The first rows read comes last in the page's chain of reads (the app, its database's 表 list, every 表's
+    // description, then the rows: data-tab.tsx renders the grid only once the catalog is read), and nothing above waits
+    // for any of it, so this first wait gets that chain's time, not expect's 5 s. On slow CI runners the rows read
+    // started 4–4.5 s after the page loaded (runs 44186592106 and 44700139254).
+    await expect(products.getByRole('row')).toHaveCount(13, { timeout: 15_000 })
     await expect(products.getByRole('row', { name: /ノートPC/ })).toContainText('120,000')
     const rows = await products.getByRole('row').allTextContents()
     const notice = page.getByText(REFRESH_FAILED)
