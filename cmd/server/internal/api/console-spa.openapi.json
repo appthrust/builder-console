@@ -755,6 +755,66 @@
         }
       }
     },
+    "/apps/{id}/comments/seen": {
+      "post": {
+        "operationId": "consoleMarkCommentsSeen",
+        "x-console-operation-id": "consoleMarkCommentsSeen",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No content"
+          },
+          "default": {
+            "description": "HTTP error; never a success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/inbox": {
+      "get": {
+        "operationId": "consoleGetInbox",
+        "x-console-operation-id": "consoleGetInbox",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Inbox"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "HTTP error; never a success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/apps/{id}/screenshots": {
       "post": {
         "operationId": "consoleUploadScreenshot",
@@ -11819,6 +11879,52 @@
           },
           "updatedAt": {
             "type": "string"
+          },
+          "contribution": {
+            "type": "object",
+            "properties": {
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "off",
+                  "group",
+                  "company"
+                ]
+              }
+            },
+            "required": [
+              "scope"
+            ],
+            "additionalProperties": false
+          },
+          "permissions": {
+            "presence": "optionalObservation",
+            "type": "object",
+            "properties": {
+              "use": {
+                "type": "boolean"
+              },
+              "comment": {
+                "type": "boolean"
+              },
+              "propose": {
+                "type": "boolean"
+              },
+              "maintain": {
+                "type": "boolean"
+              },
+              "data": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "use",
+              "comment",
+              "propose",
+              "maintain",
+              "data"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -11838,7 +11944,8 @@
           "share",
           "createdBy",
           "createdAt",
-          "updatedAt"
+          "updatedAt",
+          "contribution"
         ],
         "additionalProperties": false
       },
@@ -12127,6 +12234,52 @@
                 },
                 "updatedAt": {
                   "type": "string"
+                },
+                "contribution": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "enum": [
+                        "off",
+                        "group",
+                        "company"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "scope"
+                  ],
+                  "additionalProperties": false
+                },
+                "permissions": {
+                  "presence": "optionalObservation",
+                  "type": "object",
+                  "properties": {
+                    "use": {
+                      "type": "boolean"
+                    },
+                    "comment": {
+                      "type": "boolean"
+                    },
+                    "propose": {
+                      "type": "boolean"
+                    },
+                    "maintain": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "use",
+                    "comment",
+                    "propose",
+                    "maintain",
+                    "data"
+                  ],
+                  "additionalProperties": false
                 }
               },
               "required": [
@@ -12146,7 +12299,8 @@
                 "share",
                 "createdBy",
                 "createdAt",
-                "updatedAt"
+                "updatedAt",
+                "contribution"
               ],
               "additionalProperties": false
             },
@@ -12330,6 +12484,52 @@
           "updatedAt": {
             "type": "string"
           },
+          "contribution": {
+            "type": "object",
+            "properties": {
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "off",
+                  "group",
+                  "company"
+                ]
+              }
+            },
+            "required": [
+              "scope"
+            ],
+            "additionalProperties": false
+          },
+          "permissions": {
+            "presence": "optionalObservation",
+            "type": "object",
+            "properties": {
+              "use": {
+                "type": "boolean"
+              },
+              "comment": {
+                "type": "boolean"
+              },
+              "propose": {
+                "type": "boolean"
+              },
+              "maintain": {
+                "type": "boolean"
+              },
+              "data": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "use",
+              "comment",
+              "propose",
+              "maintain",
+              "data"
+            ],
+            "additionalProperties": false
+          },
           "path": {
             "type": "string"
           },
@@ -12351,6 +12551,7 @@
           "appName",
           "createdAt",
           "updatedAt",
+          "contribution",
           "path",
           "canOpen"
         ],
@@ -12534,6 +12735,52 @@
                 "updatedAt": {
                   "type": "string"
                 },
+                "contribution": {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "enum": [
+                        "off",
+                        "group",
+                        "company"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "scope"
+                  ],
+                  "additionalProperties": false
+                },
+                "permissions": {
+                  "presence": "optionalObservation",
+                  "type": "object",
+                  "properties": {
+                    "use": {
+                      "type": "boolean"
+                    },
+                    "comment": {
+                      "type": "boolean"
+                    },
+                    "propose": {
+                      "type": "boolean"
+                    },
+                    "maintain": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "use",
+                    "comment",
+                    "propose",
+                    "maintain",
+                    "data"
+                  ],
+                  "additionalProperties": false
+                },
                 "path": {
                   "type": "string"
                 },
@@ -12555,6 +12802,7 @@
                 "appName",
                 "createdAt",
                 "updatedAt",
+                "contribution",
                 "path",
                 "canOpen"
               ],
@@ -13158,6 +13406,13 @@
               "pending"
             ],
             "additionalProperties": false
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "user",
+              "maker"
+            ]
           }
         },
         "required": [
@@ -13168,7 +13423,8 @@
           "canCreateApps",
           "projectId",
           "directoryPublicURL",
-          "migration"
+          "migration",
+          "view"
         ],
         "additionalProperties": false
       },
@@ -14167,6 +14423,52 @@
               },
               "updatedAt": {
                 "type": "string"
+              },
+              "contribution": {
+                "type": "object",
+                "properties": {
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "group",
+                      "company"
+                    ]
+                  }
+                },
+                "required": [
+                  "scope"
+                ],
+                "additionalProperties": false
+              },
+              "permissions": {
+                "presence": "optionalObservation",
+                "type": "object",
+                "properties": {
+                  "use": {
+                    "type": "boolean"
+                  },
+                  "comment": {
+                    "type": "boolean"
+                  },
+                  "propose": {
+                    "type": "boolean"
+                  },
+                  "maintain": {
+                    "type": "boolean"
+                  },
+                  "data": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "use",
+                  "comment",
+                  "propose",
+                  "maintain",
+                  "data"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
@@ -14186,7 +14488,8 @@
               "share",
               "createdBy",
               "createdAt",
-              "updatedAt"
+              "updatedAt",
+              "contribution"
             ],
             "additionalProperties": false
           }
@@ -14559,6 +14862,71 @@
           "defaultTemplateId"
         ],
         "additionalProperties": false
+      },
+      "Inbox": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "accessRequest",
+                    "feedback"
+                  ]
+                },
+                "app": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "path": {
+                      "type": "string"
+                    },
+                    "displayName": {
+                      "type": "string"
+                    },
+                    "icon": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "path",
+                    "displayName",
+                    "icon"
+                  ],
+                  "additionalProperties": false
+                },
+                "count": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "since": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "app",
+                "count",
+                "since"
+              ],
+              "additionalProperties": false
+            },
+            "presence": "total"
+          }
+        },
+        "required": [
+          "items"
+        ]
       },
       "Error": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",

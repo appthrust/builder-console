@@ -24,13 +24,13 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { buildKeys, useBuildDraft } from '../../api/queries/build'
 import { useGroups } from '../../api/queries/console'
 import { buildCopy } from '../../model/build/copy'
+import { lastActionable } from '../../model/build/messages'
 import { isBuildPending } from '../../model/build/progress'
 import { paths } from '../../routes/paths'
 import { setArtifactCollapsed, shellStore } from '../../shell/store'
 import { useShell } from '../../shell/use-shell'
 import { ActionError, Button, cn, EmptyState, focusHeading, LinkButton, Loading, Notice, ResourceBoundary, useDocumentTitle } from '../../ui'
 import { DatabaseChanges } from '../app/database-changes'
-import { canEditApp } from '../app/permissions'
 import { ArtifactPane } from './artifact-pane'
 import { ConversationPane, PlanRejectionActions } from './conversation-pane'
 import { PublishStep } from './publish-step'
@@ -80,7 +80,8 @@ function Session({ draft, groupId, stale }: { draft: BuildDraft; groupId: string
   const primary = { ...build.result.primary, enabled: build.result.primary.enabled && !build.busy && !sharing && !updatingPlan && (build.result.primary.action !== 'publish' || !appReadOnly) }
   // 決める: the prepare action is attached to the AI's proposal, labelled by what pressing it will do. After the
   // destination moved, the notice right below the proposal carries the same action (once, beside its explanation).
-  const lastMessage = build.messages.at(-1)
+  // A recreated-workspace notice is display only: what follows is decided on the newest message before it.
+  const lastMessage = lastActionable(build.messages)
   const reapproveNotice = lastMessage?.role === 'notice' && lastMessage.retry === 'prepare' && lastMessage.title === buildCopy.failure.destination.changed.title
   // A plan Platform's validation rejected is never approved again. Its actions (「もう一度確かめる」 when the cause may lie
   // outside the plan, 「計画を作り直す」) are on the notice that explains the rejection, or on the proposal when that notice
@@ -135,7 +136,7 @@ function Session({ draft, groupId, stale }: { draft: BuildDraft; groupId: string
     {stale || build.result.unsupported || draft.buildFailure || creationAccess.error ? <div className="mx-5 mt-3 space-y-3">
       {stale}
       {build.result.unsupported ? <Notice tone="warning" title={buildCopy.unsupported.title}>{buildCopy.unsupported.detail}</Notice> : null}
-      <BuildFailureNotice failure={draft.buildFailure} projectId={me.projectId} stackId={draft.createdApplicationStackId} title={name} canEdit={build.app ? canEditApp(build.app, me) : draft.ownerUserId === me.person.subject} />
+      <BuildFailureNotice failure={draft.buildFailure} projectId={me.projectId} stackId={draft.createdApplicationStackId} title={name} canEdit={build.app ? build.app.permissions.maintain : draft.ownerUserId === me.person.subject} />
       {creationAccess.error ? <ActionError error={creationAccess.error} /> : null}
     </div> : null}
     {build.waitingForPublish || creationAccess.waitingForPublish ? <p role="status" className="px-5 py-2 text-xs text-stone-500">{text.page.waitingForPublish}</p> : null}
@@ -149,7 +150,7 @@ function Session({ draft, groupId, stale }: { draft: BuildDraft; groupId: string
         <ConversationPane messages={build.messages} stage={stage} answering={build.busy} unsupported={build.result.unsupported || build.planBlocksStart} thinking={isBuildPending(draft.conversationTurns.at(-1))} waitingForAi={build.waitingForAi} planning={planning} proposalAction={proposalAction} queued={build.queued} progress={progress} prepareOpen={build.prepareOpen} ownerGroupName={ownerGroupName} failure={failure} planRejected={build.planRejected ? (build.planRecheck ? 'recheck' : 'replan') : undefined} canRecheck={build.canRecheck} end={outcome} onSend={build.send} onRetry={build.retry} onUseName={useName} />
       </div>
       <div id="build-artifact" role="tabpanel" aria-labelledby="build-tab-artifact" className={cn('relative min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain', tab === 'artifact' ? 'block' : 'hidden', artifactCollapsed ? 'md:hidden' : 'md:block')}>
-        <ArtifactPane draft={draft} spec={build.spec} proposal={build.proposal} stage={stage} progress={progress} implementation={build.implementation.state} changeByReply={build.changeByReply} failure={build.failure} url={url} shareText={shareText} previewDatabaseReset={build.implementation.previewDatabaseReset} onOpenPreview={openPreview} onRetry={build.implementation.retry} onSkipTask={build.implementation.skipTask} onConfirm={build.implementation.confirm} onCollapse={() => setArtifactCollapsed(true)} databaseChanges={<DatabaseChanges projectId={me.projectId} databaseId={!appReadOnly && build.app && canEditApp(build.app, me) ? appView?.stack?.databaseComponentId : undefined} />} shareStep={sharing && build.app && !appReadOnly ? <>{behind}<PublishStep app={build.app} publishId={appView?.platform?.publish?.id} publishPreferences={draft.publishPreferences} onPublished={() => { build.published(); setSharing(false) }} onCancel={() => setSharing(false)} /></> : undefined} />
+        <ArtifactPane draft={draft} spec={build.spec} proposal={build.proposal} stage={stage} progress={progress} implementation={build.implementation.state} changeByReply={build.changeByReply} failure={build.failure} url={url} shareText={shareText} previewDatabaseReset={build.implementation.previewDatabaseReset} onOpenPreview={openPreview} onRetry={build.implementation.retry} onSkipTask={build.implementation.skipTask} onConfirm={build.implementation.confirm} onCollapse={() => setArtifactCollapsed(true)} databaseChanges={<DatabaseChanges projectId={me.projectId} databaseId={!appReadOnly && build.app?.permissions.data ? appView?.stack?.databaseComponentId : undefined} />} shareStep={sharing && build.app && !appReadOnly ? <>{behind}<PublishStep app={build.app} publishId={appView?.platform?.publish?.id} publishPreferences={draft.publishPreferences} onPublished={() => { build.published(); setSharing(false) }} onCancel={() => setSharing(false)} /></> : undefined} />
       </div>
       {artifactCollapsed ? (
         <div className="hidden min-h-0 flex-col items-center gap-2 bg-white py-2 md:flex">

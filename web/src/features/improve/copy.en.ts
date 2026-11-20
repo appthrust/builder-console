@@ -15,6 +15,7 @@ export const textEn: typeof textJa = {
     noSource: 'This app has no source location, so the AI cannot change it.',
     noReviewers: 'No owner has signed in yet. Ask an owner to sign in, then try again.',
     busy: 'Another conversation is in progress. Wait a moment and try again.',
+    openSession: 'A conversation is already in progress, and only one can run at a time. Continue that one.',
   },
   page: {
     title: (name: string) => `${name} — Improve with AI`,

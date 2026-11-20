@@ -7,6 +7,7 @@ import { isPlatformNotFound } from '../../api/platform-error'
 import { draftOf, runOf, taskOf } from '../../api/testing/build-domain'
 import { buildCopy } from '../../model/build/copy'
 import { buildFailureReference, classifyBuildFailure, destinationFailure } from '../../model/build/failure'
+import { messagesFromDraft } from '../../model/build/messages'
 import { deriveStage, draftPublished } from '../../model/build/stage'
 import type { BuildProposal, BuildSpec } from '../../model/build/types'
 import type { BuildDraft } from '../../model/contracts/build'
@@ -124,6 +125,34 @@ test.each(['ja', 'en'] as const)('a moved destination is approved again with the
   expect(changed).toContain(buildCopy.failure.destination.changed.reason)
   expect(changed).toContain('role="status"')
   expect(render('blocked')).toContain(`>${text.conversation.retry}</button>`)
+})
+
+test.each(['ja', 'en'] as const)('a recreated workspace is announced once, on the turn that replaced it, as information only (%s)', (language) => {
+  setLanguage(language)
+  const at = (minute: number, second = 0) => `2026-11-18T00:0${minute}:${String(second).padStart(2, '0')}Z`
+  const turn = (id: string, minute: number, fields: Record<string, unknown> = {}) => ({
+    id, kind: 'conversation', status: 'succeeded', startedAt: at(minute), finishedAt: at(minute, 10), devWorkspaceId: 'ws-new', userMessage: `request ${id}`, assistantMessage: `answer ${id}`, ...fields,
+  })
+  const draft = draftOf({
+    id: 'draft-1', projectId: 'project-1', title: 'Contacts', intent: 'Keep contacts', phase: 'specifying', specMarkdown: '', architectureMarkdown: '', ownerUserId: 'user-1', createdAt: at(0), updatedAt: at(4),
+    conversationTurns: [turn('turn-1', 1, { devWorkspaceId: 'ws-old' }), turn('turn-2', 2, { replacedDevWorkspaceId: 'ws-old' }), turn('turn-3', 3)],
+    creationPlanGenerations: [{ id: 'gen-1', status: 'succeeded', startedAt: at(4), finishedAt: at(4, 30), devWorkspaceId: 'ws-new' }],
+  })
+  const markup = renderToStaticMarkup(<ConversationPane
+    messages={messagesFromDraft(draft, [])} stage="ask" answering={false} thinking={false} queued={false}
+    onSend={() => {}} onRetry={() => {}} onUseName={() => {}}
+  />)
+  const notice = buildCopy.workspaceRecreated
+  expect(notice).toBe(language === 'ja' ? '作業環境を作り直しました。会話と計画は引き継いでいます' : 'Your workspace was recreated. The conversation and plan are kept.')
+  expect(markup.split(notice)).toHaveLength(2)
+  // Below the request that switched workspaces and above its answer; the later turn carries none.
+  expect(markup.indexOf('request turn-2')).toBeLessThan(markup.indexOf(notice))
+  expect(markup.indexOf(notice)).toBeLessThan(markup.indexOf('answer turn-2'))
+  // A calm status, not an alert: no retry, no support reference.
+  expect(markup).toContain('role="status"')
+  expect(markup).not.toContain('role="alert"')
+  expect(markup).not.toContain(`>${text.conversation.retry}</button>`)
+  expect(markup).not.toContain(buildCopy.failure.copyReference)
 })
 
 // The rendered state needs the router (LinkButton); app-build-ai.mock.spec.ts covers it. Here: the

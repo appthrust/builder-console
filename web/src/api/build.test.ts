@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, mock, test } from 'bun:test'
 import { QueryClient, QueryObserver, skipToken } from '@tanstack/react-query'
 import * as api from './build'
 import { BUILD_POLL_MS, buildDraftOptions, buildKeys, draftsOptions } from './queries/build'
-import { draftOf, runOf } from './testing/build-domain'
+import { draftOf, generationOf, runOf, turnOf } from './testing/build-domain'
 import { POLL_INTERVAL_MS, readRetryDelay, retryReadQuery } from './queries/shared'
 import { isPublishPreparationPending } from './publish-retry'
 
@@ -42,6 +42,17 @@ afterEach(() => {
   else Reflect.deleteProperty(globalThis, 'window')
   if (storageDescriptor) Object.defineProperty(globalThis, 'sessionStorage', storageDescriptor)
   else Reflect.deleteProperty(globalThis, 'sessionStorage')
+})
+
+test('turn and plan generation readers keep the workspace they replaced, and read answers without it (APT-1264)', () => {
+  expect(turnOf({ ...turn, replacedDevWorkspaceId: 'workspace-0' }).replacedDevWorkspaceId).toBe('workspace-0')
+  expect(generationOf({ ...generation, replacedDevWorkspaceId: 'workspace-0' }).replacedDevWorkspaceId).toBe('workspace-0')
+  // An older Platform never sends the field: the same answers read unchanged.
+  expect(turnOf(turn).replacedDevWorkspaceId).toBeUndefined()
+  expect(generationOf(generation).replacedDevWorkspaceId).toBeUndefined()
+  const read = draftOf({ ...draft, conversationTurns: [{ ...turn, replacedDevWorkspaceId: 'workspace-0' }, { ...turn, id: 'turn-2' }], creationPlanGenerations: [{ ...generation, replacedDevWorkspaceId: 'workspace-0' }] })
+  expect(read.conversationTurns.map((item) => item.replacedDevWorkspaceId)).toEqual(['workspace-0', undefined])
+  expect(read.creationPlanGenerations[0]?.replacedDevWorkspaceId).toBe('workspace-0')
 })
 
 test('all build API adapters use contract routes, payloads and idempotency keys per mutation attempt', async () => {

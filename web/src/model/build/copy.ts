@@ -2,14 +2,18 @@ import { localized } from '../../shell/language'
 import { textEn } from './copy.en'
 
 export const textJa = {
-  intent: { reply: '### 追記', publish: '公開: する' },
+  intent: { reply: '### 追記', publish: '公開: する', omitted: (count: number) => `（以前の追記 ${count} 件を省略）` },
   unreadablePlan: { title: '保存された計画を読めませんでした', detail: '基盤に保存された計画の内容を、このコンソールでは確認できません。' },
+  /** A turn or plan generation moved to a new workspace because the old one was retired (APT-1264): information only. */
+  workspaceRecreated: '作業環境を作り直しました。会話と計画は引き継いでいます',
   questions: {
     firstTurn: 'このアプリを作るために決めるべきことを、一つずつ質問してください。',
     kickoffReply: 'この内容で提案して',
     prepareTurn: 'アプリを用意している間に、公開するときの名前と、誰に見せるかを一つずつ確認してください。',
     /** The excel2app analysis and screen-design turns, collapsed into one line of the conversation. */
     excelReady: 'Excel の解析と画面の決定は済んでいます',
+    /** The latest of those turns failed: it is continued in Excel から作る, which retries each step by its kind. */
+    excelStopped: 'Excel から作る作業が途中で止まりました。「Excel から作る」で続けてください',
   },
   primary: { prepare: 'この内容で作る', afterPlan: '計画ができたら作る', refresh: '計画を更新して作る', publish: '公開する', continue: '続けて直す' },
   proposal: {
@@ -106,6 +110,8 @@ export const textJa = {
     unknownWorkspace: 'AI の作業場所が使える状態か、まだ確認できません。',
     timeout: { title: '処理に時間がかかっています', reason: '相談した内容は残っています。少し待ってから、もう一度試してください。' },
     busy: { title: 'AI が前の作業を進めています', reason: '内容は残っています。前の作業が終わったら続けます。' },
+    /** A failed conversation turn a later turn followed (APT-1365): over, information only, never a retry. */
+    superseded: 'この依頼は途中で止まりました',
     failed: { turn: 'AI が内容を整理できませんでした', plan: '計画を作れませんでした', implement: 'アプリを作る作業が止まりました', publish: '公開済みの状態を保存できませんでした' },
     retry: '仕様と計画は残っています。もう一度試してください。何度も止まるときは基盤の担当者に確認してください。',
     platform: { title: '基盤の問題で作成が止まりました', reason: 'あなたの入力や操作の問題ではありません。仕様と計画はそのまま残っています。少し待ってもう一度試すか、下の問い合わせ番号を基盤の担当者に伝えてください。' },

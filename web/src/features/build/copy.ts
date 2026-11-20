@@ -52,6 +52,8 @@ export const textJa = {
     changed: '変えたところ',
     /** The collapsed Excel → app line links back to the analysis and the UI preview. */
     excelReview: '解析と画面を見る',
+    /** A stopped Excel → app step is continued there. */
+    excelResume: '「Excel から作る」で続ける',
   },
   page: {
     title: (name: string) => `${name} — AI と作る`,

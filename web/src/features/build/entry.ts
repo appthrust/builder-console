@@ -4,6 +4,7 @@ import { buildSessionsApi, intentKeys, isVersionConflict, mintIdempotencyKey, ty
 import { ConsoleApiError } from '../../api/console'
 import { boundedRetryAfter, buildPollDelay, ERROR_BACKOFF_MS } from '../../api/queries/build-sessions'
 import { membershipRoots, type BuildError, type BuildSession, type Group, type Me } from '../../model/contracts/console'
+import { boundBuildOpening } from '../../model/build/questions'
 import { findResumableDraft } from '../../model/build/resume'
 import { currentLanguage } from '../../shell/language'
 import { readConsoleStart, saveConsoleStart, type ConsoleStart } from './console-session-state'
@@ -35,12 +36,12 @@ export async function beginBuild(projectId: string, intent: string, options: { g
   if (!options.groupId) throw new Error(text.page.noGroup.body)
   if (options.newSessionEngine === 'console-v1') return startConsoleBuild(intent, options.groupId)
   const drafts = await listDrafts(projectId)
-  const existing = findResumableDraft(drafts.data, intent)
+  const existing = await findResumableDraft(drafts.data, intent)
   if (existing) {
     if (!readBuildSession(existing.id)) saveBuildSession(existing.id, initialSession({ projectId, ownerSubject: options.ownerSubject, groupId: options.groupId, baseIntent: existing.intent }))
     return existing
   }
-  const draft = await createDraft(projectId, { title: titleFromIntent(intent), intent: intent.trim() })
+  const draft = await createDraft(projectId, { title: titleFromIntent(intent), intent: await boundBuildOpening(intent.trim()) })
   saveBuildSession(draft.id, initialSession({ projectId, ownerSubject: options.ownerSubject, groupId: options.groupId, baseIntent: intent.trim() }))
   return draft
 }
@@ -100,7 +101,7 @@ export async function startConsoleBuild(intent: string, groupId: string, deps: P
   saveConsoleStart(start, storage)
   let session: BuildSession
   try {
-    session = start.sessionId ? await api.get(start.sessionId) : await api.create({ kind: 'new-app', groupId, intent: words, locale: start.locale }, start.key)
+    session = start.sessionId ? await api.get(start.sessionId) : await api.create({ kind: 'new-app', groupId, intent: await boundBuildOpening(words), locale: start.locale }, start.key)
   } catch (error) {
     // The create may have happened; the kept key replays it on the next start. Nothing else is sent.
     if (isResponseContractError(error)) throw new BuildStartError('unconfirmed', start.sessionId ? { sessionId: start.sessionId } : {})

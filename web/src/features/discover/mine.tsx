@@ -7,12 +7,14 @@ import { useShell } from '../../shell/use-shell'
 import { EmptyState, LinkButton, LoadFailed, PageHeader, useDocumentTitle } from '../../ui'
 import { useAppViews } from '../app/use-app-views'
 import { StaleNotice } from '../app/notices'
+import { InboxPanel } from '../inbox'
 import { AppListSkeleton, AppTable, StatusLoadNotice, usePendingAccessRequestCounts } from './app-list'
 import { text } from './copy'
 
 /**
  * Apps whose 担当者 includes the caller (ux-design §7.1 自分のアプリ); empty → the create path.
  * Only apps that exist (bound to the platform); anything half-made is under 作りかけ (drafts.tsx).
+ * Every 「あなたの対応待ち」 row sits above the list: home's 「すべて見る」 leads here.
  */
 export function MinePage({ status }: { status?: 'problem' }) {
   useDocumentTitle(copy.mine.title)
@@ -27,6 +29,7 @@ export function MinePage({ status }: { status?: 'problem' }) {
     <div className="space-y-6">
       <PageHeader title={copy.mine.title} lead={problemOnly ? text.mine.problemLead : copy.mine.lead}
         actions={problemOnly ? <LinkButton href={paths.mine()}>{text.mine.seeAll}</LinkButton> : undefined} />
+      {problemOnly ? null : <InboxPanel limit={Number.POSITIVE_INFINITY} />}
       <StatusLoadNotice lookup={lookup} />
       {apps.isRefetchError ? <StaleNotice updatedAt={apps.dataUpdatedAt} refetching={apps.isFetching} onRetry={() => void apps.refetch()} /> : null}
       {apps.isPending || (problemOnly && lookup.loading) ? (

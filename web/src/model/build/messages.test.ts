@@ -10,7 +10,10 @@ const messagesFromDraft = readFirst(draftOf, model.messagesFromDraft)
 const planProposal = readFirst(draftOf, model.planProposal)
 const prepareAnswers = readEachFirst(turnOf, questions.prepareAnswers)
 const { replyOptions } = questions
-import { buildCopy } from './copy'
+import { buildCopy, textJa } from './copy'
+import { textEn } from './copy.en'
+import { preserveLanguage } from '../../../test/language'
+import { setLanguage } from '../../shell/language'
 import { buildFailureReference, classifyBuildFailure } from './failure'
 import { serializeSpec } from './spec'
 import type { BuildMessage } from './types'
@@ -118,8 +121,261 @@ describe('conversation history', () => {
     expect(JSON.stringify(messages)).not.toContain('__init__')
     expect(JSON.stringify(messages)).not.toContain('```json')
     expect(replyOptions(messagesFromDraft({ ...draft, conversationTurns: [analysis, init] }, []))).toEqual([buildCopy.questions.kickoffReply])
-    // Nothing is done until an Excel turn succeeded.
-    expect(messagesFromDraft({ ...draft, conversationTurns: [{ ...analysis, status: 'failed' }] }, [])).toEqual([])
+    // Nothing is called done until an Excel turn succeeded; a failed one says where to continue (below).
+    expect(messagesFromDraft({ ...draft, conversationTurns: [{ ...analysis, status: 'running', finishedAt: undefined }] }, [])).toEqual([])
+  })
+  describe('a stopped Excel → app step', () => {
+    const analysis = { ...turn, kind: 'excel-analysis' as const, id: 'turn-excel', userMessage: 'この Excel を読み取ってください', startedAt: '2026-10-08T00:00:10Z', finishedAt: '2026-10-08T00:00:40Z' }
+    const design = { ...turn, kind: 'ui-design' as const, id: 'turn-ui-1', userMessage: '__init__', startedAt: '2026-10-08T00:00:50Z', finishedAt: '2026-10-08T00:00:55Z' }
+    const stopped = (at: string) => {
+      const text = buildCopy.questions.excelStopped
+      return { role: 'assistant', text, summary: text, at, turnId: `excel:${draft.id}`, link: { kind: 'excel2app', draftId: draft.id, resume: true } } satisfies BuildMessage
+    }
+    test('the latest analysis failed: one line that sends the user back to Excel → app, no ready line and no retry', () => {
+      const messages = messagesFromDraft({ ...draft, conversationTurns: [{ ...analysis, status: 'failed', error: 'codex exited' }] }, [])
+      expect(messages).toEqual([stopped(analysis.finishedAt)])
+      expect(replyOptions(messages)).toEqual([])
+      expect(JSON.stringify(messages)).not.toContain(buildCopy.questions.excelReady)
+    })
+    test('the analysis succeeded and the screen design failed after it: the stop line, not the ready line', () => {
+      const messages = messagesFromDraft({ ...draft, conversationTurns: [{ ...design, status: 'failed', error: 'codex exited' }, analysis] }, [])
+      expect(messages).toEqual([stopped(design.finishedAt)])
+      expect(JSON.stringify(messages)).not.toContain('__init__')
+    })
+    test('a failure followed by a succeeded Excel → app step, or both succeeded: the ready line as before', () => {
+      const ready = buildCopy.questions.excelReady
+      const line = { role: 'assistant', text: ready, summary: ready, at: analysis.startedAt, turnId: `excel:${draft.id}`, options: [buildCopy.questions.kickoffReply], link: { kind: 'excel2app', draftId: draft.id } } satisfies BuildMessage
+      expect(messagesFromDraft({ ...draft, conversationTurns: [analysis, design] }, [])).toEqual([line])
+      expect(messagesFromDraft({ ...draft, conversationTurns: [{ ...analysis, status: 'failed', error: 'codex exited' }, { ...analysis, id: 'turn-excel-2', startedAt: '2026-10-08T00:00:45Z', finishedAt: '2026-10-08T00:00:48Z' }, design] }, [])).toEqual([line])
+    })
+    test('the line is in the language in use', () => {
+      const restore = preserveLanguage()
+      try {
+        setLanguage('en')
+        expect(messagesFromDraft({ ...draft, conversationTurns: [{ ...analysis, status: 'failed', error: 'codex exited' }] }, [])).toEqual([{ ...stopped(analysis.finishedAt), text: textEn.questions.excelStopped, summary: textEn.questions.excelStopped }])
+      } finally {
+        restore()
+      }
+    })
+    test('offers no reply chips, and is not counted as a reply toward 「この内容で提案して」', () => {
+      const second = { ...turn, id: 'turn-2', userMessage: '入れる', startedAt: '2026-10-08T00:02:00Z', finishedAt: '2026-10-08T00:02:10Z' }
+      const stoppedLater = { ...design, status: 'failed' as const, error: 'codex exited', startedAt: '2026-10-08T00:03:00Z', finishedAt: '2026-10-08T00:03:10Z' }
+      // Two replies, then the stopped step as the latest line: nothing to answer here, no proposal chip.
+      const afterTwo = messagesFromDraft({ ...draft, conversationTurns: [turn, second, stoppedLater] }, [])
+      expect(afterTwo.at(-1)).toEqual(stopped(stoppedLater.finishedAt))
+      expect(replyOptions(afterTwo)).toEqual([])
+      // One reply before it and one after: two replies, so the proposal chip is not offered yet.
+      const third = { ...second, id: 'turn-3', userMessage: '入れない', startedAt: '2026-10-08T00:04:00Z', finishedAt: '2026-10-08T00:04:10Z' }
+      const around = messagesFromDraft({ ...draft, conversationTurns: [turn, stoppedLater, third] }, [])
+      expect(around.at(-1)).toMatchObject({ role: 'assistant', turnId: third.id })
+      expect(replyOptions(around)).toEqual(turn.suggestedReplies!)
+    })
+  })
+})
+
+describe('superseded turn failure (APT-1365)', () => {
+  const timedOut = { ...turn, id: 'turn-1', status: 'failed' as const, error: 'application draft conversation turn timed out', userMessage: 'test', assistantMessage: undefined, changed: undefined, suggestedReplies: undefined }
+  const resent = { ...turn, id: 'turn-2', userMessage: 'test', startedAt: '2026-10-08T01:00:00Z', finishedAt: '2026-10-08T01:00:30Z' }
+  const collapsed = { role: 'notice', tone: 'info', title: textJa.failure.superseded, at: timedOut.finishedAt ?? timedOut.startedAt } satisfies BuildMessage
+  const roles = (messages: BuildMessage[]) => messages.map((message) => message.role === 'notice' ? `notice:${message.tone}` : message.role)
+
+  test('a failed turn a later turn followed reads as one past line: no retry, not an error, the later turn as it is', () => {
+    const messages = messagesFromDraft({ ...draft, conversationTurns: [resent, timedOut] }, [])
+    expect(roles(messages)).toEqual(['user', 'notice:info', 'user', 'assistant'])
+    expect(messages[0]).toEqual({ role: 'user', text: 'test', at: timedOut.startedAt })
+    expect(messages[1]).toEqual(collapsed)
+    expect(messages[1]).not.toHaveProperty('retry')
+    expect(messages[1]).not.toHaveProperty('detail')
+    expect(messages[1]).not.toHaveProperty('reference')
+    expect(messages.slice(2)).toEqual([{ role: 'user', text: 'test', at: resent.startedAt }, assistantMessage(resent, draft.id)])
+    expect(messages.some((message) => message.role === 'notice' && message.retry)).toBe(false)
+  })
+  test('the last failed turn keeps its error notice with 「もう一度試す」', () => {
+    const messages = messagesFromDraft({ ...draft, conversationTurns: [timedOut] }, [])
+    expect(messages[1]).toMatchObject({ role: 'notice', tone: 'error', title: textJa.failure.timeout.title, detail: textJa.failure.timeout.reason, retry: 'turn' })
+  })
+  test('of failures in a row only the last offers retry', () => {
+    const again = { ...timedOut, id: 'turn-2', startedAt: resent.startedAt, finishedAt: resent.finishedAt }
+    const messages = messagesFromDraft({ ...draft, conversationTurns: [again, timedOut] }, [])
+    const notices = messages.filter((message) => message.role === 'notice')
+    expect(notices).toEqual([collapsed, expect.objectContaining({ tone: 'error', at: again.finishedAt, retry: 'turn' })])
+    expect(notices.filter((message) => message.retry)).toHaveLength(1)
+  })
+  test('a later turn still running or in an unknown state supersedes it too', () => {
+    for (const status of ['running', 'future-state']) {
+      const notices = messagesFromDraft({ ...draft, conversationTurns: [timedOut, { ...resent, status, finishedAt: undefined }] }, []).filter((message) => message.role === 'notice')
+      expect(notices[0]).toEqual(collapsed)
+    }
+  })
+  test('a superseded policy refusal keeps its reason (it never offered a retry); as the last turn it stays without retry', () => {
+    const denied = { ...timedOut, error: 'workspace: ai_policy_denied' }
+    expect(classifyBuildFailure(denied.error, undefined, 'turn').kind).toBe('policy')
+    const refusal = assistantMessage(denied, draft.id)
+    expect(refusal).toMatchObject({ role: 'notice', tone: 'error' })
+    expect(refusal).not.toHaveProperty('retry')
+    const messages = messagesFromDraft({ ...draft, conversationTurns: [denied, resent] }, [])
+    expect(messages[1]).toEqual(refusal)
+    expect(roles(messages)).toEqual(['user', 'notice:error', 'user', 'assistant'])
+    // The tab's own notice of that refusal does not add a second one.
+    const kept = { ...refusal, turnId: denied.id } as BuildMessage
+    expect(messagesFromDraft({ ...draft, conversationTurns: [denied, resent] }, [kept]).filter((message) => message.role === 'notice')).toEqual<BuildMessage[]>([refusal])
+    expect(messagesFromDraft({ ...draft, conversationTurns: [denied] }, [])[1]).toEqual(refusal)
+  })
+
+  /** The notice use-build-session `fail` saves for an observed turn failure (`turnId`), or for a failed send (none). */
+  const saved = (turnId?: string): BuildMessage => ({
+    role: 'notice', tone: 'error', title: textJa.failure.timeout.title, detail: textJa.failure.timeout.reason, retry: 'turn', at: collapsed.at, ...(turnId ? { turnId } : {}),
+  })
+  const read = { ...draft, conversationTurns: [timedOut, resent] }
+
+  test('the notice this tab saved when it saw that turn fail is not shown once a later turn followed', () => {
+    const messages = messagesFromDraft(read, [saved(timedOut.id)])
+    expect(roles(messages)).toEqual(['user', 'notice:info', 'user', 'assistant'])
+    expect(messages[1]).toEqual(collapsed)
+    // A reload hands the transcript back as local messages: nothing is added twice.
+    expect(messagesFromDraft(read, messages)).toEqual(messages)
+  })
+  test('a notice of the same title and time that names another turn, or none (a failed send), is still shown', () => {
+    for (const notice of [saved('turn-other'), saved()]) {
+      const messages = messagesFromDraft(read, [notice])
+      expect(messages.filter((message) => message.role === 'notice')).toEqual<BuildMessage[]>([collapsed, notice])
+    }
+  })
+  test('switching the language does not bring back the saved notice of a superseded turn', () => {
+    const restore = preserveLanguage()
+    try {
+      setLanguage('en')
+      const messages = messagesFromDraft(read, [saved(timedOut.id)])
+      expect(messages.filter((message) => message.role === 'notice')).toEqual([{ ...collapsed, title: textEn.failure.superseded }])
+      expect(JSON.stringify(messages)).not.toContain(textJa.failure.timeout.title)
+    } finally {
+      restore()
+    }
+  })
+  test('the copy says only that the request was interrupted, in Japanese and English', () => {
+    expect(textJa.failure.superseded).toBe('この依頼は途中で止まりました')
+    expect(textEn.failure.superseded).toBe('This request was interrupted.')
+  })
+
+  const design = { ...turn, kind: 'ui-design' as const, id: 'turn-ui', userMessage: '__init__', status: 'failed' as const, error: 'codex exited', startedAt: '2026-10-08T02:00:00Z', finishedAt: '2026-10-08T02:00:10Z' }
+  test('display and retry read the same turns: the last conversation turn, never an Excel → app turn after it', () => {
+    expect(model.shownConversationTurns([design, resent, timedOut].map(turnOf)).map((item) => item.id)).toEqual([timedOut.id, resent.id])
+    expect(model.shownConversationTurns([design, timedOut].map(turnOf)).at(-1)?.id).toBe(timedOut.id)
+    expect([...model.supersededFailures([design, resent, timedOut].map(turnOf))]).toEqual([timedOut.id])
+    expect([...model.supersededFailures([design, timedOut].map(turnOf))]).toEqual([])
+    // The design turn is not a later conversation turn: the conversation failure stays the one to retry.
+    expect(messagesFromDraft({ ...draft, conversationTurns: [timedOut, design] }, []).filter((message) => message.role === 'notice')).toEqual([expect.objectContaining({ tone: 'error', retry: 'turn' })])
+  })
+
+  const stale = (messages: BuildMessage[], wires: readonly unknown[], pending: boolean) => model.withoutStaleTurnFailures(messages, wires.map(turnOf), pending)
+  const typed: BuildMessage = { role: 'user', text: '担当者も記録したい', at: '2026-10-08T00:01:05Z' }
+  const planNotice: BuildMessage = { role: 'notice', tone: 'error', title: textJa.failure.timeout.title, at: collapsed.at, retry: 'plan' }
+  const pruning: [string, BuildMessage[], unknown[], boolean, BuildMessage[]][] = [
+    ['a notice naming a superseded turn, with a reply pending', [saved(timedOut.id), typed], [timedOut, resent], true, [typed]],
+    ['a notice naming a superseded turn, nothing pending', [saved(timedOut.id)], [timedOut, resent], false, []],
+    ['a notice naming the last failed turn', [typed, saved(timedOut.id)], [timedOut], true, [typed, saved(timedOut.id)]],
+    ['a notice naming the last turn while an Excel → app turn follows', [saved(timedOut.id)], [timedOut, design], false, [saved(timedOut.id)]],
+    ['an old saved notice (no turnId), nothing pending, the last turn not failed', [saved()], [timedOut, resent], false, []],
+    ['an old saved notice, the last turn still running', [saved()], [timedOut, { ...resent, status: 'running', finishedAt: undefined }], false, []],
+    ['an old saved notice, the last turn failed', [saved()], [timedOut], false, [saved()]],
+    ['a failed send (no turnId) keeps its pending reply and notice', [typed, saved()], [timedOut, resent], true, [typed, saved()]],
+    ['a failed send before any turn', [typed, saved()], [], true, [typed, saved()]],
+    ['a notice of another context', [planNotice], [timedOut, resent], false, [planNotice]],
+  ]
+  test.each(pruning)('withoutStaleTurnFailures: %s', (_, messages, wires, pending, expected) => {
+    expect(stale(messages, wires, pending)).toEqual(expected)
+  })
+  test('withoutStaleTurnFailures answers the same list when nothing is stale', () => {
+    const messages = [typed, saved(timedOut.id)]
+    expect(stale(messages, [timedOut], true)).toBe(messages)
+  })
+})
+
+describe('recreated workspace notice (APT-1264)', () => {
+  const recreated = { role: 'notice', kind: 'workspace-recreated', tone: 'info', title: textJa.workspaceRecreated, at: '2026-10-08T00:02:00Z' } satisfies BuildMessage
+  const earlier = { ...turn, devWorkspaceId: 'ws-old' }
+  const switched = { ...turn, id: 'turn-2', startedAt: '2026-10-08T00:02:00Z', finishedAt: '2026-10-08T00:02:10Z', userMessage: '入れる', replacedDevWorkspaceId: 'ws-old' }
+  const later = { ...turn, id: 'turn-3', startedAt: '2026-10-08T00:03:00Z', finishedAt: '2026-10-08T00:03:10Z', userMessage: 'ありがとう' }
+  const generation = { id: 'gen-1', status: 'succeeded', startedAt: '2026-10-08T00:04:00Z', finishedAt: '2026-10-08T00:04:30Z', devWorkspaceId: 'ws-1' }
+  const notices = (wire: unknown) => messagesFromDraft(wire, []).filter((message) => message.role === 'notice')
+  const shape = (messages: BuildMessage[]) => messages.map((message) => message.role === 'notice' ? message.title : message.role)
+
+  test('appears once, on the turn that replaced the workspace: below its request, above its answer', () => {
+    const messages = messagesFromDraft({ ...draft, conversationTurns: [later, switched, earlier], creationPlanGenerations: [generation] }, [])
+    expect(shape(messages)).toEqual(['user', 'assistant', 'user', textJa.workspaceRecreated, 'assistant', 'user', 'assistant'])
+    expect(messages.filter((message) => message.role === 'notice')).toEqual([recreated])
+  })
+  test('is information only: no retry and no reference', () => {
+    const [notice] = notices({ ...draft, conversationTurns: [switched] })
+    expect(notice).toEqual(recreated)
+    expect(notice).not.toHaveProperty('retry')
+    expect(notice).not.toHaveProperty('reference')
+  })
+  test('stays one notice on every read and reload, also while the replacing turn runs', () => {
+    const read = { ...draft, conversationTurns: [earlier, switched, later] }
+    const first = messagesFromDraft(read, [])
+    // A reload hands the earlier transcript back as local messages: the derived notice is not added twice.
+    expect(messagesFromDraft(read, first).filter((message) => message.role === 'notice')).toEqual([recreated])
+    const running = messagesFromDraft({ ...draft, conversationTurns: [earlier, { ...switched, status: 'running', finishedAt: undefined }] }, [])
+    expect(running.slice(-2)).toEqual([{ role: 'user', text: switched.userMessage, at: switched.startedAt }, recreated])
+  })
+  test('sits right below the request, before an answer of the same time (no finishedAt, or finished at its start)', () => {
+    const user = { role: 'user', text: switched.userMessage, at: switched.startedAt } satisfies BuildMessage
+    const failed = messagesFromDraft({ ...draft, conversationTurns: [{ ...switched, status: 'failed', finishedAt: undefined, error: 'codex exited' }] }, [])
+    expect(failed.slice(0, 2)).toEqual([user, recreated])
+    expect(failed[2]).toMatchObject({ role: 'notice', tone: 'error', at: switched.startedAt, retry: 'turn' })
+    const unknown = messagesFromDraft({ ...draft, conversationTurns: [{ ...switched, status: 'future-state', finishedAt: undefined }] }, [])
+    expect(shape(unknown)).toEqual(['user', textJa.workspaceRecreated, buildCopy.unsupported.title])
+    const instant = messagesFromDraft({ ...draft, conversationTurns: [{ ...switched, finishedAt: switched.startedAt }] }, [])
+    expect(shape(instant)).toEqual(['user', textJa.workspaceRecreated, 'assistant'])
+  })
+  test('appears on a plan generation that replaced the workspace, at its start', () => {
+    const replacing = { ...generation, replacedDevWorkspaceId: 'ws-old' }
+    const messages = messagesFromDraft({ ...draft, conversationTurns: [earlier], creationPlanGenerations: [replacing] }, [])
+    expect(messages.filter((message) => message.role === 'notice')).toEqual([{ ...recreated, at: replacing.startedAt }])
+    expect(messages.at(-1)).toEqual({ ...recreated, at: replacing.startedAt })
+  })
+  test('a switch an Excel → app turn made stays after the collapsed Excel line', () => {
+    const analysis = { ...turn, kind: 'excel-analysis' as const, id: 'turn-excel', userMessage: 'この Excel を読み取ってください', startedAt: '2026-10-08T00:00:10Z', finishedAt: '2026-10-08T00:00:40Z' }
+    const design = { ...turn, kind: 'ui-design' as const, id: 'turn-ui-1', userMessage: '__init__', startedAt: '2026-10-08T00:00:50Z', finishedAt: '2026-10-08T00:00:55Z', replacedDevWorkspaceId: 'ws-old' }
+    const messages = messagesFromDraft({ ...draft, conversationTurns: [switched, design, analysis] }, [])
+    // The design turn named ws-old first: the later conversation turn naming it again adds nothing.
+    expect(shape(messages)).toEqual(['assistant', textJa.workspaceRecreated, 'user', 'assistant'])
+    expect(messages[0]).toMatchObject({ turnId: `excel:${draft.id}` })
+    expect(messages[1]).toEqual({ ...recreated, at: design.startedAt })
+  })
+  test('a retired workspace named by more than one record is announced at the first; another retirement is announced again', () => {
+    const replacing = { ...generation, replacedDevWorkspaceId: 'ws-old' }
+    expect(notices({ ...draft, conversationTurns: [switched], creationPlanGenerations: [replacing] })).toEqual([recreated])
+    const again = { ...later, replacedDevWorkspaceId: 'ws-1' }
+    expect(notices({ ...draft, conversationTurns: [again, switched] }).map((notice) => notice.at)).toEqual([switched.startedAt, again.startedAt])
+    const read = draftOf({ ...draft, conversationTurns: [again, switched], creationPlanGenerations: [replacing] })
+    expect([...model.recreatingRecords([...read.conversationTurns, ...read.creationPlanGenerations])].map((record) => record.id)).toEqual(['turn-2', 'turn-3'])
+  })
+  test('nothing is shown without the field (an older Platform) or for an empty one', () => {
+    expect(notices({ ...draft, conversationTurns: [earlier, later], creationPlanGenerations: [generation] })).toEqual([])
+    expect(notices({ ...draft, conversationTurns: [{ ...switched, replacedDevWorkspaceId: '' }] })).toEqual([])
+  })
+  test('decisions read past it: the newest actionable message is the one before it', () => {
+    // A device clock behind the server's sorts the server-timed notice after the local generation-limit notice.
+    const limit = { role: 'notice', tone: 'warning', title: buildCopy.failure.limit.title, detail: buildCopy.failure.limitRejected, at: '2026-10-08T00:01:30Z' } satisfies BuildMessage
+    const messages = messagesFromDraft({ ...draft, conversationTurns: [earlier], creationPlanGenerations: [{ ...generation, replacedDevWorkspaceId: 'ws-old' }] }, [limit])
+    expect(messages.at(-1)).toMatchObject({ kind: 'workspace-recreated' })
+    expect(model.lastActionable(messages)).toEqual(limit)
+    expect(model.lastActionable([{ ...recreated }])).toBeUndefined()
+  })
+  test('the copy is calm and exact in Japanese and English, switched at use time', () => {
+    expect(textJa.workspaceRecreated).toBe('作業環境を作り直しました。会話と計画は引き継いでいます')
+    expect(textEn.workspaceRecreated).toBe('Your workspace was recreated. The conversation and plan are kept.')
+    const restore = preserveLanguage()
+    try {
+      setLanguage('en')
+      expect(messagesFromDraft({ ...draft, conversationTurns: [switched] }, []).find((message) => message.role === 'notice')).toEqual({ ...recreated, title: textEn.workspaceRecreated })
+      setLanguage('ja')
+      expect(buildCopy.workspaceRecreated).toBe(textJa.workspaceRecreated)
+    } finally {
+      restore()
+    }
   })
 })
 

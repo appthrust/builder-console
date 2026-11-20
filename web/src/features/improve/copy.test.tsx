@@ -119,6 +119,22 @@ test('improvement failures honor run and task reasons before diagnostic wording'
   expect(interrupted).toContain(buildCopy.failure.resumable.reason)
 })
 
+test.each(['ja', 'en'] as const)('a turn that replaced a retired workspace tells it once, between its request and its answer, as information (APT-1264, %s)', (language) => {
+  setLanguage(language)
+  const first = draft.conversationTurns![0]!
+  const replacing = { ...first, id: 't2', startedAt: '2026-10-26T00:01:00Z', finishedAt: '2026-10-26T00:01:10Z', userMessage: '並び順も変えたい', assistantMessage: '## 要約\n並び順を変えます。', replacedDevWorkspaceId: 'ws-old' }
+  const later = { ...first, id: 't3', startedAt: '2026-10-26T00:02:00Z', finishedAt: '2026-10-26T00:02:10Z', userMessage: '色も変えたい', assistantMessage: '## 要約\n色を変えます。' }
+  const html = render({ ...draft, conversationTurns: [first, replacing, later] })
+  const notice = buildCopy.workspaceRecreated
+  expect(notice).toBe(language === 'ja' ? '作業環境を作り直しました。会話と計画は引き継いでいます' : 'Your workspace was recreated. The conversation and plan are kept.')
+  expect(html.split(notice)).toHaveLength(2)
+  expect(html.indexOf('並び順も変えたい')).toBeLessThan(html.indexOf(notice))
+  expect(html.indexOf(notice)).toBeLessThan(html.indexOf('並び順を変えます。'))
+  expect(html.indexOf(notice)).toBeLessThan(html.indexOf('色も変えたい'))
+  // An older Platform sends no field: nothing is shown.
+  expect(render(draft)).not.toContain(notice)
+})
+
 test.each(['ja', 'en'] as const)('a stopped run names no way on this page lacks: no skip, and a reply here is a new turn, not a change run, in %s', (language) => {
   setLanguage(language)
   const id = implementationTodoId(tasks[0]!.title, 0)

@@ -12,7 +12,7 @@ test.describe('App delete @app', () => {
 
     await page.goto('/mine')
     await expect(page.getByRole('heading', { level: 1, name: '自分のアプリ', exact: true })).toBeVisible()
-    await expect(main.getByRole('link', { name: new RegExp(app.name) })).toBeVisible()
+    await expect(main.getByRole('table').getByRole('link', { name: new RegExp(app.name) })).toBeVisible()
     await page.goto(groupApps)
     await expect(page.getByRole('heading', { level: 1, name: seed.groups.teamA.name, exact: true })).toBeVisible()
     await expect(main.getByRole('link', { name: new RegExp(app.name) })).toBeVisible()
@@ -60,7 +60,7 @@ test.describe('App delete @app', () => {
 
     await page.goto('/mine')
     await expect(page.getByRole('heading', { level: 1, name: '自分のアプリ', exact: true })).toBeVisible()
-    await expect(main.getByRole('link', { name: new RegExp(seed.apps.mitsumori.name) })).toBeVisible()
+    await expect(main.getByRole('table').getByRole('link', { name: new RegExp(seed.apps.mitsumori.name) })).toBeVisible()
     await expect(main.getByRole('link', { name: new RegExp(app.name) })).toHaveCount(0)
 
     await withExpectedFailures([{ method: 'GET', path: '/api/console/resolve', status: 404, count: 1, reason: 'the deleted app\'s URL resolves to nothing' }], async () => {

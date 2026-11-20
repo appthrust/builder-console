@@ -40,6 +40,7 @@ export const shellEn: typeof shell = {
     noGroups: 'No groups yet.',
     problems: (n: number) => `${n} ${n === 1 ? 'issue' : 'issues'}`,
     problemsLabel: (n: number) => `${n} ${n === 1 ? 'app needs' : 'apps need'} attention`,
+    inboxLabel: (n: number) => `Home (${n} waiting for you)`,
     skip: 'Skip to content',
   },
   topbar: {
@@ -50,10 +51,7 @@ export const shellEn: typeof shell = {
     switchContext: 'Switch group',
     userMenu: 'User menu',
     profile: 'Profile',
-    cannotCreateTitle: 'You cannot create apps yet',
-    cannotCreateBody: 'Ask your admin to give you access to create apps.',
     platformUnavailable: 'App creation is unavailable',
-    platformUnavailableBody: 'Wait a moment, then reload the page.',
     notMemberTitle: 'You are not a project member',
     notMemberBody: (teamSlug?: string) => teamSlug
       ? `This project is managed by the team “${teamSlug}”. Ask an admin to add you.`
@@ -67,13 +65,25 @@ export const shellEn: typeof shell = {
     searchClear: 'Clear search',
     resultsTitle: (q: string) => `Results for “${q}”`,
     noResults: 'No apps found. Try a different search.',
-    groupApps: (name: string) => `${name} apps`,
-    seeAll: 'View all →',
-    groupEmpty: 'This group has no apps yet.',
-    shared: 'Shared by parent groups',
-    sharedEmpty: 'No shared apps yet.',
-    companyNew: 'New across the company',
-    companyEmpty: 'No apps have been shared with the company yet.',
+    usable: 'Apps you can use',
+    count: (n: number) => (n === 1 ? '1 app' : `${n} apps`),
+    filterLabel: 'Filter apps you can use',
+    filterAll: 'All',
+    filterOther: 'Other teams',
+    filterCompany: 'Company-wide',
+    hint: 'Choose an app to open it in a new tab.',
+    hintClose: 'Dismiss tip',
+    more: 'Show more',
+    directoryPrompt: 'Can’t find the app you need?',
+    directoryLink: 'Search the directory →',
+    emptyTitle: 'No apps you can use yet',
+    emptyBody: 'Find an app in the directory and select “Request access” to ask its owner.',
+    emptyAction: 'Search the directory',
+    noGroupTitle: 'You have not joined a group yet',
+    noGroupBody: 'Ask your admin to add you. You can use company-wide apps below.',
+    noUsableMatch: 'No apps you can use match your search.',
+    otherMatches: (n: number) => (n === 1 ? '1 other app in the company matches.' : `${n} other apps in the company match.`),
+    otherMatchesLabel: 'Other apps in the company',
     noMembership: 'You have not joined a group yet. Ask your admin to add you.',
   },
   mine: {
@@ -154,7 +164,50 @@ export const shellEn: typeof shell = {
   help: {
     title: 'Help',
     toc: 'Contents',
+    order: {
+      user: ['find', 'access', 'ask', 'create'],
+      maker: ['publish', 'share', 'proposals', 'trouble'],
+    },
     articles: [
+      {
+        id: 'find',
+        title: 'Find and open apps',
+        body: [
+          'Home lists the apps you can use under “Apps you can use”.',
+          'Select a card to open the app in a new tab.',
+          'Select “Details” to read what the app does and how to use it.',
+          'Use the search box at the top to find an app by name or purpose.',
+        ],
+      },
+      {
+        id: 'access',
+        title: 'When you can’t open an app',
+        body: [
+          'Apps that are not on Home can be found by team in the directory.',
+          'For an app you cannot open, select “Request access” to ask its owner.',
+          'Once your request is approved, the app appears under “Apps you can use”.',
+          'If an app says it is not ready yet, wait until it is ready.',
+        ],
+      },
+      {
+        id: 'ask',
+        title: 'Need help? Ask the owner',
+        body: [
+          'Open the app’s “Details” and write under “Tell the owner”.',
+          'Share feedback, requests, or problems. Anyone who can see the app can read it.',
+          'If it is urgent, use “Email the owner”.',
+          'If an app seems to be having trouble, wait a moment and try again.',
+        ],
+      },
+      {
+        id: 'create',
+        title: 'Want to create an app?',
+        body: [
+          'If you can create apps, “+ New app” appears in the top-right corner.',
+          'Name your app and choose who can see it.',
+          'If you don’t see the button, ask your admin to give you access to create apps.',
+        ],
+      },
       {
         id: 'publish',
         title: 'Publish your app',
@@ -177,6 +230,17 @@ export const shellEn: typeof shell = {
           'Public: anyone on the internet can open the app. Only admins can choose this.',
           'Invitations are not emailed automatically. Copy the invitation message and link, send them to the person, and ask them to sign in with the invited email address.',
           'The invited person needs an account they can sign in with. Ask your workspace admin if they cannot sign in.',
+        ],
+      },
+      {
+        id: 'proposals',
+        title: 'Accept and send proposals',
+        body: [
+          'People who don’t own an app can still propose changes to it.',
+          'Proposals can come from people in the app’s team who can create apps.',
+          'To propose a change, select “Propose a change” on the app’s page.',
+          'A proposal changes nothing until an owner reviews it and selects “Apply”.',
+          'Owners choose whether to accept proposals in the app’s settings.',
         ],
       },
       {

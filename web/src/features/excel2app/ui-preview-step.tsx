@@ -233,6 +233,9 @@ function ChatPanel({ messages, busy, readOnly, activity, ready, onSend, onUndo, 
       {/* biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be reachable by keyboard. */}
       <ol ref={log} aria-label={text.chat.messages} aria-live="polite" aria-busy={busy} tabIndex={0} className="max-h-80 min-h-40 flex-1 space-y-3 overflow-y-auto px-4 py-4 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent @2xl:max-h-none @2xl:min-h-0">
         {messages.map((message, index) => {
+          // The workspace was recreated (APT-1264): information between an instruction and its reply, not a chat bubble.
+          // biome-ignore lint/suspicious/noArrayIndexKey: the conversation only grows; an index is its identity.
+          if (message.role === 'notice') return <li key={index} data-testid="excel2app-chat-message" data-role="notice"><Notice tone="info" title={message.text} /></li>
           const state = message.failed ? 'failed' : message.pending ? 'pending' : undefined
           const quota = message.failed && isAIQuotaExhausted(message.text)
           const failure = message.failed ? message.failure ?? classifyBuildFailure(message.text, undefined, 'turn') : undefined

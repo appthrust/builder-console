@@ -10,7 +10,7 @@ import { platformErrorEnvelope } from '../../api/platform-error'
 import { isSessionExpiredError, sessionExpiryStore } from '../../api/session-expiry'
 import { classifyBuildFailure, failureOffers } from '../../model/build/failure'
 import { buildCopy } from '../../model/build/copy'
-import { messagesFromDraft, planProposal } from '../../model/build/messages'
+import { messagesFromDraft, planProposal, shownConversationTurns, supersededFailures, withoutStaleTurnFailures } from '../../model/build/messages'
 import { composeBuildIntent, conversationTurns, decomposeBuildIntent, isPrepareTurn, prepareAnswers } from '../../model/build/questions'
 import { parseSpec, serializeSpec } from '../../model/build/spec'
 import { deriveStage, hasUnplannedKickoff, needsPlanRefresh } from '../../model/build/stage'
@@ -48,6 +48,8 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
   const lock = useRef(false)
   const retryContext = useRef<'turn' | 'plan' | 'prepare' | 'implement' | 'publish'>('turn')
   const observedFailures = useRef(new Set<string>())
+  // The draft turn whose observed failure `failure` holds (none for a failed send or another context).
+  const failedTurnId = useRef<string | undefined>(undefined)
   const blockedUntil = useRef(0)
   // A 412 from the AI gate is usually the platform rolling out (the API pod restarts, the
   // runtime target is briefly unadmitted). Retry with backoff before declaring it unavailable.
@@ -61,6 +63,9 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
   const { app, appView, appProgress, generation, execution, domain, proposalDraft, published, implementation, implementing, destination } = creation
   const planBlocksStart = Boolean(draft.creationPlanUnreadable) && !isBuildPending(execution) && !draft.createdApplicationId
   const turn = draft.conversationTurns.at(-1)
+  // The conversation's last turn as the conversation shows it (APT-1365): its failure is the one observed, guarded and
+  // retried, never an Excel → app turn recorded after it. `turn` (any kind) still tells whether a job runs.
+  const conversationTurn = useMemo(() => shownConversationTurns(draft.conversationTurns).at(-1), [draft.conversationTurns])
   const running = [generation, turn, execution].some(isBuildPending)
   const result = deriveStage({ draft, generation, turn, execution, appProgress, implementation: stageImplementation(implementation.state), published, lastPlannedIntent: session.lastPlannedIntent, now })
   const { spec } = useMemo(() => parseSpec(draft.specMarkdown), [draft.specMarkdown])
@@ -95,7 +100,8 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
   async function receive(next: BuildDraft) {
     await writeDraft(queryClient, projectId, draftRef, next)
   }
-  function fail(error: unknown, context: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish', at = new Date().toISOString(), failedStep?: BuildExecutionStep) {
+  /** `turnId`: the draft's conversation turn whose failure was observed; a failed send made no turn and has none. */
+  function fail(error: unknown, context: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish', at = new Date().toISOString(), failedStep?: BuildExecutionStep, turnId?: string) {
     const preparationExecution = context === 'prepare' ? draftRef.current.creationExecutions.at(-1) : undefined
     // Console binding can fail after creation succeeded; keep that execution in the support reference.
     const reference = { draftId: draft.id, at, ...(preparationExecution ? { executionId: preparationExecution.id } : {}) }
@@ -109,6 +115,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
       ? { ...classified, reason: planRecheck ? buildCopy.failure.limitRecheck : buildCopy.failure.limitRejected }
       : classified
     retryContext.current = context
+    failedTurnId.current = turnId
     setFailure(next)
     patch((current) => {
       // The same failure repeated (retry, reload) stays one notice.
@@ -122,7 +129,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
       const limited = context === 'plan' && next.kind === 'limit'
       const calm = unconfirmed || next.destination === 'changed' || next.destination === 'blocked' || next.kind === 'plan' || limited
       const retry = unconfirmed ? 'confirm' as const : context === 'prepare' && draftRef.current.creationPlanUnreadable ? undefined : next.recheck ? 'recheck' as const : next.kind === 'plan' ? 'plan' as const : next.kind !== 'policy' && !limited ? context : undefined
-      return { ...current, ...(next.kind === 'quota' || next.kind === 'policy' || limited ? { planRequested: false } : {}), messages: [...messages, { role: 'notice', tone: calm ? 'warning' : 'error', title: next.title, detail: next.reason, ...(retry ? { retry } : {}), at, ...(next.reference ? { reference: next.reference } : {}) }] }
+      return { ...current, ...(next.kind === 'quota' || next.kind === 'policy' || limited ? { planRequested: false } : {}), messages: [...messages, { role: 'notice', tone: calm ? 'warning' : 'error', title: next.title, detail: next.reason, ...(retry ? { retry } : {}), at, ...(next.reference ? { reference: next.reference } : {}), ...(turnId ? { turnId } : {}) }] }
     })
   }
   async function perform(context: 'turn' | 'plan' | 'prepare' | 'implement' | 'publish', action: () => Promise<void>) {
@@ -193,11 +200,13 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
       return
     }
     void perform('turn', async () => {
-      const currentDraft = draftRef.current
-      const replies = conversationTurns(currentDraft.conversationTurns).map((item) => item.userMessage)
-      const intent = composeBuildIntent(decomposeBuildIntent(session.baseIntent), [...replies, pending.text])
-      // The intent is the plan's input; 用意する answers do not change the plan in use.
-      if (!asking) await receive(await api.updateDraft(projectId, draft.id, { intent }))
+      // The persisted opening is shared by fresh and resumed tabs. Preparation answers do not change the plan.
+      if (!asking) {
+        const current = draftRef.current
+        const replies = conversationTurns(current.conversationTurns).map((item) => item.userMessage)
+        const intent = await composeBuildIntent(current.intent, [...replies, pending.text])
+        await receive(await api.updateDraft(projectId, draft.id, { intent }))
+      }
       try {
         const created = await api.createTurn(projectId, draft.id, { message: pending.text })
         const latest = draftRef.current
@@ -243,7 +252,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
       return
     }
     if ([latestGeneration, current.conversationTurns.at(-1)].some(isBuildPending)) return
-    const intent = composeBuildIntent(decomposeBuildIntent(session.baseIntent), conversationTurns(current.conversationTurns).map((item) => item.userMessage), true)
+    const intent = await composeBuildIntent(current.intent, conversationTurns(current.conversationTurns).map((item) => item.userMessage), true)
     const updated = current.intent === intent ? current : await api.updateDraft(projectId, draft.id, { intent })
     await receive(updated)
     const attemptKey = `build-plan-${draft.id}-${current.conversationTurns.at(-1)?.id ?? 'initial'}-${previousGenerationId ?? 'initial'}`
@@ -259,7 +268,7 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
     ? unreadableReplanRequested.current && session.planRequested
     : (isOneOf(turn?.status, 'succeeded') && (session.planRequested || hasUnplannedKickoff(draft))) || (session.prepareRequested && !session.reusePlan && needsPlanRefresh(draft, session.lastPlannedIntent))
       || (session.planRequested && creation.planRejected)
-  const unobservedFailure = [generation, turn].some((operation) => isOneOf(operation?.status, 'failed') && !observedFailures.current.has(operation!.id))
+  const unobservedFailure = [generation, conversationTurn].some((operation) => isOneOf(operation?.status, 'failed') && !observedFailures.current.has(operation!.id))
   const creationEffects = useDraftCreationEffects(creation, {
     projectId, groupId, draft, draftRef, tab: session, currentTab: () => store.state, patch, receive, perform, fail,
     clearFailure: () => setFailure(undefined), busy, lock, failure, running, unsupported: Boolean(result.unsupported),
@@ -272,12 +281,12 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
   useEffect(() => {
     // A phase or job state this console does not know starts nothing on its own (stage.ts `unsupported`).
     if (running || busy || lock.current || session.pending.length || failure || draft.createdApplicationStackId || result.unsupported) return
-    if ([generation, turn, execution].some((operation) => isOneOf(operation?.status, 'failed') && !observedFailures.current.has(operation!.id))) return
+    if ([generation, conversationTurn, execution].some((operation) => isOneOf(operation?.status, 'failed') && !observedFailures.current.has(operation!.id))) return
     if (planFirst) void perform('plan', generate)
   }, [draft, session.prepareRequested, session.planRequested, session.pending.length, running, busy, failure, creation.defaultPending])
 
   useEffect(() => {
-    for (const [context, operation] of [['turn', turn], ['plan', generation]] as const) {
+    for (const [context, operation] of [['turn', conversationTurn], ['plan', generation]] as const) {
       if (draft.creationPlanUnreadable) continue
       if (!operation || !isOneOf(operation.status, 'failed') || observedFailures.current.has(operation.id)) continue
       observedFailures.current.add(operation.id)
@@ -285,9 +294,21 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
       // An unset repository destination stops every plan alike: trying again waits for the user (after an administrator set it).
       if (context === 'plan' && session.planRetries === 0 && kind !== 'quota' && kind !== 'policy' && kind !== 'destination') {
         patch((current) => ({ ...current, planRetries: 1, planRequested: true, messages: [...current.messages, { role: 'notice', tone: 'info', title: text.session.retryPlan, at: new Date().toISOString() }] }))
-      } else fail(new Error(operation.error ?? text.session.operationFailed), context, operation.finishedAt)
+      } else fail(new Error(operation.error ?? text.session.operationFailed), context, operation.finishedAt, undefined, context === 'turn' ? operation.id : undefined)
     }
-  }, [turn, generation])
+  }, [conversationTurn, generation])
+
+  // A later conversation turn (another tab's resend, say) supersedes an observed turn failure (APT-1365): its notice
+  // leaves the tab's messages and its failure clears, so neither holds back a pending reply the screen no longer explains.
+  useEffect(() => {
+    const current = store.state
+    const messages = withoutStaleTurnFailures(current.messages, draft.conversationTurns, current.pending.length > 0)
+    if (messages !== current.messages) patch({ messages })
+    if (failedTurnId.current && supersededFailures(draft.conversationTurns).has(failedTurnId.current)) {
+      failedTurnId.current = undefined
+      setFailure(undefined)
+    }
+  }, [draft.conversationTurns, session.messages, session.pending.length])
 
   // Draft preferences are authoritative across tabs. During implementation only the
   // preferences/title are writable; specification alignment waits for its lock.
@@ -344,7 +365,8 @@ export function useBuildSession(observed: BuildDraft, me: Me, groupId: string, o
     else if (context === 'publish' || context === 'implement' || context === 'prepare') creationEffects.retry(context)
     else if (context === 'recheck') creationEffects.recheck()
     else if (context === 'plan') patch({ planRequested: true })
-    else if (context === 'turn' && !store.state.pending.length && isOneOf(turn?.status, 'failed')) send(turn!.userMessage)
+    // The turn the conversation shows last (`conversationTurn`), never an Excel → app turn after it.
+    else if (context === 'turn' && !store.state.pending.length && isOneOf(conversationTurn?.status, 'failed')) send(conversationTurn!.userMessage)
   }
   return {
     session, spec, app, implementation, failure, busy, result, proposal, domain, planBlocksStart,

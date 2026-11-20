@@ -987,6 +987,31 @@ describe('a plan Platform\'s validation rejects is an answer about the plan (APT
     expect(proposalButtons()).toEqual([buildCopy.primary.prepare])
   })
 
+  test('at the generation limit, a recreated-workspace notice sorted after the limit notice (device clock behind the server) brings back no new plan (APT-1264)', async () => {
+    const { draftId, key } = await rejected(fieldErrorAnswer)
+    refusals.push({ method: 'POST', path: generations(draftId), status: 412, body: { error: { code: 'failed_precondition', message: 'application draft has reached 20 plan generation attempts' } } })
+    await click(action(buildCopy.failure.plan.incomplete.title, makeAgain))
+    await settle(10)
+    expect(notices(buildCopy.failure.limit.title, '#build-conversation')).toHaveLength(1)
+    expect(proposalButtons()).toEqual([])
+    // Platform marks the plan's generation as the switch from a retired workspace. Its start (server time) reads later
+    // than the limit notice's (this device's time), so the display-only notice is the conversation's last message.
+    const ahead = new Date(Date.now() + 60 * 60_000).toISOString()
+    rewrites.push({
+      method: 'GET', path: new RegExp(`${draftPath(draftId)}$`), once: false,
+      body: (wire) => rewriteDraftWire(wire, draftId, (draft) => ({ ...draft, creationPlanGenerations: (draft.creationPlanGenerations as Json[]).map((generation) => ({ ...generation, startedAt: ahead, replacedDevWorkspaceId: 'ws-retired' })) })),
+    })
+    await tick(key)
+    await settle(10)
+    expect(notices(buildCopy.workspaceRecreated, '#build-conversation')).toHaveLength(1)
+    expect(conversation().lastIndexOf(buildCopy.workspaceRecreated)).toBeGreaterThan(conversation().lastIndexOf(buildCopy.failure.limit.title))
+    // The limit is still what the page decides on: 「計画を作り直す」 is not offered again, and nothing is generated.
+    expect(labels(buildCopy.failure.limit.title)).toEqual([])
+    expect(labels(buildCopy.workspaceRecreated)).toEqual([])
+    expect(proposalButtons()).toEqual([])
+    expect(count('POST', generations(draftId))).toBe(1)
+  })
+
   // A failed request is not an answer about the plan: preparing asks no AI, so a 500 and a gateway 503 alike are the
   // platform failure with its reference, and the same approval may be tried again.
   test.each([500, 503])('a failed validation request (%i) is the platform failure with its reference, never a plan rejection', async (status) => {

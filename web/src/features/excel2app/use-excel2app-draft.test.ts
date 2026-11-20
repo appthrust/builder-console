@@ -2,13 +2,15 @@ import { describe, expect, test } from 'bun:test'
 import type { ApplicationDraft, ApplicationDraftConversationTurn } from '@appthrust/api-schema/platform-api'
 import { completeUiDesign, excelAnalysisOf, uiDesignOf, type CompleteUiDesign } from '../../model/contracts/excel'
 import { draftOf, readEachFirst, readFirst, turnOf } from '../../api/testing/build-domain'
+import { buildCopy } from '../../model/build/copy'
+import { recreatingRecords } from '../../model/build/messages'
 import { serializeSpec } from '../../model/build/spec'
 import { textJa } from './copy'
 import { fromDraftWorkbook, planApp, toDraftWorkbook } from './model'
 import { designFromReadings } from './design'
 import { SAMPLE_SETS } from './samples'
 import { defaultUiDesign } from './ui-design'
-import { analysisTitle as domainAnalysisTitle, classifyStoreError, currentTurns as domainCurrentTurns, designMessages as domainDesignMessages, designStack as domainDesignStack, fileStem, handOffPatch, isApplicationCreated, latestSaver, resumeStep as domainResumeStep, specParts, undoMessage, UI_DESIGN_INIT } from './use-excel2app-draft'
+import { analysisTitle as domainAnalysisTitle, classifyStoreError, currentTurns as domainCurrentTurns, designMessages as domainDesignMessages, designStack as domainDesignStack, fileStem, handOffPatch, isApplicationCreated, latestSaver, resumeStep as domainResumeStep, specParts, undoMessage, UI_DESIGN_INIT, type UiPreviewChatMessage } from './use-excel2app-draft'
 
 const currentTurns = readFirst(draftOf, domainCurrentTurns)
 const resumeStep = readFirst(draftOf, domainResumeStep)
@@ -152,6 +154,28 @@ describe('screen design turns', () => {
       { role: 'assistant', text: 'AI が止まりました', failed: true },
       { role: 'user', text: '密度をコンパクトに', pending: true },
     ])
+  })
+  test('a turn that replaced a retired workspace says so once, after its instruction and before its reply; reopening gives the same chat (APT-1264)', () => {
+    const replacingInit = { ...init, replacedDevWorkspaceId: 'ws-old' }
+    const replacingChange = { ...change, replacedDevWorkspaceId: 'ws-1' }
+    // A later turn naming the same retired workspace again adds nothing.
+    const again = { ...turn('t-again', '色を青に', 4, { assistantMessage: '## 要約\n色を青にしました。' }), replacedDevWorkspaceId: 'ws-old' }
+    const open = () => {
+      const turns = domainCurrentTurns(draftOf({ ...draft, conversationTurns: [replacingInit, replacingChange, again] }))
+      return domainDesignMessages(turns, recreatingRecords(turns))
+    }
+    const notice: UiPreviewChatMessage = { role: 'notice', text: buildCopy.workspaceRecreated }
+    expect(open()).toEqual([
+      notice,
+      { role: 'assistant', text: '6 画面を用意しました。' },
+      { role: 'user', text: '一覧をカード表示に' },
+      notice,
+      { role: 'assistant', text: '一覧をカード表示にしました。' },
+      { role: 'user', text: '色を青に' },
+      { role: 'assistant', text: '色を青にしました。' },
+    ])
+    expect(open()).toEqual(open())
+    expect(designMessages([init, change]).some((message) => message.role === 'notice')).toBe(false)
   })
   test('the undo request carries the previous design as JSON within one turn message', () => {
     const message = undoMessage(design)

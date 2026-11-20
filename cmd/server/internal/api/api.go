@@ -37,6 +37,7 @@ type API struct {
 	stackURLs        map[string]cachedStackURLs
 	builds           *buildsession.Service
 	installationID   string
+	authorityStacks  consoleStackReader
 }
 
 type request struct {
@@ -52,6 +53,8 @@ type request struct {
 	bearer              string
 	platformUnavailable bool
 	claims              identity.Identity
+	authorityApps       map[authorityRoute][]domain.App
+	authorityStackCache map[string]buildsession.ConsoleStack
 }
 
 type endpoint func(*request) (any, int, error)
@@ -68,6 +71,7 @@ func New(database *store.Store, auth *identity.Authenticator, upstream *platform
 	a.mux.Handle("GET /launcher/entries", launcher.NewEntriesHandler(appEntrySource{api: a}, a.identity.Authenticate))
 	a.mux.HandleFunc("GET /api/console/openapi.json", a.openAPI)
 	a.route("GET /api/console/me", false, true, a.me)
+	a.route("GET /api/console/inbox", false, true, a.inbox)
 	a.route("GET /api/console/resolve", false, true, a.resolve)
 	a.mux.Handle("/api/console/directory/", a.directoryProxy())
 	a.route("POST /api/console/admin/directory-migrate", true, true, a.migrateDirectory)
@@ -83,6 +87,7 @@ func New(database *store.Store, auth *identity.Authenticator, upstream *platform
 	a.route("DELETE /api/console/apps/{id}", true, true, a.deleteApp)
 	a.route("GET /api/console/apps/{id}/comments", false, true, a.comments)
 	a.route("POST /api/console/apps/{id}/comments", true, true, a.createComment)
+	a.route("POST /api/console/apps/{id}/comments/seen", true, true, a.markCommentsSeen)
 	a.route("DELETE /api/console/apps/{id}/comments/{cid}", true, true, a.deleteComment)
 	a.route("GET /api/console/apps/{id}/screenshots/{sid}", false, true, a.screenshot)
 	a.route("POST /api/console/apps/{id}/screenshots", true, true, a.uploadScreenshot)
@@ -107,7 +112,7 @@ func Unavailable() http.Handler {
 		err := httpx.Fail(503, "console_store_unavailable", "The console database is not available")
 		if strings.HasPrefix(r.URL.Path, "/api/console/v1/build-sessions") {
 			w.Header().Set("Cache-Control", "no-store")
-			writeBuildError(w, err)
+			writeBuildError(w, r, err)
 			return
 		}
 		httpx.WriteError(w, err, "console")
@@ -118,7 +123,7 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	if a.links == nil && strings.HasPrefix(r.URL.Path, "/api/console/") && r.URL.Path != "/api/console/openapi.json" {
 		if strings.HasPrefix(r.URL.Path, "/api/console/v1/build-sessions") {
-			writeBuildError(w, directoryError(link.ErrUnavailable))
+			writeBuildError(w, r, directoryError(link.ErrUnavailable))
 			return
 		}
 		httpx.WriteError(w, directoryError(link.ErrUnavailable), "console")
@@ -155,7 +160,7 @@ func (a *API) routeHandlerMode(mutation, needsRoles, transactional, fresh bool, 
 				if errors.Is(err, identity.ErrUnavailable) {
 					status = http.StatusServiceUnavailable
 				}
-				writeBuildError(w, httpx.Fail(status, "unauthorized", "Authentication is required"))
+				writeBuildError(w, r, httpx.Fail(status, "unauthorized", "Authentication is required"))
 				return
 			}
 			if errors.Is(err, identity.ErrUnavailable) {
@@ -192,11 +197,11 @@ func (a *API) routeHandlerMode(mutation, needsRoles, transactional, fresh bool, 
 		if err != nil {
 			var rejection *domain.BuildRejection
 			if errors.As(err, &rejection) {
-				writeBuildError(w, err)
+				writeBuildError(w, r, err)
 				return
 			}
 			if !transactional {
-				writeBuildError(w, err)
+				writeBuildError(w, r, err)
 				return
 			}
 			httpx.WriteError(w, directoryError(err), "console")

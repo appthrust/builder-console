@@ -6,7 +6,7 @@ import { act, useLayoutEffect, useSyncExternalStore } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import * as api from '../../api/build'
 import { draftOf, turnOf, generationOf } from '../../api/testing/build-domain'
-import { appOf } from '../../api/testing/catalog-domain'
+import { appOf, appWireDefaults } from '../../api/testing/catalog-domain'
 import type { BuildDraft } from '../../model/contracts/build'
 import { buildKeys } from '../../api/queries/build'
 import { consoleKeys } from '../../api/queries/console'
@@ -29,7 +29,7 @@ import { useBuildSession } from './use-build-session'
 const me: Me = {
   projectId: 'project-session-test', person: { id: 'person-1', subject: 'owner-1', pending: false, email: 'owner@example.test', displayName: 'Owner', avatarVersion: null },
   effectiveGroupIds: ['sales'], managedGroupIds: [], isConsoleAdmin: false, canCreateApps: true,
-  teamSlug: 'team', directoryPublicURL: '', migration: { pending: false, people: 0, groups: 0, memberships: 0 },
+  teamSlug: 'team', directoryPublicURL: '', migration: { pending: false, people: 0, groups: 0, memberships: 0 }, view: 'user',
 }
 const at = '2026-10-26T00:00:00Z'
 const turn = (id: string, userMessage: string, minute: number): ApplicationDraftConversationTurn => ({
@@ -171,6 +171,58 @@ describe('kickoff to plan handoff', () => {
     expect(build.session.planRequested).toBe(false)
     await render()
     expect(generation).toHaveBeenCalledTimes(1)
+  })
+
+  test('an intent PATCH rejection keeps the reply queued with a Platform reference and never starts an AI turn', async () => {
+    const message = "'intent' must be 4000 characters or fewer"
+    update.mockRejectedValueOnce(new ORPCError('BAD_REQUEST', {
+      status: 400, data: { body: { error: { code: 'invalid_argument', message } } },
+    }))
+    await mount({ ...draft, conversationTurns: [turn('opening', buildCopy.questions.firstTurn, 0)] })
+    await act(async () => { build.send('一覧を作る') })
+    expect(build.failure).toMatchObject({ kind: 'platform', title: buildCopy.failure.platform.title, reference: { draftId: draft.id } })
+    expect(build.session.pending.map((item) => item.text)).toEqual(['一覧を作る'])
+    expect(createTurn).not.toHaveBeenCalled()
+  })
+
+  test.each([3954, 4000, 4050])('a fresh tab can send a kickoff and plan from a %i-byte draft with 14 replies', async (storedBytes) => {
+    const generation = mockGeneration()
+    const utf8 = new TextEncoder()
+    const replies = Array.from({ length: 14 }, (_, i) => `${i + 1}: ${'仕入'.repeat(40)}`)
+    // Legacy wire format, independent of the formatter under test. The 3954-byte case is 1542 characters.
+    const heading = '\n\n### 追記\n\n'
+    const opening = '在庫管理'
+    replies[0] += '数'.repeat(54)
+    replies[0] += 'x'.repeat(storedBytes - utf8.encode([opening, ...replies].join(heading)).length)
+    const stored = [opening, ...replies].join(heading)
+    expect(utf8.encode(stored)).toHaveLength(storedBytes)
+    if (storedBytes === 3954) expect(stored).toHaveLength(1542)
+    const turns = replies.map((reply, i) => ({ ...turn(`t-${i}`, reply, 0), startedAt: new Date(Date.parse(at) + i * 1000).toISOString() }))
+    update.mockImplementation(async (_project, _id, { intent }) => {
+      if (!intent || utf8.encode(intent).length > 4000) throw new ORPCError('BAD_REQUEST', {
+        status: 400, data: { body: { error: { code: 'invalid_argument', message: "'intent' must be 4000 characters or fewer" } } },
+      })
+      return { ...client.getQueryData<BuildDraft>(queryKey)!, intent }
+    })
+    client.setQueryData(queryKey, draftOf({ ...draft, intent: stored, conversationTurns: turns }))
+    await render()
+
+    const message = 'この内容で提案して'
+    await act(async () => { build.send(message) })
+    expect(createTurn).toHaveBeenCalledTimes(1)
+    expect(createTurn).toHaveBeenCalledWith(me.projectId, draft.id, { message })
+    const patches = update.mock.calls.map(([, , payload]) => payload.intent)
+    expect(patches).toHaveLength(2)
+    for (const intent of patches) {
+      expect(utf8.encode(intent).length).toBeLessThanOrEqual(4000)
+      expect(intent).toContain(opening)
+      expect(intent).toContain(message)
+    }
+    expect(patches[0]!.endsWith(message)).toBe(true)
+    expect(patches[1]!.endsWith('\n\n公開: する')).toBe(true)
+    expect(build.session.lastPlannedIntent).toBe(patches[1])
+    expect(generation).toHaveBeenCalledTimes(1)
+    expect(client.getQueryData<BuildDraft>(queryKey)?.conversationTurns.map((item) => item.userMessage)).toEqual([...replies, message])
   })
 
   test.each(['saved', 'missing', 'invalid'] as const)('reload with %s session recovers succeeded kickoff from the draft', async (storage) => {
@@ -448,7 +500,7 @@ test('a saved implementation can retry before the console app binding loads', as
 })
 
 test('fresh tabs and legacy sessions show the original opening rather than composed metadata', async () => {
-  const composed = composeBuildIntent(draft.intent, ['検索する'], true)
+  const composed = await composeBuildIntent(draft.intent, ['検索する'], true)
   await mount({ ...draft, intent: composed }, { ...initial, baseIntent: composed })
   expect(build.messages[0]).toMatchObject({ role: 'user', text: draft.intent })
 })
@@ -541,7 +593,7 @@ const publishedDraft: ApplicationDraft = {
 const publishedApp = {
   id: 'app-console', slug: 'ledger', displayName: draft.title, description: '', icon: '', tags: [], guide: '', capabilities: [], screenshots: [],
   group: { id: 'sales', path: 'sales', name: 'Sales' }, owners: [me.person], stackId: 'stack-1', appName: 'app-platform',
-  share: { scope: 'group', groupIds: ['sales'], extraPersonIds: [] }, createdBy: me.person, createdAt: at, updatedAt: at,
+  share: { scope: 'group', groupIds: ['sales'], extraPersonIds: [] }, createdBy: me.person, createdAt: at, updatedAt: at, ...appWireDefaults,
 }
 
 async function mountPublished(current = publishedDraft, session = initial) {

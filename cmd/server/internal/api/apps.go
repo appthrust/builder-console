@@ -36,16 +36,25 @@ func (a *API) apps(s *request) (any, int, error) {
 		}
 		entries := make([]domain.DirectoryEntry, len(apps))
 		for i, app := range apps {
-			entries[i] = domain.EntryOf(app, s.actor.Visible(app))
+			app = s.appForCaller(app)
+			entries[i] = domain.EntryOf(app, app.Permissions.Use)
 		}
 		return appList[domain.DirectoryEntry]{Items: entries}, 200, nil
 	}
 	apps, err := s.tx.Apps(s.actor, scope, groupPath, query.Get("q"))
+	for i := range apps {
+		apps[i] = s.appForCaller(apps[i])
+	}
 	return appList[domain.App]{Items: apps}, 200, err
 }
 
 type appList[T any] struct {
 	Items []T `json:"items"`
+}
+
+func (s *request) appForCaller(app domain.App) domain.App {
+	app.Permissions = domain.Capabilities(s.actor, app)
+	return app
 }
 
 func (a *API) app(s *request) (any, int, error) {
@@ -56,7 +65,7 @@ func (a *API) app(s *request) (any, int, error) {
 	if !s.actor.Visible(app) {
 		return nil, 0, httpx.NotFound()
 	}
-	return app, 200, nil
+	return s.appForCaller(app), 200, nil
 }
 
 func (s *request) boundApp() (domain.App, error) {
@@ -75,7 +84,8 @@ func (a *API) directoryEntry(s *request) (any, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	return domain.EntryOf(app, s.actor.Visible(app)), 200, nil
+	app = s.appForCaller(app)
+	return domain.EntryOf(app, app.Permissions.Use), 200, nil
 }
 
 func (a *API) appByPath(s *request) (any, int, error) {
@@ -90,7 +100,7 @@ func (a *API) appByPath(s *request) (any, int, error) {
 	if !s.actor.Visible(app) {
 		return nil, 0, httpx.NotFound()
 	}
-	return app, 200, nil
+	return s.appForCaller(app), 200, nil
 }
 
 type appInput struct {
@@ -103,6 +113,7 @@ type appInput struct {
 	GroupID      *string             `json:"groupId"`
 	Slug         *string             `json:"slug"`
 	Share        *domain.SharePolicy `json:"share"`
+	Contribution *domain.ContributionPolicy `json:"contribution"`
 	OwnerIDs     *[]string           `json:"ownerIds"`
 }
 
@@ -151,6 +162,14 @@ func (s *request) applyApp(input appInput, app *domain.App, creating bool) error
 	}
 	if input.Share != nil {
 		app.Share = *input.Share
+	}
+	if input.Contribution != nil {
+		switch input.Contribution.Scope {
+		case "off", "group", "company":
+			app.Contribution = *input.Contribution
+		default:
+			return httpx.Invalid("contribution.scope must be off, group, or company")
+		}
 	}
 	if app.Tags == nil {
 		app.Tags = []string{}
@@ -211,7 +230,7 @@ func (a *API) createApp(s *request) (any, int, error) {
 	if input.OwnerIDs != nil {
 		return nil, 0, httpx.Invalid("ownerIds can only be changed after creation")
 	}
-	app := domain.App{ID: uuid.NewString(), CreatedBy: s.person, Share: domain.SharePolicy{Scope: "group"}}
+	app := domain.App{ID: uuid.NewString(), CreatedBy: s.person, Share: domain.SharePolicy{Scope: "group"}, Contribution: domain.ContributionPolicy{Scope: "group"}}
 	if input.GroupID != nil {
 		app.Share.GroupIDs = []string{*input.GroupID}
 	}
@@ -246,7 +265,7 @@ func (a *API) createApp(s *request) (any, int, error) {
 		return nil, 0, err
 	}
 	created, err := s.tx.App(app.ID)
-	return created, 201, err
+	return s.appForCaller(created), 201, err
 }
 
 func (s *request) editableApp() (domain.App, error) {
@@ -313,7 +332,7 @@ func (a *API) patchApp(s *request) (any, int, error) {
 		return nil, 0, err
 	}
 	updated, err = s.tx.App(app.ID)
-	return updated, 200, err
+	return s.appForCaller(updated), 200, err
 }
 
 func (a *API) bindApp(s *request) (any, int, error) {
@@ -341,7 +360,7 @@ func (a *API) bindApp(s *request) (any, int, error) {
 		return nil, 0, err
 	}
 	app, err = s.tx.App(app.ID)
-	return app, 200, err
+	return s.appForCaller(app), 200, err
 }
 
 func (a *API) deleteApp(s *request) (any, int, error) {

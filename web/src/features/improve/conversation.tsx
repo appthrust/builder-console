@@ -3,14 +3,14 @@ import { Check, Circle, ExternalLink, Loader2 } from 'lucide-react'
 import { forwardRef, useLayoutEffect, useRef, type ReactNode } from 'react'
 import { buildCopy } from '../../model/build/copy'
 import { buildFailureReference, classifyBuildFailure, classifyRunFailure, failureOffers, failureText } from '../../model/build/failure'
-import { assistantMessage } from '../../model/build/messages'
+import { assistantMessage, recreatingRecords } from '../../model/build/messages'
 import { activityLines, formatElapsed } from '../../model/build/progress'
 import type { BuildFailure } from '../../model/build/types'
 import { isProductLanguage } from '../../model/build/wording'
 import { improveTimeline, runVersion, sortedTurns, type ImproveState, type ImproveTask } from '../../model/improve'
 import { ActivityLog, Button, CopyButton, LinkButton, Notice } from '../../ui'
 import { Composer } from '../build/composer'
-import { AiTurn, AssistantMessage, UserMessage } from '../build/conversation-pane'
+import { AiTurn, AssistantMessage, UserMessage, WorkspaceRecreatedNotice } from '../build/conversation-pane'
 import { text as buildText } from '../build/copy'
 import { text } from './copy'
 import { useClock } from './use-clock'
@@ -73,6 +73,8 @@ export const ImproveConversation = forwardRef<HTMLTextAreaElement, ImproveConver
   const turns = sortedTurns(draft)
   const lastTurn = turns.at(-1)
   const lastAnswer = [...turns].reverse().find((turn) => isOneOf(turn.status, 'succeeded'))
+  // The turn that switched from a retired workspace tells it once, between its request and its answer (APT-1264).
+  const recreating = recreatingRecords(turns)
   const latestRun = draft.implementationRuns.at(-1)
   const answerable = state.phase === 'asking' || state.phase === 'proposed'
   const chips = answerable && !locked ? (lastAnswer?.suggestedReplies ?? []).map((reply) => ({ label: reply, value: reply })) : []
@@ -81,6 +83,7 @@ export const ImproveConversation = forwardRef<HTMLTextAreaElement, ImproveConver
     const answer = isOneOf(turn.status, 'succeeded') ? assistantMessage(turn, draft.id) : undefined
     return <div key={turn.id} className="flex flex-col gap-5">
       <UserMessage text={turn.userMessage} />
+      {recreating.has(turn) ? <WorkspaceRecreatedNotice /> : null}
       {answer?.role === 'assistant' ? <AssistantMessage message={answer} active={answerable && turn === lastAnswer} /> : null}
       {turn.id === state.proposalTurnId ? <ProposalCard tasks={state.proposal} starting={starting} disabled={locked} review={review} failure={startFailure} onStart={onStart} onConfirm={onConfirmStart} /> : null}
       {isOneOf(turn.status, 'failed') ? <FailureNotice failure={classifyBuildFailure(turn.error ?? '', undefined, 'turn', { draftId: draft.id, at: turn.finishedAt ?? turn.startedAt })} onRetry={turn === lastTurn && !locked ? () => submit(turn.userMessage) : undefined} /> : null}

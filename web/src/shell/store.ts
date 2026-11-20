@@ -1,11 +1,13 @@
 // Shell UI state (TanStack Store): the mobile nav drawer, whether the desktop
-// nav and the build session's 「いま作っているもの」 pane are folded away, and the
-// 所属 the caller chose in the top bar. Choices survive reloads (localStorage).
+// nav and the build session's 「いま作っているもの」 pane are folded away, the
+// 所属 the caller chose in the top bar, and whether the home's one-time launch
+// tip was dismissed. Choices survive reloads (localStorage).
 import { Store } from '@tanstack/react-store'
 
 const MEMBERSHIP_KEY = 'builder-console:membership'
 const NAV_COLLAPSED_KEY = 'builder-console:nav-collapsed'
 const ARTIFACT_COLLAPSED_KEY = 'builder-console:build-artifact-collapsed'
+const LAUNCH_HINT_KEY = 'builder-console:launch-hint-dismissed'
 
 export type ShellState = {
   navOpen: boolean
@@ -15,6 +17,8 @@ export type ShellState = {
   artifactCollapsed: boolean
   /** Group id chosen in the 所属 switcher; null = first direct membership. */
   membershipGroupId: string | null
+  /** The home's 「使いたいアプリを選ぶと、新しいタブで開きます。」 was closed in this browser. */
+  launchHintDismissed: boolean
 }
 
 // Static page imports also run outside a browser, before storage is installed.
@@ -32,6 +36,7 @@ export const shellStore = new Store<ShellState>({
   navCollapsed: readStoredValue(NAV_COLLAPSED_KEY) === '1',
   artifactCollapsed: readStoredValue(ARTIFACT_COLLAPSED_KEY) === '1',
   membershipGroupId: readStoredValue(MEMBERSHIP_KEY),
+  launchHintDismissed: readStoredValue(LAUNCH_HINT_KEY) === '1',
 })
 
 export function setNavOpen(navOpen: boolean) {
@@ -51,4 +56,9 @@ export function setArtifactCollapsed(artifactCollapsed: boolean) {
 export function setMembershipGroup(groupId: string) {
   localStorage.setItem(MEMBERSHIP_KEY, groupId)
   shellStore.setState((state) => ({ ...state, membershipGroupId: groupId }))
+}
+
+export function dismissLaunchHint() {
+  writeFlag(LAUNCH_HINT_KEY, true)
+  shellStore.setState((state) => (state.launchHintDismissed ? state : { ...state, launchHintDismissed: true }))
 }

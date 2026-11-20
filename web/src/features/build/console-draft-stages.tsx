@@ -30,7 +30,6 @@ import type { Group, Me } from '../../model/contracts/console'
 import { setArtifactCollapsed } from '../../shell/store'
 import { ActionError, Button, Disclosure, Notice } from '../../ui'
 import { DatabaseChanges } from '../app/database-changes'
-import { canEditApp } from '../app/permissions'
 import { ArtifactPane } from './artifact-pane'
 import { ConsolePublishSettings, publishReady } from './console-publish-settings'
 import { readConsoleCreation, saveConsoleCreation } from './console-session-state'
@@ -243,7 +242,7 @@ export function useConsoleDraftStages({ view, actions, draft: observed, me, grou
       artifact: <ArtifactPane draft={draft} spec={spec} proposal={proposal} stage={result.stage} progress={failure?.context === 'prepare' ? undefined : result.progress} implementation={implementation.state} changeByReply={false}
         url={url} shareText={shareText} previewDatabaseReset={implementation.previewDatabaseReset} onOpenPreview={onOpenArtifact} onRetry={implementation.retry} onSkipTask={implementation.skipTask} onConfirm={implementation.confirm}
         onCollapse={() => setArtifactCollapsed(true)}
-        databaseChanges={<DatabaseChanges projectId={projectId} databaseId={!appReadOnly && app && canEditApp(app, me) ? appView?.stack?.databaseComponentId : undefined} />}
+        databaseChanges={<DatabaseChanges projectId={projectId} databaseId={!appReadOnly && app?.permissions.data ? appView?.stack?.databaseComponentId : undefined} />}
         shareStep={sharing && app && !appReadOnly ? <>{behind}<PublishStep app={app} publishId={appView?.platform?.publish?.id} publishPreferences={draft.publishPreferences} onPublished={() => { void effects.markPublished(); setSharing(false) }} onCancel={() => setSharing(false)} /></> : undefined} />,
     } : {}),
     notices: [

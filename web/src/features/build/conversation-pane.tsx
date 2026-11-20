@@ -148,6 +148,14 @@ export function UserMessage({ text }: { text: string }) {
   </article>
 }
 
+/**
+ * The workspace was recreated (APT-1264), where a conversation keeps its own records (improve, Excel → app):
+ * information only, the same as the build conversation's derived notice (messages.ts#workspaceRecreatedNotice).
+ */
+export function WorkspaceRecreatedNotice({ className }: { className?: string }) {
+  return <Notice tone="info" title={buildCopy.workspaceRecreated} className={className} />
+}
+
 /** A failure's support reference, with its copy button. */
 export function FailureReference({ reference }: { reference: NonNullable<BuildFailure['reference']> }) {
   const value = buildFailureReference(reference)
@@ -187,6 +195,6 @@ export function AssistantMessage({ message, active, action }: { message: Assista
       <ul className="mt-1 space-y-1">{changed.map((item, index) => <li key={`${index}-${item}`} className="flex gap-1.5 text-stone-700"><Check aria-hidden className="mt-0.5 size-3.5 shrink-0 text-accent" /><span className="min-w-0 break-words">{item}</span></li>)}</ul>
     </div> : null}
     {question ? <div className={cn((summary || changed.length > 0) && 'mt-2.5')}><QuestionLine active={active}>{question}</QuestionLine></div> : null}
-    {message.link ? <HrefLink href={paths.excel2app(message.link.draftId)} className="mt-1 inline-flex min-h-8 items-center gap-1 text-sm font-medium text-accent-strong underline underline-offset-2 hover:text-stone-900">{uiText.conversation.excelReview}<ArrowRight aria-hidden className="size-3.5" /></HrefLink> : null}
+    {message.link ? <HrefLink href={paths.excel2app(message.link.draftId)} className="mt-1 inline-flex min-h-8 items-center gap-1 text-sm font-medium text-accent-strong underline underline-offset-2 hover:text-stone-900">{message.link.resume ? uiText.conversation.excelResume : uiText.conversation.excelReview}<ArrowRight aria-hidden className="size-3.5" /></HrefLink> : null}
   </AiTurn>
 }

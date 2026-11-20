@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { appOf } from '../../api/testing/catalog-domain'
+import { appOf, appWireDefaults } from '../../api/testing/catalog-domain'
 import { initialValues } from './form'
 import { clearCreateSession, readCreateSession, restoreCreateDraft, saveCreateSession, type CreateSession } from './persistence'
 
@@ -9,7 +9,7 @@ const wireDraft = {
   id: 'app-draft', slug: 'stock', displayName: '在庫管理', description: '備品の在庫', icon: '', tags: ['備品'], guide: '', capabilities: [], screenshots: [],
   group: { id: 'sales', path: 'sales', name: '営業部' }, owners: [person], createdBy: person,
   stackId: null, appName: 'stock', share: { scope: 'group', groupIds: ['sales'], extraPersonIds: [] },
-  createdAt: '2026-10-07T00:00:00Z', updatedAt: '2026-10-07T00:00:00Z',
+  createdAt: '2026-10-07T00:00:00Z', updatedAt: '2026-10-07T00:00:00Z', ...appWireDefaults,
 }
 const draft = appOf(wireDraft)
 function storage() {

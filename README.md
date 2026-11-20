@@ -139,10 +139,12 @@ fixtures after reviewing a writer change:
 UPDATE_CONSOLE_WIRE_FIXTURES=1 go test ./cmd/server/internal/api -run '^TestConsoleWriterContract$'
 ```
 
-The existing served `openapi.json` remains byte-identical to the public
-`appserver-go v0.5.0` Console contract. Compatibility tests check its listApps /
-getApp fields and fixtures against the internal schema. Replacing that public
-document needs separate review. This intentionally deviates from the design's
+The served `openapi.json` is the committed public Console contract. It is
+maintained separately and may add Console features while preserving every SDK
+field from `appserver-go`. A server test checks served bytes against the committed
+file; compatibility tests check its listApps / getApp fields and fixtures against
+both the SDK and internal schema.
+This intentionally deviates from the design's
 single generated public document and separate `B/api-schema` package: the schema
 currently has one TypeScript consumer, so it shares the SPA's Zod installation.
 A package boundary is deferred until a second consumer needs it, avoiding
@@ -153,6 +155,11 @@ and cleans up. The existing web CI job runs it. The boundary checker also reject
 feature/model imports of the canonical schema directory, including type-only
 imports, barrels, and assertions. PostgreSQL handler contract tests use the same
 opt-in DSN and isolated-schema cleanup as the other server integration tests.
+
+The role-based views contract adds `me.view`, app `permissions` and `contribution`,
+the maintainer inbox, and comment-seen writes. Regenerate the internal artifact
+with the command above after canonical schema changes. Comment-seen writes use
+fetch keepalive so opening another page does not cancel the read receipt.
 
 ### NEW-APP conversation contracts (APT-753 / S4)
 

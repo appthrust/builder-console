@@ -30,6 +30,8 @@
 //   created and bound to that seeded stack (412 without a source repository, e.g. `nippo`). While
 //   read, their turns answer after ~2 s (first a clarifying question, then a 3-task proposal whose
 //   first reply is 「この内容で直して」) and their runs move one step every ~1.5 s.
+//   Like the console gate, a caller without `permissions.propose` on the console app is refused with
+//   403 `contribution_not_accepted` (scope `off`) or `forbidden` before any Platform check.
 //   Completion submits a proposal; only Accept creates a live release and version.
 // Toggles:
 // - `POST /api/v1/__mock/role {role}` switches the caller's Team role (Viewer → create calls answer 403).
@@ -44,6 +46,8 @@
 // - `POST /api/v1/__mock/ai-quota {exhausted: boolean}` makes AI turns, plan generation
 //   and implementation tasks fail with the provider's credits message while exhausted.
 //   Clear it to resume manually; completed work is retained and reset clears the toggle.
+// - `POST /api/v1/__mock/turn-failure {error, kind?}` makes the next new-app turn of `kind` (default `conversation`;
+//   `excel-analysis` or `ui-design`) that settles fail with `error` (once); `{}` clears it. Reset clears it too.
 // - `POST /api/v1/__mock/stack-conflict {appName?, reason?, message?}` makes the next stack create (of
 //   `appName`, or any) answer one 409 with `details.reason` (`delivery_pending` = retryable).
 // - `POST /api/v1/__mock/github-repository {name}` marks `acme/<name>` as existing on GitHub (`uriage` is seeded).
@@ -141,7 +145,7 @@ import { buildCopy, textJa as buildTextJa } from '../model/build/copy'
 import { isFirstTurn, isKickoffReply, isPrepareTurn } from '../model/build/questions'
 import { dataModeFailure, findTable, resetDatabaseData, selectRows, state as dataState, type DataMode } from './mock-database-data'
 import { dataWriteRoutes } from './mock-database-rows'
-import { mockOwnerSubjects, mockSubject } from './mock-console'
+import { mockOwnerSubjects, mockProposalRefusal, mockSubject } from './mock-console'
 
 export const MOCK_PROJECT_ID = 'commerce'
 const TEAM_SLUG = 'commerce-team'
@@ -703,6 +707,15 @@ function failQuotaTurn(draft: ApplicationDraft, turn: ApplicationDraftConversati
   return true
 }
 
+/** `__mock/turn-failure`: the next turn of the configured kind that settles fails with the configured error, once. */
+function failNextTurn(draft: ApplicationDraft, turn: ApplicationDraftConversationTurn, now: string): boolean {
+  if (state.turnFailure === undefined || (turn.kind ?? 'conversation') !== state.turnFailure.kind) return false
+  Object.assign(turn, { status: 'failed', error: state.turnFailure.error, finishedAt: now })
+  state.turnFailure = undefined
+  draft.updatedAt = now
+  return true
+}
+
 /** Plan generations run three steps; a running creation execution finishes in one. */
 function advanceDraft(draft: ApplicationDraft): boolean {
   let moved = false
@@ -721,7 +734,7 @@ function advanceDraft(draft: ApplicationDraft): boolean {
   }
   for (const turn of draft.conversationTurns ?? []) {
     if (turn.status !== 'pending' && turn.status !== 'running') continue
-    if (failQuotaTurn(draft, turn, now)) { moved = true; continue }
+    if (failQuotaTurn(draft, turn, now) || failNextTurn(draft, turn, now)) { moved = true; continue }
     if (turn.kind === 'excel-analysis' || turn.kind === 'ui-design') {
       answerExcelTurn(draft, turn, now)
       moved = true
@@ -1198,6 +1211,8 @@ function seedPlatform() {
     codexUnavailableReason: undefined as ApplicationDraftCreationToolRegistryResponse['codexUnavailableReason'],
     codexPolicy: undefined as string | undefined,
     aiQuotaExhausted: false,
+    /** `__mock/turn-failure`: the error the next settling turn of `kind` fails with (once). */
+    turnFailure: undefined as { error: string; kind: NonNullable<ApplicationDraftConversationTurn['kind']> } | undefined,
     rejectNextValidation: false,
     creationPublishConflict: false,
     accessForbidden: false,
@@ -1864,6 +1879,12 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
     if (typeof body.exhausted === 'boolean') state.aiQuotaExhausted = body.exhausted
     return json({ exhausted: state.aiQuotaExhausted })
   }],
+  ['POST', /^\/api\/v1\/__mock\/turn-failure$/, async (_, request) => {
+    const body = await request.json() as { error?: unknown; kind?: unknown }
+    const kind = body.kind === 'excel-analysis' || body.kind === 'ui-design' ? body.kind : 'conversation'
+    state.turnFailure = typeof body.error === 'string' ? { error: body.error, kind } : undefined
+    return json(state.turnFailure ?? {})
+  }],
   [
     'POST',
     /^\/api\/v1\/__mock\/plan-generation$/,
@@ -2088,6 +2109,9 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
       if (body.kind !== undefined && body.kind !== 'creation' && !improvement) return error(400, 'invalid_argument', "'kind' must be creation or improvement")
       if (improvement && !body.applicationStackId) return error(400, 'invalid_argument', 'applicationStackId is required for an improvement draft')
       if (!improvement && body.applicationStackId) return error(400, 'invalid_argument', 'applicationStackId is only accepted for an improvement draft')
+      // The console gate (console_authority) answers before the Platform sees an improvement draft.
+      const refusal = improvement ? mockProposalRefusal(body.applicationStackId!) : undefined
+      if (refusal) return error(403, refusal.code, refusal.message)
       // Like platform-api: the target stack must resolve to an application with a source repository.
       const stack = improvement ? state.stacks.get(body.applicationStackId!) : undefined
       if (improvement && !stack) return error(412, 'failed_precondition', 'the application stack has no application')

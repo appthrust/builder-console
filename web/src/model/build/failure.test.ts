@@ -31,6 +31,16 @@ test('unrelated invalid requests retain their preparation failure classification
   expect(classifyBuildFailure('groupId is invalid', 400, 'prepare').kind).toBe('platform')
 })
 
+test.each(['turn', 'plan'] as const)('an invalid intent PATCH before a %s is a Platform request rejection', (context) => {
+  const message = "'intent' must be 4000 characters or fewer"
+  const reference = { draftId: 'draft-1', at: '2026-11-17T00:00:00Z' }
+  expect(classifyBuildFailure(message, 400, context, reference, 'invalid_argument')).toEqual({
+    kind: 'platform', ...buildCopy.failure.platform, raw: message, reference,
+  })
+  expect(classifyBuildFailure("'message' must be shorter", 400, context, reference, 'invalid_argument').kind).toBe('failed')
+  expect(classifyBuildFailure(message, undefined, context).kind).toBe('failed')
+})
+
 test('department failure is localized without a platform support reference', () => {
   setLanguage('en')
   const failure = classifyBuildFailure('groupId must be one of your directory groups', 400, 'prepare', { draftId: 'draft-1', at: '2026-10-18T11:22:00Z' }, 'invalid_request')

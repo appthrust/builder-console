@@ -17,21 +17,19 @@ import { UnconfirmedNotice } from '../build/unconfirmed-notice'
 import { proposalOptions } from '../../api/queries/proposal'
 import { proposalTerminal } from '../proposals/model'
 
+/** The words of the entry: 「AIで直す」 by default; a proposer's entry passes its own (ux-design §8). */
+export type ImproveWording = { action: string; title: string; description: (app: string) => string }
+
+type ImproveTarget = { app: Pick<BusinessApp, 'displayName'>; stackId: string; projectId: string }
+
 /**
- * 「AIで直す」 on a bound app: resumes the newest open improvement session for
- * the app's stack, or asks what to change and starts one. The first message is
- * also the session's first turn, so the AI answers as soon as the page opens.
+ * Starting a session: the first message is also its first turn, so the AI answers as soon as the page opens.
+ * After an unreadable answer the session may exist: `confirmLatest` reads the list back and opens the one that
+ * was made; nothing is resent from here.
  */
-export function ImproveButton({ app, stackId, projectId, initialMessage, actionLabel }: {
-  app: Pick<BusinessApp, 'displayName'>; stackId: string; projectId: string
-  initialMessage?: string; actionLabel?: string
-}) {
+function useImproveStart({ app, stackId, projectId }: ImproveTarget) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const drafts = useQuery(draftsOptions(projectId))
-  const [open, setOpen] = useState(false)
-  const [intent, setIntent] = useState('')
-  const inputId = useId()
   const start = useMutation({
     mutationFn: async (message: string) => {
       const draft = await createDraft(projectId, { kind: 'improvement', applicationStackId: stackId, intent: message, title: app.displayName })
@@ -44,22 +42,36 @@ export function ImproveButton({ app, stackId, projectId, initialMessage, actionL
       await navigate({ href: paths.improve(draft.id) })
     },
     // The session may have been created even though its answer could not be read: read the list back so
-    // the button resumes it instead of starting another one. Nothing is resent.
+    // the entry resumes it instead of starting another one. Nothing is resent.
     onError: (error) => { if (isResponseContractError(error)) void queryClient.invalidateQueries({ queryKey: buildKeys.drafts(projectId) }) },
   })
-  const status = platformErrorEnvelope(start.error)?.status
-  const unconfirmed = isResponseContractError(start.error)
-  /** After an unreadable start: read the sessions back and open the one that was made; never start another from here. */
-  const confirmLatest = async () => {
+  const confirmLatest = async (onFound?: () => void) => {
     const latest = await queryClient.fetchQuery({ ...draftsOptions(projectId), staleTime: 0 }).catch(() => undefined)
     start.reset()
     const made = improvementFor(latest?.data, stackId)
-    if (made) { setOpen(false); await navigate({ href: paths.improve(made.id) }) }
+    if (made) { onFound?.(); await navigate({ href: paths.improve(made.id) }) }
   }
-  const trimmed = intent.trim()
-  const ready = trimmed.length > 0 && trimmed.length <= MAX_LENGTH && !start.isPending
+  return { start, unconfirmed: isResponseContractError(start.error), confirmLatest }
+}
+
+/**
+ * 「AIで直す」 on a bound app: resumes the newest open improvement session for the app's stack, or asks what to
+ * change and starts one. `initialMessage` starts at once with that text (the build failure's one-click repair);
+ * `draft` instead opens the question with that text filled in, to be edited before 「相談をはじめる」.
+ */
+export function ImproveButton({ app, stackId, projectId, initialMessage, draft, actionLabel, wording, tone = 'primary', refusal }: ImproveTarget & {
+  initialMessage?: string; draft?: string; actionLabel?: string
+  wording?: ImproveWording; tone?: 'primary' | 'secondary'
+  /** A refusal this caller words itself (checked before the generic 412/409 wording); undefined falls through. */
+  refusal?: (error: unknown) => string | undefined
+}) {
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const drafts = useQuery(draftsOptions(projectId))
+  const [open, setOpen] = useState(false)
+  const oneClick = useImproveStart({ app, stackId, projectId })
   const onClick = async () => {
-    if (initialMessage) { start.mutate(initialMessage); return }
+    if (initialMessage) { oneClick.start.mutate(initialMessage); return }
     const existing = improvementFor(drafts.data?.data, stackId)
     if (existing?.proposalId) {
       try {
@@ -72,25 +84,65 @@ export function ImproveButton({ app, stackId, projectId, initialMessage, actionL
     if (existing) void navigate({ href: paths.improve(existing.id) })
     else setOpen(true)
   }
+  return <>
+    <Button tone={tone} icon={<Sparkles />} onClick={onClick} loading={initialMessage ? oneClick.start.isPending : drafts.isPending} disabled={oneClick.unconfirmed} data-testid={initialMessage ? 'repair-build-with-ai' : 'improve-with-ai'}>{actionLabel ?? wording?.action ?? text.entry.action}</Button>
+    {initialMessage && oneClick.start.error ? oneClick.unconfirmed ? <UnconfirmedNotice onConfirm={() => void oneClick.confirmLatest()} /> : <ActionError error={oneClick.start.error} /> : null}
+    <ImproveDialog app={app} stackId={stackId} projectId={projectId} open={open} onOpenChange={setOpen} draft={draft} wording={wording} refusal={refusal} />
+  </>
+}
+
+/**
+ * The question 「どこを直しますか？」 and its start. `draft` fills the answer in each time the dialog opens; the
+ * person edits it before starting. Opened by a caller of its own (「これを AIで直す」 on a comment), the dialog
+ * itself checks for an open session on the stack: that one is resumed instead, since a stack takes one at a time.
+ */
+export function ImproveDialog({ app, stackId, projectId, open, onOpenChange, draft, wording, refusal }: ImproveTarget & {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  draft?: string
+  wording?: ImproveWording
+  refusal?: (error: unknown) => string | undefined
+}) {
+  const navigate = useNavigate()
+  const { start, unconfirmed, confirmLatest } = useImproveStart({ app, stackId, projectId })
+  const [intent, setIntent] = useState(draft ?? '')
+  // Each opening starts from the caller's draft; without one, what was typed stays across a cancel (as before).
+  const [shownOpen, setShownOpen] = useState(open)
+  if (shownOpen !== open) {
+    setShownOpen(open)
+    if (open && draft !== undefined) setIntent(draft)
+  }
+  const drafts = useQuery({ ...draftsOptions(projectId), enabled: open && draft !== undefined })
+  const existing = draft !== undefined ? improvementFor(drafts.data?.data, stackId) : undefined
+  const existingProposal = useQuery({ ...proposalOptions(projectId, existing?.proposalId), enabled: open && Boolean(existing?.proposalId) })
+  const resumable = existing && !(existingProposal.data && proposalTerminal(existingProposal.data.phase)) ? existing : undefined
+  const inputId = useId()
+  const status = platformErrorEnvelope(start.error)?.status
+  const trimmed = intent.trim()
+  const ready = trimmed.length > 0 && trimmed.length <= MAX_LENGTH && !start.isPending && !resumable
+  const refused = start.error ? refusal?.(start.error) : undefined
   const change = (next: boolean) => {
     if (start.isPending) return
     if (!next) start.reset()
-    setOpen(next)
+    onOpenChange(next)
   }
-  return <>
-    <Button tone="primary" icon={<Sparkles />} onClick={onClick} loading={initialMessage ? start.isPending : drafts.isPending} disabled={unconfirmed} data-testid={initialMessage ? 'repair-build-with-ai' : 'improve-with-ai'}>{actionLabel ?? text.entry.action}</Button>
-    {initialMessage && start.error ? unconfirmed ? <UnconfirmedNotice onConfirm={() => void confirmLatest()} /> : <ActionError error={start.error} /> : null}
+  return (
     <Dialog
       open={open}
       onOpenChange={change}
-      title={text.entry.title}
-      description={text.entry.description(app.displayName)}
+      title={wording?.title ?? text.entry.title}
+      description={(wording?.description ?? text.entry.description)(app.displayName)}
       footer={<>
         <Button onClick={() => change(false)} disabled={start.isPending}>{copy.common.cancel}</Button>
         <Button tone="primary" type="submit" form={`${inputId}-form`} disabled={!ready || unconfirmed} loading={start.isPending}>{text.entry.submit}</Button>
       </>}
     >
       <form id={`${inputId}-form`} className="space-y-4" onSubmit={(event) => { event.preventDefault(); if (ready && !unconfirmed) start.mutate(trimmed) }}>
+        {resumable ? (
+          <Notice tone="warning" actions={<Button size="sm" onClick={() => { onOpenChange(false); void navigate({ href: paths.improve(resumable.id) }) }}>{text.drafts.resume}</Button>}>
+            {text.entry.openSession}
+          </Notice>
+        ) : null}
         <Field id={inputId} label={text.entry.label}>
           <TextArea
             id={inputId}
@@ -104,10 +156,11 @@ export function ImproveButton({ app, stackId, projectId, initialMessage, actionL
             }}
           />
         </Field>
-        {start.error ? status === 412 ? <Notice tone="error">{platformErrorEnvelope(start.error)?.code === 'reviewers_unavailable' ? text.entry.noReviewers : text.entry.noSource}</Notice>
-          : status === 409 ? <Notice tone="error">{text.entry.busy}</Notice>
-            : unconfirmed ? <UnconfirmedNotice onConfirm={() => void confirmLatest()} /> : <ActionError error={start.error} /> : null}
+        {start.error ? refused ? <Notice tone="error">{refused}</Notice>
+          : status === 412 ? <Notice tone="error">{platformErrorEnvelope(start.error)?.code === 'reviewers_unavailable' ? text.entry.noReviewers : text.entry.noSource}</Notice>
+            : status === 409 ? <Notice tone="error">{text.entry.busy}</Notice>
+              : unconfirmed ? <UnconfirmedNotice onConfirm={() => void confirmLatest(() => onOpenChange(false))} /> : <ActionError error={start.error} /> : null}
       </form>
     </Dialog>
-  </>
+  )
 }

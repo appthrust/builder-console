@@ -409,7 +409,7 @@ func TestBuildErrorsHaveBoundedRetryAfter(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
-			writeBuildError(w, tc.err)
+			writeBuildError(w, httptest.NewRequest("GET", "/", nil), tc.err)
 			require.Equal(t, tc.want, w.Header().Get("Retry-After"))
 			if tc.name == "permanent failure" {
 				var body BuildError

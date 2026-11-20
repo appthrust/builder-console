@@ -30,33 +30,88 @@ export function isPrepareTurn(text: string): boolean {
   return text === textJa.questions.prepareTurn || text === textEn.questions.prepareTurn
 }
 
-/** Only successful AI turns count; notices and the derived proposal are not replies. */
+/** Only successful AI turns count; notices, the derived proposal and a stopped Excel → app step are not replies. */
 export function replyOptions(messages: BuildMessage[]): string[] {
   const conversation = messages.filter((message) => message.role !== 'notice' && !(message.role === 'assistant' && message.proposal))
   const latest = conversation.at(-1)
-  if (latest?.role !== 'assistant') return []
+  // A stopped Excel → app step (messages.ts, `link.resume`) is continued in Excel から作る: nothing is answered here.
+  if (latest?.role !== 'assistant' || latest.link?.resume) return []
   const previous = conversation.at(-2)
   const options = latest.options ?? []
   if (previous?.role === 'user' && isKickoffReply(previous.text)) return options
   // 用意する asks two fixed things; 「この内容で提案して」 would restart planning.
   if (conversation.some((message) => message.role === 'user' && isPrepareTurn(message.text))) return options
-  const successful = conversation.filter((message) => message.role === 'assistant' && message.turnId).length
+  const successful = conversation.filter((message) => message.role === 'assistant' && message.turnId && !message.link?.resume).length
   return successful >= 3 && !options.some(isKickoffReply) ? [...options, buildCopy.questions.kickoffReply] : options
 }
 
-/** Conversation replies enter the plan in order; publication keeps its explicit marker. */
-export function composeBuildIntent(base: string, replies: string[], publish?: boolean): string {
-  const parts = [base.trim()]
-  for (const reply of replies) if (reply.trim()) parts.push(`${buildCopy.intent.reply}\n\n${reply.trim()}`)
-  const marker = publish === true ? `\n\n${buildCopy.intent.publish}` : ''
-  let content = parts.filter(Boolean).join('\n\n').slice(0, 8000 - marker.length)
-  // Do not leave half a UTF-16 surrogate at the storage boundary.
-  if (/[\uD800-\uDBFF]$/.test(content)) content = content.slice(0, -1)
-  return content.trimEnd() + marker
+// Older Platform versions enforce the draft field's 4000-character limit in UTF-8 bytes.
+const INTENT_BYTES = 4000
+const utf8 = new TextEncoder()
+const bytes = (value: string) => utf8.encode(value).length
+const openingStamp = /…\n<!-- opening:([0-9a-f]{32}) -->$/
+
+function prefix(value: string, budget: number): string {
+  // encodeInto stops before the first code point that would not fit.
+  const { read } = utf8.encodeInto(value, new Uint8Array(budget))
+  return value.slice(0, read).trimEnd()
 }
 
-/** Recover the user-authored opening from the console's persisted intent envelope. */
-export function decomposeBuildIntent(intent: string): string {
+async function openingId(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', utf8.encode(value))
+  return Array.from(new Uint8Array(digest, 0, 16), (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+/** An abbreviated opening still identifies the original words, not every request with the same prefix. */
+export async function boundBuildOpening(opening: string, budget = INTENT_BYTES): Promise<string> {
+  if (bytes(opening) <= budget) return opening
+  const existing = openingStamp.exec(opening)
+  const stamp = `…\n<!-- opening:${existing?.[1] ?? await openingId(opening)} -->`
+  return prefix(existing ? opening.slice(0, existing.index) : opening, budget - bytes(stamp)) + stamp
+}
+
+/** A compact plan input, not the transcript: conversationTurns retains every complete message. */
+export async function composeBuildIntent(intent: string, replies: readonly string[], publish?: boolean): Promise<string> {
+  let opening = openingEnvelope(intent)
+  const messages = replies.map((reply) => reply.trim()).filter(Boolean)
+  // Persisted headings (including legacy English drafts) and the automatic first turn travel with
+  // the conversation. Switching the display language must not change a plan's input.
+  const metadata = intent.trim().slice(opening.length).trimStart()
+  const copy = metadata.startsWith(`${textEn.intent.reply}\n\n`) || metadata === textEn.intent.publish
+    || (!metadata && messages[0] === textEn.questions.firstTurn) ? textEn.intent : textJa.intent
+  const heading = `\n\n${copy.reply}\n\n`
+  const footer = publish ? `\n\n${copy.publish}` : ''
+  const budget = INTENT_BYTES - bytes(footer)
+  if (!messages.length) return (await boundBuildOpening(opening, budget)) + footer
+  const headingBytes = bytes(heading)
+  const sizes = messages.map((reply) => headingBytes + bytes(reply))
+  const latest = messages.length - 1
+  const omitted = (count: number) => count ? heading + copy.omitted(count) : ''
+  const repliesBytes = sizes.reduce((total, size) => total + size, 0)
+  let first = 0
+  if (bytes(opening) + repliesBytes > budget) {
+    // Reserve the newest follow-up and its omission notice before spending bytes on older replies.
+    // If even opening + newest cannot fit, a short one stays whole; two large ones share the space.
+    const olderBytes = repliesBytes - sizes[latest]!
+    const available = budget - Math.min(olderBytes, bytes(omitted(latest))) - headingBytes
+    const newest = messages[latest]!
+    const newestBytes = sizes[latest]! - headingBytes
+    opening = await boundBuildOpening(opening, Math.max(available - newestBytes, Math.floor(available / 2)))
+    const openingBytes = bytes(opening)
+    const room = available - openingBytes
+    if (newestBytes > room) messages[latest] = prefix(newest, room - bytes('…')) + '…'
+    let remaining = budget - openingBytes - headingBytes - bytes(messages[latest]!)
+    // A few short replies may cost less than saying they were omitted.
+    first = olderBytes <= remaining ? 0 : latest
+    while (first > 0 && sizes[first - 1]! + bytes(omitted(first - 1)) <= remaining) {
+      remaining -= sizes[--first]!
+    }
+  }
+  return opening + omitted(first) + heading + messages.slice(first).join(heading) + footer
+}
+
+/** Keep a clipped opening's identity when recomposing a stored draft. */
+function openingEnvelope(intent: string): string {
   let base = intent.trim()
   for (const catalog of [textJa, textEn]) {
     const reply = base.indexOf(`\n\n${catalog.intent.reply}\n\n`)
@@ -64,7 +119,20 @@ export function decomposeBuildIntent(intent: string): string {
     const marker = `\n\n${catalog.intent.publish}`
     if (base.endsWith(marker)) base = base.slice(0, -marker.length)
   }
-  return base
+  return base.trimEnd()
+}
+
+/** Recover only user-facing text (no replay metadata) for the opening chat message. */
+export function decomposeBuildIntent(intent: string): string {
+  return openingEnvelope(intent).replace(openingStamp, '…')
+}
+
+export async function sameBuildOpening(intent: string, wanted: string): Promise<boolean> {
+  const opening = openingEnvelope(intent)
+  const stamp = openingStamp.exec(opening)
+  if (!stamp) return opening === wanted
+  const excerpt = opening.slice(0, stamp.index)
+  return wanted.startsWith(excerpt) && await openingId(wanted) === stamp[1]
 }
 
 /** Integrated entities already exclude headers, reports and merged duplicates. */
