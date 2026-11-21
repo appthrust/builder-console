@@ -1,6 +1,14 @@
 import type { RestartDevWorkspaceRequest } from '@appthrust/api-schema/platform-api'
 import type { PreviewWorkspace } from '../model/contracts/build'
-import { getDevWorkspaceContract, restartDevWorkspaceContract } from './contracts/platform/workspace'
+import type { MyWorkspace, MyWorkspaceList, WorkspaceDeletion } from '../model/contracts/workspace'
+import {
+  deleteDevWorkspaceContract,
+  extendDevWorkspaceLeaseContract,
+  getDevWorkspaceContract,
+  listDevWorkspacesContract,
+  restartDevWorkspaceContract,
+  stopDevWorkspaceContract,
+} from './contracts/platform/workspace'
 import { apiGateway } from './gateway'
 
 /** Runtime URLs stay on the console proxy. The edge, not JavaScript, adds Authorization. */
@@ -19,6 +27,26 @@ export function getWorkspace(projectId: string, workspaceId: string, signal: Abo
 /** Restarts the workspace runtime; `resetPreviewDatabase` also discards its preview database. */
 export function restartWorkspace(projectId: string, workspaceId: string, body: RestartDevWorkspaceRequest): Promise<PreviewWorkspace> {
   return apiGateway.platform(restartDevWorkspaceContract, { projectId, id: workspaceId, ...body })
+}
+
+/** The caller's own workspaces (`owner=me`); other people's never appear. */
+export function listMyWorkspaces(projectId: string, signal: AbortSignal): Promise<MyWorkspaceList> {
+  return apiGateway.platform(listDevWorkspacesContract, { projectId, owner: 'me' }, { signal })
+}
+
+/** Renews the activity lease of the caller's running workspace. */
+export function extendWorkspaceLease(projectId: string, workspaceId: string): Promise<MyWorkspace> {
+  return apiGateway.platform(extendDevWorkspaceLeaseContract, { projectId, id: workspaceId })
+}
+
+/** Stops compute; the source data stays until the workspace is deleted. */
+export function stopWorkspace(projectId: string, workspaceId: string): Promise<MyWorkspace> {
+  return apiGateway.platform(stopDevWorkspaceContract, { projectId, id: workspaceId })
+}
+
+/** Deletes the workspace and its source data. `idempotencyKey`: one per workspace and user intent, reused by a retry. */
+export function deleteWorkspace(projectId: string, workspaceId: string, idempotencyKey: string): Promise<WorkspaceDeletion> {
+  return apiGateway.platform(deleteDevWorkspaceContract, { projectId, id: workspaceId }, { idempotencyKey })
 }
 
 /**

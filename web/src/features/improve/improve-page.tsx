@@ -21,6 +21,7 @@ import { ImproveSidePane } from './side-pane'
 import { useImproveSession } from './use-improve-session'
 import { text as proposalText } from '../proposals/copy'
 import { ProposalOutcome, ProposalStatus } from '../proposals/proposal-ui'
+import { sessionWorkspaceId, WorkspaceLeaseHint } from '../workspaces'
 
 const PILL: Record<ImprovePhase, ConsoleStatus> = { asking: 'unfinished', proposed: 'unfinished', running: 'deploying', failed: 'failed', done: 'live', unsupported: 'unfinished' }
 
@@ -72,7 +73,10 @@ function Session({ draft, stale }: { draft: BuildDraft; stale: ReactNode }) {
       </div>
       <div className="flex flex-[1_1_auto] flex-wrap items-center justify-between gap-x-3 gap-y-1.5 sm:gap-x-4 lg:flex-none">
         <Stepper compact step={state.phase === 'unsupported' ? -1 : improveStages.indexOf(state.stage)} labels={improveStages.map((stage) => text.stageLabels[stage])} />
-        {action ? <div className="ml-auto shrink-0">{action}</div> : null}
+        <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
+          <WorkspaceLeaseHint workspaceId={sessionWorkspaceId(draft)} />
+          {action}
+        </div>
       </div>
     </header>
     {/* Page-level notices share one inset place under the header, whatever raised them. */}

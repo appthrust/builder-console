@@ -148,6 +148,40 @@ entries are unaffected. Only the image entry shows the existing registry
 prerequisite. Successful reads are unchanged. Registry 401, 5xx, network and
 contract failures—and every failure of the other reads—still fail the query.
 
+## 自分の作業場所 (My workspaces)
+
+The header's laptop icon (badge: running count) opens a drawer with the
+caller's own DevWorkspaces, read from `GET dev-workspaces?owner=me`
+(`@appthrust/api-schema` ≥ 0.1.8). Admin work, Project policy and other
+people's workspaces stay in the Dashboard. `src/features/workspaces/` holds the
+drawer, the delete dialog, the lease hint and their model; the reader keeps only
+the fields the drawer shows, with open `state`, `scope` and source volume state
+(a server without `state` reads the state its phase stands for).
+
+- Groups: 動いている (Ready, Degraded, Committing, Starting), 休止中 (Sleeping)
+  and 停止・使用終了・失敗 (everything else, including states this console does
+  not know). Each row: name, state, target and one line — the lease countdown,
+  when the source data is released, 「停止した作業場所のデータは、削除するまで残ります」
+  or, for Retired, when Platform deletes it.
+- Actions come only from `allowedActions`: 開く/再開する (`open`, to the AI
+  session page that uses the workspace, else its draft's build page; no page, no
+  action), 延長する (`extendLease`, immediate), 停止する (`stop`, confirmed),
+  再開する on a Stopped or Failed row (`start` or `restart`: there is no start
+  route, so both call restart) and 削除する (`delete`, not offered on running
+  rows). Retired workspaces cannot run again (both are false) and are deleted by Platform.
+- The header line comes from `summary`; 片づける (shown while
+  `idleRetained > 0`) checks the idle Sleeping and Stopped rows by the server's
+  rule over `idleAfter`. Delete repeats the Dashboard warning (unpushed changes are
+  lost; rows without a pushed branch or pull request are named) and sends one
+  `DELETE` per row with its own `Idempotency-Key`, reused by 失敗したものをもう一度.
+- The build and improve session headers show the session workspace's lease
+  (「あと 12 分で休止」, warning color from five minutes before); the owner
+  extends it with one click.
+
+The list is re-read every 30 seconds. The mock seeds six workspaces for 山田
+(Running 2, Sleeping 2, Stopped 1, Retired 1); see the top of
+`src/dev/mock-platform.ts`.
+
 
 ## Excel から作る
 

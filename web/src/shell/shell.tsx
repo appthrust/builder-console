@@ -13,6 +13,7 @@ import { Dialog as RDialog } from 'radix-ui'
 import { useEffect, type ReactNode } from 'react'
 import { useMe } from '../api/queries/console'
 import { useConsoleView } from '../features/inbox'
+import { MyWorkspacesEntry } from '../features/workspaces'
 import { copy } from '../copy'
 import { paths } from '../routes/paths'
 import {
@@ -178,7 +179,8 @@ function TopBar() {
             aria-label={`${copy.topbar.switchContext}（${contextLabel}: ${contextName}）`}
             className="flex min-h-10 min-w-0 items-center gap-1 rounded-md px-1.5 py-1.5 text-sm hover:bg-stone-100 data-[state=open]:bg-stone-100 md:min-h-0 sm:px-2"
           >
-            <span className="shrink-0 text-xs text-stone-500">{contextLabel}:</span>
+            {/* Phones keep the group name; the trigger's accessible name still says 所属 / 表示中. */}
+            <span className="shrink-0 text-xs text-stone-500 max-sm:hidden">{contextLabel}:</span>
             <span className="truncate font-medium text-stone-900">{contextName}</span>
             <ChevronDown aria-hidden className="size-4 shrink-0 text-stone-400" />
           </DropdownMenuTrigger>
@@ -209,6 +211,7 @@ function TopBar() {
             </p>
           ) : null}
           {onCreate ? null : <CreateButton groupPath={currentGroup?.path} />}
+          <MyWorkspacesEntry />
           <AppSwitcher language={language} />
           <UserMenu />
         </div>
@@ -223,7 +226,7 @@ function CreateButton({ groupPath }: { groupPath: string | undefined }) {
   const view = useConsoleView()
   if (!me.canCreateApps) return null
   return (
-    <LinkButton href={paths.new({ group: groupPath })} tone={view === 'maker' ? 'primary' : 'secondary'}>
+    <LinkButton href={paths.new({ group: groupPath })} tone={view === 'maker' ? 'primary' : 'secondary'} className="max-sm:px-2.5 max-sm:text-xs">
       {copy.nav.create}
     </LinkButton>
   )

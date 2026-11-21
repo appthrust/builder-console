@@ -82,6 +82,10 @@
 //   `__mock/advance`). The `__mock/data` mode `forbidden` makes the list answer 403 too.
 // - `POST /api/v1/__mock/access-forbidden {forbidden}` denies access PUTs without changing policy.
 //   Each accepted access write reports pending for one GET poll, then ready.
+// - 「自分の作業場所」 (./mock-workspaces.ts): the signed-in person has six seeded workspaces (Running 2, Sleeping 2,
+//   Stopped 1, Retired 1). `GET dev-workspaces?owner=me` answers them with state, allowedActions, lease, summary and
+//   idleAfter; extend-lease renews a running one for an hour, stop stops it, DELETE removes it, and restart answers
+//   409 for a Retired one.
 // - `POST /api/v1/__mock/reset` returns {reset: true} and reseeds the entire mock,
 //   reapplying MOCK_ROLE (default Editor), MOCK_REGISTRY and MOCK_CODEX.
 import { createHash, randomBytes } from 'node:crypto'
@@ -146,6 +150,7 @@ import { isFirstTurn, isKickoffReply, isPrepareTurn } from '../model/build/quest
 import { dataModeFailure, findTable, resetDatabaseData, selectRows, state as dataState, type DataMode } from './mock-database-data'
 import { dataWriteRoutes } from './mock-database-rows'
 import { mockOwnerSubjects, mockProposalRefusal, mockSubject } from './mock-console'
+import { MOCK_IDLE_AFTER, MOCK_LEASE_TTL_SECONDS, presentWorkspace, seedMyWorkspaces, summarizeWorkspaces } from './mock-workspaces'
 
 export const MOCK_PROJECT_ID = 'commerce'
 const TEAM_SLUG = 'commerce-team'
@@ -948,7 +953,7 @@ function advanceDraft(draft: ApplicationDraft): boolean {
   return moved
 }
 
-/** The application-scoped workspace a draft's runs (and improvement turns) reuse, created Ready on first use. */
+/** The application-scoped workspace a draft's runs (and improvement turns) reuse, created Ready on first use with an hour's lease. */
 function ensureApplicationWorkspace(draft: ApplicationDraft, now: string): string {
   const id = draft.implementationWorkspaceId ?? nextId('ws')
   draft.implementationWorkspaceId = id
@@ -958,6 +963,7 @@ function ensureApplicationWorkspace(draft: ApplicationDraft, now: string): strin
       id, projectId: draft.projectId, scope: 'application', applicationId: draft.createdApplicationId,
       componentId: `${draft.createdApplicationId}-web`, displayName: draft.title, ownerUserId: draft.ownerUserId,
       phase: 'Ready', branchName: draft.kind === 'improvement' ? `appthrust/proposal/${draft.id}` : 'main', baseRef: 'main', createdAt: now, conditions: [],
+      lastActivityAt: now, expiresAt: new Date(Date.parse(now) + MOCK_LEASE_TTL_SECONDS * 1_000).toISOString(),
       codexUrl: `${base}/codex/`, previewUrl: `${base}/proxy/preview/`,
     })
   }
@@ -1226,7 +1232,7 @@ function seedPlatform() {
     proposals: new Map<string, SourceChangeProposal>(),
     draftReviewers: new Map<string, string[]>(),
     workbooks: new Map<string, Map<string, StoredWorkbook>>(),
-    workspaces: new Map<string, DevWorkspaceRead>(),
+    workspaces: new Map<string, DevWorkspaceRead>(seedMyWorkspaces(MOCK_PROJECT_ID).map((workspace) => [workspace.id, workspace])),
     documents: new Map<string, Map<string, string>>(),
     workspaceTodos: new Map<string, unknown[]>(),
     workspaceOperations: new Map<string, DevWorkspaceOperationRead>(),
@@ -1716,11 +1722,44 @@ const routes: Array<[method: string, pattern: RegExp, handler: Handler]> = [
     const workspace = state.workspaces.get(m[2]!)
     return workspace ? json(workspace) : error(404, 'not_found', 'workspace not found')
   }],
+  ['GET', new RegExp(`^${P}/dev-workspaces$`), (m, _, url) => {
+    const caller = mockSubject()
+    const rows = [...state.workspaces.values()]
+      .filter((workspace) => workspace.projectId === m[1] && (url.searchParams.get('owner') !== 'me' || workspace.ownerUserId === caller))
+      .map((workspace) => presentWorkspace(workspace, caller, state.role !== 'Viewer'))
+      .sort((a, b) => Date.parse(b.lastActivityAt ?? b.createdAt ?? '') - Date.parse(a.lastActivityAt ?? a.createdAt ?? ''))
+    return json({ ...list(rows), summary: summarizeWorkspaces(rows, Date.now()), idleAfter: MOCK_IDLE_AFTER })
+  }],
   ['POST', new RegExp(`^${P}/dev-workspaces/([^/]+)/restart$`), (m) => {
     const workspace = state.workspaces.get(m[2]!)
     if (!workspace) return error(404, 'not_found', 'workspace not found')
+    if (workspace.state === 'Retired') return error(409, 'conflict', 'a retired workspace cannot restart')
     workspace.phase = 'Starting'
     return json(mutation('DevWorkspace', workspace.id, workspace), 202)
+  }],
+  ['POST', new RegExp(`^${P}/dev-workspaces/([^/]+)/extend-lease$`), (m) => {
+    const workspace = state.workspaces.get(m[2]!)
+    if (!workspace) return error(404, 'not_found', 'workspace not found')
+    if (workspace.ownerUserId !== mockSubject()) return error(403, 'dev_workspace_owner_required', 'only the workspace owner can extend its lease')
+    if (!presentWorkspace(workspace, mockSubject(), state.role !== 'Viewer').allowedActions?.extendLease) return error(409, 'conflict', 'workspace is not running')
+    const now = stamp()
+    const expiresAt = new Date(Date.parse(now) + MOCK_LEASE_TTL_SECONDS * 1_000).toISOString()
+    Object.assign(workspace, { lastActivityAt: now, expiresAt, lease: { ...workspace.lease, lastActivityAt: now, expiresAt, ttlSeconds: workspace.lease?.ttlSeconds ?? MOCK_LEASE_TTL_SECONDS, source: workspace.lease?.source ?? 'default' } })
+    return json(mutation('DevWorkspace', workspace.id, presentWorkspace(workspace, mockSubject(), true)), 202)
+  }],
+  ['POST', new RegExp(`^${P}/dev-workspaces/([^/]+)/stop$`), (m) => {
+    const workspace = state.workspaces.get(m[2]!)
+    if (!workspace) return error(404, 'not_found', 'workspace not found')
+    if (!presentWorkspace(workspace, mockSubject(), state.role !== 'Viewer').allowedActions?.stop) return error(403, 'forbidden', 'workspace cannot be stopped')
+    workspace.phase = 'Stopped'
+    return json(mutation('DevWorkspace', workspace.id, presentWorkspace(workspace, mockSubject(), true)), 202)
+  }],
+  ['DELETE', new RegExp(`^${P}/dev-workspaces/([^/]+)$`), (m) => {
+    const workspace = state.workspaces.get(m[2]!)
+    if (!workspace) return error(404, 'not_found', 'workspace not found')
+    if (!presentWorkspace(workspace, mockSubject(), state.role !== 'Viewer').allowedActions?.delete) return error(403, 'forbidden', 'only the owner can delete this workspace')
+    state.workspaces.delete(workspace.id)
+    return json({ pendingSync: false, operation: operation('DevWorkspace', workspace.id) }, 202)
   }],
   ['GET', new RegExp(`^${P}/dev-workspaces/([^/]+)/proxy/preview/$`), (m) => {
     const workspace = state.workspaces.get(m[2]!)
