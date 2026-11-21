@@ -43,6 +43,7 @@ import { BuildFailureNotice } from './build-failure-notice'
 import { useCreatedAppView } from './use-created-app-view'
 import { BuildOutcomeTurn } from './build-outcome'
 import { shareScopeLabel } from '../../model/access'
+import { sessionWorkspaceId } from '../workspaces'
 
 export function BuildPage({ draftId }: { draftId: string }) {
   const { me, groups, currentGroup } = useShell()
@@ -131,7 +132,7 @@ function Session({ draft, groupId, stale }: { draft: BuildDraft; groupId: string
     publish={{ label: buildCopy.primary.publish, enabled: primary.action === 'publish' && primary.enabled, onClick: onPrimary }}
     retry={retryable ? { pending: Boolean(build.implementation.state.retryPending), onClick: build.implementation.retry } : undefined} />
   return <div className="flex min-h-0 flex-1 flex-col" data-testid="build-session" data-stage={stage}>
-    <SessionHeader name={name} stage={stage} released={released} unsupported={build.result.unsupported} outcome={build.result.outcome} action={<StageAction stage={stage} primary={primary} progress={progress} onPrimary={onPrimary} />} />
+    <SessionHeader name={name} stage={stage} released={released} unsupported={build.result.unsupported} outcome={build.result.outcome} workspaceId={sessionWorkspaceId(draft)} action={<StageAction stage={stage} primary={primary} progress={progress} onPrimary={onPrimary} />} />
     {/* Page-level notices share one inset place under the header, whatever raised them. */}
     {stale || build.result.unsupported || draft.buildFailure || creationAccess.error ? <div className="mx-5 mt-3 space-y-3">
       {stale}

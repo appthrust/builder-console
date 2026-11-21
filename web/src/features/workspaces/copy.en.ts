@@ -1,0 +1,103 @@
+import type { workspacesJa } from './copy'
+
+const plural = (n: number, one: string, many: string) => (n === 1 ? `1 ${one}` : `${n} ${many}`)
+
+export const workspacesEn: typeof workspacesJa = {
+  title: 'My workspaces',
+  entry: (running: number) => (running > 0 ? `My workspaces (${running} running)` : 'My workspaces'),
+  description: 'Your own workspaces for building with AI.',
+  groups: {
+    running: 'Running',
+    sleeping: 'Sleeping',
+    other: 'Stopped · Retired · Failed',
+  },
+  groupCount: (n: number) => String(n),
+  state: {
+    Ready: 'Ready',
+    Starting: 'Starting',
+    Degraded: 'Degraded',
+    Committing: 'Saving',
+    Sleeping: 'Sleeping',
+    Stopped: 'Stopped',
+    Retired: 'Retired',
+    Failed: 'Failed',
+    Deleting: 'Deleting',
+    unknown: 'Unknown',
+  },
+  target: {
+    draft: 'New app',
+    application: (app: string) => `App ${app}`,
+    branch: (app: string, branch: string) => `App ${app} / ${branch}`,
+    unknown: 'Unknown target',
+  },
+  line: {
+    lease: (minutes: number) => `Sleeps in ${minutes} min`,
+    leaseExpired: 'Sleeping soon',
+    dataUntil: (date: string) => `Data until ${date}`,
+    dataKept: 'Data kept until deleted',
+    dataReleasing: 'Releasing data',
+    dataReleased: 'Data released',
+    stopped: 'Stopped workspaces keep source data until deleted',
+    retired: (date: string) => `Unusable, auto-deleted ${date}.`,
+    retiredUndated: 'Unusable, deleted automatically.',
+    unknown: 'This state cannot be shown yet',
+  },
+  summary: {
+    kept: (n: number) => `${plural(n, 'workspace keeps', 'workspaces keep')} source data`,
+    idle: (n: number, idleAfter: string) => `${n} idle ≥ ${idleAfter}`,
+    separator: ' · ',
+  },
+  duration: {
+    days: (n: number) => plural(n, 'day', 'days'),
+    hours: (n: number) => plural(n, 'hour', 'hours'),
+  },
+  cleanup: 'Clean up',
+  cleanupSelected: (n: number) => `Selected ${plural(n, 'idle workspace', 'idle workspaces')}. Review them, then delete.`,
+  select: (name: string) => `Select ${name}`,
+  selection: (n: number) => `${n} selected`,
+  clearSelection: 'Clear selection',
+  deleteSelected: (n: number) => `Delete ${n} selected`,
+  action: {
+    open: 'Open',
+    resume: 'Resume',
+    restart: 'Restart',
+    extend: 'Extend',
+    stop: 'Stop',
+    delete: 'Delete',
+  },
+  actionLabel: (name: string, action: string) => `${action} ${name}`,
+  extended: (name: string) => `Extended the lease of ${name}.`,
+  stopped: (name: string) => `Stopped ${name}.`,
+  restarted: (name: string) => `Restarting ${name}.`,
+  stop: {
+    title: (name: string) => `Stop ${name}?`,
+    body: 'Stopped workspaces keep source data until deleted.',
+    confirm: 'Stop',
+  },
+  remove: {
+    title: (n: number) => (n === 1 ? 'Delete workspace?' : `Delete ${n} workspaces?`),
+    warning: 'Unpushed changes in these workspaces are lost.',
+    body: 'The workspace and its source data are deleted. Pushed branches and pull requests stay in the repository.',
+    rows: 'Workspaces to delete',
+    unpublished: 'No published branch',
+    retired: 'Retired · already unusable',
+    unpublishedNote: (n: number) => (n === 1
+      ? '1 workspace has no published branch; its work exists only in the workspace.'
+      : `${n} workspaces have no published branch; their work exists only in the workspace.`),
+    confirm: (n: number) => (n === 1 ? 'Delete' : `Delete ${n} workspaces`),
+    deleting: 'Deleting',
+    deleted: 'Deletion started',
+    retryFailed: 'Retry failed',
+  },
+  empty: {
+    title: 'No workspaces yet',
+    body: 'Workspaces appear here once you build with AI.',
+  },
+  leaseHint: {
+    remaining: (minutes: number) => `Expires in ${minutes} min`,
+    expired: 'Sleeping soon',
+    extendLabel: (shown: string) => `${shown} (press to extend the lease)`,
+    extended: 'Lease extended',
+    failed: 'Could not extend the lease',
+  },
+}

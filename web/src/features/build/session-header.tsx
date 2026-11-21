@@ -8,6 +8,7 @@ import { buildStages, stageLabels } from './session'
 import { localized } from '../../shell/language'
 import { text, textJa } from './copy'
 import { textEn } from './copy.en'
+import { WorkspaceLeaseHint } from '../workspaces'
 
 /** `unsupported`: the draft is in a state this console does not know, so no step is marked as the current one. */
 export function StageRail({ stage, unsupported = false }: { stage: BuildStage; unsupported?: boolean }) {
@@ -46,8 +47,9 @@ function outcomeState(stage: BuildStage, outcome: BuildOutcome | undefined): { s
  * One row from lg: back · name · state · rail · stage action. When the width runs
  * out (390px) the rail and the action wrap to a second row, action right-aligned.
  * While the implementation runs, the state word is followed by its tasks done and the run's 経過.
+ * `workspaceId`: the session's workspace; while it runs, its lease countdown follows (devworkspace builder-console.md §4).
  */
-export function SessionHeader({ name, stage, action, released = false, unsupported = false, outcome }: { name: string; stage: BuildStage; action?: ReactNode; released?: boolean; unsupported?: boolean; outcome?: BuildOutcome }) {
+export function SessionHeader({ name, stage, action, released = false, unsupported = false, outcome, workspaceId }: { name: string; stage: BuildStage; action?: ReactNode; released?: boolean; unsupported?: boolean; outcome?: BuildOutcome; workspaceId?: string }) {
   const back = stage === 'publish' ? { href: paths.mine(), label: text.header.myApps } : { href: paths.drafts(), label: text.header.drafts }
   const state = outcomeState(stage, outcome)
   const running = stage === 'build' && outcome?.kind === 'implementing' ? outcome : undefined
@@ -64,7 +66,10 @@ export function SessionHeader({ name, stage, action, released = false, unsupport
     </div>
     <div className="flex flex-[1_1_auto] flex-wrap items-center justify-between gap-x-3 gap-y-1.5 sm:gap-x-4 lg:flex-none">
       <StageRail stage={state?.rail ?? stage} unsupported={unsupported} />
-      {action ? <div className="ml-auto shrink-0">{action}</div> : null}
+      {workspaceId || action ? <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
+        {workspaceId ? <WorkspaceLeaseHint workspaceId={workspaceId} /> : null}
+        {action}
+      </div> : null}
     </div>
   </header>
 }

@@ -32,6 +32,7 @@
 
   --animate-fade-in: fade-in 150ms ease-out;
   --animate-slide-in-left: slide-in-left 200ms ease-out;
+  --animate-slide-in-right: slide-in-right 200ms ease-out;
   --animate-pop-in: pop-in 150ms ease-out;
 
   @keyframes fade-in {
@@ -45,6 +46,14 @@
   @keyframes slide-in-left {
     from {
       transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(0);
+    }
+  }
+  @keyframes slide-in-right {
+    from {
+      transform: translateX(100%);
     }
     to {
       transform: translateX(0);

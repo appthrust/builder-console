@@ -28,6 +28,7 @@ import { text } from './copy'
 import { SessionHeader } from './session-header'
 import { UnconfirmedNotice } from './unconfirmed-notice'
 import { useConsoleBuildSession, type ConsoleBuildActions } from './use-console-build-session'
+import { sessionWorkspaceId } from '../workspaces'
 
 export function ConsoleBuildPage({ sessionId }: { sessionId: string }) {
   const build = useConsoleBuildSession(sessionId)
@@ -57,10 +58,10 @@ function ConsoleWithDraft({ view, actions, stale, draftId }: { view: ConsoleBuil
 function ConsoleDraftView({ view, actions, stale, draft, me, groups }: { view: ConsoleBuildView; actions: ConsoleBuildActions; stale: ReactNode; draft: BuildDraft; me: Me; groups: Group[] }) {
   const [openArtifact, setOpenArtifact] = useState(0)
   const stages = useConsoleDraftStages({ view, actions, draft, me, groups, onOpenArtifact: () => setOpenArtifact((count) => count + 1) })
-  return <ConsoleLayout view={view} actions={actions} stale={stale} stages={stages} openArtifact={openArtifact} />
+  return <ConsoleLayout view={view} actions={actions} stale={stale} stages={stages} openArtifact={openArtifact} workspaceId={sessionWorkspaceId(draft)} />
 }
 
-function ConsoleLayout({ view, actions, stale, stages, draftError, openArtifact = 0 }: { view: ConsoleBuildView; actions: ConsoleBuildActions; stale: ReactNode; stages?: ConsoleStages; draftError?: unknown; openArtifact?: number }) {
+function ConsoleLayout({ view, actions, stale, stages, draftError, openArtifact = 0, workspaceId }: { view: ConsoleBuildView; actions: ConsoleBuildActions; stale: ReactNode; stages?: ConsoleStages; draftError?: unknown; openArtifact?: number; workspaceId?: string }) {
   const { session } = view
   const name = parseSpec(session.specification.markdown).spec.name || text.session.newApp
   useDocumentTitle(text.page.title(name))
@@ -88,7 +89,7 @@ function ConsoleLayout({ view, actions, stale, stages, draftError, openArtifact 
       : undefined)
   const busy = Boolean(planWaiting) || stages?.stage === 'build'
   return <div className="flex min-h-0 flex-1 flex-col" data-testid="build-session" data-engine="console-v1" data-stage={stages?.stage ?? (lifecycle ? STAGE_BY_LIFECYCLE[lifecycle] : undefined)}>
-    <SessionHeader name={name} stage={stages?.stage ?? (lifecycle ? STAGE_BY_LIFECYCLE[lifecycle]! : 'ask')} released={stages?.released ?? false} unsupported={!lifecycle} outcome={stages?.outcome} action={action} />
+    <SessionHeader name={name} stage={stages?.stage ?? (lifecycle ? STAGE_BY_LIFECYCLE[lifecycle]! : 'ask')} released={stages?.released ?? false} unsupported={!lifecycle} outcome={stages?.outcome} workspaceId={workspaceId} action={action} />
     <PageNotices view={view} actions={actions} stale={stale} archived={archived} extra={[
       ...(draftError !== undefined && draftError !== null ? [<ActionError key="draft-error" error={draftError} />] : []),
       ...(stages?.notices ?? []),
