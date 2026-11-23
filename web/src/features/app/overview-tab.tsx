@@ -23,6 +23,7 @@ import { isSourceBuildFailed } from './platform'
 import { ScreenshotStrip } from './screenshots'
 import { ToolsPanel } from './tools-panel'
 import { VoicesPanel } from './voices-panel'
+import { RunningAccessCheckStatus } from './running-access-check'
 
 /** 「利用者にはこう見えます →」 (WF-05 ②): the same page drawn as a user sees it (`?as=user`, app-page.tsx). */
 export function UserViewLink({ app }: { app: Pick<BusinessApp, 'group' | 'slug'> }) {
@@ -140,6 +141,7 @@ export function OverviewTab({
                 </div>
               </div>
             )}
+            <RunningAccessCheckStatus check={view.platform?.publish?.runningAccessCheck} unavailable={queryClient.getQueryState(keys.publishes(projectId))?.status === 'error'} />
 
             {view.status === 'failed' ? (
               <div className="mt-5 border-t border-stone-100 pt-4">

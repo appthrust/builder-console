@@ -60,6 +60,15 @@ export interface AppPublish {
   tailnetUrl?: string
   phase?: OpenValue<PublishPhase>
   access?: PublishAccess
+  runningAccessCheck?: RunningAccessCheck
+}
+
+export interface RunningAccessCheck {
+  state: OpenValue<'passed' | 'failed' | 'unverified' | 'notApplicable'>
+  reason: OpenValue<'AllServingVersionsPassed' | 'CriterionFailed' | 'NoReceipt' | 'ProvenanceMismatch' | 'ObservationUnavailable' | 'PublicOnly'>
+  checkedAt?: string
+  policyRevision?: string
+  servingVersions: { releaseId: string; artifactDigest: string; commitSha?: string; sourceDigest?: string }[]
 }
 
 /** The server's record of a failed source build on a stack. */

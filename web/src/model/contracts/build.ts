@@ -62,7 +62,16 @@ export type BuildExecution = Omit<CanonicalExecution, 'status' | 'steps' | 'appr
   approval?: CreationApproval
   approvalUnreadable?: true
 }
-export type ImplementationTask = Omit<CanonicalTask, 'status' | 'failureReason'> & { status: OpenValue<TaskStatus>; failureReason?: OpenValue<ImplementationFailureReason> }
+export interface CandidateAccessCheck {
+  state: OpenValue<'passed' | 'failed' | 'unverified'>
+  checkedAt: string
+  sourceDigest: string
+  artifactDigest: string
+  policyRevision: string
+  criteria: { name: string; state: OpenValue<'passed' | 'failed' | 'notObserved'> }[]
+}
+
+export type ImplementationTask = Omit<CanonicalTask, 'status' | 'failureReason' | 'accessCheck'> & { status: OpenValue<TaskStatus>; failureReason?: OpenValue<ImplementationFailureReason>; accessCheck?: CandidateAccessCheck }
 
 /**
  * The run failure reasons this console knows (Platform's documented values, APT-1158). Platform's set grows: any other

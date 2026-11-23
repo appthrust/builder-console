@@ -292,6 +292,14 @@ task. Every task reports its
 acceptance-criterion checks, gets at most one repair pass, and leaves any unmet
 criteria visible while the run continues. Plans, specifications and chat use
 business wording rather than implementation file names or identifiers.
+
+Independent access-check results are separate from the coder's report. The task
+panel shows candidate evidence; overview/releases use only the read-only
+`Publish.runningAccessCheck` projection for the running versions. Missing or
+unknown states, incomplete provenance, failed refreshes and digest mismatches
+are unverified, never a retained green badge. Public-only is not a protected
+access pass. The current Platform hub lacks complete serving-digest projection,
+so running checks stay unverified until that operator evidence is available.
 Step 5 and the build preparation Q&A save the publish name and audience as
 draft `publishPreferences` (alongside title alignment), so a new tab skips
 answered preparation questions

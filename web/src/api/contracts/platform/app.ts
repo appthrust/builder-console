@@ -61,12 +61,23 @@ export const publishAccessReader: z.ZodType<PublishAccess> = z.object({
   pending: CanonicalPublishAccess.shape.pending.unwrap().pick({ reason: true }).optional(),
 })
 
+const runningAccessCheckReader = z.object({
+  state: openEnum(['passed', 'failed', 'unverified', 'notApplicable']),
+  reason: openEnum(['AllServingVersionsPassed', 'CriterionFailed', 'NoReceipt', 'ProvenanceMismatch', 'ObservationUnavailable', 'PublicOnly']),
+  checkedAt: z.iso.datetime().optional(),
+  policyRevision: z.string().optional(),
+  servingVersions: z.array(z.object({
+    releaseId: z.string(), artifactDigest: z.string(), commitSha: z.string().optional(), sourceDigest: z.string().optional(),
+  })),
+})
+
 export const publishReader: z.ZodType<AppPublish> = Publish.pick({ id: true, applicationId: true, branchId: true, componentId: true, publicUrl: true, tailnetUrl: true }).extend({
   applicationId: dnsLabelOrEmpty,
   branchId: dnsLabelOrEmpty,
   componentId: dnsLabelOrEmpty,
   phase: openCanonical(PublishPhase).optional(),
   access: publishAccessReader.optional(),
+  runningAccessCheck: runningAccessCheckReader.optional(),
 })
 
 export const stackReader: z.ZodType<AppStack> = ApplicationStack.pick({
