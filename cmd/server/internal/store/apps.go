@@ -18,7 +18,7 @@ const visibleSQL = `$2 OR a.share_scope IN ('company','public') OR $1=ANY(a.shar
 
 const appSelect = `SELECT a.id,a.slug,a.display_name,a.description,a.icon,a.tags,a.guide,a.capabilities,a.stack_id,a.app_name,
 	a.share_scope,a.share_group_ids,a.share_extra_person_ids,a.created_at,a.updated_at,
-	a.group_id,a.created_by,a.contribution_scope,
+	a.group_id,a.created_by,a.contribution_scope,a.share_revision,a.share_sync,a.share_binding_etag,
 	COALESCE((SELECT jsonb_agg(jsonb_build_object('id',o.person_id) ORDER BY o.person_id)
 	FROM app_owners o WHERE o.app_id=a.id),'[]'::jsonb),
 	COALESCE((SELECT jsonb_agg(jsonb_build_object('id',s.id,'caption',s.caption,'width',s.width,'height',s.height) ORDER BY s.position)
@@ -32,7 +32,7 @@ func scanApp(row scanner) (domain.App, error) {
 	var owners, screenshots []byte
 	err := row.Scan(&a.ID, &a.Slug, &a.DisplayName, &a.Description, &a.Icon, pq.Array(&a.Tags), &a.Guide, pq.Array(&a.Capabilities), &a.StackID, &a.AppName,
 		&a.Share.Scope, pq.Array(&a.Share.GroupIDs), pq.Array(&a.Share.ExtraPersonIDs), &a.CreatedAt, &a.UpdatedAt,
-		&a.Group.ID, &a.CreatedBy.ID, &a.Contribution.Scope, &owners, &screenshots)
+		&a.Group.ID, &a.CreatedBy.ID, &a.Contribution.Scope, &a.ShareRevision, &a.ShareSync, &a.ShareBindingETag, &owners, &screenshots)
 	if err == nil {
 		err = json.Unmarshal(owners, &a.Owners)
 	}

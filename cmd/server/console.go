@@ -102,6 +102,10 @@ func consoleHandler(upstreamURL, projectID string) (*consoleAPI, func(), error) 
 			return nil, err
 		}
 		connected := api.New(database, auth, upstream, links, publicURL)
+		if err := connected.ConfigureSharing(upstreamURL, auth.HTTPClient().Transport); err != nil {
+			_ = database.Close()
+			return nil, err
+		}
 		connected.ConfigureBuildSessions(conversations, installationID)
 		connected.ConfigureConsoleAuthority(conversationPlatform)
 		console.current.Store(connected)

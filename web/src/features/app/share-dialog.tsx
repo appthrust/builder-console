@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Building2, Globe, Lock, Users } from 'lucide-react'
 import { buildGroupTree, flattenGroupTree, isUnknownPerson, type AccessRequest, type BusinessApp, type Me, type Person, type PersonRef } from '../../model/contracts/console'
 import { isOneOf, knownValue } from '../../model/contracts/build'
-import { putAppAccess, retryAccess } from '../../api/access'
+import { retryAccess } from '../../api/access'
 import { appAccessRequestsQuery, consoleKeys, peopleQuery, useGroups } from '../../api/queries/console'
 import { keys } from '../../api/queries/shared'
 import { copy } from '../../copy'
@@ -18,14 +18,18 @@ import { ensurePerson, useApproveAccessRequest, useDeclineAccessRequest, useUpda
 import { PersonSearch } from './settings/parts'
 import { PendingBadge } from './pending-badge'
 import { UnconfirmedNotice, useWriteConfirmation } from './notices'
+import { ShareManagement } from './share-management'
+import { shareAccessQuery } from '../../api/sharing'
 
 const SCOPES: readonly ShareScope[] = ['private', 'group', 'company', 'public']
 const ICONS = { private: Lock, group: Users, company: Building2, public: Globe }
 
-export function ShareDialog({ app, me, canEdit, publishId, url, access, open, onOpenChange, onAccessError }: {
+export function ShareDialog({ app, me, canEdit: canEditMetadata, publishId, url, access, open, onOpenChange, onAccessError }: {
   app: BusinessApp; me: Me; canEdit: boolean; publishId?: string; url?: string; access: AccessDisplay
   open: boolean; onOpenChange: (open: boolean) => void; onAccessError: (error: unknown) => void
 }) {
+  const management = useQuery({ ...shareAccessQuery(app.id), enabled: open && Boolean(app.stackId) })
+  const canEdit = canEditMetadata && (!app.stackId || management.data?.canManageBindings === true)
   const groups = useGroups().data
   const flatGroups = useMemo(() => flattenGroupTree(buildGroupTree(groups)), [groups])
   const extraIds = app.share.extraPersonIds.filter((id) => !app.owners.some((owner) => owner.id === id))
@@ -43,13 +47,10 @@ export function ShareDialog({ app, me, canEdit, publishId, url, access, open, on
   const [groupIds, setGroupIds] = useState(app.share.groupIds.length ? [...app.share.groupIds] : [app.group.id])
   const [confirm, setConfirm] = useState<KnownShare>()
   const [invitationEmail, setInvitationEmail] = useState('')
-  const requestKey = useRef('')
   const scopeWrite = useMutation({
     mutationFn: async (share: KnownShare) => {
       if (!canEdit) throw new Error(copy.common.loadFailed)
       if (!publishId) throw new Error(words.unavailable)
-      // Never PATCH intent before the user's platform write has succeeded.
-      await putAppAccess(me.projectId, publishId, share.scope, requestKey.current)
       await update.mutateAsync({ share })
     },
     retry: retryAccess,
@@ -92,7 +93,6 @@ export function ShareDialog({ app, me, canEdit, publishId, url, access, open, on
   const saveScope = () => {
     if (!canEdit || !share || !scope) return
     const next: KnownShare = { ...share, scope, groupIds: scope === 'group' ? groupIds : [] }
-    requestKey.current = crypto.randomUUID()
     if (widensShare(app.share, next)) setConfirm(next)
     else scopeWrite.mutate(next)
   }
@@ -108,6 +108,7 @@ export function ShareDialog({ app, me, canEdit, publishId, url, access, open, on
         <div className="space-y-6">
           <p role="status" data-testid="share-access-status" className="text-sm text-stone-700">{access.label}</p>
           {!share ? <Notice tone="warning">{text.unsupported.share}</Notice> : null}
+          {app.shareSync && app.shareSync !== 'applied' ? <Notice tone="warning">{words.divergence}</Notice> : null}
           {confirmation.unconfirmed ? <UnconfirmedNotice onConfirm={() => void confirmation.confirm()} confirming={confirmation.confirming} /> : null}
           {canEdit && requests.isLoadingError ? <LoadFailed error={requests.error} onRetry={() => void requests.refetch()} /> : null}
           {canEdit && pending.length > 0 ? (
@@ -186,10 +187,11 @@ export function ShareDialog({ app, me, canEdit, publishId, url, access, open, on
               return { value, title: value === 'private' ? words.limited : copy.create.share[value].title, description: value === 'private' ? words.limitedHint : copy.create.share[value].body, icon: <Icon />, disabled: value === 'public' && !me.isConsoleAdmin,
                 children: value === 'group' && scope === 'group' ? <GroupChecklist groups={flatGroups} selected={groupIds} onChange={setGroupIds} legend={copy.create.share.groupPick} idPrefix="dialog-share-groups" disabled={!canEdit || busy} /> : undefined }
             })} />
-            {canEdit ? <Button className="mt-4" tone="primary" loading={scopeWrite.isPending} disabled={busy || !share || !publishId || (!dirty && access.applied) || (scope === 'group' && !groupIds.length)} onClick={saveScope}>{dirty ? copy.app.settings.save : words.apply}</Button> : null}
+            {canEdit ? <Button className="mt-4" tone="primary" loading={scopeWrite.isPending} disabled={busy || !share || !publishId || (!dirty && access.applied && app.shareSync === 'applied' && management.data?.shareSync === 'applied') || (scope === 'group' && !groupIds.length)} onClick={saveScope}>{dirty ? copy.app.settings.save : words.apply}</Button> : null}
             {!publishId ? <p className="mt-2 text-xs text-stone-500">{words.unavailable}</p> : null}
             {scopeWrite.error && !confirmation.unconfirmed ? <div className="mt-3"><ActionError error={scopeWrite.error} /></div> : null}
           </section>
+          <ShareManagement app={app} open={open} />
           <div className="space-y-3 border-t border-stone-100 pt-4">
             <p className="text-xs text-stone-500">{words.noMail}</p>
             {url ? <>

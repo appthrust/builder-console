@@ -38,6 +38,7 @@ type API struct {
 	builds           *buildsession.Service
 	installationID   string
 	authorityStacks  consoleStackReader
+	sharing          *sharePlatform
 }
 
 type request struct {
@@ -55,6 +56,7 @@ type request struct {
 	claims              identity.Identity
 	authorityApps       map[authorityRoute][]domain.App
 	authorityStackCache map[string]buildsession.ConsoleStack
+	afterCommit         func() error
 }
 
 type endpoint func(*request) (any, int, error)
@@ -83,6 +85,12 @@ func New(database *store.Store, auth *identity.Authenticator, upstream *platform
 	// Creation and binding resolve fresh Directory authority before the transaction.
 	a.mux.HandleFunc("POST /api/console/apps", a.routeHandlerMode(true, true, true, true, a.createApp))
 	a.route("PATCH /api/console/apps/{id}", true, true, a.patchApp)
+	a.route("POST /api/console/apps/{id}/share-sync", true, true, a.syncAppShare)
+	a.route("GET /api/console/apps/{id}/share-access", false, true, a.shareAccess)
+	a.route("POST /api/console/apps/{id}/organization-groups", true, true, a.assignOrganizationGroups)
+	a.route("DELETE /api/console/apps/{id}/organization-groups/{binding}", true, true, a.removeOrganizationGroups)
+	a.route("GET /api/console/apps/{id}/share-diff", false, true, a.shareDiff)
+	a.route("POST /api/console/apps/{id}/access-cutover", true, true, a.startAccessCutover)
 	a.mux.HandleFunc("POST /api/console/apps/{id}/bind", a.routeHandlerMode(true, true, true, true, a.bindApp))
 	a.route("DELETE /api/console/apps/{id}", true, true, a.deleteApp)
 	a.route("GET /api/console/apps/{id}/comments", false, true, a.comments)
@@ -231,12 +239,16 @@ func (a *API) routeHandlerMode(mutation, needsRoles, transactional, fresh bool, 
 // uncached Directory view as build sessions before opening the transaction.
 func (a *API) withRequest(ctx context.Context, claims identity.Identity, bearer string, mutation, needsRoles, me, fresh bool, handler func(*request) error) error {
 	return a.withResolvedRequest(ctx, claims, bearer, needsRoles, me, fresh, func(state *request) error {
-		return directoryError(a.store.Do(ctx, mutation, func(tx *store.Tx) error {
+		err := a.store.Do(ctx, mutation, func(tx *store.Tx) error {
 			state.tx = tx
 			tx.DirectoryGroups = state.groups
 			tx.HydratePeople = state.directory.People
 			return handler(state)
-		}))
+		})
+		if err == nil && state.afterCommit != nil {
+			err = state.afterCommit()
+		}
+		return directoryError(err)
 	})
 }
 

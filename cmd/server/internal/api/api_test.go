@@ -31,6 +31,7 @@ type harness struct {
 	stackBearer   atomic.Value
 	stacks        atomic.Value
 	database      *store.Store
+	sharing       *shareFixture
 }
 
 func token(subject string) string {
@@ -94,6 +95,7 @@ func newHarness(t *testing.T) *harness {
 	}
 	h.server = httptest.NewServer(New(database, auth, platform.New(upstream.URL, "pj-test"), h.directory.client(t), ""))
 	t.Cleanup(h.server.Close)
+	h.sharing = installShareFixture(t, h)
 	return h
 }
 

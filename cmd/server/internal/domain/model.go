@@ -129,6 +129,10 @@ type App struct {
 	StackID      *string      `json:"stackId"`
 	AppName      *string      `json:"appName"`
 	Share        SharePolicy  `json:"share"`
+	ShareRevision int64        `json:"shareRevision"`
+	ShareSync     string       `json:"shareSync"`
+	ShareBindingETag string    `json:"-"`
+	CanManageShare bool        `json:"canManageShare"`
 	Contribution ContributionPolicy `json:"contribution"`
 	Permissions  Permissions        `json:"permissions"`
 	CreatedBy    Person       `json:"createdBy"`

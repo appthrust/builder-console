@@ -1,17 +1,18 @@
 import type { PublishPreferences } from '../../model/contracts/build'
 import { useStore } from '@tanstack/react-form'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import { buildGroupTree, flattenGroupTree, type BusinessApp } from '../../model/contracts/console'
 import { keys } from '../../api/queries/shared'
 import { consoleKeys, updateApp, useGroups, useMe, writeAppCache } from '../../api/queries/console'
-import { putAppAccess, retryAccess } from '../../api/access'
+import { retryAccess } from '../../api/access'
 import { knownScope, shareSentence } from '../../model/share'
 import { UnconfirmedNotice, useWriteConfirmation } from '../app/notices'
 import { ActionError, Button, Card, CardBody, Field, TextInput } from '../../ui'
 import { effectiveShareGroupIds, initialValues, useCreateForm } from '../create/form'
 import { ShareStep } from '../create/steps/share-step'
 import { text } from './copy'
+import { sharingCopy } from '../../copy/sharing'
 
 /** The saved draft determines defaults even in a new tab, before console metadata catches up. */
 export function PublishStep({ app, publishId, publishPreferences, onPublished, onCancel }: { app: BusinessApp; publishId?: string; publishPreferences?: PublishPreferences; onPublished(app: BusinessApp): void; onCancel(): void }) {
@@ -27,11 +28,9 @@ export function PublishStep({ app, publishId, publishPreferences, onPublished, o
   const share = { scope: values.scope, groupIds: values.scope === 'group' ? effectiveShareGroupIds(values) : [], extraPersonIds: [...app.share.extraPersonIds] }
   const expanding = values.scope === 'company' || values.scope === 'public'
   const valid = name.trim().length > 0 && name.trim().length <= 200 && (values.scope !== 'group' || share.groupIds.length > 0) && (values.scope !== 'public' || me.isConsoleAdmin) && (!expanding || confirmName === name.trim())
-  const requestKey = useRef('')
   const mutation = useMutation({
     mutationFn: async () => {
       if (!publishId) throw new Error(text.publish.waitingForUrl)
-      await putAppAccess(me.projectId, publishId, share.scope, requestKey.current)
       return updateApp(app.id, { displayName: name.trim(), share })
     },
     retry: retryAccess,
@@ -40,6 +39,7 @@ export function PublishStep({ app, publishId, publishPreferences, onPublished, o
       await writeAppCache(queryClient, updated)
       await queryClient.invalidateQueries({ queryKey: ['console', 'apps'] })
       await queryClient.invalidateQueries({ queryKey: keys.publishes(me.projectId) })
+      if (updated.shareSync !== 'applied') throw new Error(sharingCopy.divergence)
       onPublished(updated)
     },
   })
@@ -50,7 +50,7 @@ export function PublishStep({ app, publishId, publishPreferences, onPublished, o
   ]))
   return <section aria-labelledby="build-share-title"><Card><CardBody>
     <h3 id="build-share-title" className="mb-4 text-lg font-semibold text-stone-900">{text.publish.title}</h3>
-    <form onSubmit={(event) => { event.preventDefault(); if (valid && publishId && !mutation.isPending && !confirmation.unconfirmed) { requestKey.current = crypto.randomUUID(); mutation.mutate() } }} className="space-y-5">
+    <form onSubmit={(event) => { event.preventDefault(); if (valid && publishId && !mutation.isPending && !confirmation.unconfirmed) mutation.mutate() }} className="space-y-5">
       <Field id="publish-name" label={text.publish.name}><TextInput id="publish-name" value={name} onChange={(event) => setName(event.target.value)} maxLength={200} autoComplete="off" /></Field>
       <ShareStep form={form} groups={flattenGroupTree(buildGroupTree(groups))} isConsoleAdmin={me.isConsoleAdmin} shareText={shareSentence(share, groups, app.group)} />
       {expanding ? <Field id="publish-confirm-name" label={text.publish.confirmName} hint={name.trim()}><TextInput id="publish-confirm-name" value={confirmName} onChange={(event) => setConfirmName(event.target.value)} autoComplete="off" /></Field> : null}

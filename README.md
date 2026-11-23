@@ -59,6 +59,53 @@ creates and cleans an isolated schema per test; without a DSN those tests skip.
 DOM unit tests use the repository-local `web/test/dom.ts` preload from
 `web/bunfig.toml`, with no sibling Dashboard package dependency.
 
+### Sharing and access cutover
+
+All Console sharing writes use the server's `applyAppShare`: app PATCH (including
+owner/person changes), access-request approval, and post-bind `POST
+/api/console/apps/{id}/share-sync`. Browsers no longer write publish policies.
+Before cutover, the legacy policy is applied first and the Console policy plus
+`shareRevision`/`shareSync=pending` commit before the fixed binding is replaced.
+Binding failure leaves the legacy change intact and records `shareSync=conflict`.
+The UI warns instead of reporting completion. The next authorized share change
+replaces the fixed binding from the saved legacy policy; it does not union grants,
+delete other bindings, or silently approve an access model. Approval remains
+pending until both writes are confirmed. No credentials are stored.
+
+Platform contracts (under `/api/v1/projects/{project}/applications/{app}`):
+
+- `GET /role-bindings` supplies management authority, the fixed binding ETag,
+  organization capabilities and source synchronization status.
+- `GET /access/share-groups?externalId=...` maps Directory IDs to supplied
+  `bindingGroupName` and `sourceUID`. `PUT /role-bindings/share` replaces only
+  `role: app-user`, `subjects`, and optional `organizationPersonRefs`.
+  It uses `Idempotency-Key` and `If-Match`, or `If-None-Match: *` on creation.
+- Company means `Authenticated`; group means supplied `Group` references plus
+  explicit people; private means owners and invited people; public means an empty
+  fixed binding. People use `{sourceUID,personID}` even before identity linking:
+  being added to sharing is not proof that the person can sign in yet.
+- Organization membership disclosure is a separate normal binding POST/DELETE.
+  It requires explicit model acceptance, an eligible role and a ready source.
+  The dialog distinguishes absent source, first sync pending and unavailable
+  status, and retains existing assignments for removal during source outages.
+- `GET /access-cutover/diff` supplies bounded gaining/losing member samples and
+  a revision-bound digest. Only an explicit owner confirmation sends `POST
+  /access-cutover` with `direction`, `candidateDigest`, `expectedApplicationUID`,
+  `expectedShareRevision`, `expectedBindingETag` and `confirmedDiffDigest`.
+  The server rereads the diff and rejects stale or unresolved comparisons.
+  `GET /access-cutover` supplies progress; `AppEnforced` writes bindings only.
+  Legacy reapplication is rejected after cutover.
+  After activation, the restore action requires another explicit owner confirmation
+  and echoes only Platform's sealed `previousDigest` as `candidateDigest` with
+  `direction: restore`; the Console never accepts a user-chosen previous version.
+
+Every Platform call uses the current operator's bearer and Platform checks
+`access:manage`. Console ownership changes **do not** grant `access-manager`.
+Creator bootstrap and explicit Platform assignments remain its only sources;
+cutover additionally requires Console ownership. Thus an owner without Platform
+management authority cannot share or confirm cutover. No Console admin or
+Directory-manager flag substitutes for that authority.
+
 From `web/`, run `bun run mock` and `bun run dev` in separate terminals. The default
 ports are 54385 for the mock API and 5199 for Vite; set `CONSOLE_MOCK_PORT` and
 `CONSOLE_PORT` to isolate concurrent work. Neither command requires a live Platform.

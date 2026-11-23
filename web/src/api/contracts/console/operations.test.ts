@@ -28,7 +28,8 @@ function fixture(schema: keyof typeof schemas): unknown {
 // embedded artifact fails here; Go validates the same document independently.
 test('OpenAPI is generated from the canonical Zod schema', () => {
   const document = JSON.parse(readFileSync(new URL('../../../../../cmd/server/internal/api/console-spa.openapi.json', import.meta.url), 'utf8'))
-  expect(document).toEqual(openAPIDocument())
+  // Compare the published JSON, not Zod's non-enumerable Standard Schema helpers.
+  expect(document).toEqual(JSON.parse(JSON.stringify(openAPIDocument())))
   expect(document.paths['/apps'].get.operationId).toBe('listApps')
   expect(document.paths['/apps/{id}'].get.operationId).toBe('getApp')
 })

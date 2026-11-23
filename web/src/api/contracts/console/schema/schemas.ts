@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { buildSchemas } from './build-sessions'
+import { shareSchemas } from './share'
 
 // The writer owns total collections. Readers may not turn missing grants into
 // empty grants. Directory proxy shapes are pinned to appserver-go v0.5.0;
@@ -32,6 +33,7 @@ export const app = z.strictObject({
   capabilities: total(text), screenshots: total(screenshot), group: appGroup.strict(), owners: total(personRef),
   stackId: text.nullable(), appName: text.nullable(), share, createdBy: personRef, createdAt: text, updatedAt: text,
   contribution, permissions: observed(permissions),
+  shareRevision: observed(count), shareSync: observed(text), canManageShare: observed(z.boolean()),
 })
 export const directoryEntry = app.omit({ slug: true, guide: true, share: true, createdBy: true }).extend({ path: text, canOpen: z.boolean() })
 export const group = z.object({
@@ -114,6 +116,7 @@ export const error = z.object({ error: text, message: text, details: observed(z.
 const list = <T extends z.ZodType>(item: T) => z.object({ items: total(item) })
 export const schemas = {
   ...buildSchemas,
+  ...shareSchemas,
   ConversationSetting: conversationSetting, ConversationSettingRead: conversationSettingRead,
   ConversationSettingInput: conversationSettingInput, ConversationSettingHeaders: conversationSettingHeaders,
   ConversationSettingETag: conversationSettingETag,

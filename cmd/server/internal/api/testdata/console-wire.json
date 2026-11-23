@@ -72,6 +72,9 @@
         "groupIds": [],
         "extraPersonIds": []
       },
+      "shareRevision": 0,
+      "shareSync": "",
+      "canManageShare": false,
       "contribution": {"scope": "group"},
       "permissions": {"use": true, "comment": true, "propose": true, "maintain": true, "data": true},
       "createdBy": {
@@ -128,6 +131,9 @@
             "groupIds": [],
             "extraPersonIds": []
           },
+          "shareRevision": 0,
+          "shareSync": "",
+          "canManageShare": false,
           "contribution": {"scope": "group"},
           "permissions": {"use": true, "comment": true, "propose": true, "maintain": true, "data": true},
           "createdBy": {
@@ -642,6 +648,9 @@
           "groupIds": [],
           "extraPersonIds": []
         },
+        "shareRevision": 0,
+        "shareSync": "",
+        "canManageShare": false,
         "contribution": {"scope": "group"},
         "permissions": {"use": true, "comment": true, "propose": true, "maintain": true, "data": true},
         "createdBy": {
@@ -743,5 +752,28 @@
       "error": "forbidden",
       "message": "You do not have permission for this action"
     }
+  },
+  {
+    "name": "share-management",
+    "schema": "ShareManagement",
+    "body": {
+      "bindings": [], "canManageBindings": true,
+      "organizationGroups": {"declared": false, "accepted": false, "roles": []},
+      "organizationSource": {"sourceUID": "source", "ready": true, "initialSyncComplete": true, "appliedVersion": "1", "consecutiveFailures": 0},
+      "isOwner": true, "shareSync": "applied"
+    }
+  },
+  {
+    "name": "share-diff",
+    "schema": "ShareDiff",
+    "body": {
+      "applicationUID": "uid", "candidateDigest": "sha256:candidate", "diffDigest": "diff", "shareRevision": "revision", "bindingETag": "etag",
+      "addedCount": 0, "removedCount": 0, "unresolvedCount": 0, "added": [], "removed": [], "oldAuthenticated": false, "newAuthenticated": false
+    }
+  },
+  {
+    "name": "share-cutover",
+    "schema": "ShareCutover",
+    "body": {"resource": {"id": "cutover", "applicationUID": "uid", "direction": "activate", "phase": "Prepared", "reason": "", "previousDigest": "", "cookieIsolationVerified": false}}
   }
 ]
