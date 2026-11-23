@@ -9,6 +9,7 @@ import { implementationCopy as copy } from './copy'
 import { PreviewDatabaseLine, type PreviewDatabaseControl } from './preview-database'
 import { implemented, type ImplementationState } from './state'
 import { text } from '../copy'
+import { CandidateAccessCheckStatus } from './candidate-access-check'
 
 
 export function ImplementPanel({ state, preparation, released, published, changeByReply, previewNotice, previewDatabase, onOpenPreview, onRetry, onSkipTask, onConfirm }: {
@@ -95,7 +96,8 @@ export function ImplementPanel({ state, preparation, released, published, change
         {progress.hint ? <p className="mt-2 text-sm text-stone-600">{progress.hint}</p> : null}
         <ol aria-label={text.implement.steps} className="mt-4 space-y-3 text-sm">
           {progress.steps?.map((step, index) => {
-            const unmet = state.tasks.find((task) => task.id === step.taskId)?.verification?.criteria.filter((criterion) => !criterion.met) ?? []
+            const task = state.tasks.find((task) => task.id === step.taskId)
+            const unmet = task?.verification?.criteria.filter((criterion) => !criterion.met) ?? []
             return <li key={step.taskId ?? index} aria-current={step.state === 'doing' ? 'step' : undefined} className="flex gap-3">
             <span aria-label={text.artifact.states[step.state]} className={step.state === 'failed' ? 'text-bad-ink' : step.state === 'doing' ? 'text-accent' : 'text-stone-400'}>{{ todo: '○', doing: '●', done: '✔', failed: '✖', unknown: '?' }[step.state]}</span>
             <div className="min-w-0 flex-1">
@@ -104,6 +106,7 @@ export function ImplementPanel({ state, preparation, released, published, change
               {step.expectation ? <span className="block text-xs text-stone-500">{step.expectation}</span> : null}
               {step.activity ? <span aria-label={buildCopy.progress.observe.activity} className="block text-xs text-stone-600">{step.activity}</span> : null}
               {step.detail ? <span className="block text-xs text-bad-ink">{step.detail}</span> : null}
+              <CandidateAccessCheckStatus check={task?.accessCheck} />
               {unmet.length ? <details className="mt-1 text-xs text-amber-800" open>
                 <summary className="cursor-pointer">{copy.unmetCriteria(unmet.length)}</summary>
                 <ul className="mt-1 list-disc space-y-1 pl-4">{unmet.map((item, criterionIndex) => <li key={criterionIndex}>{item.criterion}{item.note ? <span className="block text-stone-500">{item.note}</span> : null}</li>)}</ul>

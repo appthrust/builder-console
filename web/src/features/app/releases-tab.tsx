@@ -20,6 +20,7 @@ import { Button, Card, CardBody, CardHeader, ConfirmDialog, DataTable, EmptyStat
 import { text } from './copy'
 import { webScope } from './platform'
 import { isUnconfirmedWrite, StaleNotice, UnconfirmedNotice, useWriteConfirmation } from './notices'
+import { RunningAccessCheckStatus } from './running-access-check'
 
 /** One line of 更新履歴: a release, or a rollback candidate the release list does not carry. */
 interface ReleaseRow {
@@ -161,6 +162,7 @@ export function ReleasesTab({ projectId, view }: { projectId: string; view: AppV
       void queryClient.invalidateQueries({ queryKey: ['release-state'] })
       void queryClient.invalidateQueries({ queryKey: ['releases'] })
       void queryClient.invalidateQueries({ queryKey: keys.summaries(projectId) })
+      void queryClient.invalidateQueries({ queryKey: keys.publishes(projectId) })
     },
   })
   // A rollback whose answer could not be read may have started: read the release state back before offering another.
@@ -253,6 +255,11 @@ export function ReleasesTab({ projectId, view }: { projectId: string; view: AppV
         }
       />
       <CardBody className="space-y-4">
+        <RunningAccessCheckStatus
+          check={platform.publish?.runningAccessCheck}
+          observedDigest={releaseState.data?.targetImageDigest}
+          unavailable={releaseState.isError || overview.isError || releaseState.isFetching || rollback.inFlight || mutation.isPending || queryClient.getQueryState(keys.publishes(projectId))?.status === 'error'}
+        />
         {confirmation.unconfirmed ? (
           <UnconfirmedNotice onConfirm={() => void confirmation.confirm()} confirming={confirmation.confirming} />
         ) : rollback.inFlight ? (

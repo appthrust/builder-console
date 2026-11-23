@@ -103,6 +103,14 @@ export const executionReader: z.ZodType<BuildExecution> = ApplicationDraftCreati
 export const taskReader: z.ZodType<ImplementationTask> = ApplicationDraftImplementationTask.extend({
   status: openCanonical(ApplicationDraftImplementationTaskStatus),
   failureReason: openCanonical(ApplicationDraftImplementationFailureReason).optional(),
+  accessCheck: z.object({
+    state: openEnum(['passed', 'failed', 'unverified']),
+    checkedAt: z.iso.datetime(),
+    sourceDigest: z.string(),
+    artifactDigest: z.string(),
+    policyRevision: z.string(),
+    criteria: z.array(z.object({ name: z.string(), state: openEnum(['passed', 'failed', 'notObserved']) })),
+  }).optional(),
 })
 
 // A failed run's `failure` (APT-1158) is absent on an older Platform; its `reason` is an open value. A present but
