@@ -566,6 +566,242 @@
         }
       }
     },
+    "/apps/{id}/share-sync": {
+      "post": {
+        "operationId": "consoleSyncShare",
+        "x-console-operation-id": "consoleSyncShare",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/App"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "HTTP error; never a success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/apps/{id}/share-access": {
+      "get": {
+        "operationId": "consoleGetShareAccess",
+        "x-console-operation-id": "consoleGetShareAccess",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareManagement"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "HTTP error; never a success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/apps/{id}/organization-groups": {
+      "post": {
+        "operationId": "consoleAssignOrganizationGroups",
+        "x-console-operation-id": "consoleAssignOrganizationGroups",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareManagement"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "HTTP error; never a success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/apps/{id}/organization-groups/{binding}": {
+      "delete": {
+        "operationId": "consoleRemoveOrganizationGroups",
+        "x-console-operation-id": "consoleRemoveOrganizationGroups",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "binding",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareManagement"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "HTTP error; never a success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/apps/{id}/share-diff": {
+      "get": {
+        "operationId": "consoleGetShareDiff",
+        "x-console-operation-id": "consoleGetShareDiff",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareDiff"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "HTTP error; never a success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/apps/{id}/access-cutover": {
+      "post": {
+        "operationId": "consoleStartAccessCutover",
+        "x-console-operation-id": "consoleStartAccessCutover",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShareCutover"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "HTTP error; never a success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/apps/{id}/directory-entry": {
       "get": {
         "operationId": "consoleGetDirectoryEntry",
@@ -11076,6 +11312,342 @@
         ],
         "additionalProperties": false
       },
+      "ShareManagement": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "bindings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "role": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "subjects": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "kind": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "issuer": {
+                        "type": "string"
+                      },
+                      "subject": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ]
+                  }
+                },
+                "organizationPersonRefs": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "sourceUID": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "personID": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "sourceUID",
+                      "personID"
+                    ]
+                  }
+                },
+                "organizationGroupSourceRef": {
+                  "type": "object",
+                  "properties": {
+                    "sourceUID": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "sourceUID"
+                  ]
+                },
+                "managedFor": {
+                  "type": "string"
+                },
+                "etag": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "role",
+                "subjects"
+              ]
+            }
+          },
+          "canManageBindings": {
+            "type": "boolean"
+          },
+          "isOwner": {
+            "type": "boolean"
+          },
+          "shareSync": {
+            "type": "string"
+          },
+          "organizationGroups": {
+            "type": "object",
+            "properties": {
+              "declared": {
+                "type": "boolean"
+              },
+              "accepted": {
+                "type": "boolean"
+              },
+              "roles": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "required": [
+              "declared",
+              "accepted",
+              "roles"
+            ]
+          },
+          "organizationSource": {
+            "type": "object",
+            "properties": {
+              "sourceUID": {
+                "type": "string",
+                "minLength": 1
+              },
+              "ready": {
+                "type": "boolean"
+              },
+              "initialSyncComplete": {
+                "type": "boolean"
+              },
+              "appliedVersion": {
+                "type": "string"
+              },
+              "consecutiveFailures": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "sourceUID",
+              "ready",
+              "initialSyncComplete",
+              "appliedVersion",
+              "consecutiveFailures"
+            ]
+          },
+          "cutover": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "applicationUID": {
+                "type": "string"
+              },
+              "direction": {
+                "type": "string"
+              },
+              "phase": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reason": {
+                "type": "string"
+              },
+              "previousDigest": {
+                "type": "string"
+              },
+              "cookieIsolationVerified": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "applicationUID",
+              "direction",
+              "phase",
+              "reason",
+              "previousDigest",
+              "cookieIsolationVerified"
+            ]
+          }
+        },
+        "required": [
+          "bindings",
+          "canManageBindings",
+          "isOwner",
+          "shareSync",
+          "organizationGroups"
+        ]
+      },
+      "ShareDiff": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "applicationUID": {
+            "type": "string",
+            "minLength": 1
+          },
+          "candidateDigest": {
+            "type": "string"
+          },
+          "diffDigest": {
+            "type": "string",
+            "minLength": 1
+          },
+          "shareRevision": {
+            "type": "string",
+            "minLength": 1
+          },
+          "bindingETag": {
+            "type": "string",
+            "minLength": 1
+          },
+          "addedCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "removedCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "unresolvedCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "added": {
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "principal": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "displayName": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "principal"
+              ]
+            }
+          },
+          "removed": {
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "principal": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "displayName": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "principal"
+              ]
+            }
+          },
+          "oldAuthenticated": {
+            "type": "boolean"
+          },
+          "newAuthenticated": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "applicationUID",
+          "candidateDigest",
+          "diffDigest",
+          "shareRevision",
+          "bindingETag",
+          "addedCount",
+          "removedCount",
+          "unresolvedCount",
+          "added",
+          "removed",
+          "oldAuthenticated",
+          "newAuthenticated"
+        ]
+      },
+      "ShareCutover": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "resource": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "applicationUID": {
+                "type": "string"
+              },
+              "direction": {
+                "type": "string"
+              },
+              "phase": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reason": {
+                "type": "string"
+              },
+              "previousDigest": {
+                "type": "string"
+              },
+              "cookieIsolationVerified": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "applicationUID",
+              "direction",
+              "phase",
+              "reason",
+              "previousDigest",
+              "cookieIsolationVerified"
+            ]
+          }
+        },
+        "required": [
+          "resource"
+        ]
+      },
       "ConversationSetting": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -11925,6 +12497,20 @@
               "data"
             ],
             "additionalProperties": false
+          },
+          "shareRevision": {
+            "presence": "optionalObservation",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "shareSync": {
+            "presence": "optionalObservation",
+            "type": "string"
+          },
+          "canManageShare": {
+            "presence": "optionalObservation",
+            "type": "boolean"
           }
         },
         "required": [
@@ -12280,6 +12866,20 @@
                     "data"
                   ],
                   "additionalProperties": false
+                },
+                "shareRevision": {
+                  "presence": "optionalObservation",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "shareSync": {
+                  "presence": "optionalObservation",
+                  "type": "string"
+                },
+                "canManageShare": {
+                  "presence": "optionalObservation",
+                  "type": "boolean"
                 }
               },
               "required": [
@@ -12529,6 +13129,20 @@
               "data"
             ],
             "additionalProperties": false
+          },
+          "shareRevision": {
+            "presence": "optionalObservation",
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "shareSync": {
+            "presence": "optionalObservation",
+            "type": "string"
+          },
+          "canManageShare": {
+            "presence": "optionalObservation",
+            "type": "boolean"
           },
           "path": {
             "type": "string"
@@ -12780,6 +13394,20 @@
                     "data"
                   ],
                   "additionalProperties": false
+                },
+                "shareRevision": {
+                  "presence": "optionalObservation",
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "shareSync": {
+                  "presence": "optionalObservation",
+                  "type": "string"
+                },
+                "canManageShare": {
+                  "presence": "optionalObservation",
+                  "type": "boolean"
                 },
                 "path": {
                   "type": "string"
@@ -14469,6 +15097,20 @@
                   "data"
                 ],
                 "additionalProperties": false
+              },
+              "shareRevision": {
+                "presence": "optionalObservation",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "shareSync": {
+                "presence": "optionalObservation",
+                "type": "string"
+              },
+              "canManageShare": {
+                "presence": "optionalObservation",
+                "type": "boolean"
               }
             },
             "required": [

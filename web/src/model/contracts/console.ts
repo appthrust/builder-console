@@ -121,6 +121,9 @@ export interface BusinessApp {
   stackId: string | null
   appName: string | null
   share: SharePolicy
+  shareRevision?: number
+  shareSync?: string
+  canManageShare?: boolean
   createdBy: PersonRef
   createdAt: string
   updatedAt: string

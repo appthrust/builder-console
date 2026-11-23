@@ -8,7 +8,7 @@ for (const key of Object.getOwnPropertyNames(globalThis)) {
   if (key in window && (window as unknown as Record<string, unknown>)[key] === undefined && key !== 'global')
     (window as unknown as Record<string, unknown>)[key] = (globalThis as unknown as Record<string, unknown>)[key]
 }
-for (const key of ['window', 'document', 'navigator', 'HTMLElement', 'HTMLInputElement', 'Element', 'Node', 'NodeFilter', 'DocumentFragment', 'Event', 'CustomEvent', 'EventTarget', 'MouseEvent', 'KeyboardEvent', 'MutationObserver', 'ResizeObserver', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'scrollTo'] as const) {
+for (const key of ['window', 'document', 'navigator', 'HTMLElement', 'HTMLInputElement', 'HTMLFormElement', 'Element', 'Node', 'NodeFilter', 'DocumentFragment', 'Event', 'CustomEvent', 'EventTarget', 'MouseEvent', 'KeyboardEvent', 'MutationObserver', 'ResizeObserver', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame', 'scrollTo'] as const) {
   Object.defineProperty(globalThis, key, { configurable: true, value: key === 'window' ? window : window[key] })
 }
 Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', { configurable: true, value: true })

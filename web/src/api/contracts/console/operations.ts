@@ -8,6 +8,7 @@ import { meContract } from './me'
 import { configContract } from './config'
 import { groupsContract } from './groups'
 import { listCommentsContract, markCommentsSeenContract, postCommentContract, removeCommentContract } from './comments'
+import { shareManagement, shareDiff, shareSchemas } from './schema/share'
 
 export type AppListInput = { scope?: 'mine' | 'company' | 'all'; groupId?: string; q?: string }
 export type DirectoryAppsInput = { groupId?: string; q?: string; ownerId?: string }
@@ -30,6 +31,12 @@ export const appByPathContract = consoleContract({ ...operations.appByPath, read
 export const createAppContract = consoleContract({ ...operations.createApp, reader: appReader, request: (body: CreateAppInput) => ({ method: 'POST', path: '/api/console/apps', body }) })
 export const updateAppContract = consoleContract({ ...operations.updateApp, reader: appReader, request: ({ appId, input }: { appId: string; input: UpdateAppInput }) => ({ method: 'PATCH', path: appPath(appId), body: input }) })
 export const bindAppContract = consoleContract({ ...operations.bindApp, reader: appReader, request: ({ appId, stackId, appName }: { appId: string; stackId: string; appName: string }) => ({ method: 'POST', path: `${appPath(appId)}/bind`, body: { stackId, appName } }) })
+export const syncShareContract = consoleContract({ ...operations.syncShare, reader: appReader, request: ({ appId, idempotencyKey }: { appId: string; idempotencyKey: string }) => ({ method: 'POST', path: `${appPath(appId)}/share-sync`, headers: { 'Idempotency-Key': idempotencyKey } }) })
+export const shareAccessContract = consoleContract({ ...operations.shareAccess, reader: shareManagement, request: (appId: string) => ({ method: 'GET', path: `${appPath(appId)}/share-access` }) })
+export const assignOrganizationGroupsContract = consoleContract({ ...operations.assignOrganizationGroups, reader: shareManagement, request: ({ appId, role, idempotencyKey }: { appId: string; role: string; idempotencyKey: string }) => ({ method: 'POST', path: `${appPath(appId)}/organization-groups`, headers: { 'Idempotency-Key': idempotencyKey }, body: { role, confirmDisclosure: true } }) })
+export const removeOrganizationGroupsContract = consoleContract({ ...operations.removeOrganizationGroups, reader: shareManagement, request: ({ appId, binding, idempotencyKey }: { appId: string; binding: string; idempotencyKey: string }) => ({ method: 'DELETE', path: `${appPath(appId)}/organization-groups/${encodeURIComponent(binding)}`, headers: { 'Idempotency-Key': idempotencyKey } }) })
+export const shareDiffContract = consoleContract({ ...operations.shareDiff, reader: shareDiff, request: (appId: string) => ({ method: 'GET', path: `${appPath(appId)}/share-diff` }) })
+export const startAccessCutoverContract = consoleContract({ ...operations.startAccessCutover, reader: shareSchemas.ShareCutover, request: ({ appId, diff, idempotencyKey, previousDigest }: { appId: string; diff: z.output<typeof shareDiff>; idempotencyKey: string; previousDigest?: string }) => ({ method: 'POST', path: `${appPath(appId)}/access-cutover`, headers: { 'Idempotency-Key': idempotencyKey }, body: { confirmed: true, direction: previousDigest === undefined ? 'activate' : 'restore', candidateDigest: previousDigest ?? diff.candidateDigest, expectedApplicationUID: diff.applicationUID, expectedShareRevision: diff.shareRevision, expectedBindingETag: diff.bindingETag, confirmedDiffDigest: diff.diffDigest } }) })
 export const removeAppContract = consoleEmptyContract({ ...operations.removeApp, request: (appId: string) => ({ method: 'DELETE', path: appPath(appId) }) })
 export const directoryAppsContract = consoleContract({ ...operations.directoryApps, reader: items(entryReader), request: (input: DirectoryAppsInput = {}) => ({ method: 'GET', path: `/api/console/apps${query({ scope: 'directory', group: input.groupId, q: input.q, ownerId: input.ownerId })}` }) })
 export const directoryEntryContract = consoleContract({ ...operations.directoryEntry, reader: entryReader, request: (appId: string) => ({ method: 'GET', path: `${appPath(appId)}/directory-entry` }) })
@@ -63,6 +70,9 @@ export const consoleContracts = {
   createPerson: createPersonContract, members: membersContract, directoryUsers: directoryUsersContract,
   resolve: resolveContract, apps: appsContract, app: appContract, appByPath: appByPathContract,
   createApp: createAppContract, updateApp: updateAppContract, bindApp: bindAppContract, removeApp: removeAppContract,
+  syncShare: syncShareContract, shareAccess: shareAccessContract,
+  assignOrganizationGroups: assignOrganizationGroupsContract, removeOrganizationGroups: removeOrganizationGroupsContract,
+  shareDiff: shareDiffContract, startAccessCutover: startAccessCutoverContract,
   directoryApps: directoryAppsContract, directoryEntry: directoryEntryContract, tools: toolsContract,
   comments: listCommentsContract, postComment: postCommentContract, removeComment: removeCommentContract, markCommentsSeen: markCommentsSeenContract,
   uploadScreenshot: uploadScreenshotContract, removeScreenshot: removeScreenshotContract, reorderScreenshots: reorderScreenshotsContract,

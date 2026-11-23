@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/appthrust/builder-console/cmd/server/internal/domain"
+	"github.com/appthrust/builder-console/cmd/server/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -175,22 +176,31 @@ func (a *API) approveAccessRequest(s *request) (any, int, error) {
 	}
 	requester := domain.NewActor(r.Requester.ID, domain.Roles{}, effectiveGroups, s.groups)
 	updated := domain.ApproveAccess(app, r.Requester.ID, requester.Visible(app))
-	// route runs this handler in one write transaction under the store lock.
+	// Commit legacy intent first. Approval is final only after binding readback.
 	if err := s.tx.SaveApp(app, updated); err != nil {
 		return nil, 0, err
 	}
-	if err := s.tx.DecideAccessRequest(r.ID, domain.RequestApproved, s.person.ID, time.Now().UTC()); err != nil {
-		return nil, 0, err
-	}
-	r, err = s.tx.AccessRequest(r.ID)
-	if err != nil {
-		return nil, 0, err
-	}
-	updated, err = s.tx.App(app.ID)
-	return struct {
+	result := struct {
 		Request domain.AppAccessRequest `json:"request"`
 		App     domain.App              `json:"app"`
-	}{r, s.appForCaller(updated)}, http.StatusOK, err
+	}{r, s.appForCaller(updated)}
+	decide := func(tx *store.Tx) error {
+		if err := tx.DecideAccessRequest(r.ID, domain.RequestApproved, s.person.ID, time.Now().UTC()); err != nil {
+			return err
+		}
+		tx.HydratePeople = s.directory.People
+		var err error
+		result.Request, err = tx.AccessRequest(r.ID)
+		return err
+	}
+	if app.Bound() {
+		if err := a.applyAppShare(s, &result.App, decide); err != nil {
+			return nil, 0, err
+		}
+	} else if err := decide(s.tx); err != nil {
+		return nil, 0, err
+	}
+	return &result, http.StatusOK, nil
 }
 
 func (a *API) declineAccessRequest(s *request) (any, int, error) {

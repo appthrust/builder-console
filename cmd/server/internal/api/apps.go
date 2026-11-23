@@ -65,6 +65,10 @@ func (a *API) app(s *request) (any, int, error) {
 	if !s.actor.Visible(app) {
 		return nil, 0, httpx.NotFound()
 	}
+	if app.Bound() && app.AppName != nil && a.sharing != nil {
+		bindings, err := a.sharing.bindings(s.r.Context(), s.bearer, *app.AppName)
+		app.CanManageShare = err == nil && bindings.CanManageBindings
+	}
 	return s.appForCaller(app), 200, nil
 }
 
@@ -332,7 +336,16 @@ func (a *API) patchApp(s *request) (any, int, error) {
 		return nil, 0, err
 	}
 	updated, err = s.tx.App(app.ID)
-	return s.appForCaller(updated), 200, err
+	if err != nil {
+		return nil, 0, err
+	}
+	if input.Share != nil || input.OwnerIDs != nil {
+		if err := a.applyAppShare(s, &updated, nil); err != nil {
+			return nil, 0, err
+		}
+	}
+	updated = s.appForCaller(updated)
+	return &updated, 200, nil
 }
 
 func (a *API) bindApp(s *request) (any, int, error) {

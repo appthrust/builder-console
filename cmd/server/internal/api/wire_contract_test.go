@@ -101,6 +101,11 @@ func consoleWriterFixtures(t *testing.T) []writerFixture {
 	w := httptest.NewRecorder()
 	httpx.WriteError(w, httpx.Forbidden(), "console")
 	fixtures = append(fixtures, writerFixture{"http-error", "Error", json.RawMessage(w.Body.Bytes())})
+	fixtures = append(fixtures,
+		writerFixture{"share-management", "ShareManagement", shareManagement{shareBindings: readyShareBindings(), IsOwner: true, ShareSync: "applied"}},
+		writerFixture{"share-diff", "ShareDiff", shareDiffResponse{ApplicationUID: "uid", CandidateDigest: "sha256:candidate", DiffDigest: "diff", ShareRevision: "revision", BindingETag: "etag", Added: []shareDiffMember{}, Removed: []shareDiffMember{}}},
+		writerFixture{"share-cutover", "ShareCutover", cutoverResult{Resource: cutoverResource{ID: "cutover", ApplicationUID: "uid", Direction: "activate", Phase: "Prepared"}}},
+	)
 	return fixtures
 }
 
